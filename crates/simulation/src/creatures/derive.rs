@@ -27,7 +27,9 @@ pub(super) fn with_acquired_strength(
     acquired: u8,
 ) -> Result<Attributes, BuildError> {
     let mut values = ordinary.values();
-    let total = values.strength.checked_add(u16::from(acquired))
+    let total = values
+        .strength
+        .checked_add(u16::from(acquired))
         .ok_or(BuildError::Arithmetic)?;
     if acquired > 7 || (acquired > 0 && total > 7) {
         return Err(BuildError::AttributeCap);

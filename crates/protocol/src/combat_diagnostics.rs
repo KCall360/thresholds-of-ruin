@@ -165,7 +165,10 @@ impl<'de> Deserialize<'de> for HasteDoseOutcome {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum DiagnosticEffect {
-    GainStrength { target: ActorId, change: StrengthGain },
+    GainStrength {
+        target: ActorId,
+        change: StrengthGain,
+    },
     RaiseLevel {
         target: ActorId,
         #[serde(with = "crate::integers::unsigned")]
@@ -516,7 +519,10 @@ impl<'de> Deserialize<'de> for DiagnosticEffect {
         #[derive(Deserialize)]
         #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
-            GainStrength { target: ActorId, change: StrengthGain },
+            GainStrength {
+                target: ActorId,
+                change: StrengthGain,
+            },
             RaiseLevel {
                 target: ActorId,
                 #[serde(with = "crate::integers::unsigned")]
@@ -855,7 +861,8 @@ mod growth_diagnostic_tests {
             assert_eq!(serde_json::to_value(decoded).unwrap(), value);
         }
         for amount in [0, u64::from(u32::MAX) + 1, u64::MAX] {
-            let value = serde_json::json!({"type":"raise_level","target":"2","amount":amount.to_string()});
+            let value =
+                serde_json::json!({"type":"raise_level","target":"2","amount":amount.to_string()});
             let decoded: DiagnosticEffect = serde_json::from_value(value.clone()).unwrap();
             assert_eq!(serde_json::to_value(decoded).unwrap(), value);
         }
@@ -868,10 +875,13 @@ mod growth_diagnostic_tests {
             serde_json::json!({"type":"raise_level","target":"2","amount":"01"}),
             serde_json::json!({"type":"raise_level","target":"2","amount":"18446744073709551616"}),
             serde_json::json!({"type":"raise_level","target":"2"}),
-            serde_json::json!(["raise_level","2","1"]),
+            serde_json::json!(["raise_level", "2", "1"]),
         ] {
             assert!(serde_json::from_value::<DiagnosticEffect>(value).is_err());
         }
-        assert!(serde_json::from_str::<DiagnosticEffect>(r#"{"type":"gain_strength","target":"2","change":"acquired","change":"restored"}"#).is_err());
+        assert!(serde_json::from_str::<DiagnosticEffect>(
+            r#"{"type":"gain_strength","target":"2","change":"acquired","change":"restored"}"#
+        )
+        .is_err());
     }
 }

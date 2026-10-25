@@ -972,7 +972,10 @@ impl CreatureState {
             return Ok(StrengthGain::Restored);
         }
         let mut build = (*self.build).clone();
-        if !build.acquire_strength().map_err(CreatureStateError::Build)? {
+        if !build
+            .acquire_strength()
+            .map_err(CreatureStateError::Build)?
+        {
             return Ok(StrengthGain::Unchanged);
         }
         self.stage_rebuild(build)?;
@@ -984,9 +987,12 @@ impl CreatureState {
     pub(crate) fn stage_raise_level(&mut self) -> Result<u64, CreatureStateError> {
         let current = self.build.ledger().total_hd();
         let policy = &self.build.ruleset().document().growth;
-        let amount = self.earned_progress.next_unfunded_credit(current, policy)
+        let amount = self
+            .earned_progress
+            .next_unfunded_credit(current, policy)
             .map_err(CreatureStateError::Growth)?;
-        self.earned_progress.award_wide(amount, current, policy)
+        self.earned_progress
+            .award_wide(amount, current, policy)
             .map_err(CreatureStateError::Growth)?;
         Ok(amount)
     }

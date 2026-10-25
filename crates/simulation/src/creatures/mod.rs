@@ -8,6 +8,8 @@ mod expertise_learning;
 #[cfg(test)]
 mod expertise_learning_tests;
 #[cfg(test)]
+mod growth_dose_tests;
+#[cfg(test)]
 mod growth_failure_tests;
 #[cfg(test)]
 mod hit_die_effect_tests;
@@ -325,11 +327,13 @@ impl CreatureBuild {
     pub(crate) fn acquire_strength(&mut self) -> Result<bool, BuildError> {
         let (ordinary, _, _) = derive::advancement_facts(self, self.initial_attributes())?;
         let natural = derive::with_acquired_strength(ordinary, self.strength_acquired)?;
-        if natural.get(crate::attributes::Attribute::Strength) == 7 {
+        if natural.get(crate::attributes::Attribute::Strength) >= 7 {
             return Ok(false);
         }
         self.edit_intellect_advancement(|candidate| {
-            candidate.strength_acquired = candidate.strength_acquired.checked_add(1)
+            candidate.strength_acquired = candidate
+                .strength_acquired
+                .checked_add(1)
                 .ok_or(BuildError::Arithmetic)?;
             Ok(())
         })?;
@@ -510,13 +514,15 @@ impl CreatureBuild {
         if attributes == self.initial_attributes {
             return Ok(());
         }
-        if self.intellect_learning.as_ref().is_some_and(|learning| {
-            !learning.acquisitions.is_empty()
-                || learning
-                    .thresholds
-                    .iter()
-                    .any(|row| row.expertise.is_some())
-        }) {
+        if self.strength_acquired > 0
+            || self.intellect_learning.as_ref().is_some_and(|learning| {
+                !learning.acquisitions.is_empty()
+                    || learning
+                        .thresholds
+                        .iter()
+                        .any(|row| row.expertise.is_some())
+            })
+        {
             // Privileged baseline rewrites cannot rewrite already learned history.
             return Err(BuildError::InvalidOwnership);
         }

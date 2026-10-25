@@ -56,7 +56,8 @@ fn baseline(
         }
     }
     let ordinary = Attributes::new(values).map_err(|_| BuildError::AttributeCap)?;
-    let mut attributes = super::derive::with_acquired_strength(ordinary, witness.strength_acquired)?;
+    let mut attributes =
+        super::derive::with_acquired_strength(ordinary, witness.strength_acquired)?;
     let templates = birth_templates
         .iter()
         .map(|id| {

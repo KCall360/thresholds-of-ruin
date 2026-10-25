@@ -83,6 +83,12 @@ def first_contact_recording_case():
     return MagicItemProcesses("test_imported_cancellation_privileged_capture_records_actual_reach_and_effect")
 
 
+def growth_recording_case():
+    """Actual granted self-ability diagnostics; production Drinks are separate."""
+    from test_magic_items_process import MagicItemProcesses
+    return MagicItemProcesses("test_growth_self_abilities_privileged_capture_records_actual_acquisition_and_credit")
+
+
 def haste_recording_case():
     """Actual paid self-ability outcomes; production potion acceptance is separate."""
     from test_magic_items_process import MagicItemProcesses
@@ -291,6 +297,27 @@ class Recorder(ProcessTestCase):
                             for effect in record["outcome"]["effects"]))
         # Publish both only after cleanup and both source-positive validations.
         server_samples.update({"zz.first_contact_" + key: value for key, value in samples.items()})
+
+    def record_growth(self, server_samples):
+        samples = run_recording_case(growth_recording_case(), "growth_samples")
+        self.assertEqual(set(samples), {"gain_strength", "raise_level"})
+        for kind, sample in samples.items():
+            self.assertEqual(sample["type"], "combat_diagnostics")
+            self.assertTrue(sample["report"]["enabled"])
+            record, = [row for row in sample["report"]["records"]
+                       if row.get("ability", {}).get("id") == "fixture." + kind]
+            effect, = [row for row in record["outcome"]["effects"] if row["type"] == kind]
+            self.assertEqual(str(effect["target"]), "1")
+            if kind == "gain_strength":
+                self.assertEqual(effect["change"], "acquired")
+            else:
+                amount = effect["amount"]
+                self.assertIsInstance(amount, str)
+                self.assertEqual(str(int(amount)), amount)
+                self.assertGreater(int(amount), 0)
+                self.assertLessEqual(int(amount), (1 << 64) - 1)
+        # No partial publication if either actual artifact or cleanup is invalid.
+        server_samples.update({"zz.growth_" + key: value for key, value in samples.items()})
 
     def record_haste(self, server_samples):
         samples = run_recording_case(haste_recording_case(), "haste_samples")
@@ -733,6 +760,7 @@ class Recorder(ProcessTestCase):
         self.record_first_contact(server_samples)
         self.record_torch(server_samples)
         self.record_haste(server_samples)
+        self.record_growth(server_samples)
         self.record_personal_conditions(server_samples)
         self.record_persistent_conditions(server_samples)
         self.record_amulet_escape(server_samples)

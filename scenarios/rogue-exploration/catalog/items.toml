@@ -59,7 +59,7 @@ consumable = { discovery = "self_effect", effects = [{ kind = "restore_attribute
 
 [appearance_pools."rogue.potions"]
 asset = "item.potion"
-appearances = ["amber potion", "smoky potion", "violet potion", "azure potion", "crimson potion", "silver potion", "pearl potion", "teal potion", "ochre potion"]
+appearances = ["amber potion", "smoky potion", "violet potion", "azure potion", "crimson potion", "silver potion", "pearl potion", "teal potion", "ochre potion", "indigo potion", "copper potion"]
 
 # Ordinary recoverable stacks; neither a purse abstraction nor a supply item.
 [items."rogue.gold"]
@@ -772,3 +772,23 @@ class = "potion"
 stackable = true
 appearance_pool = "rogue.potions"
 consumable = { discovery = "on_use", effects = [{ kind = "haste_dose", condition = "rogue.hasted", rest = "rogue.haste_exhaustion" }] }
+
+[items."rogue.gain_strength"]
+asset = "item.potion"
+name = "potion of gain strength"
+identity = "rogue.gain_strength"
+magical = true
+class = "potion"
+stackable = true
+appearance_pool = "rogue.potions"
+consumable = { discovery = "on_use", effects = [{ kind = "gain_strength" }] }
+
+[items."rogue.raise_level"]
+asset = "item.potion"
+name = "potion of raise level"
+identity = "rogue.raise_level"
+magical = true
+class = "potion"
+stackable = true
+appearance_pool = "rogue.potions"
+consumable = { discovery = "on_use", effects = [{ kind = "raise_level" }] }

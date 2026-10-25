@@ -284,7 +284,8 @@ impl IntellectLearning {
         witness: &IntellectSources,
     ) -> Result<u16, BuildError> {
         if rows.len() > crate::limits::HIT_DICE
-            || witness.strength_acquired > build.strength_acquired() {
+            || witness.strength_acquired > build.strength_acquired()
+        {
             return Err(BuildError::InvalidOwnership);
         }
         let choices = rows
@@ -347,7 +348,8 @@ impl IntellectLearning {
     }
     pub fn validate(&self, build: &CreatureBuild) -> Result<(), BuildError> {
         if self.birth.attributes != build.initial_attributes()
-            || self.birth.sources.strength_acquired != 0 {
+            || self.birth.sources.strength_acquired != 0
+        {
             return Err(BuildError::InvalidOwnership);
         }
         if self.thresholds.len() > usize::from(crate::limits::DERIVED_ATTRIBUTE)

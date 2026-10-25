@@ -19,15 +19,15 @@ class RogueHasteContent(unittest.TestCase):
                 "discovery": "on_use", "effects": [{"kind": "haste_dose",
                     "condition": "rogue.hasted", "rest": "rogue.haste_exhaustion"}]}})
 
-    def test_haste_is_ninth_distinct_potion_identity_without_replacing_old_cosmetics(self):
+    def test_haste_keeps_distinct_potion_identity_without_replacing_old_cosmetics(self):
         catalog = source("catalog/items.toml")
         self.assertEqual({name for name, item in catalog["items"].items()
                           if item.get("appearance_pool") == "rogue.potions"}, {
             "rogue.restore_strength", "rogue.healing", "rogue.extra_healing", "rogue.confusion",
-            "rogue.blindness", "rogue.poison", "rogue.see_invisible", "rogue.levitation", "rogue.haste"})
+            "rogue.blindness", "rogue.poison", "rogue.see_invisible", "rogue.levitation", "rogue.haste", "rogue.gain_strength", "rogue.raise_level"})
         self.assertEqual(catalog["appearance_pools"]["rogue.potions"]["appearances"], [
             "amber potion", "smoky potion", "violet potion", "azure potion", "crimson potion",
-            "silver potion", "pearl potion", "teal potion", "ochre potion"])
+            "silver potion", "pearl potion", "teal potion", "ochre potion", "indigo potion", "copper potion"])
 
     def test_only_shared_haste_opts_into_mixed_lifetime_and_rest_is_dedicated(self):
         conditions = {row["path"][1]: row["value"] for row in source("rules.toml")["overrides"]

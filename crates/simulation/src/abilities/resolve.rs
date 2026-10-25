@@ -395,8 +395,12 @@ pub enum ResolvedEffect {
     CancelSpecials {
         changed: bool,
     },
-    GainStrength { change: super::StrengthGain },
-    RaiseLevel { amount: u64 },
+    GainStrength {
+        change: super::StrengthGain,
+    },
+    RaiseLevel {
+        amount: u64,
+    },
     HasteDose {
         id: ConditionId,
         rest: ConditionId,
@@ -561,13 +565,16 @@ impl ResolvedEffect {
             },
             Self::GainStrength { .. } => {
                 let change = if let Some(context) = state.recovery_context {
-                    creature.with_recovery_context(context, |creature| creature.stage_gain_strength())?
+                    creature
+                        .with_recovery_context(context, |creature| creature.stage_gain_strength())?
                 } else {
                     creature.stage_gain_strength()?
                 };
                 Self::GainStrength { change }
             }
-            Self::RaiseLevel { .. } => Self::RaiseLevel { amount: creature.stage_raise_level()? },
+            Self::RaiseLevel { .. } => Self::RaiseLevel {
+                amount: creature.stage_raise_level()?,
+            },
             Self::HasteDose { id, rest, outcome } => {
                 if !outcome.valid()
                     || !creature
@@ -1381,7 +1388,9 @@ pub(super) fn resolve_batch<'a>(
             PlannedEffect::RoomLight => ResolvedEffect::RoomLight { changed: false },
             PlannedEffect::DrainLife => ResolvedEffect::DrainLife { changed: false },
             PlannedEffect::CancelSpecials => ResolvedEffect::CancelSpecials { changed: false },
-            PlannedEffect::GainStrength => ResolvedEffect::GainStrength { change: super::StrengthGain::Unchanged },
+            PlannedEffect::GainStrength => ResolvedEffect::GainStrength {
+                change: super::StrengthGain::Unchanged,
+            },
             PlannedEffect::RaiseLevel => ResolvedEffect::RaiseLevel { amount: 0 },
             PlannedEffect::HasteDose {
                 id,
@@ -1721,8 +1730,12 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
             CancelSpecials {
                 changed: bool,
             },
-            GainStrength { change: super::StrengthGain },
-            RaiseLevel { amount: u64 },
+            GainStrength {
+                change: super::StrengthGain,
+            },
+            RaiseLevel {
+                amount: u64,
+            },
             HasteDose {
                 id: ConditionId,
                 rest: ConditionId,

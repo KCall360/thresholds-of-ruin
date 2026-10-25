@@ -79,6 +79,7 @@ fn no_private_reply(messages: &[Value]) {
         "resulting_build_epoch",
         "starting_skills",
         "refund_count",
+        "strength_acquired",
         "replacement",
     ] {
         assert!(

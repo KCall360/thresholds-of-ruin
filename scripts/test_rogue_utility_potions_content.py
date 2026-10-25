@@ -57,7 +57,7 @@ class RogueUtilityPotionsContent(unittest.TestCase):
         potion_ids = {key for key, item in catalog["items"].items()
                       if item.get("appearance_pool") == "rogue.potions"}
         self.assertEqual(potion_ids, {"rogue.restore_strength", "rogue.healing", "rogue.confusion",
-                                     "rogue.blindness", "rogue.poison", "rogue.see_invisible", "rogue.extra_healing", "rogue.levitation", "rogue.haste"})
+                                     "rogue.blindness", "rogue.poison", "rogue.see_invisible", "rogue.extra_healing", "rogue.levitation", "rogue.haste", "rogue.gain_strength", "rogue.raise_level"})
         appearances = catalog["appearance_pools"]["rogue.potions"]["appearances"]
         self.assertEqual(len(appearances), len(set(appearances)))
         self.assertEqual(len(appearances), len(potion_ids))

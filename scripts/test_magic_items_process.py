@@ -20,6 +20,7 @@ from drain_catalog_package import prepare as prepare_imported_drain
 from first_contact_catalog_package import prepare as prepare_imported_first_contact
 from torch_catalog_package import prepare as prepare_imported_torch
 from haste_catalog_package import prepare as prepare_imported_haste
+from growth_catalog_package import prepare as prepare_imported_growth
 
 
 def observation(frame):
@@ -955,6 +956,142 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         self.assertEqual(str(effects[0]["target"]), "2")
         self.assertNotIn('"type":"combat_diagnostics"', "".join(owner.transcript).replace(" ", ""))
         self.first_contact_samples = {"reach": reach_sample, "effect": effect_sample}
+
+    def exercise_imported_growth_adventure(self, kind):
+        package, policy = prepare_imported_growth(self, kind)
+        server = self.server("--checkpoint-interval", 1, scenario=package)
+        probe, _ = self.client(observe=True)
+        text, _ = self.adventure()
+        self.say(text, "take all")
+        carried = self.snapshot(probe)
+        self.assertTrue(settled(carried))
+        potion, = items(carried, "potion")
+        count = 3 if kind == "gain_strength" else 2
+        self.assertEqual(int(potion["quantity"]), count)
+        self.assertFalse(potion["identified"])
+        stats = observation(carried)["combat"]["own_stats"]
+        self.assertEqual(stats["attributes"]["strength"], 5)
+        self.assertEqual(stats["attributes"]["speed"], 0)
+        initial = checkpoint(self, probe)
+        original = actor_creature(initial)
+        self.assertEqual(original["build"]["initial_attributes"]["strength"], 5)
+        self.assertEqual(original["build"]["strength_acquired"], 0)
+        self.assertEqual(original["build"]["future_growth"], {"kind": "disabled"})
+        self.assertEqual(len(original["build"]["hd"]), 1)
+        self.assertEqual(original["earned_progress"]["held_xp"], 0)
+        self.assertNotIn("Permanent potion Strength", self.say(text, "advancement"))
+        current = carried
+        expected_held = 0
+        for dose in range(1, count + 1):
+            selected, = items(current, "potion")
+            reply = self.say(text, "drink " + selected["name"])
+            self.assertIn("finish drinking", reply.lower())
+            current = self.snapshot(probe)
+            self.assertTrue(settled(current))
+            self.assertEqual(int(observation(current)["tick"]) - int(observation(carried)["tick"]), dose * 100)
+            remaining = items(current, "potion")
+            self.assertEqual(sum(int(row["quantity"]) for row in remaining), count - dose)
+            if remaining:
+                self.assertTrue(remaining[0]["identified"])
+                self.assertEqual(remaining[0]["name"], "potion of " + kind.replace("_", " "))
+            saved = checkpoint(self, probe)
+            creature = actor_creature(saved)
+            self.assertEqual(saved["rules_rng"], initial["rules_rng"])
+            self.assertEqual(creature["build"]["initial_attributes"], original["build"]["initial_attributes"])
+            self.assertEqual(creature["build"]["hd"], original["build"]["hd"])
+            self.assertEqual(creature["build"]["choices"], original["build"]["choices"])
+            overview = self.say(text, "advancement")
+            if kind == "gain_strength":
+                acquired = min(dose, 2)
+                self.assertEqual(creature["build"]["strength_acquired"], acquired)
+                self.assertEqual(observation(current)["combat"]["own_stats"]["attributes"]["strength"], 5 + acquired)
+                self.assertEqual(creature["earned_progress"], original["earned_progress"])
+                self.assertIn(f"Permanent potion Strength: +{acquired} (not refundable)", overview)
+            else:
+                # Independent authored curve prices at tiers one and two; blocked
+                # first dose remains banked, so the second funds the next tier.
+                expected_held += policy["threshold_base"] + policy["threshold_per_tier"] * (dose - 1)
+                progress = creature["earned_progress"]
+                self.assertEqual(progress["held_xp"], expected_held)
+                self.assertEqual(progress["earned_xp"], expected_held)
+                self.assertEqual(progress["spent_xp"], 0)
+                self.assertEqual(progress["highest_applied_tier"], 1)
+                self.assertEqual(creature["build"]["strength_acquired"], 0)
+                self.assertIn(f"XP: held {expected_held} / next threshold {policy['threshold_base']}", overview)
+                self.assertNotIn("Permanent potion Strength", overview)
+            self.assertFalse(current["state"]["wizard_game"])
+            if dose == 1:
+                text.stop(save=False)
+                probe.stop(save=False)
+                server.stop(save=False)
+                shutil.rmtree(package)
+                server = self.server("--checkpoint-interval", 1, scenario=ROOT / "scenarios/two-room", seed=None)
+                probe, current = self.client(observe=True)
+                self.assertEqual(checkpoint(self, probe), saved)
+                text, _ = self.adventure()
+        self.assertNotIn('"type":"combat_diagnostics"', "".join(probe.transcript).replace(" ", ""))
+
+    @non_graphical
+    def test_imported_gain_strength_adventure_dual_cap_and_source_free_reopen(self):
+        self.exercise_imported_growth_adventure("gain_strength")
+
+    @non_graphical
+    def test_imported_raise_level_adventure_repeated_blocked_funding_and_source_free_reopen(self):
+        self.exercise_imported_growth_adventure("raise_level")
+
+    @non_graphical
+    def test_growth_self_abilities_privileged_capture_records_actual_acquisition_and_credit(self):
+        package, policy = prepare_imported_growth(self, "gain_strength", diagnostic_abilities=True)
+        self.server("--checkpoint-interval", 1, scenario=package, wizard=True)
+        owner, initial = self.client()
+        carried = self.collect(owner, initial)
+        self.assertTrue(settled(carried))
+        abilities = observation(carried)["combat"]["own_stats"]["abilities"]
+        for kind in ("gain_strength", "raise_level"):
+            ability, = [row for row in abilities if row["id"] == "fixture." + kind]
+            self.assertEqual(ability["reach"], {"kind": "self_only"})
+        self.assertEqual(observation(carried)["combat"]["own_stats"]["attributes"]["strength"], 5)
+        self.assertEqual(observation(carried)["combat"]["own_stats"]["attributes"]["speed"], 0)
+        baseline = checkpoint(self, owner)
+        self.assertEqual(actor_creature(baseline)["earned_progress"]["held_xp"], 0)
+        self.assertEqual(actor_creature(baseline)["build"]["strength_acquired"], 0)
+        wizard, _ = self.client(WIZARD_TOKEN, observe=True)
+        def message(client):
+            rows = [json.loads(line).get("message") for line in client.transcript if line.startswith("{")]
+            return next(row for row in reversed(rows) if row and row["type"] == "combat_diagnostics")
+        enabled = self.command(wizard, {"type": "wizard", "command": "combat capture on"})
+        self.assertFalse(enabled.get("error"), enabled.get("error"))
+        self.assertTrue(message(wizard)["report"]["enabled"])
+        self.growth_samples = {}
+        for kind in ("gain_strength", "raise_level"):
+            before = self.snapshot(owner)
+            self.assertTrue(settled(before))
+            result = self.act(owner, {"type": "use_ability", "id": "fixture." + kind,
+                "invocation": {"aim": {"kind": "actor_target", "target": observation(before)["self_target"]},
+                               "weapon": {"kind": "default"}}})
+            self.assertIsNone(result["error"])
+            after = self.advance(owner, [])
+            self.assertGreater(int(observation(after)["tick"]), int(observation(before)["tick"]))
+            self.assertEqual(items(after, "potion"), items(carried, "potion"), "ability capture is not a Drink receipt")
+            saved = checkpoint(self, owner)
+            self.assertEqual(saved["rules_rng"], baseline["rules_rng"])
+            self.assertEqual(actor_creature(saved)["build"]["hd"], actor_creature(baseline)["build"]["hd"])
+            queried = self.command(wizard, {"type": "wizard", "command": "combat inspect"})
+            self.assertFalse(queried.get("error"), queried.get("error"))
+            sample = message(wizard)
+            record, = [row for row in sample["report"]["records"]
+                       if row.get("ability", {}).get("id") == "fixture." + kind]
+            effect, = [row for row in record["outcome"]["effects"] if row["type"] == kind]
+            self.assertEqual(str(effect["target"]), "1")
+            if kind == "gain_strength":
+                self.assertEqual(effect["change"], "acquired")
+                self.assertEqual(actor_creature(saved)["build"]["strength_acquired"], 1)
+                self.assertEqual(observation(after)["combat"]["own_stats"]["attributes"]["strength"], 6)
+            else:
+                self.assertEqual(effect["amount"], str(policy["threshold_base"]))
+                self.assertEqual(actor_creature(saved)["earned_progress"]["held_xp"], policy["threshold_base"])
+            self.growth_samples[kind] = sample
+        self.assertNotIn('"type":"combat_diagnostics"', "".join(owner.transcript).replace(" ", ""))
 
     @non_graphical
     def test_imported_haste_adventure_paid_doses_and_source_free_reopen(self):

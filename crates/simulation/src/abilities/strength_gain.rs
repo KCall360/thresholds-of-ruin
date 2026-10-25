@@ -42,10 +42,13 @@ mod tests {
         ] {
             let encoded = serde_json::to_string(&result).unwrap();
             assert_eq!(encoded, format!("\"{spelling}\""));
-            assert_eq!(serde_json::from_str::<StrengthGain>(&encoded).unwrap(), result);
-            assert!(serde_json::from_str::<StrengthGain>(
-                &format!("{{\"{spelling}\":null}}")
-            ).is_err());
+            assert_eq!(
+                serde_json::from_str::<StrengthGain>(&encoded).unwrap(),
+                result
+            );
+            assert!(
+                serde_json::from_str::<StrengthGain>(&format!("{{\"{spelling}\":null}}")).is_err()
+            );
         }
         for invalid in ["null", "0", "[]", "{}", "\"both\"", "\"\""] {
             assert!(serde_json::from_str::<StrengthGain>(invalid).is_err());

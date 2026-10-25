@@ -1,6 +1,6 @@
+//! Validated action plans, pure effect resolution, and runtime orchestration.
 mod strength_gain;
 pub use strength_gain::StrengthGain;
-//! Validated action plans, pure effect resolution, and runtime orchestration.
 mod compile;
 mod haste_dose;
 pub use haste_dose::HasteDoseOutcome;
@@ -170,6 +170,8 @@ mod payload_resistance_tests;
 #[cfg(test)]
 mod cancellation_missile_tests;
 
+#[cfg(test)]
+mod growth_dose_tests;
 #[cfg(test)]
 mod haste_dose_tests;
 #[cfg(test)]

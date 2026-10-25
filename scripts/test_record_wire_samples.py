@@ -901,5 +901,47 @@ class HasteRecordingContracts(unittest.TestCase):
                 self.assertEqual(samples, {"existing": {"type": "palette"}})
 
 
+class GrowthRecordingContracts(unittest.TestCase):
+    def case(self, failure=None, malformed=False):
+        case, trace = recording_case(failure)
+        source = {kind: {"type": "combat_diagnostics", "report": {"enabled": True, "records": [
+            {"ability": {"id": "fixture." + kind, "name": "Growth diagnostic"}, "outcome": {"effects": [
+                {"type": kind, "target": "1", **payload}]}}]}}
+            for kind, payload in (("gain_strength", {"change": "acquired"}), ("raise_level", {"amount": "100"}))}
+        if malformed:
+            source["raise_level"]["report"]["records"][0]["outcome"]["effects"][0]["amount"] = 100
+        original = type(case).runTest
+        def record(subject):
+            subject.growth_samples = copy.deepcopy(source)
+            original(subject)
+        type(case).runTest = record
+        return case, trace, source
+
+    def test_factory_selects_actual_non_graphical_granted_ability_case(self):
+        case = record_wire_samples.growth_recording_case()
+        self.assertEqual(case.id(), "test_magic_items_process.MagicItemProcesses."
+                         "test_growth_self_abilities_privileged_capture_records_actual_acquisition_and_credit")
+        self.assertFalse(is_graphical_test(case))
+
+    def test_both_actual_results_publish_after_successful_cleanup(self):
+        case, trace, source = self.case()
+        samples = {}
+        with patch("record_wire_samples.growth_recording_case", return_value=case):
+            record_wire_samples.Recorder().record_growth(samples)
+        self.assertEqual(samples, {"zz.growth_" + key: value for key, value in source.items()})
+        self.assertEqual(trace[-1], "class_cleanup")
+        self.assertIsNot(samples["zz.growth_gain_strength"], case.growth_samples["gain_strength"])
+
+    def test_cleanup_or_invalid_result_keeps_existing_samples_atomically(self):
+        for failure, malformed in (("cleanup", False), ("class_cleanup", False), (None, True)):
+            with self.subTest(failure=failure, malformed=malformed):
+                case, _, _ = self.case(failure, malformed)
+                samples = {"existing": {"type": "palette"}}
+                with patch("record_wire_samples.growth_recording_case", return_value=case):
+                    with self.assertRaises(AssertionError):
+                        record_wire_samples.Recorder().record_growth(samples)
+                self.assertEqual(samples, {"existing": {"type": "palette"}})
+
+
 if __name__ == "__main__":
     unittest.main()

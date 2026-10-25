@@ -10015,8 +10015,15 @@ mod gain_strength_effect_tests {
             r#"{"kind":"gain_strength","kind":"gain_strength"}"#,
             r#"{"kind":null}"#,
         ] {
-            assert!(serde_json::from_str::<source::Effect>(malformed).is_err(), "{malformed}");
-            assert!(crate::storage::codec::strict::<Owned<source::Effect>>(malformed.as_bytes()).is_err(), "{malformed}");
+            assert!(
+                serde_json::from_str::<source::Effect>(malformed).is_err(),
+                "{malformed}"
+            );
+            assert!(
+                crate::storage::codec::strict::<Owned<source::Effect>>(malformed.as_bytes())
+                    .is_err(),
+                "{malformed}"
+            );
         }
     }
 }
@@ -10041,8 +10048,15 @@ mod raise_level_effect_tests {
             r#"{"kind":"raise_level","kind":"raise_level"}"#,
             r#"{"kind":null}"#,
         ] {
-            assert!(serde_json::from_str::<source::Effect>(malformed).is_err(), "{malformed}");
-            assert!(crate::storage::codec::strict::<Owned<source::Effect>>(malformed.as_bytes()).is_err(), "{malformed}");
+            assert!(
+                serde_json::from_str::<source::Effect>(malformed).is_err(),
+                "{malformed}"
+            );
+            assert!(
+                crate::storage::codec::strict::<Owned<source::Effect>>(malformed.as_bytes())
+                    .is_err(),
+                "{malformed}"
+            );
         }
     }
 }

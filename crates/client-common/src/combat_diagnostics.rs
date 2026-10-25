@@ -399,16 +399,41 @@ pub(crate) mod tests {
     #[test]
     fn growth_diagnostics_render_actual_results_and_reject_wrong_recipient() {
         for (effect, expected) in [
-            (DiagnosticEffect::GainStrength { target: ActorId(2), change: StrengthGain::Unchanged }, "  Actor 2: Strength unchanged"),
-            (DiagnosticEffect::GainStrength { target: ActorId(2), change: StrengthGain::Restored }, "  Actor 2: Strength restored by one"),
-            (DiagnosticEffect::GainStrength { target: ActorId(2), change: StrengthGain::Acquired }, "  Actor 2: Strength permanently increased by one"),
-            (DiagnosticEffect::RaiseLevel { target: ActorId(2), amount: u64::MAX }, "  Actor 2: credited 18446744073709551615 growth XP"),
+            (
+                DiagnosticEffect::GainStrength {
+                    target: ActorId(2),
+                    change: StrengthGain::Unchanged,
+                },
+                "  Actor 2: Strength unchanged",
+            ),
+            (
+                DiagnosticEffect::GainStrength {
+                    target: ActorId(2),
+                    change: StrengthGain::Restored,
+                },
+                "  Actor 2: Strength restored by one",
+            ),
+            (
+                DiagnosticEffect::GainStrength {
+                    target: ActorId(2),
+                    change: StrengthGain::Acquired,
+                },
+                "  Actor 2: Strength permanently increased by one",
+            ),
+            (
+                DiagnosticEffect::RaiseLevel {
+                    target: ActorId(2),
+                    amount: u64::MAX,
+                },
+                "  Actor 2: credited 18446744073709551615 growth XP",
+            ),
         ] {
             let report = report_with_effects(vec![effect]);
             assert!(lines(&report).unwrap().contains(&expected.to_string()));
             let mut forged = report.clone();
             match &mut forged.records[0].outcome.effects[0] {
-                DiagnosticEffect::GainStrength { target, .. } | DiagnosticEffect::RaiseLevel { target, .. } => *target = ActorId(1),
+                DiagnosticEffect::GainStrength { target, .. }
+                | DiagnosticEffect::RaiseLevel { target, .. } => *target = ActorId(1),
                 _ => unreachable!(),
             }
             assert!(lines(&forged).is_err());

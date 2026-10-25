@@ -3231,3 +3231,6 @@ mod portable_torch;
 
 #[path = "haste_dose_session_tests.rs"]
 mod haste_dose;
+
+#[path = "growth_potion_session_tests.rs"]
+mod growth_potions;

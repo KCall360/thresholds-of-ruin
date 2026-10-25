@@ -458,6 +458,7 @@ impl Engine {
             _ => None,
         };
         Ok(p::AdvancementOverview {
+            strength_acquired: build.strength_acquired(),
             starting_skills: build.starting_skills().map(skill),
             growth: p::AdvancementGrowth {
                 highest_applied_tier: creature.earned_progress().highest_applied_tier().get(),
@@ -736,6 +737,7 @@ impl Preview {
                 maximum: value.maximum,
             };
         Ok(p::AdvancementSummary {
+            strength_acquired: self.build().strength_acquired(),
             proposal: proposal.clone(),
             resulting_build_epoch: runtime.build_epoch.get(),
             removed_count: small(self.removed().len())?,

@@ -1391,3 +1391,42 @@ this snapshot. They will extend the current nine-identity family with distinct
 cosmetics without changing live weights or kits; seeded appearance assignments
 need not remain unchanged. These source-only failures are not Rust/compiler or
 paid-gameplay evidence. Existing Restore Strength remains a separate effect.
+
+### Growth complete candidate checkpoint (runtime pending)
+
+The candidate now includes the paired mechanics and permanent/history validation,
+17 new core controls plus an existing genuine obstruction control extended for
+Raise, three admitted Service fixtures, strict saved/source effect controls and
+three actual-process fixtures. The latter separately exercise production Strength
+5→6→7→7 paid doses, successive blocked Raise funding, and privileged outcomes from
+explicitly granted self abilities. The diagnostic caller is not a potion Drink
+Exposure receipt. Both ordinary routes include source-deleted interval-one reopen;
+Service independently retains pending/retry and completed nonzero provenance,
+ring/deficit/cap and ordinary growth-source reenable boundaries. These fixtures
+have static prerequisite review, not runtime qualification yet.
+
+Owned advancement overview and preview now carry required bounded
+`strength_acquired`, separate from initial attributes and refundable purchase
+rows. Common presentation adds a permanent-potion label only for positive counts;
+zero retains the prior presentation. Existing effective attributes and actual
+preview admission remain authoritative. Current DTO constructors and strict
+positive/negative inventories were migrated, including the independent 3D
+consumer inventory; this is not a native 3D execution claim.
+
+The production catalog now adds the two opt-in OnUse doses and distinct indigo and
+copper cosmetics, preserving the prior nine labels and all live weights/kits.
+The new recorder wrapper's three pure first-red tests reached missing factory/
+recording seams; its reviewed implementation reuses the established actual-case
+cleanup gate and publishes both validated artifacts atomically. The grouped
+catalog, related restoration/Haste/utility inventories and recorder controls pass
+74 pure tests with all twelve inputs unchanged. Those mock-wrapper tests do not
+constitute genuine server captures. Future recording must preserve generated
+client request examples versus actual server-frame provenance.
+
+The entire source candidate is frozen and formatted but still uncompiled and
+unrun in Rust. A meaningful disabled-effect red precedes restored-green runtime;
+current applications, genuine certificates and wire/saved corpus regeneration
+remain pending. Full-width credit is owned by core arithmetic and protocol
+boundary controls; the bounded actual diagnostic fixture records a lawful small
+credit using canonical full-width decimal transport, not an invented wide ledger.
+No native, performance, release, hosted or final verification gate is claimed.
