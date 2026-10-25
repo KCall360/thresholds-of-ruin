@@ -574,3 +574,21 @@ An additional bounded six-member physically connected same-room fixture covers
 a far member beyond ordinary residency pins, with real reciprocal portals,
 exact payment and frozen-clock/source-free checks. All three boundaries remain
 separately named; these latest green assertions are not yet runtime-qualified.
+
+
+The first green collection passes all ten Room Light Service cases and sixteen
+additional canonical/source/history checks. Core spatial/save controls pass
+35/35; the paid core case now passes illumination/payment but exposed a mistaken
+diagnostic assertion. Self-device Exposure intentionally creates no combat
+check diagnostic, so the canonical published event is the correct oracle. The
+final correction explicitly asserts that distinction and uses existing opaque
+publication receipts for truthful direct/Exposure return values. Its old pure
+false marker versus actual publication contrast is assertion-sensitivity
+coverage, not a claimed historical runtime red.
+
+The authentic current saved-scenario writer has regenerated the current fixture;
+the only semantic additions are five required empty `spatial_scopes` maps.
+Fifty-four affected saved-adapter tests pass against that fixture using the same
+qualified server executable, without recompilation. Actual imported Text/process
+and package certificate qualification remain pending; no verification gate is
+claimed by these focused results.

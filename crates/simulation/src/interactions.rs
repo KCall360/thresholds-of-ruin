@@ -1336,10 +1336,13 @@ impl Game {
             .with_context(self.resolution_context(resolution, actor, actor)?);
         let mut rng = self.rules_rng;
         let outcome = crate::abilities::resolve(resolution, &snapshot, &mut rng, &mut ())?;
-        let observed = outcome.result == crate::abilities::OutcomeStatus::Applied;
         self.rules_rng = rng;
-        self.apply_outcome(outcome)?;
-        Ok(observed)
+        let receipt = self.apply_resolved_outcome(
+            outcome,
+            crate::lifecycle::ResolutionPublication::Standalone,
+            &mut crate::lifecycle::DamageActivityGuard::default(),
+        )?;
+        Ok(self.published_resolution(receipt)?.result == crate::abilities::OutcomeStatus::Applied)
     }
     pub(crate) fn finish_item_work(
         &mut self,

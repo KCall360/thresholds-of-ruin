@@ -132,17 +132,9 @@ fn room_light_paid_device_lights_exact_room_surfaces_without_rng_or_targeting() 
         Some(false),
         "unlisted cell is not room illumination"
     );
-    let diagnostic = &game
-        .combat_diagnostics()
-        .unwrap()
-        .records()
-        .back()
-        .unwrap()
-        .outcome;
-    assert_eq!(
-        diagnostic.effects,
-        vec![ResolvedEffect::RoomLight { changed: true }]
-    );
+    // Self-device payloads resolve as Exposure, not a generic ability combat
+    // diagnostic. The authoritative resolution event still records actual change.
+    assert!(game.combat_diagnostics().unwrap().records().is_empty());
     let canonical = game
         .combat_events()
         .iter()
@@ -158,7 +150,10 @@ fn room_light_paid_device_lights_exact_room_surfaces_without_rng_or_targeting() 
             _ => None,
         })
         .unwrap();
-    assert_eq!(diagnostic, canonical);
+    assert_eq!(
+        canonical.effects,
+        vec![ResolvedEffect::RoomLight { changed: true }]
+    );
     game.set_combat_diagnostics(false);
     let mut shared = crate::checkpoint::SharedState::default();
     let snapshot = game.checkpoint(&mut shared);
@@ -320,5 +315,85 @@ fn room_light_is_not_a_natural_melee_payload() {
         }
         crate::rules::validate_strike_shapes(&strikes).unwrap();
         assert!(create(strikes).is_err());
+    }
+}
+
+#[test]
+fn room_light_direct_and_exposure_returns_use_actual_publication_not_pure_marker() {
+    for exposure in [false, true] {
+        let (mut game, item) = fixture(false, false);
+        assert_eq!(game.world.is_lit(at(4)), Some(false));
+        let tick = game.tick;
+        let rng = game.rules_rng;
+        let effects = game
+            .effect_plan(ActorId(1), &[crate::rules::Effect::RoomLight])
+            .unwrap();
+        let plan = if exposure {
+            ResolutionPlan::Exposure {
+                actor: ActorId(1),
+                target: ActorId(1),
+                effects: &effects,
+                descriptors: &[],
+            }
+        } else {
+            ResolutionPlan::Effects {
+                actor: ActorId(1),
+                target: ActorId(1),
+                effects: &effects,
+            }
+        };
+        let creature = game.creature(ActorId(1)).unwrap();
+        let snapshot = Snapshot::capture(&creature).with_context(
+            game.resolution_context(plan, ActorId(1), ActorId(1))
+                .unwrap(),
+        );
+        let mut pure_rng = rng;
+        let pure = super::resolve::resolve(plan, &snapshot, &mut pure_rng, &mut ()).unwrap();
+        assert_eq!(
+            pure.effects,
+            vec![ResolvedEffect::RoomLight { changed: false }]
+        );
+        let old_return_oracle = pure.result == OutcomeStatus::Applied;
+        assert!(!old_return_oracle);
+        assert_eq!(pure_rng, rng);
+        let apply = |game: &mut Game| {
+            if exposure {
+                game.with_effect_publication(|candidate| {
+                    candidate.apply_exposure_in_transaction(
+                        ActorId(1),
+                        &[crate::rules::Effect::RoomLight],
+                        &[],
+                    )
+                })
+            } else {
+                game.apply_effects(ActorId(1), &[crate::rules::Effect::RoomLight])
+            }
+        };
+        let actual = apply(&mut game).unwrap();
+        // Explicit sensitivity to the old prepublication-return expression;
+        // this is not a claim that a separate historical runtime red was run.
+        assert!(actual);
+        assert_ne!(actual, old_return_oracle);
+        assert_eq!(game.world.is_lit(at(4)), Some(true));
+        assert_eq!(game.world.is_lit(at(5)), Some(false));
+        assert!(!apply(&mut game).unwrap());
+        assert_eq!(game.tick, tick);
+        assert_eq!(game.rules_rng, rng);
+        assert_eq!(game.items[&item].charges, Some(2));
+        assert!(!game.actors[&ActorId(1)].knowledge.contains("fixture.light"));
+        let changed = game
+            .combat_events()
+            .iter()
+            .filter_map(|event| match event {
+                crate::combat::CombatEvent::Resolved { outcome, .. } => {
+                    outcome.effects.iter().find_map(|effect| match effect {
+                        ResolvedEffect::RoomLight { changed } => Some(*changed),
+                        _ => None,
+                    })
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(changed, vec![true, false]);
     }
 }

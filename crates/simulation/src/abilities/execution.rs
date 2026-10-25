@@ -744,11 +744,14 @@ impl Game {
             Snapshot::capture(&creature).with_context(self.resolution_context(plan, actor, actor)?);
         let mut rng = self.rules_rng;
         let resolved = resolve::resolve_receipt(plan, &snapshot, &mut rng, &mut (), true)?;
-        let applied = resolved.outcome.result == OutcomeStatus::Applied;
         self.rules_rng = rng;
         self.consume_resistance_tokens(&resolved.resistance_tokens)?;
-        self.apply_outcome(resolved.outcome)?;
-        Ok(applied)
+        let receipt = self.apply_resolved_outcome(
+            resolved.outcome,
+            crate::lifecycle::ResolutionPublication::Standalone,
+            &mut crate::lifecycle::DamageActivityGuard::default(),
+        )?;
+        Ok(self.published_resolution(receipt)?.result == OutcomeStatus::Applied)
     }
     /// The caller has validated and spent the exact finite source in this same
     /// transaction. The frozen effects do not depend on that deleted item.

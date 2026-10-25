@@ -517,6 +517,7 @@
         "id": "ai-interactions",
         "objective": null,
         "ruleset": "rules.toml",
+        "spatial_scopes": {},
         "terrain": null,
         "themes": [],
         "unique_retrieval": null,
@@ -1329,6 +1330,7 @@
           "item": 100
         },
         "ruleset": "rules.toml",
+        "spatial_scopes": {},
         "terrain": null,
         "themes": [
           "ruined-stone",
@@ -1763,6 +1765,7 @@
         "id": "interactions",
         "objective": null,
         "ruleset": "rules.toml",
+        "spatial_scopes": {},
         "terrain": null,
         "themes": [],
         "unique_retrieval": null,
@@ -1923,6 +1926,7 @@
         "id": "items",
         "objective": null,
         "ruleset": "rules.toml",
+        "spatial_scopes": {},
         "terrain": null,
         "themes": [],
         "unique_retrieval": null,
@@ -2056,6 +2060,7 @@
         "id": "two-room",
         "objective": null,
         "ruleset": "rules.toml",
+        "spatial_scopes": {},
         "terrain": null,
         "themes": [
           "stone"

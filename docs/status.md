@@ -49,12 +49,14 @@ content coverage, a freshly validated package certificate, and imported-catalog
 Text/Service acceptance including source-deleted reopen. The complete-pool test
 fixture is corrected and the fresh full server library passes. Live pools are unchanged. Historical local results do not qualify
 this tree.
-A bounded row-run registry and test-only explicit/generated spatial compiler now
-have fresh full-library coverage. A strict standalone pooled codec also passes;
-Game/history persistence installation is now under source-first reconstruction,
-not yet a completed saved gameplay capability.
+A bounded row-run registry, pooled Game/history retention and canonical authored/
+generated source verification now support the opt-in Room Light device. Focused
+Service coverage includes paid room illumination, passage/maze no-ops, connected
+cross-region loading, frozen foreign surfaces and source-deleted reopening.
+Live distributions remain unchanged. Final core result-projection, actual Text
+process, certificate and broader qualification work is still in progress.
 The [spatial integration plan](plans/rogue-spatial-registry-reconstruction.md) owns
-remaining canonical-source, codec and capacity work.
+exact acceptance scope and remaining qualification.
 Existing live item distributions remain unchanged and polymorph remains separate.
 
 Characters retain last-seen terrain, doors, stairs and item appearances in the

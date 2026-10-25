@@ -200,6 +200,27 @@ the old rate and leaves the target at normal speed until a later application.
 These effects do not change the Speed attribute. Utility use does not identify
 the wand. Status screens show these persistent effects as “until removed”.
 
+## Opt-in Nothing and Light wands
+
+The catalog also contains `rogue.wand_nothing` and `rogue.wand_light` for scenario
+selection. Neither is added to the existing eight-wand live floor pool or starting
+kits; ordinary Rogue floor stock is unchanged.
+
+Both use the normal paid Zap action. An unidentified wand still asks for a
+direction, so its hidden self-targeting behavior is not disclosed by the prompt.
+Once its type is known, the client can use it on yourself without that direction
+step. Remaining charges are not revealed merely by identifying the type.
+
+Nothing starts with 3–7 charges. A charged use spends one charge and ordinary
+action time, but applies no effect and does not identify the wand. Light starts
+with 10–19 charges and identifies on charged use, including when nothing changes.
+It illuminates the caster's actual room, including its canonical wall, ceiling,
+floor and door surfaces across region boundaries—not every cell of a storage
+region or every neighboring room. A passage or generated maze is a paid no-op;
+an already-lit room also spends the charge without further change. Loading remote
+surfaces does not give frozen creatures turns. Illumination persists in the save;
+it is not a map-reveal, creature-detection or targeting command.
+
 ## Flight and linked holds
 
 Bat and kestrel each own one animal racial HD, with 1d2 and 1d4 natural damage.
