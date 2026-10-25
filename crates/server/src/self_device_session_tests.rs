@@ -2244,6 +2244,93 @@ fn managed_drain_life_zero_share_alerts_remote_frozen_actor_without_waking_or_di
 
 // Only typed opaque identities are normalized; every field, row, event and
 // multiplicity remains in the compared ordinary observation.
+// Cell keys are opaque String fields, not a protocol FromStr token. Normalize
+// only the typed cell identity/reference fields; never arbitrary prose or hex.
+fn drain_normalize_cells(cells: &mut [CellView], keys: &mut BTreeMap<String, String>) {
+    fn key(value: &mut String, keys: &mut BTreeMap<String, String>) {
+        let next = format!("cell-{}", keys.len());
+        *value = keys.entry(value.clone()).or_insert(next).clone();
+    }
+    for cell in cells {
+        key(&mut cell.key, keys);
+        if let Some(door) = &mut cell.door {
+            for approach in &mut door.approaches {
+                key(approach, keys);
+            }
+        }
+    }
+}
+
+#[test]
+fn drain_cell_normalization_preserves_aliases_and_all_substantive_fields() {
+    fn cell(key: &str, x: i32) -> CellView {
+        serde_json::from_value(json!({"key":key,"position":{"x":x,"y":0,"z":0},
+            "lit":false,"door":null,"trap":null,"material":"unchanged narrative",
+            "stairs_up":false,"stairs_down":false,"wall":false,"place_hint":false}))
+        .unwrap()
+    }
+    let original = vec![cell("first-a", 0), cell("second-a", 1), cell("first-a", 2)];
+    let mut a = original.clone();
+    let mut b = vec![cell("first-b", 0), cell("second-b", 1), cell("first-b", 2)];
+    let mut keys = BTreeMap::new();
+    drain_normalize_cells(&mut a, &mut keys);
+    drain_normalize_cells(&mut b, &mut BTreeMap::new());
+    assert_eq!(a, b);
+    assert_eq!(a[0].key, a[2].key);
+    assert_ne!(a[0].key, a[1].key);
+    // A later delta must reuse the same identity map, not remint its first row.
+    let mut later = vec![cell("second-a", 1)];
+    drain_normalize_cells(&mut later, &mut keys);
+    assert_eq!(later[0].key, a[1].key);
+    // Door approach references share the same cell-key namespace. Narrative
+    // text that merely looks like a real key must never be normalized.
+    fn door_cells(first: &str, second: &str, approach: &str) -> Vec<CellView> {
+        let mut cells = vec![cell(first, 0), cell(second, 1)];
+        cells[0].door = Some(DoorView {
+            id: DoorTarget::from_digest([7; 32]),
+            name: "a".repeat(40),
+            description: "a".repeat(40),
+            open: true,
+            reachable: true,
+            approaches: vec![approach.into()],
+            asset: None,
+        });
+        cells[0].material = "a".repeat(40);
+        cells
+    }
+    let raw_a = "a".repeat(40);
+    let raw_b = "b".repeat(40);
+    let raw_c = "c".repeat(40);
+    let raw_d = "d".repeat(40);
+    let mut references = door_cells(&raw_a, &raw_b, &raw_b);
+    let mut renamed = door_cells(&raw_c, &raw_d, &raw_d);
+    let mut mismatched = door_cells(&raw_c, &raw_d, &raw_c);
+    drain_normalize_cells(&mut references, &mut BTreeMap::new());
+    drain_normalize_cells(&mut renamed, &mut BTreeMap::new());
+    drain_normalize_cells(&mut mismatched, &mut BTreeMap::new());
+    assert_eq!(references, renamed);
+    assert_ne!(references, mismatched, "broken door reference must survive");
+    let door = references[0].door.as_ref().unwrap();
+    assert_eq!(door.approaches, vec![references[1].key.clone()]);
+    assert_eq!(door.name, raw_a);
+    assert_eq!(door.description, raw_a);
+    assert_eq!(references[0].material, raw_a);
+    for change in 0..4 {
+        let mut bad = original.clone();
+        match change {
+            0 => bad[0].position.x += 1,
+            1 => bad[0].material = "different content".into(),
+            2 => {
+                bad.pop();
+            }
+            3 => bad[2].key = "not-the-first-alias".into(),
+            _ => unreachable!(),
+        }
+        drain_normalize_cells(&mut bad, &mut BTreeMap::new());
+        assert_ne!(a, bad, "substantive difference {change} must survive");
+    }
+}
+
 fn drain_normalize_tokens(value: &mut Value, tokens: &mut BTreeMap<String, String>) {
     match value {
         Value::String(text)
@@ -2326,7 +2413,19 @@ fn drain_normalized_updates(mut updates: Vec<StreamUpdate>) -> Value {
             .or_insert(next)
             .clone();
     };
+    let mut cell_keys = BTreeMap::new();
     for update in &mut updates {
+        match &mut update.body {
+            UpdateBody::Observation { state, .. } => drain_normalize_cells(
+                &mut std::sync::Arc::make_mut(state).observation.visible_cells,
+                &mut cell_keys,
+            ),
+            UpdateBody::ObservationDelta { state, .. } => {
+                drain_normalize_cells(&mut state.cells.changed, &mut cell_keys)
+            }
+            _ => unreachable!("only actual observation updates captured"),
+        }
+        // CellChanges.removed contains Positions, not opaque keys: unchanged.
         identity("stream", &mut update.context.stream.0);
         identity("branch", &mut update.branch.0);
         let event = match &mut update.body {
@@ -2508,7 +2607,11 @@ fn hidden_drain_observations(count: u64) -> (Value, Value, Value, Value) {
     assert!(!nothing_identified(&owner, wand));
     let followed = drain_follower_observation(&mut wire, &mut follower, Request::Snapshot);
     assert!(followed.visible_actors.is_empty());
-    let mut owner = serde_json::to_value(&owner.state.observation).unwrap();
+    let mut owner = owner.state.observation.clone();
+    let mut followed = followed;
+    drain_normalize_cells(&mut owner.visible_cells, &mut BTreeMap::new());
+    drain_normalize_cells(&mut followed.visible_cells, &mut BTreeMap::new());
+    let mut owner = serde_json::to_value(owner).unwrap();
     let mut followed = serde_json::to_value(followed).unwrap();
     drain_normalize_tokens(&mut owner, &mut BTreeMap::new());
     drain_normalize_tokens(&mut followed, &mut BTreeMap::new());

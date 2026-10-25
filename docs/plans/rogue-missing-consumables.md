@@ -588,6 +588,17 @@ TooWeak refusal snapshot. Production package validation and certificate checking
 also pass. These receipts do not yet qualify the final affected server,
 protocol/common corpus consumers or broader verification gates.
 
+The regenerated-artifact cohort passes all 280 protocol integration and 144
+common-client cases. The server passes 1,074 cases; its remaining paired privacy
+comparison differs only in independently minted opaque visible-cell keys. The
+test-only correction normalizes typed cell identity/reference fields with a
+bijection, retaining positions, content, cardinality and cross-update aliases.
+Independent negative controls preserve substantive differences and broken door
+references. It does not match arbitrary hexadecimal strings or alter production
+privacy. Actual owner/follower Update and delta comparisons remain required;
+this corrected comparison still awaits runtime. These are focused receipts,
+not quick, push, full, native or hosted qualification.
+
 ### Proposed next batch: physical first contact
 
 Cancellation and Magic Missile should reuse the existing paid ray planner and
