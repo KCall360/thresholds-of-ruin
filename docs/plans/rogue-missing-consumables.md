@@ -1337,7 +1337,8 @@ ordinary repurchase must respect both the ordinary-five limit and combined-seven
 limit, so refund/rebuy cannot produce eight. Historical source-composition and
 Intellect receipt obligations above remain required; no high-water ledger is added.
 
-Raise Level's blocked-funding choice is also settled: always credit only the
+The following earlier Raise decision is superseded by the later decision below:
+Raise Level's blocked-funding choice was to credit only the
 checked shortfall to the current ordinary next-level threshold, even if growth is
 currently blocked. The credited XP may remain banked until normal advancement is
 possible. If the current obligation is already funded, credit zero; do not skip it
@@ -1349,3 +1350,23 @@ blocked or already-funded outcomes. The next coherent batch combines these two
 settled effects with strict provenance, source-free history and actual caller
 controls. These are decisions and requirements, not implemented growth behavior.
 Hallucination's retained design follows this batch rather than replacing it.
+
+### Latest Raise decision: one additional funded level per dose
+
+This decision supersedes every earlier current-obligation-only, already-funded-zero
+and no-stacking requirement above. Each Raise potion funds one additional level
+beyond all levels already funded by current XP, including while growth is blocked
+or pending. An already-funded but unapplied level is not a reason to credit zero:
+the next potion funds the level beyond it. Repeated doses advance that funded
+frontier one level each without requiring an intervening actual HD application.
+
+Use the existing ordinary threshold curve with checked full-width arithmetic and
+credit the shortfall to that next not-yet-funded threshold. Preserve existing XP
+and the ordinary drained-regrowth interpretation. Funding must not directly append
+HD, bypass source choices, remove obstructions or relax normal growth admission;
+actual progression may remain pending while XP banks. Ordinary paid consumption
+and OnUse identification remain unchanged. Source-valid tests must independently
+prove the funded frontier, chosen next threshold, exact credit and unchanged
+blocked progression/choices, including repeated doses and wide values. Strength's
+ordinary-five/combined-seven policy is unchanged. No growth implementation or
+runtime qualification is claimed by this policy correction.

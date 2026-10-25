@@ -115,8 +115,9 @@ tests. Final/native/release gates remain pending; live weighted pools and kits
 remain unchanged.
 The next accepted growth batch is still unimplemented: Strength preserves the
 ordinary-five cap and limits ordinary plus acquired permanent magic to seven,
-with innate modifiers afterward; Raise funds only the current ordinary XP
-shortfall even when blocked, banking without skipping an already-funded tier.
+with innate modifiers afterward; each Raise dose funds one additional level
+beyond all levels already funded by XP, even while actual growth is blocked,
+without bypassing ordinary advancement admission.
 Their provenance, refund/history and actual-caller qualification remain next work.
 Existing live item distributions remain unchanged and polymorph remains separate.
 
