@@ -1018,3 +1018,32 @@ The existing seams are `growth_pending`,
 new authority selects the unresolved policy. Blocked-dose payment and discovery
 also require an explicit decision where no approved contract already exists.
 Pinned Rogue has no corresponding TOR gate model; no implementation is selected.
+The corrected full simulation library passes all 1,868 tests. The next full
+server run passes 1,093 tests and fails one remaining assertion in the source
+negative fixture; all remote illumination, true cold-frontier, frozen-actor,
+clock/fuel and current-state map-work controls pass. The last assertion used
+private metadata-only `Package::check` to reject an authored quantity. The actual
+public source check builds the scenario and already rejects quantity two through
+the ordinary item compiler; ground, carried, loadout and population paths reuse
+that quantity guard. Per-instance class/stackable overrides also reach ordinary
+runtime item validity. No additional production admission policy is required.
+
+The fixture correction retains the original invalid payload, proves valid
+quantity-one ground and carried placements through actual builds, rejects their
+quantity-two contrasts at the same boundary, and checks the original invalid
+source with the public full validator in a separate temporary directory. This
+last corrected assertion awaits its fresh server run. The 1,093/one result is not
+a clean full-server pass. Other client/protocol collections and refreshed
+application artifacts remain separately reported; final verification/native/
+release/hosted gates are not implied by the clean core result.
+
+The same-source affected collection additionally passes protocol library 35,
+common library 145, Text library 76, protocol integration 283, ASCII integration
+150 and World integration 82 tests. The first ASCII library selection executed
+zero tests and is not qualification; its actual integration owner was then run.
+Text integration records 189 passes and one stale missing-lamp expectation:
+`light` now uses the carried-item domain and correctly refuses an absent lamp as
+not carried, rather than not visible. Its one-line fixture correction preserves
+the refusal and all independent real torch verb/state controls. This corrected
+Text case and the final server quantity-stage fixture still await reruns; no
+additional gameplay or validation policy is introduced by these two corrections.

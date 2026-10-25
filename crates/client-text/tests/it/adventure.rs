@@ -851,7 +851,7 @@ fn carried_things_drop_and_unusable_actions_are_refused() {
             "throw ring at goblin",
             "You'd rather keep hold of it; use attack to fight.",
         ),
-        ("light the lamp", "You can't see any lamp here."),
+        ("light the lamp", "You aren't carrying any lamp."),
         (
             "pray",
             "You murmur a prayer. If anything hears it, it gives no sign.",

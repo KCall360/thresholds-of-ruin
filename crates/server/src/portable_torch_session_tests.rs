@@ -414,15 +414,38 @@ fn portable_torch_source_requires_single_tool_and_real_hand_equipment() {
         .is_err(),
         "identity mismatched capability presence"
     );
-    let mut regions = source.region_defs().unwrap();
-    let mut region = serde_json::to_value(&regions[0]).unwrap();
-    region["items"][0]["quantity"] = json!(2);
-    regions[0] = serde_json::from_value(region).unwrap();
-    assert!(
-        Package::from_parts(source.manifest.clone(), regions, &rules)
-            .and_then(|package| package.check())
-            .is_err()
-    );
+    // Quantity is checked by the ordinary item compiler, not the metadata-only
+    // Package::check. Exercise that same full boundary for carried and ground
+    // placement, establishing each valid single-item baseline first.
+    for carried_by in [Some(OWNER.0), None] {
+        let mut regions = source.region_defs().unwrap();
+        let mut region = serde_json::to_value(&regions[0]).unwrap();
+        region["items"][0]["carried_by"] = json!(carried_by);
+        region["items"][0]["quantity"] = json!(1);
+        regions[0] = serde_json::from_value(region.clone()).unwrap();
+        Package::from_parts(source.manifest.clone(), regions.clone(), &rules)
+            .unwrap()
+            .build(42, false)
+            .unwrap();
+        region["items"][0]["quantity"] = json!(2);
+        regions[0] = serde_json::from_value(region).unwrap();
+        let invalid = Package::from_parts(source.manifest.clone(), regions, &rules).unwrap();
+        assert!(invalid.build(42, false).is_err());
+        if carried_by.is_some() {
+            // Keep the original invalid carried payload and prove the supported
+            // public source checker rejects it too; torch_source already passed
+            // this checker with the otherwise identical unit-quantity source.
+            let invalid_source = tempfile::tempdir().unwrap();
+            crate::scenario_package::write_package(
+                invalid_source.path(),
+                &invalid.manifest,
+                &invalid.region_defs().unwrap(),
+                &rules,
+            )
+            .unwrap();
+            assert!(crate::scenario_package::check(invalid_source.path()).is_err());
+        }
+    }
 }
 
 fn blind_portal_torch_source(root: &Path, cold_frontier: bool) -> crate::Scenario {
