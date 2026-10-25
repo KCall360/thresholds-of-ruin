@@ -1315,3 +1315,37 @@ poison cure remains outside approval. Required actual observer, source-deleted
 save, cure, memory and ordinary client witnesses belong to one later coherent
 batch. No hallucination code, new clock schema or runtime qualification is claimed
 by this inventory; Strength/Raise decisions remain separately pending.
+
+The final Haste affected consumers now pass: protocol library 36, protocol
+integration 283 and client-common library 146, with checked inputs unchanged.
+These close the pending regenerated-wire/diagnostic consumer checks. The earlier
+core 1,879, focused server seven, full server 1,099 plus two exact-binary reruns,
+and genuine applications/process/artifact receipts remain separately identified.
+Final native, release, performance and verification gates are still pending.
+
+### Settled next batch: permanent Strength and ordinary Raise funding
+
+The Strength cap decision now supersedes the earlier unresolved alternatives.
+Ordinary base allocation plus ordinary attribute choices remains capped at five.
+Ordinary Strength plus acquired permanent magic is capped at seven in total,
+not seven additional potion points. Innate/template and other separately derived
+modifiers apply afterward; rings and temporary conditions do not create potion
+capacity. Deficit restoration still consumes its own exclusive restore-one
+branch. Otherwise a capped dose is a paid no-op with no latent entitlement.
+Acquired points survive ordinary refunds/respec and are not themselves refundable;
+ordinary repurchase must respect both the ordinary-five limit and combined-seven
+limit, so refund/rebuy cannot produce eight. Historical source-composition and
+Intellect receipt obligations above remain required; no high-water ledger is added.
+
+Raise Level's blocked-funding choice is also settled: always credit only the
+checked shortfall to the current ordinary next-level threshold, even if growth is
+currently blocked. The credited XP may remain banked until normal advancement is
+possible. If the current obligation is already funded, credit zero; do not skip it
+or stack funding for a later tier. Existing held/earned/spent XP, ordinary threshold
+selection, source choices and drained-HD regrowth remain authoritative. No direct
+HD append, lower-balance overwrite or truncation through a u32 credit is allowed.
+Ordinary dose consumption and OnUse identification remain the baseline, including
+blocked or already-funded outcomes. The next coherent batch combines these two
+settled effects with strict provenance, source-free history and actual caller
+controls. These are decisions and requirements, not implemented growth behavior.
+Hallucination's retained design follows this batch rather than replacing it.

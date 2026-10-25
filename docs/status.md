@@ -110,8 +110,14 @@ stale-certificate failures is closed by both exact-binary reruns after genuine
 certificate refresh, not reported as a new full run. Actual ordinary Adventure
 use/source-deleted reopening and a separate granted-ability diagnostic process
 pass. Genuine recording now has 52 generated client examples and 57 captured
-server frames. Updated protocol/common consumers and final/native/release gates
-remain pending; live weighted pools and kits remain unchanged.
+server frames. The updated protocol library/integration and common library pass 36/283/146
+tests. Final/native/release gates remain pending; live weighted pools and kits
+remain unchanged.
+The next accepted growth batch is still unimplemented: Strength preserves the
+ordinary-five cap and limits ordinary plus acquired permanent magic to seven,
+with innate modifiers afterward; Raise funds only the current ordinary XP
+shortfall even when blocked, banking without skipping an already-funded tier.
+Their provenance, refund/history and actual-caller qualification remain next work.
 Existing live item distributions remain unchanged and polymorph remains separate.
 
 Characters retain last-seen terrain, doors, stairs and item appearances in the
