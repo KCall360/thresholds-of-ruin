@@ -55,9 +55,13 @@ def assert_sample(test, observation, phase):
                 1: ("bat", "creature.bat", "torch", None, "tool")}[phase]
     name, asset, object_name, object_asset, cosmetic_class = expected
     peers = [row for row in observation["visible_actors"] if row["id"] != observation["self_target"]]
-    test.assertEqual(len(peers), 1)
-    test.assertEqual((peers[0]["name"], peers[0].get("asset"), peers[0]["description"]),
-                     (name, asset, ""))
+    # One creature may have several genuinely disclosed body-cell occurrences.
+    # Keep and check every row; occurrence count is not an actor population count.
+    test.assertEqual(len({row["id"] for row in peers}), 1)
+    for peer in peers:
+        test.assertEqual((peer["name"], peer.get("asset"), peer["description"]),
+                         (name, asset, ""))
+        test.assertEqual(peer["appearance_seed"], "p_" + "00" * 32)
     test.assertEqual(len(observation["ground_items"]), 1)
     ground = observation["ground_items"][0]
     test.assertEqual(ground["presentation"], {"name": object_name, "asset": object_asset,

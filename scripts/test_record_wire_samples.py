@@ -943,5 +943,185 @@ class GrowthRecordingContracts(unittest.TestCase):
                 self.assertEqual(samples, {"existing": {"type": "palette"}})
 
 
+class HallucinationRecordingContracts(unittest.TestCase):
+    def case(self, failure=None, mutation=None):
+        case, trace = recording_case(failure)
+        # Pure validator/lifecycle inputs only: never presented as wire corpus
+        # recordings. Genuine corpus values come from the real process factory.
+        condition = {"condition": {"id": "rogue.hallucinating", "name": "Hallucinating"},
+                     "remaining_ticks": "80800"}
+        view = {"self_target": "a_self", "tick": "100",
+            "combat": {"own_stats": {"conditions": [condition]}},
+            "visible_actors": [{"id": "a_peer", "name": "emu", "asset": "creature.bird.emu", "description": "",
+                                "appearance_seed": "p_" + "00" * 32}],
+            "ground_items": [{"presentation": {"name": "arrow", "asset": "item.weapon",
+                "kind": {"kind": "item", "class": "weapon"}}, "item": {
+                    "class": "coin", "quantity": "7", "known_currency": "gold", "name": "object", "appearance": "object", "description": ""}}],
+            "visible_cells": [{"stairs_up": False, "stairs_down": False}]}
+        raw = {"type": "snapshot", "request_id": "exact-hallucination-request",
+               "snapshot": {"state": {"observation": view}, "context": {"stream": "unchanged-stream", "epoch": "1"}}}
+        source = {stage: copy.deepcopy(raw) for stage in ("visual", "extended", "cured")}
+        extended = source["extended"]["snapshot"]["state"]["observation"]
+        extended["tick"] = "200"
+        extended["combat"]["own_stats"]["conditions"][0]["remaining_ticks"] = "161500"
+        extended["visible_actors"][0].update(name="bat", asset="creature.bat")
+        extended["ground_items"][0]["presentation"] = {"name": "torch", "asset": None,
+            "kind": {"kind": "item", "class": "tool"}}
+        cured = source["cured"]["snapshot"]["state"]["observation"]
+        cured["tick"] = "300"
+        cured["visible_actors"][0].update(name="actual visible peer", asset=None)
+        cured["combat"]["own_stats"]["conditions"] = []
+        cured["ground_items"][0]["presentation"] = None
+        cured["ground_items"][0]["item"]["name"] = "gold coin"
+        if mutation is not None:
+            mutation(source)
+        original = type(case).runTest
+        def record(subject):
+            subject.hallucination_samples = copy.deepcopy(source)
+            original(subject)
+        type(case).runTest = record
+        return case, trace, source
+
+    def test_factory_selects_actual_non_graphical_text_cadence_source_free_case(self):
+        case = record_wire_samples.hallucination_recording_case()
+        self.assertEqual(case.id(), "test_magic_items_process.MagicItemProcesses."
+                         "test_imported_hallucination_text_visual_cadence_and_source_free_reopen")
+        self.assertFalse(is_graphical_test(case))
+
+    def test_three_raw_snapshots_publish_only_after_all_lifecycle_hooks(self):
+        case, trace, source = self.case()
+        samples = {"existing": {"type": "palette"}}
+        with patch("record_wire_samples.hallucination_recording_case", return_value=case):
+            record_wire_samples.Recorder().record_hallucination(samples)
+        self.assertEqual(samples, {"existing": {"type": "palette"},
+            **{"zz.hallucination_" + stage: sample for stage, sample in source.items()}})
+        self.assertEqual(trace, ["class_setup", "setup", "body", "teardown", "cleanup",
+                                 "class_teardown", "class_cleanup"])
+        for stage in source:
+            self.assertIsNot(samples["zz.hallucination_" + stage], case.hallucination_samples[stage])
+            self.assertEqual(samples["zz.hallucination_" + stage]["request_id"], "exact-hallucination-request")
+
+    @staticmethod
+    def multicell_occurrences(source):
+        for sample in source.values():
+            rows = sample["snapshot"]["state"]["observation"]["visible_actors"]
+            rows[0]["position"] = {"x": 2, "y": 0, "z": 0}
+            upper = copy.deepcopy(rows[0])
+            upper["position"]["z"] = 1
+            rows.append(upper)
+
+    def test_two_lawful_body_occurrences_preserve_every_raw_row(self):
+        case, trace, source = self.case(mutation=self.multicell_occurrences)
+        samples = {}
+        with patch("record_wire_samples.hallucination_recording_case", return_value=case):
+            record_wire_samples.Recorder().record_hallucination(samples)
+        self.assertEqual(trace[-1], "class_cleanup")
+        self.assertEqual(samples, {"zz.hallucination_" + stage: sample for stage, sample in source.items()})
+        for sample in samples.values():
+            rows = sample["snapshot"]["state"]["observation"]["visible_actors"]
+            self.assertEqual(len(rows), 2)
+            self.assertEqual([row["position"]["z"] for row in rows], [0, 1])
+
+    def test_second_peer_or_contradictory_same_target_occurrence_rejects_atomically(self):
+        for stage in ("visual", "extended", "cured"):
+            for field, value in (("id", "a_second_peer"), ("name", "contradictory name"),
+                                 ("asset", "creature.wrong"), ("description", "true hidden description")):
+                with self.subTest(stage=stage, field=field):
+                    def mutate(source):
+                        self.multicell_occurrences(source)
+                        source[stage]["snapshot"]["state"]["observation"]["visible_actors"][1][field] = value
+                    case, _, _ = self.case(mutation=mutate)
+                    samples = {"existing": {"type": "palette"}}
+                    with patch("record_wire_samples.hallucination_recording_case", return_value=case):
+                        with self.assertRaises(AssertionError):
+                            record_wire_samples.Recorder().record_hallucination(samples)
+                    self.assertEqual(samples, {"existing": {"type": "palette"}})
+        for stage in ("visual", "extended"):
+            with self.subTest(stage=stage, field="appearance_seed"):
+                def mutate(source):
+                    self.multicell_occurrences(source)
+                    source[stage]["snapshot"]["state"]["observation"]["visible_actors"][1]["appearance_seed"] = "p_" + "01" * 32
+                case, _, _ = self.case(mutation=mutate)
+                samples = {"existing": {"type": "palette"}}
+                with patch("record_wire_samples.hallucination_recording_case", return_value=case):
+                    with self.assertRaises(AssertionError):
+                        record_wire_samples.Recorder().record_hallucination(samples)
+                self.assertEqual(samples, {"existing": {"type": "palette"}})
+
+    def test_shared_process_sample_helper_preserves_and_checks_every_body_occurrence(self):
+        from hallucination_package import assert_sample
+        _, _, source = self.case(mutation=self.multicell_occurrences)
+        for stage, phase in (("visual", 0), ("extended", 1)):
+            view = source[stage]["snapshot"]["state"]["observation"]
+            before = copy.deepcopy(view)
+            assert_sample(self, view, phase)
+            self.assertEqual(view, before, "shared helper must never deduplicate or normalize raw rows")
+            for field, value in (("id", "a_second_peer"), ("name", "contradictory name"),
+                                 ("asset", "creature.wrong"), ("description", "true hidden description"),
+                                 ("appearance_seed", "p_" + "01" * 32)):
+                with self.subTest(stage=stage, field=field):
+                    bad = copy.deepcopy(view)
+                    bad["visible_actors"][1][field] = value
+                    with self.assertRaises(AssertionError):
+                        assert_sample(self, bad, phase)
+
+    def test_both_inclusive_duration_endpoints_accept_only_exact_base_turn_extension(self):
+        for extension in (80800, 89200):
+            with self.subTest(extension=extension):
+                def mutate(source):
+                    visual = source["visual"]["snapshot"]["state"]["observation"]
+                    extended = source["extended"]["snapshot"]["state"]["observation"]
+                    first_remaining = int(visual["combat"]["own_stats"]["conditions"][0]["remaining_ticks"])
+                    remaining = first_remaining + extension + int(visual["tick"]) - int(extended["tick"])
+                    extended["combat"]["own_stats"]["conditions"][0]["remaining_ticks"] = str(remaining)
+                case, _, source = self.case(mutation=mutate)
+                samples = {}
+                with patch("record_wire_samples.hallucination_recording_case", return_value=case):
+                    record_wire_samples.Recorder().record_hallucination(samples)
+                self.assertEqual(samples, {"zz.hallucination_" + stage: sample for stage, sample in source.items()})
+
+    def test_any_lifecycle_failure_prevents_all_three_samples(self):
+        for failure in ("class_setup", "setup", "body", "teardown", "cleanup", "class_teardown", "class_cleanup"):
+            with self.subTest(failure=failure):
+                case, _, _ = self.case(failure)
+                samples = {"existing": {"type": "palette"}}
+                with patch("record_wire_samples.hallucination_recording_case", return_value=case):
+                    with self.assertRaises(AssertionError):
+                        record_wire_samples.Recorder().record_hallucination(samples)
+                self.assertEqual(samples, {"existing": {"type": "palette"}})
+
+    def test_invalid_visual_extension_cure_authority_or_private_clock_never_partially_publishes(self):
+        def view(samples, stage):
+            return samples[stage]["snapshot"]["state"]["observation"]
+        mutations = {
+            "wrong_visual_name": lambda s: view(s, "visual")["visible_actors"][0].update(name="actual peer"),
+            "true_sibling_leak": lambda s: view(s, "visual")["ground_items"][0]["item"].update(asset="item.coin"),
+            "fake_mechanical_class": lambda s: view(s, "visual")["ground_items"][0]["item"].update(**{"class": "weapon"}),
+            "wrong_sample": lambda s: view(s, "visual")["ground_items"][0]["presentation"].update(name="torch"),
+            "wrong_extended_peer": lambda s: view(s, "extended")["visible_actors"][0].update(name="emu"),
+            "wrong_extended_object": lambda s: view(s, "extended")["ground_items"][0]["presentation"].update(name="arrow"),
+            "extended_true_sibling_leak": lambda s: view(s, "extended")["ground_items"][0]["item"].update(asset="item.coin"),
+            "too_small_extension": lambda s: view(s, "extended")["combat"]["own_stats"]["conditions"][0].update(remaining_ticks="161400"),
+            "too_large_extension": lambda s: view(s, "extended")["combat"]["own_stats"]["conditions"][0].update(remaining_ticks="170000"),
+            "fractional_turn_extension": lambda s: view(s, "extended")["combat"]["own_stats"]["conditions"][0].update(remaining_ticks="161501"),
+            "extension_tick_ignored": lambda s: view(s, "extended").update(tick="201"),
+            "stale_cured_peer": lambda s: view(s, "cured")["visible_actors"][0].update(name="bat", asset="creature.bat"),
+            "zero_extension": lambda s: view(s, "extended")["combat"]["own_stats"]["conditions"][0].update(remaining_ticks="0"),
+            "missing_extension": lambda s: view(s, "extended")["combat"]["own_stats"].update(conditions=[]),
+            "uncured_marker": lambda s: view(s, "cured")["combat"]["own_stats"].update(conditions=copy.deepcopy(view(s, "visual")["combat"]["own_stats"]["conditions"])),
+            "stale_cured_art": lambda s: view(s, "cured")["ground_items"][0].update(presentation=copy.deepcopy(view(s, "visual")["ground_items"][0]["presentation"])),
+            "private_clock": lambda s: view(s, "visual").update(remaining_to_shift="100"),
+            "not_raw_snapshot": lambda s: s["visual"].update(type="state"),
+        }
+        for label, mutation in mutations.items():
+            with self.subTest(label=label):
+                case, _, _ = self.case(mutation=mutation)
+                samples = {"existing": {"type": "palette"}}
+                with patch("record_wire_samples.hallucination_recording_case", return_value=case):
+                    with self.assertRaises(AssertionError):
+                        record_wire_samples.Recorder().record_hallucination(samples)
+                self.assertEqual(samples, {"existing": {"type": "palette"}})
+
+
 if __name__ == "__main__":
     unittest.main()

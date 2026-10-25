@@ -436,6 +436,7 @@ fn map_records_reject_positional_missing_duplicate_and_unknown_fields_recursivel
                 "place_hint",
                 "stairs_up",
                 "stairs_down",
+                "object_presentation",
                 "trap",
                 "door",
                 "ground_items",
@@ -451,6 +452,7 @@ fn map_records_reject_positional_missing_duplicate_and_unknown_fields_recursivel
             "/page/cells/0/ground_items/0",
             vec![
                 "class",
+                "presentation",
                 "description",
                 "name",
                 "appearance",

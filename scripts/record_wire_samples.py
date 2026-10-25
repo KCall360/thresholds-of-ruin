@@ -83,6 +83,12 @@ def first_contact_recording_case():
     return MagicItemProcesses("test_imported_cancellation_privileged_capture_records_actual_reach_and_effect")
 
 
+def hallucination_recording_case():
+    """Reuse the genuine Text/cadence/source-free case and its raw snapshots."""
+    from test_magic_items_process import MagicItemProcesses
+    return MagicItemProcesses("test_imported_hallucination_text_visual_cadence_and_source_free_reopen")
+
+
 def growth_recording_case():
     """Actual granted self-ability diagnostics; production Drinks are separate."""
     from test_magic_items_process import MagicItemProcesses
@@ -297,6 +303,71 @@ class Recorder(ProcessTestCase):
                             for effect in record["outcome"]["effects"]))
         # Publish both only after cleanup and both source-positive validations.
         server_samples.update({"zz.first_contact_" + key: value for key, value in samples.items()})
+
+    def record_hallucination(self, server_samples):
+        samples = run_recording_case(hallucination_recording_case(), "hallucination_samples")
+        self.assertEqual(set(samples), {"visual", "extended", "cured"})
+        observations = {}
+        deadlines = {}
+        for stage, sample in samples.items():
+            # Require the actual protocol envelope, not a normalized client
+            # frame or a fabricated partial appearance document.
+            self.assertEqual(sample["type"], "snapshot")
+            self.assertIsInstance(sample["request_id"], str)
+            self.assertTrue(sample["request_id"])
+            observation = sample["snapshot"]["state"]["observation"]
+            observations[stage] = observation
+            encoded = json.dumps(sample)
+            for private in ("remaining_to_shift", "presentation_catalog", "palette_index",
+                            "hallucination_phase", "hallucination"):
+                self.assertNotIn('"' + private + '"', encoded)
+            marked = [row for row in observation["combat"]["own_stats"]["conditions"]
+                      if row["condition"]["id"] == "rogue.hallucinating"]
+            if stage == "cured":
+                self.assertEqual(marked, [])
+            else:
+                self.assertEqual(len(marked), 1)
+                condition = marked[0]
+                self.assertIsInstance(condition["remaining_ticks"], str)
+                self.assertGreater(int(condition["remaining_ticks"]), 0)
+                self.assertIsInstance(observation["tick"], str)
+                deadlines[stage] = int(observation["tick"]) + int(condition["remaining_ticks"])
+            ground, = observation["ground_items"]
+            self.assertEqual(ground["item"]["class"], "coin")
+            self.assertEqual(ground["item"]["quantity"], "7")
+            if stage == "cured":
+                self.assertIsNone(ground["presentation"])
+                self.assertEqual(ground["item"]["name"], "gold coin")
+        self.assertEqual(observations["visual"]["tick"], "100")
+        self.assertEqual(observations["extended"]["tick"], "200")
+        self.assertIn(deadlines["extended"] - deadlines["visual"], range(80800, 89201, 100))
+        for stage, name, asset, object_name, object_asset, cosmetic_class in (
+                ("visual", "emu", "creature.bird.emu", "arrow", "item.weapon", "weapon"),
+                ("extended", "bat", "creature.bat", "torch", None, "tool")):
+            observation = observations[stage]
+            peers = [row for row in observation["visible_actors"] if row["id"] != observation["self_target"]]
+            # Body cells are separate lawful occurrences of one target. Keep
+            # every raw row while requiring one identity and exact cosmetics.
+            self.assertEqual(len({row["id"] for row in peers}), 1)
+            for peer in peers:
+                self.assertEqual((peer["name"], peer.get("asset"), peer["description"]), (name, asset, ""))
+                self.assertEqual(peer["appearance_seed"], "p_" + "00" * 32)
+            ground, = observation["ground_items"]
+            self.assertEqual(ground["presentation"], {"name": object_name, "asset": object_asset,
+                "kind": {"kind": "item", "class": cosmetic_class}})
+            self.assertEqual((ground["item"]["name"], ground["item"]["appearance"],
+                              ground["item"]["description"]), ("object", "object", ""))
+            self.assertIsNone(ground["item"].get("asset"))
+            self.assertIsNone(ground["item"].get("corpse"))
+        cured = observations["cured"]
+        peers = [row for row in cured["visible_actors"] if row["id"] != cured["self_target"]]
+        self.assertEqual(len({row["id"] for row in peers}), 1)
+        for peer in peers:
+            self.assertEqual((peer["name"], peer.get("asset"), peer["description"]),
+                             ("actual visible peer", None, ""))
+        # Every source-positive frame and cleanup must succeed before publishing
+        # any member. Preserve raw messages byte-semantically, never synthesize.
+        server_samples.update({"zz.hallucination_" + stage: sample for stage, sample in samples.items()})
 
     def record_growth(self, server_samples):
         samples = run_recording_case(growth_recording_case(), "growth_samples")
@@ -761,6 +832,7 @@ class Recorder(ProcessTestCase):
         self.record_torch(server_samples)
         self.record_haste(server_samples)
         self.record_growth(server_samples)
+        self.record_hallucination(server_samples)
         self.record_personal_conditions(server_samples)
         self.record_persistent_conditions(server_samples)
         self.record_amulet_escape(server_samples)

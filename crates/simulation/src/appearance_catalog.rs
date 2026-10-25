@@ -124,6 +124,11 @@ pub struct CreatureAppearance {
     pub name: Arc<str>,
     pub asset: Option<Arc<str>>,
 }
+impl CreatureAppearance {
+    pub(crate) fn valid(&self) -> bool {
+        name_valid(&self.name) && self.asset.as_deref().is_none_or(asset_valid)
+    }
+}
 /// Already selected private cosmetic result. Seed is the constant neutral
 /// cosmetic seed, never a palette ordinal, true subject seed, actor ID or the
 /// reversible full selector hash.
@@ -152,13 +157,7 @@ impl PresentationCatalog {
         mut creatures: Vec<CreatureAppearance>,
         mut objects: Vec<ObjectPresentation>,
     ) -> Result<Arc<Self>, BuildError> {
-        if creatures.iter().any(|row| {
-            !name_valid(&row.name)
-                || row
-                    .asset
-                    .as_deref()
-                    .is_some_and(|asset| !asset_valid(asset))
-        }) || objects.iter().any(|row| {
+        if creatures.iter().any(|row| !row.valid()) || objects.iter().any(|row| {
             !name_valid(&row.name)
                 || row
                     .asset

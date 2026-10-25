@@ -13,7 +13,7 @@ fn source(root: &Path) -> crate::Scenario {
     assert_eq!(
         manifest["archetypes"]["rogue.hallucination"]["consumable"],
         json!({
-            "discovery":"on_use", "effects":[{"kind":"apply_condition_for_turns",
+            "discovery":"on_use", "descriptors":[], "effects":[{"kind":"apply_condition_for_turns",
                 "condition":CONDITION, "duration":{"kind":"rolled",
                     "dice":{"count":1,"sides":85,"bonus":807}}}]
         })
@@ -505,13 +505,6 @@ fn pending_paid_dose_and_active_palette_reopen_interval_one_without_sources_befo
     let mut wire =
         Wire::new(Engine::open_with_policy(&path, source(&root), policy.clone()).unwrap());
     let potion = item(&mut wire, 30);
-    let catalog = wire
-        .service
-        .engine
-        .game
-        .content()
-        .presentation_catalog()
-        .clone();
     let before = wire.checkpoint();
     let request = wire.request(OWNER, Action::Drink { item: potion });
     let admitted = ack(wire.send(OWNER, "pending-hallucination", request.clone()));
@@ -534,6 +527,7 @@ fn pending_paid_dose_and_active_palette_reopen_interval_one_without_sources_befo
     assert_eq!(nothing_actor(&pending, OWNER)["pending"]["remaining"], 100);
     assert_eq!(pending["game"]["rules_rng"], before["game"]["rules_rng"]);
     assert_eq!(nothing_items(&pending)["30"]["quantity"], 6);
+    let pending_view = wire.service.engine.state(OWNER).unwrap();
     wire.service
         .engine
         .test_restore_checkpoint(&serde_json::to_vec(&pending).unwrap())
@@ -550,7 +544,7 @@ fn pending_paid_dose_and_active_palette_reopen_interval_one_without_sources_befo
         pending,
         "exact reconstruction before Service reconnect pause"
     );
-    assert_eq!(engine.game.content().presentation_catalog(), &catalog);
+    assert_eq!(engine.state(OWNER).unwrap(), pending_view);
     let mut wire = Wire::new(engine);
     wire.serial = serial;
     let paused = wire.checkpoint();
@@ -584,12 +578,13 @@ fn pending_paid_dose_and_active_palette_reopen_interval_one_without_sources_befo
         completed
     );
     assert_eq!(wire.checkpoint(), active);
+    let active_view = wire.service.engine.state(OWNER).unwrap();
     wire.service.engine.flush().unwrap();
     assert_real_stored_checkpoint(&path, false);
     drop(wire);
     let engine = Engine::open_with_policy(&path, crate::Scenario::two_room(123), policy).unwrap();
     assert_eq!(checkpoint(&engine), active);
-    assert_eq!(engine.game.content().presentation_catalog(), &catalog);
+    assert_eq!(engine.state(OWNER).unwrap(), active_view);
     assert_sample(&engine.state(OWNER).unwrap().observation, 0);
 }
 

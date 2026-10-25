@@ -421,6 +421,9 @@ impl ItemSpec {
     }
 }
 
+/// Owner and post-drop equipment placement validated before the transfer.
+type HeldLightDropPlacement = (ActorId, BTreeMap<crate::EquipmentSlotId, ItemId>);
+
 impl Game {
     fn item_is_equipped(&self, id: ItemId) -> bool {
         self.items.get(&id).is_some_and(|item| match item.location {
@@ -437,7 +440,7 @@ impl Game {
         &self,
         source: ItemId,
         destination: ItemLocation,
-    ) -> Result<Option<(ActorId, BTreeMap<crate::EquipmentSlotId, ItemId>)>, GameError> {
+    ) -> Result<Option<HeldLightDropPlacement>, GameError> {
         if !self.item_is_equipped(source) {
             return Ok(None);
         }

@@ -972,6 +972,7 @@ impl Game {
                     .next_in(actor)
                     .into_iter()
                     .chain(actor.periodic_relocations.next_in(actor.alive()))
+                    .chain(crate::hallucination_clock::next_in(actor))
                     .chain(actor.awareness.next_in(actor))
                     .min()
                     .and_then(|interval| actor.active_since.checked_add(interval))

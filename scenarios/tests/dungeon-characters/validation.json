@@ -1,7 +1,7 @@
 {
   "validator": "tor-scenario-43",
   "ruleset": "interactions-v52",
-  "ruleset_hash": "c98c6e0acc950e3b4d781a0f160af07daf406ccfbd561544cbf317c875f8a5dd",
+  "ruleset_hash": "0b5d3fa31310f7e5e05525385c9d56a39298a4651414ffaa9a1744e0afa37bde",
   "ruleset_dependencies": {
     "interactions-v52": "07ff86819e6516d4f97ba1cb85e18bd3452ff649effe4c0ce8da77e042702bb0"
   },
@@ -12,6 +12,6 @@
     "scenario.toml": "c77bd52c39581c5a6352b67eb0fa6ac2f4848946580f9219761c6ea3a234be44"
   },
   "regions": 1,
-  "model_hash": "8e3b96c787a386b2a73ac4809da01751f20aa4ee76a3e63083acd874bed35c0b",
+  "model_hash": "5f42a11a036ffda1cdc1f4894af7e035cd567919577d3398d434f01e599335ea",
   "coverage": "all authored regions and character starts; descriptor structural bounds; deterministic sampled groups at seeds 0, 1, 42 under explicit work budget; no all-seed or winnability proof"
 }

@@ -460,7 +460,7 @@ one row's headroom, and each stays bounded by that row's original die maximum.
 If fewer credits remain, only that eligible prefix is applied. Exact fill or no
 eligible headroom never invents an unbounded maximum-Health bonus. This preserves
 the pinned source's one/two threshold while adapting permanent gains to TOR's
-owned-HD ledger. The source's hallucination cure remains unsupported.
+owned-HD ledger. It also removes exactly `rogue.hallucinating`, including while blind.
 
 Improvement credit survives level drain only for that exact owned HD. Restoring
 the same source/ordinal/seed restores its original credit; choosing a different
@@ -486,10 +486,16 @@ reveal leaves the potion unidentified. Sight still needs the shared illuminated,
 unobstructed eye witness; this does not grant monster detection or pierce a guise.
 These bindings follow the pinned [potion cases](https://github.com/phs/rogue/blob/c7c119f893bd2f8255f2ad78d58a32664ddb9a97/potions.c)
 and the actual [spread expression](https://github.com/phs/rogue/blob/c7c119f893bd2f8255f2ad78d58a32664ddb9a97/misc.c).
-Sustain-strength uses the shared worn attribute-loss protection above. Poison's
-hallucination cure and full source presentation remain unsupported; no bespoke
-resolver substitutes for those remaining gaps. The seven concealed potion identities have
-seven distinct appearances. The existing finite magic-potion stage chooses equally
+Sustain-strength uses the shared worn attribute-loss protection above. Poison does
+not cure Hallucination in this accepted adaptation. The opt-in Hallucination potion
+identifies on use, including blind and repeated use, and applies `1d85 + 807` base
+turns of one pure actor-active condition. Its saved presentation phase shifts once
+per captured base turn; extending the same generation preserves that cadence.
+Extra Healing cures it; ordinary healing and see-invisible do not. Cosmetic names,
+assets and glyph categories never replace actual action targets or physical item
+classes. Only genuine visual disclosure is changed; ordinary Awareness remains
+factual. Acquired map/public-plan appearances remain historical after cure.
+All concealed potion identities have distinct catalog appearances. The existing finite magic-potion stage chooses equally
 among healing, confusion, blindness, poison, see-invisible and extra healing for one unit;
 restore-strength retains its separate stage. These are provisional TOR availability
 weights, not the source distribution. Stage IDs, order and attempt bounds are unchanged.

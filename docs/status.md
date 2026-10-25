@@ -41,7 +41,8 @@ knowledge-gated common/Text/ASCII prompts now have fresh focused coverage. Paid
 self-device execution passes Nothing and nonempty-effect Service contrasts,
 including charge/retry and paused identification with source-deleted reopen. The
 room/passage foundation and appearance selector pass their fresh tests; the
-appearance selector remains a primitive, not integrated hallucination gameplay.
+appearance selector now supports integrated opt-in Hallucination gameplay, with
+the focused runtime and consumer checkpoint described below.
 Fresh Service checks cover OnUse observer isolation and storage rollback;
 actual Text/process checks and genuine current save/wire fixtures pass.
 Remaining consumables and broader qualification are unfinished. The opt-in
@@ -113,13 +114,29 @@ pass. Genuine recording now has 52 generated client examples and 57 captured
 server frames. The updated protocol library/integration and common library pass 36/283/146
 tests. Final/native/release gates remain pending; live weighted pools and kits
 remain unchanged.
-The next accepted growth batch is still unimplemented: Strength preserves the
+The opt-in growth potions now have paid/source-free acceptance: Strength preserves the
 ordinary-five cap and limits ordinary plus acquired permanent magic to seven,
 with innate modifiers afterward; each Raise dose funds one additional level
 beyond all levels already funded by XP, even while actual growth is blocked,
 without bypassing ordinary advancement admission.
-Their provenance, refund/history and actual-caller qualification remain next work.
+Their provenance, refund/history and actual-caller checks pass, including the
+corrected full core/server regressions and current protocol/common/ASCII consumers.
 Existing live item distributions remain unchanged and polymorph remains separate.
+
+The opt-in Hallucination potion now uses one pure timed condition and saved
+base-turn presentation cadence. Extend preserves its generation/deadline; Extra
+Healing removes exactly that condition. Genuine visual actors, ground/guise objects
+and unknown stair artwork receive observer-specific canonical cosmetics without
+changing real targets, actions or navigation. Nonvisual Awareness stays factual;
+map and public-plan samples retain their acquisition-time presentation.
+Fresh core/server libraries pass 1,927/1,121 tests. Protocol library/integration
+pass 37/288, common 150, Text 77/192 and ASCII integration 152. Three real-process
+cases cover Adventure display, blind/repeat/cure and source-deleted map/history
+reopening. All 44 certificates and current saved/wire artifacts were genuinely
+regenerated (52 client examples, 62 captured server frames). These are scoped
+reconstruction results: detection/mapping and final quick/push/full, native,
+release/performance and hosted gates remain unfinished. Independent 3D changes
+remain isolated, not integrated or qualified by these results.
 
 Characters retain last-seen terrain, doors, stairs and item appearances in the
 saved game. Returning to an explored neighborhood or opening a fresh client
@@ -609,7 +626,7 @@ checks do not replace the current
   language. Runtime scripting and its language remain undecided.
 - Shared rule/effect infrastructure does not imply complete survival, carrying
   capacity, curses, enchantment, rust, identification, ranged projectile/ray,
-  secret-search or hallucination gameplay. See the current references and
+  secret-search or complete detection/mapping gameplay. See the current references and
   [remaining requirements](plans/requirements.md) for their boundaries.
 - Rogue actor/player/item appearances use existing asset fields and structural
   palette forecasts. Text and ASCII share a minimal keyed English vocabulary;

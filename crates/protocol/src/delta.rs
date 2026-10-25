@@ -158,7 +158,7 @@ impl StateDelta {
                     let (was, is) = (&old[i], &new[j]);
                     // Exhaustive so that a new cell field cannot be missed.
                     let CellView {
-                        object_presentation: None,
+                        object_presentation,
                         lit,
                         door,
                         trap,
@@ -171,7 +171,8 @@ impl StateDelta {
                         place_hint,
                         asset,
                     } = was;
-                    if *lit != is.lit
+                    if *object_presentation != is.object_presentation
+                        || *lit != is.lit
                         || *key != is.key
                         || *asset != is.asset
                         || *door != is.door

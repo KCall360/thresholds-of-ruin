@@ -308,7 +308,7 @@ fn named_fixture_with_awareness(
     )
     .unwrap();
     let content = crate::creatures::Content::with_presentation_catalog(base.content(), palette);
-    let mut game = Game::new(base.world.clone(), 42, content);
+    let mut game = Game::new((*base.world).clone(), 42, content);
     assert_eq!(
         crate::perception::contract_fixtures::spawn(
             &mut game,
@@ -362,7 +362,13 @@ fn observer_key_has_literal_distinct_result_without_subject_seed_leak() {
 }
 #[test]
 fn intact_visual_guise_substitutes_as_object_but_invisible_awareness_does_not() {
-    let mut guised = named_fixture(&[crate::perception::contract_fixtures::guise()]);
+    // Keep this witness about an intact guise, not a lucky passive discovery
+    // contest triggered by completing the drink.
+    let mut guise = crate::perception::contract_fixtures::guise();
+    if let crate::perception::PerceptionValue::ObjectGuise { edge, .. } = &mut guise {
+        *edge = 1000;
+    }
+    let mut guised = named_fixture(&[guise]);
     let before = guised.observe(OWNER).unwrap();
     assert!(before
         .apparent_objects
@@ -379,8 +385,10 @@ fn intact_visual_guise_substitutes_as_object_but_invisible_awareness_does_not() 
     assert_eq!(object.appearance.name, "object");
     assert!(object.appearance.description.is_empty() && object.appearance.asset.is_none());
     assert!(!view.visible_actors.iter().any(|a| a.id == SUBJECT));
-    let mut invisible =
-        named_fixture(&[crate::perception::PerceptionValue::Invisible { enabled: true }]);
+    let mut invisible = named_fixture_with_awareness(
+        &[crate::perception::PerceptionValue::Invisible { enabled: true }],
+        true,
+    );
     let (_, sight) = invisible.scene_snapshot(OWNER).unwrap();
     assert!(!invisible.actor_visible_in_sight(OWNER, SUBJECT, &sight));
     let factual = invisible

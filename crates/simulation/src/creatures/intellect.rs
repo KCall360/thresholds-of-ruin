@@ -178,26 +178,42 @@ pub(super) fn current_sources_from_facts(
 ) -> Result<IntellectSources, BuildError> {
     sources_from_facts(
         build,
-        build.initial_attributes(),
         birth_templates,
-        build.strength_acquired(),
-        attributes,
-        skills,
-        selected,
-        hit_dice,
+        SourceFacts {
+            initial_attributes: build.initial_attributes(),
+            strength_acquired: build.strength_acquired(),
+            attributes,
+            skills,
+            selected,
+            hit_dice,
+        },
     )
+}
+
+/// Current or historically reconstructed permanent composition inputs.
+/// References preserve the existing validated facts without copying/scanning them.
+struct SourceFacts<'a> {
+    initial_attributes: Attributes,
+    strength_acquired: u8,
+    attributes: Attributes,
+    skills: &'a SkillRanks,
+    selected: &'a BTreeSet<TalentId>,
+    hit_dice: &'a HitDiceSummary,
 }
 
 fn sources_from_facts(
     build: &CreatureBuild,
-    initial_attributes: Attributes,
     birth_templates: &[TemplateId],
-    strength_acquired: u8,
-    attributes: Attributes,
-    skills: &SkillRanks,
-    selected: &BTreeSet<TalentId>,
-    hit_dice: &HitDiceSummary,
+    facts: SourceFacts<'_>,
 ) -> Result<IntellectSources, BuildError> {
+    let SourceFacts {
+        initial_attributes,
+        strength_acquired,
+        attributes,
+        skills,
+        selected,
+        hit_dice,
+    } = facts;
     let mut witness = IntellectSources {
         strength_acquired,
         classes: hit_dice.classes.keys().cloned().collect(),
@@ -380,12 +396,14 @@ pub(super) fn historical_sources_refs<'a>(
     }
     sources_from_facts(
         build,
-        initial_attributes,
         birth_templates,
-        strength_acquired,
-        attributes,
-        &skills,
-        &selected,
-        &hit_dice,
+        SourceFacts {
+            initial_attributes,
+            strength_acquired,
+            attributes,
+            skills: &skills,
+            selected: &selected,
+            hit_dice: &hit_dice,
+        },
     )
 }

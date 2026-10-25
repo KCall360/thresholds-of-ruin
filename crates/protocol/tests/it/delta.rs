@@ -739,13 +739,19 @@ fn complete_encoding_prefers_full_when_every_cell_changes_or_base_is_wrong() {
 #[test]
 fn equal_complete_encoded_sizes_prefer_full() {
     let mut found = false;
-    for key_length in 1..=256 {
+    // Keep one cell and forget one. The removed coordinates add delta-only
+    // bytes; the retained key adds full-only bytes. This makes the sweep cross
+    // equality without omitting any required cell fields or exceeding key bounds.
+    for key_length in 1..=128 {
         let mut base = room(15, 15, 9_000_000_000_000_000_000);
-        base.observation.visible_cells.truncate(1);
+        base.observation.visible_cells.truncate(2);
         base.observation.visible_cells[0].key = "k".repeat(key_length);
         let mut next = base.clone();
+        next.observation.visible_cells.truncate(1);
         next.revision += 1;
         next.observation.tick += 1;
+        assert_eq!(base.validate(), Ok(()));
+        assert_eq!(next.validate(), Ok(()));
         let previous = exact_base(&base, base.revision);
         let full = complete_observation(next.clone(), next.revision);
         let mut candidate = full.clone();
@@ -1909,4 +1915,45 @@ fn paid_refusal_observation_rejects_forged_non_item_action() {
     state.validate().unwrap();
     state.observation.interactions.as_mut().unwrap().refused[0].action = Action::Wait;
     assert_eq!(state.validate(), Err(InvalidState::InvalidInteraction));
+}
+
+#[test]
+fn cosmetic_cell_changes_and_cures_are_not_lost_by_exhaustive_delta_comparison() {
+    let mut base = room(5, 5, 1);
+    base.observation.visible_cells[0].stairs_down = true;
+    let mut next = base.clone();
+    next.revision += 1;
+    next.observation.visible_cells[0].object_presentation = Some(ObjectPresentation {
+        name: "silver flask".into(),
+        asset: None,
+        kind: ObjectPresentationKind::Item {
+            class: ItemClass::Potion,
+        },
+    });
+    let delta = round_trip(&base, &next);
+    assert_eq!(
+        delta.cells.changed,
+        vec![next.observation.visible_cells[0].clone()]
+    );
+    let mut shifted = next.clone();
+    shifted.revision += 1;
+    shifted.observation.visible_cells[0].object_presentation = Some(ObjectPresentation {
+        name: "stairs".into(),
+        asset: None,
+        kind: ObjectPresentationKind::Stairs,
+    });
+    let delta = round_trip(&next, &shifted);
+    assert_eq!(
+        delta.cells.changed,
+        vec![shifted.observation.visible_cells[0].clone()]
+    );
+    let mut cured = shifted.clone();
+    cured.revision += 1;
+    cured.observation.visible_cells[0].object_presentation = None;
+    let delta = round_trip(&shifted, &cured);
+    assert_eq!(
+        delta.cells.changed,
+        vec![cured.observation.visible_cells[0].clone()]
+    );
+    assert!(cured.observation.visible_cells[0].stairs_down);
 }

@@ -7347,6 +7347,11 @@ value = 13
             .unwrap();
         let package = Package::from_parts(manifest, regions, &template.rules_source).unwrap();
         let game = package.build(42, true).unwrap();
+        // Expected explicit recipes share the actual immutable package palette.
+        // Keep the full build comparison, including Content; a native neutral
+        // catalog is not this authored package's presentation catalog.
+        let catalog =
+            catalog.with_presentation_catalog(game.content().presentation_catalog().clone());
         let mut shared = tor_simulation::checkpoint::SharedState::default();
         let snapshot = serde_json::to_value(game.checkpoint(&mut shared)).unwrap();
         let shared = serde_json::to_value(shared).unwrap();

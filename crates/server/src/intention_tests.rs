@@ -2684,6 +2684,7 @@ mod intention_admission_tests {
             .creatures
             .compile(engine.game.content().rules().clone())
             .unwrap()
+            .with_presentation_catalog(engine.game.content().presentation_catalog().clone())
             .prepare(definitions.characters[0].creature.as_ref().unwrap())
             .unwrap();
         engine

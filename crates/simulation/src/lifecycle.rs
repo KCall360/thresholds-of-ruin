@@ -70,24 +70,29 @@ pub(crate) enum ResolutionPublication {
     },
 }
 
-pub(crate) enum ApplicationOutcome {
-    Resolved(Outcome, Option<u16>),
-    Actor(ActorOutcome),
-    Item(ItemOutcome),
+/// Static lifecycle dispatch without a large temporary wrapper enum or heap
+/// allocation. Only lifecycle-owned outcome implementations publish state.
+pub(crate) trait ApplicationOutcome {
+    fn apply(self, game: &mut Game) -> Result<(), GameError>;
 }
-impl From<Outcome> for ApplicationOutcome {
-    fn from(value: Outcome) -> Self {
-        Self::Resolved(value, None)
+impl ApplicationOutcome for Outcome {
+    fn apply(self, game: &mut Game) -> Result<(), GameError> {
+        game.apply_resolved_outcome(
+            self,
+            ResolutionPublication::Standalone,
+            &mut DamageActivityGuard::default(),
+        )?;
+        Ok(())
     }
 }
-impl From<ActorOutcome> for ApplicationOutcome {
-    fn from(value: ActorOutcome) -> Self {
-        Self::Actor(value)
+impl ApplicationOutcome for ActorOutcome {
+    fn apply(self, game: &mut Game) -> Result<(), GameError> {
+        game.commit_actor_outcome(self)
     }
 }
-impl From<ItemOutcome> for ApplicationOutcome {
-    fn from(value: ItemOutcome) -> Self {
-        Self::Item(value)
+impl ApplicationOutcome for ItemOutcome {
+    fn apply(self, game: &mut Game) -> Result<(), GameError> {
+        game.apply_item_outcome(self)
     }
 }
 
@@ -297,6 +302,18 @@ impl Game {
         let clock = self.actor_clock(id);
         let elapsed = clock.saturating_sub(state.active_since);
         if elapsed > 0 {
+            // Only the old generation owns this elapsed interval. Conditions
+            // advance below; final candidate reconciliation happens afterwards.
+            if let Some((_, remaining)) = crate::hallucination_clock::hallucination_instance(state)
+            {
+                crate::hallucination_clock::settle_before_expiry(
+                    &mut state.hallucination,
+                    remaining,
+                    elapsed,
+                )?;
+            } else {
+                state.hallucination = None;
+            }
             if state.alive() {
                 state.periodic_relocations.advance(elapsed)?;
             }
@@ -462,43 +479,36 @@ impl Game {
 
     pub(crate) fn apply_outcome(
         &mut self,
-        outcome: impl Into<ApplicationOutcome>,
+        outcome: impl ApplicationOutcome,
     ) -> Result<(), GameError> {
-        match outcome.into() {
-            ApplicationOutcome::Resolved(outcome, strike) => {
-                let site = strike.map_or(ResolutionPublication::Standalone, |strike| {
-                    ResolutionPublication::Primary { strike }
-                });
-                self.apply_resolved_outcome(outcome, site, &mut DamageActivityGuard::default())?;
-            }
-            ApplicationOutcome::Actor(outcome) => self.commit_actor_outcome(outcome)?,
-            ApplicationOutcome::Item(outcome) => {
-                self.push_event(
-                    if matches!(&outcome.change, ItemChange::CurseBlocked(_)) {
-                        CombatEvent::ItemCurseBlocked {
-                            actor: outcome.actor,
-                            item: outcome.work.item().ok_or(GameError::ItemUnavailable)?,
-                            intention: outcome.intention,
-                        }
-                    } else {
-                        CombatEvent::ItemCompleted {
-                            actor: outcome.actor,
-                            work: outcome.work,
-                            intention: outcome.intention,
-                        }
-                    },
-                    None,
-                )?;
-                match outcome.change {
-                    ItemChange::CurseBlocked(actor) | ItemChange::Equipment(actor) => {
-                        self.commit_actor_outcome(actor)?
-                    }
-                    ItemChange::Consumed { actor } => self.commit_actor_outcome(actor)?,
-                    ItemChange::PortableLight { item, lit, actor } => {
-                        self.set_item_light(item, lit)?;
-                        self.commit_actor_outcome(actor)?;
-                    }
+        outcome.apply(self)
+    }
+
+    fn apply_item_outcome(&mut self, outcome: ItemOutcome) -> Result<(), GameError> {
+        self.push_event(
+            if matches!(&outcome.change, ItemChange::CurseBlocked(_)) {
+                CombatEvent::ItemCurseBlocked {
+                    actor: outcome.actor,
+                    item: outcome.work.item().ok_or(GameError::ItemUnavailable)?,
+                    intention: outcome.intention,
                 }
+            } else {
+                CombatEvent::ItemCompleted {
+                    actor: outcome.actor,
+                    work: outcome.work,
+                    intention: outcome.intention,
+                }
+            },
+            None,
+        )?;
+        match outcome.change {
+            ItemChange::CurseBlocked(actor) | ItemChange::Equipment(actor) => {
+                self.commit_actor_outcome(actor)?
+            }
+            ItemChange::Consumed { actor } => self.commit_actor_outcome(actor)?,
+            ItemChange::PortableLight { item, lit, actor } => {
+                self.set_item_light(item, lit)?;
+                self.commit_actor_outcome(actor)?;
             }
         }
         Ok(())
@@ -1290,6 +1300,20 @@ impl Game {
             .awareness
             .rephase(outcome.state.perception().aggravation);
         self.reconcile_relocation_sources(&mut outcome)?;
+        let generation = crate::hallucination_clock::hallucination_instance(&outcome.state)
+            .map(|(generation, _)| generation);
+        crate::hallucination_clock::reconcile(
+            &mut outcome.state.hallucination,
+            generation,
+            outcome.state.turn_ticks,
+        );
+        if let Some(interval) = crate::hallucination_clock::next_in(&outcome.state) {
+            outcome
+                .state
+                .active_since
+                .checked_add(interval)
+                .ok_or(GameError::Schedule(crate::ScheduleError::TimeExhausted))?;
+        }
         Ok(PreparedActorOutcome {
             outcome,
             death,

@@ -34,44 +34,6 @@ impl<'de> Deserialize<'de> for HasteDoseOutcome {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn haste_dose_receipt_is_closed_and_zero_is_only_overdose_rest() {
-        for outcome in [
-            HasteDoseOutcome::Hasted { duration: 400 },
-            HasteDoseOutcome::Overdose { rest: 0 },
-            HasteDoseOutcome::Overdose { rest: 700 },
-        ] {
-            let encoded = serde_json::to_string(&outcome).unwrap();
-            assert_eq!(
-                serde_json::from_str::<HasteDoseOutcome>(&encoded).unwrap(),
-                outcome
-            );
-        }
-        for invalid in [
-            r#"{"kind":"hasted","duration":0}"#,
-            r#"{"kind":"hasted"}"#,
-            r#"{"kind":"overdose"}"#,
-            r#"{"kind":"overdose","rest":null}"#,
-            r#"{"kind":"overdose","rest":0,"duration":1}"#,
-            r#"{"kind":"overdose","rest":0,"rest":1}"#,
-            r#"{"kind":"hasted","duration":1000001}"#,
-            r#"{"kind":"overdose","rest":1000001}"#,
-            r#"{"overdose":{"rest":0}}"#,
-            r#"["overdose",0]"#,
-            r#""overdose""#,
-            "null",
-        ] {
-            assert!(
-                serde_json::from_str::<HasteDoseOutcome>(invalid).is_err(),
-                "{invalid}"
-            );
-        }
-    }
-}
-
 pub(crate) fn valid_haste_turn_ticks(ticks: u64) -> bool {
     ticks > 0
         && ticks
@@ -112,4 +74,42 @@ pub(crate) fn haste_dose_conditions_valid(
         && rest.preparation == ConditionPreparation::Pause
         && rest.modifiers.is_empty()
         && rest.descriptors.is_empty()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn haste_dose_receipt_is_closed_and_zero_is_only_overdose_rest() {
+        for outcome in [
+            HasteDoseOutcome::Hasted { duration: 400 },
+            HasteDoseOutcome::Overdose { rest: 0 },
+            HasteDoseOutcome::Overdose { rest: 700 },
+        ] {
+            let encoded = serde_json::to_string(&outcome).unwrap();
+            assert_eq!(
+                serde_json::from_str::<HasteDoseOutcome>(&encoded).unwrap(),
+                outcome
+            );
+        }
+        for invalid in [
+            r#"{"kind":"hasted","duration":0}"#,
+            r#"{"kind":"hasted"}"#,
+            r#"{"kind":"overdose"}"#,
+            r#"{"kind":"overdose","rest":null}"#,
+            r#"{"kind":"overdose","rest":0,"duration":1}"#,
+            r#"{"kind":"overdose","rest":0,"rest":1}"#,
+            r#"{"kind":"hasted","duration":1000001}"#,
+            r#"{"kind":"overdose","rest":1000001}"#,
+            r#"{"overdose":{"rest":0}}"#,
+            r#"["overdose",0]"#,
+            r#""overdose""#,
+            "null",
+        ] {
+            assert!(
+                serde_json::from_str::<HasteDoseOutcome>(invalid).is_err(),
+                "{invalid}"
+            );
+        }
+    }
 }

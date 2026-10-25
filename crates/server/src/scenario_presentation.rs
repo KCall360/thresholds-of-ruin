@@ -236,8 +236,15 @@ mod tests {
         checked_package(source.clone());
         let mut invalid = source;
         invalid.archetypes.get_mut("duplicate alias").unwrap().class = ItemClass::Weapon;
-        let mut negative = package;
-        negative.manifest = invalid;
+        // This is a new authored negative, not corruption of pinned metadata.
+        // Reconstruct its source receipt so the existing physical-class rule,
+        // rather than an earlier integrity guard, owns the rejection.
+        let negative = Package::from_parts(
+            invalid,
+            package.region_defs().unwrap(),
+            &package.rules_source,
+        )
+        .unwrap();
         let failure = negative.check().unwrap_err();
         assert!(failure.message.contains("one physical class"), "{failure}");
     }
@@ -275,10 +282,20 @@ mod tests {
     fn validated_creature_display_names_keep_full_utf8_bound_in_cosmetic_catalog() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../scenarios/rogue-exploration");
-        let mut package = read_package(&root).unwrap();
+        let original = read_package(&root).unwrap();
+        original.check().unwrap();
         let long_name = "é".repeat(128);
-        let creature = package.manifest.archetypes.get_mut("rogue.emu").unwrap();
+        let mut authored = original.manifest.clone();
+        let creature = authored.archetypes.get_mut("rogue.emu").unwrap();
         creature.creature.as_mut().unwrap().name = long_name.clone();
+        // Repin the legitimately edited authored fixture through its normal
+        // constructor; never weaken the production content-integrity check.
+        let package = Package::from_parts(
+            authored,
+            original.region_defs().unwrap(),
+            &original.rules_source,
+        )
+        .unwrap();
         package.check().unwrap();
         let mut source = manifest();
         source.archetypes.insert(

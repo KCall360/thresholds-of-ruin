@@ -756,6 +756,10 @@ fn next_timer(actor: &Actor) -> Option<u64> {
     creature
         .into_iter()
         .chain(
+            crate::hallucination_clock::next_in(actor)
+                .and_then(|interval| actor.active_since.checked_add(interval)),
+        )
+        .chain(
             actor
                 .awareness
                 .next_in(actor)

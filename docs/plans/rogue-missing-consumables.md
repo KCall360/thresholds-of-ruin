@@ -1591,3 +1591,141 @@ including advancement and retained-map consumer regressions. These close the
 pending Growth consumer checks without rebuilding the preserved process apps.
 No quick/push/full, release, native, hosted-CI or performance gate is claimed;
 Hallucination and the remaining accepted consumables remain unfinished.
+
+### Hallucination integrated first-red scaffold (2026-10-25)
+
+The opt-in catalog entry, pure marked condition, immutable canonical presentation
+roster, strict saved cadence record, observer-only cosmetic projection and separate
+wire/client presentation fields are assembled with their owning regression tests.
+Objects retain real operation metadata but replace all true display siblings with
+neutral placeholders; the sampled outer payload owns appearance. Actors replace
+name, asset and display seed together. Nonvisual Awareness remains factual.
+
+Normal compilation and retained-source reopening share one palette adapter. The
+source preflight accounts empty-roster fallbacks and wide shared appearance pools
+without imposing the selector primitive's smaller public-choice limit. Map samples
+freeze at acquisition; shared-payload restore validates membership against the
+same immutable catalog without rerolling historical samples. Cosmetic cell art
+requires an actual nonwall stair occurrence and never creates recognition.
+
+The new content first-red failed for the intended missing potion/marker/cure
+behavior while retaining the live-stock control. All 112 pure Rogue content tests
+then passed. Rust runtime, Service and actual-client cases are authored but have
+not run. The cadence lifecycle/timer hooks are deliberately withheld for one
+grouped native first-red before coherent green integration, not an implemented
+runtime feature. Independent 3D compatibility is an isolated patch only. Current
+wire/save artifacts and certificates have not been regenerated for this scaffold;
+no compilation, runtime, native or verification-gate success is claimed here.
+
+The scaffold now passes frozen workspace all-target compilation after correcting
+one exhaustive delta destructuring (with explicit cosmetic change/cure coverage),
+a native fixture's shared-world clone, a headless fixture field and private
+Engine access in the Service fixtures. These were compile/setup corrections,
+not gameplay failures. Unused cadence-hook warnings are expected until the
+first-red scaffold is connected. The actual native behavior run remains pending.
+
+### Hallucination runtime integration checkpoint
+
+The grouped native first-red ran 26 tests: 11 passed and 15 failed. The paid
+condition cases reached missing-cadence assertions after their payment, lifetime
+and RNG prerequisites. Runtime lifecycle, active-timer and physics hooks were
+then connected together. An intact-guise fixture needed a stronger authored
+concealment edge because completing a drink legitimately attempts passive
+recognition; its invisible contrast now explicitly enables lawful Awareness.
+
+The first complete core regression ran 1,927 tests: 1,921 passed and six new
+Hallucination checkpoint/frozen-state cases failed strict saved schedule or
+lifecycle validation. These failures remain open at this checkpoint; the passing
+older regressions do not qualify the feature. Source compilation passed separately.
+
+Three real-process cases and a genuine raw-wire recording extension are now
+assembled for visual/Extend/source-free reopening, blind identification and exact
+cure, and acquired map/public-plan history across door closure and cure. All 55
+pure recorder tests pass, including cross-stage sample and cleanup controls.
+These are not actual-process results. Current certificates and wire/save artifacts
+still require genuine regeneration, and server/client/runtime and final repository
+gates remain pending. Isolated 3D compatibility remains separate and unqualified.
+
+The six failures were traced to test fixtures advancing raw time while an idle
+peer retained an earlier readiness timestamp. Shared paid completion and active
+fractional advances now use ordinary actor Wait scheduling; only wholly
+frozen/detached scenes use physics-only advancement. No production schedule or
+restore validation was weakened. The corrected runtime run is still pending.
+
+The corrected full core regression now passes all 1,927 tests with unchanged
+inputs. The first server Hallucination cohort compiled and ran ten tests: three
+wire/saved-marker boundary tests passed; seven Service cases stopped at their
+shared prerequisite because its expected consumable object omitted the existing
+empty `descriptors` field. Those cases have not yet exercised gameplay. The
+expected fixture shape is being corrected without changing production content.
+
+### Hallucination genuine applications and process checkpoint
+
+The five ordinary application binaries (scenario compiler, server, headless,
+Text and ASCII) built with unchanged inputs. All 44 scenario packages were
+validated and checked by that exact compiler. Three actual-process witnesses
+now pass: Adventure visual identities and repeated-dose cadence through
+source-deleted reopening; blind identification and exact Extra Healing cure;
+and acquired map/public-plan samples retained across a real closed door, cure
+and source-deleted reopening. These are non-graphical process results, not native
+window qualification.
+
+Fixture corrections preserved the real causal boundaries: the pre-draw save
+is captured after durable drink admission, before the peer allows completion;
+multiple visible body-cell occurrences must share one real handle and every row
+must carry the expected cosmetic tuple. The visual naming witness uses Adventure,
+not the diagnostic script interface that intentionally prints actor handles.
+
+The genuine wire recorder passed with 52 client schema examples and 62 captured
+server samples, including exact visual, extended and cured Hallucination frames.
+No current fixture was handpatched. The current saved-scenario writer, corrected
+Service/full-server regression and downstream consumer cohorts remain pending.
+
+The corrected server Hallucination cohort now passes all ten selected tests,
+including all seven encoded Service/source-free cases. The genuine current
+saved-scenario writer has also regenerated its existing-epoch corpus. Full server
+regression and current consumer checks are the next validation steps; regeneration
+alone is not a reader/round-trip pass.
+
+### Hallucination corrected regression and consumer checkpoint
+
+The complete server library now passes all 1,121 tests. Five fixture mismatches
+were corrected without relaxing production checks: legitimately edited source
+fixtures now reconstruct their pinned metadata, native recipe oracles retain the
+actual immutable presentation catalog, and the exact remembered-map field
+inventory includes the required nullable cosmetic field. The current saved writer
+and explicit reader/round-trip owners pass within this full run.
+
+Current consumers pass: protocol library 37 and integration 288, client-common
+150, Text library 77 and integration 192, ASCII integration 152; none ignored.
+An existing encoded-size tie fixture needed a lawful removed-cell delta to restore
+an actual equal-size boundary after the new required field. It still asserts exact
+equality and selection of the complete response, not a weaker inequality.
+
+Together with the full core's 1,927 passes and the genuine application/process
+checkpoint, this closes the scoped Hallucination feature checkpoint. Detection,
+food/magic snapshots and mapping remain accepted unfinished work. No final
+quick/push/full, native, independent 3D, release/performance or hosted qualification
+is inferred from these scoped results. Live weighted stock and kits remain unchanged.
+
+### Detection and mapping foundations under qualification
+
+The neutral core now has bounded immutable chart values and a physical-scope
+projection helper. Projection uses authoritative physical joins, preserves three
+coordinates and every sample occurrence, keeps disconnected components separate,
+and withholds coordinates for an inconsistent component. Charts contain only
+component-local positions and kind-specific display marks, not action handles.
+Caller-explicit budgets distinguish unavailable presentation from an empty result;
+a structural chart is not yet a drinking-time identification receipt.
+
+Mapping uses optional source-certified room construction frames, not inferred
+local-z or current gravity. Missing certification preserves ordinary source
+admission and means mapping is unavailable; malformed supplied certification must
+reject. Generated Rogue will supply complete certification. Oriented boundary
+facts must exclude floor/ceiling faces without deleting a coincident wall face,
+and remain separate from full ordinary map appearance and navigation authority.
+
+These are infrastructure and implementation contracts, not completed consumables.
+Paid census/refresh/history behavior, complete delivery admission, strict current
+save/protocol consumers and real-client acceptance remain unfinished. No feature
+completion or final verification gate follows from compilation alone.

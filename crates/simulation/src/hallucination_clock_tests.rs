@@ -70,11 +70,39 @@ pub(crate) fn start(game: &mut Game, item: ItemId) -> u64 {
     due
 }
 pub(crate) fn finish(game: &mut Game, due: u64) {
-    game.with_recovery_transition(true, |candidate| {
-        candidate.tick = due;
-        candidate.resolve_preparations()
-    })
-    .unwrap();
+    // The real peer action advances the scheduler through paid completion. A
+    // raw tick assignment would strand this ready peer in the past, creating
+    // an invalid checkpoint before any cadence validation could run.
+    assert_eq!(game.next_actor(), Some(SUBJECT));
+    assert_eq!(game.actors[&SUBJECT].ready_at, game.tick());
+    game.actors.get_mut(&SUBJECT).unwrap().turn_ticks = NonZeroU64::new(due - game.tick()).unwrap();
+    game.act(SUBJECT, Action::Wait).unwrap();
+    assert_eq!(game.tick(), due);
+    assert!(game.preparation(OWNER).is_none());
+}
+
+fn advance_to(game: &mut Game, until: u64) {
+    // Drive fractional active time with ordinary Wait work, preserving the
+    // owner's captured base period and the scheduler's readiness invariants.
+    // Only a wholly frozen/detached scene may advance without a ready actor.
+    while game.tick() < until {
+        let Some(actor) = game.next_actor() else {
+            assert!(game.actors.keys().all(|id| game.actor_frozen(*id)));
+            assert_eq!(game.advance_physics(until).unwrap(), until);
+            break;
+        };
+        assert!(actor == OWNER || actor == SUBJECT);
+        assert_eq!(game.actors[&actor].ready_at, game.tick());
+        if actor == SUBJECT {
+            game.actors.get_mut(&actor).unwrap().turn_ticks =
+                NonZeroU64::new(until - game.tick()).unwrap();
+        }
+        game.act(actor, Action::Wait).unwrap();
+        assert!(
+            game.tick() <= until,
+            "peer Wait must retain the requested decision boundary"
+        );
+    }
 }
 pub(crate) fn clock(game: &Game) -> (u64, u64, u64) {
     let cadence = game
@@ -172,7 +200,7 @@ fn ordinary_peer_drives_exact_shift_without_owner_action_or_random_draw() {
 fn extension_keeps_deadline_and_same_transaction_reapplication_resets_generation() {
     let mut game = fixture();
     apply(&mut game, 1000);
-    game.advance_physics(50).unwrap();
+    advance_to(&mut game, 50);
     apply(&mut game, 200);
     assert_eq!(clock(&game), (0, 0, 50));
     assert_eq!(
@@ -180,8 +208,8 @@ fn extension_keeps_deadline_and_same_transaction_reapplication_resets_generation
         Some((0, 1150))
     );
     assert_eq!(game.next_creature_event_tick(), Some(100));
-    game.advance_physics(100).unwrap();
-    game.advance_physics(150).unwrap();
+    advance_to(&mut game, 100);
+    advance_to(&mut game, 150);
     assert_eq!(clock(&game), (0, 1, 50));
     game.apply_effects(
         OWNER,
@@ -243,13 +271,13 @@ fn expiry_precedes_tied_shift_and_bounds_next_event_before_long_period() {
         let mut game = fixture();
         apply(&mut game, duration);
         assert_eq!(game.next_creature_event_tick(), Some(duration));
-        game.advance_physics(duration).unwrap();
+        advance_to(&mut game, duration);
         assert!(game.actors[&OWNER].hallucination.is_none());
         assert!(game.projected_hallucination(OWNER).unwrap().is_none());
         assert!(hallucination_instance(&game.actors[&OWNER]).is_none());
     }
     let mut game = fixture();
-    game.advance_physics(75).unwrap();
+    advance_to(&mut game, 75);
     apply(&mut game, 1000);
     assert_eq!(clock(&game), (0, 0, 100));
     assert_eq!(game.next_creature_event_tick(), Some(175));
@@ -261,7 +289,7 @@ fn frozen_and_detached_cadence_keep_fraction_through_real_record_roundtrip() {
     for detached in [false, true] {
         let mut game = fixture();
         apply(&mut game, 1000);
-        game.advance_physics(50).unwrap();
+        advance_to(&mut game, 50);
         let mut records = MemoryRecords::default();
         game.apply_region_transition(
             &RegionTransition {
@@ -286,7 +314,7 @@ fn frozen_and_detached_cadence_keep_fraction_through_real_record_roundtrip() {
             );
         }
         let mut game = roundtrip(&game);
-        game.advance_physics(500).unwrap();
+        advance_to(&mut game, 500);
         if !detached {
             assert_eq!(clock(&game), (0, 0, 50));
         }
@@ -300,9 +328,9 @@ fn frozen_and_detached_cadence_keep_fraction_through_real_record_roundtrip() {
         .unwrap();
         assert_eq!(clock(&game), (0, 0, 50));
         assert_eq!(hallucination_instance(&game.actors[&OWNER]), Some((0, 950)));
-        game.advance_physics(549).unwrap();
+        advance_to(&mut game, 549);
         assert_eq!(clock(&game), (0, 0, 1));
-        game.advance_physics(550).unwrap();
+        advance_to(&mut game, 550);
         assert_eq!(clock(&game), (0, 1, 100));
         assert_eq!(roundtrip(&game), game);
     }
@@ -312,11 +340,11 @@ fn frozen_and_detached_cadence_keep_fraction_through_real_record_roundtrip() {
 fn current_and_retained_history_require_matching_cadence_and_reject_impossible_age() {
     let mut game = fixture();
     apply(&mut game, 1000);
-    game.advance_physics(50).unwrap();
+    advance_to(&mut game, 50);
     game.settle_actor_time(OWNER).unwrap();
     let mut shared = crate::checkpoint::SharedState::default();
     let history = serde_json::to_value(game.checkpoint(&mut shared)).unwrap();
-    game.advance_physics(100).unwrap();
+    advance_to(&mut game, 100);
     let current = serde_json::to_value(game.checkpoint(&mut shared)).unwrap();
     let baseline = serde_json::to_value(&shared).unwrap();
     for snapshot in [history, current] {
@@ -430,7 +458,7 @@ fn cadence_horizon_uses_expiry_and_unmarked_owners_cannot_keep_clock() {
 fn extension_and_restore_retain_captured_period_not_changed_base_timing() {
     let mut game = fixture();
     apply(&mut game, 1000);
-    game.advance_physics(50).unwrap();
+    advance_to(&mut game, 50);
     // No production setter changes base timing today; this native witness pins
     // the captured-period contract rather than silently imposing equality.
     game.actors.get_mut(&OWNER).unwrap().turn_ticks = NonZeroU64::new(75).unwrap();

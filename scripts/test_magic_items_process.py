@@ -21,6 +21,9 @@ from first_contact_catalog_package import prepare as prepare_imported_first_cont
 from torch_catalog_package import prepare as prepare_imported_torch
 from haste_catalog_package import prepare as prepare_imported_haste
 from growth_catalog_package import prepare as prepare_imported_growth
+from hallucination_catalog_package import prepare as prepare_imported_hallucination
+from hallucination_package import assert_sample as assert_hallucination_sample, initial_items as hallucination_initial_items
+from utility_potions_package import condition as hallucination_condition, deadline as hallucination_deadline, inventory_item as hallucination_item
 
 
 def observation(frame):
@@ -1092,6 +1095,207 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
                 self.assertEqual(actor_creature(saved)["earned_progress"]["held_xp"], policy["threshold_base"])
             self.growth_samples[kind] = sample
         self.assertNotIn('"type":"combat_diagnostics"', "".join(owner.transcript).replace(" ", ""))
+
+    def hallucination_drink(self, owner, peer, identity):
+        self.assertIsNone(self.act(owner, {"type": "drink", "item": identity})["error"])
+        return self.advance(owner, [peer])
+
+    def hallucination_memory(self, client, frame):
+        if not frame["map_hydration"]["complete"]:
+            frame = self.frame(client, lambda value: any(value.get("map_hydration", {}).get(flag)
+                               for flag in ("complete", "failed", "limited")))
+        self.assertTrue(frame["map_hydration"]["complete"], frame["map_hydration"])
+        self.assertFalse(frame["map_hydration"]["failed"] or frame["map_hydration"]["limited"])
+        cells = [cell for cell in frame["memory"] if any(
+            row["item"]["class"] == "coin" and row["item"]["quantity"] == "7"
+            for row in cell["ground_items"])]
+        self.assertEqual(len(cells), 1)
+        # Complete remembered appearance, including the frozen presentation and
+        # factual stair bits; never a live target or an inferred palette phase.
+        # Hydration deliberately has no client-local last-seen timestamps.
+        # Compare every saved appearance field, not those local cache receipts.
+        return {key: value for key, value in cells[0].items()
+                if key not in ("last_seen_tick", "last_seen_revision")}
+
+    def hallucination_snapshot_sample(self, probe, frame):
+        messages = [json.loads(line).get("message") for line in probe.transcript if line.startswith("{")]
+        sample = next(message for message in reversed(messages) if message and message["type"] == "snapshot")
+        self.assertEqual(sample["snapshot"]["state"], frame["state"])
+        for private in ("remaining_to_shift", "presentation_catalog", "palette_index"):
+            self.assertNotIn(private, json.dumps(sample))
+        return sample
+
+    def hallucination_adventure_begin(self, text, probe, before, identity):
+        # The interactive Adventure interface resolves the currently disclosed
+        # label. Do not wait for its final prompt while an external peer holds
+        # the paid action; establish actual admission through the owner stream.
+        name = hallucination_item(before, identity)["name"]
+        self.send(text, "drink " + name)
+        return self.frame(probe, lambda frame: frame.get("state")
+            and observation(frame)["tick"] == observation(before)["tick"]
+            and any(status["phase"] == "started" for status in frame.get("intentions", [])))
+
+    def hallucination_adventure_finish(self, text, probe, peer):
+        after = self.advance(probe, [peer])
+        told = text.until(lambda line: "finish drinking" in line.lower())
+        told += text.until(lambda line: line == "> ")
+        self.assertIn("finish drinking", told.lower())
+        return after
+
+    @non_graphical
+    def test_imported_hallucination_text_visual_cadence_and_source_free_reopen(self):
+        package = prepare_imported_hallucination(self)
+        server = self.server("--checkpoint-interval", 1, scenario=package)
+        probe, initial = self.client(observe=True, actor=1)
+        peer, _ = self.client(actor=2)
+        text, _ = self.adventure()
+        ids = hallucination_initial_items(self, initial)
+        initial_ground = observation(initial)["ground_items"][0]["item"]["id"]
+        initial_actor = next(row["id"] for row in observation(initial)["visible_actors"]
+                             if row["name"] == "actual visible peer")
+        pending = self.hallucination_adventure_begin(text, probe, initial, ids["hallucination"])
+        # Fresh saves do not have a checkpoint before the first durable record.
+        # Admission captures paid work at tick zero; the external peer still
+        # prevents its tick-100 effect, so this is a genuine pre-draw baseline.
+        self.assertEqual(observation(pending)["tick"], "0")
+        self.assertIsNone(hallucination_condition(pending, "rogue.hallucinating"))
+        self.assertTrue(pending["intentions"], "the first paid dose must be admitted")
+        before = checkpoint(self, probe)
+        self.assertEqual(before["tick"], 0)
+        self.assertIsNone(before["actors"]["1"]["hallucination"])
+        first = self.hallucination_adventure_finish(text, probe, peer)
+        self.assertEqual(observation(first)["tick"], "100")
+        assert_hallucination_sample(self, observation(first), 0)
+        self.assertEqual(hallucination_item(first, ids["hallucination"])["quantity"], "5")
+        self.assertEqual(hallucination_item(first, ids["hallucination"])["name"], "potion of hallucination")
+        self.assertTrue(hallucination_item(first, ids["hallucination"])["identified"])
+        self.assertEqual(observation(first)["ground_items"][0]["item"]["id"], initial_ground)
+        self.assertEqual({row["id"] for row in observation(first)["visible_actors"]
+                          if row["id"] != observation(first)["self_target"]}, {initial_actor})
+        saved_first = checkpoint(self, probe)
+        self.assertNotEqual(saved_first["rules_rng"], before["rules_rng"])
+        clock = saved_first["actors"]["1"]["hallucination"]
+        self.assertEqual((clock["phase"], clock["period"], clock["remaining_to_shift"]), (0, 100, 100))
+        seen = self.say(text, "look")
+        self.assertIn("emu", seen.lower())
+        self.assertIn("arrow", seen.lower())
+        self.assertNotIn("actual visible peer", seen.lower())
+        self.assertNotIn("gold coin", seen.lower())
+        for _ in range(3):
+            self.assertEqual(self.snapshot(probe)["state"], first["state"])
+            self.assertEqual(checkpoint(self, probe), saved_first)
+        first = self.snapshot(probe)
+        self.hallucination_samples = {"visual": self.hallucination_snapshot_sample(probe, first)}
+        self.hallucination_adventure_begin(text, probe, first, ids["hallucination"])
+        second = self.hallucination_adventure_finish(text, probe, peer)
+        self.assertEqual(observation(second)["tick"], "200")
+        assert_hallucination_sample(self, observation(second), 1)
+        extension = hallucination_deadline(second, "rogue.hallucinating") - hallucination_deadline(first, "rogue.hallucinating")
+        self.assertIn(extension, range(80800, 89201, 100))
+        saved = checkpoint(self, probe)
+        next_clock = saved["actors"]["1"]["hallucination"]
+        self.assertEqual(next_clock["generation"], clock["generation"])
+        self.assertEqual((next_clock["phase"], next_clock["period"], next_clock["remaining_to_shift"]), (1, 100, 100))
+        self.assertNotEqual(saved["rules_rng"], saved_first["rules_rng"])
+        second = self.snapshot(probe)
+        self.hallucination_samples["extended"] = self.hallucination_snapshot_sample(probe, second)
+        remembered = self.hallucination_memory(probe, second)
+        text.stop(save=False)
+        probe.stop(save=False)
+        peer.stop(save=False)
+        server.stop(save=False)
+        shutil.rmtree(package)
+        self.server("--checkpoint-interval", 1, scenario=ROOT / "scenarios/two-room", seed=None)
+        probe, restored = self.client(observe=True, actor=1)
+        self.assertEqual(checkpoint(self, probe), saved, "source-free reopen keeps real cadence and RNG")
+        assert_hallucination_sample(self, observation(restored), 1)
+        self.assertEqual(self.hallucination_memory(probe, restored), remembered)
+        peer, _ = self.client(actor=2)
+        text, _ = self.adventure()
+        self.hallucination_adventure_begin(text, probe, restored, ids["extra"])
+        cured = self.hallucination_adventure_finish(text, probe, peer)
+        self.assertIsNone(hallucination_condition(cured, "rogue.hallucinating"))
+        self.assertIsNone(checkpoint(self, probe)["actors"]["1"]["hallucination"])
+        self.assertIsNone(observation(cured)["ground_items"][0]["presentation"])
+        self.assertEqual(observation(cured)["ground_items"][0]["item"]["name"], "gold coin")
+        self.assertTrue(any(row["name"] == "actual visible peer" for row in observation(cured)["visible_actors"]))
+        cured = self.snapshot(probe)
+        self.hallucination_samples["cured"] = self.hallucination_snapshot_sample(probe, cured)
+        self.assertFalse(cured["state"]["wizard_game"])
+
+    @non_graphical
+    def test_imported_hallucination_first_blind_on_use_extend_and_exact_cure(self):
+        package = prepare_imported_hallucination(self)
+        self.server("--checkpoint-interval", 1, scenario=package)
+        owner, initial = self.client(actor=1)
+        peer, _ = self.client(actor=2)
+        ids = hallucination_initial_items(self, initial)
+        self.hallucination_drink(owner, peer, ids["blind"])
+        first = self.hallucination_drink(owner, peer, ids["hallucination"])
+        self.assertIsNotNone(hallucination_condition(first, "rogue.blindness"))
+        self.assertIsNotNone(hallucination_condition(first, "rogue.hallucinating"))
+        self.assertTrue(hallucination_item(first, ids["hallucination"])["identified"])
+        self.assertTrue(all(row["presentation"] is None for row in observation(first)["ground_items"]))
+        self.assertTrue(all(row["object_presentation"] is None for row in observation(first)["visible_cells"]))
+        generation = checkpoint(self, owner)["actors"]["1"]["hallucination"]["generation"]
+        second = self.hallucination_drink(owner, peer, ids["hallucination"])
+        extension = hallucination_deadline(second, "rogue.hallucinating") - hallucination_deadline(first, "rogue.hallucinating")
+        self.assertIn(extension, range(80800, 89201, 100))
+        self.assertEqual(checkpoint(self, owner)["actors"]["1"]["hallucination"]["generation"], generation)
+        ordinary = self.hallucination_drink(owner, peer, ids["healing"])
+        self.assertIsNotNone(hallucination_condition(ordinary, "rogue.hallucinating"))
+        self.hallucination_drink(owner, peer, ids["blind"])
+        sight = self.hallucination_drink(owner, peer, ids["sight"])
+        self.assertIsNotNone(hallucination_condition(sight, "rogue.hallucinating"))
+        self.hallucination_drink(owner, peer, ids["blind"])
+        cured = self.hallucination_drink(owner, peer, ids["extra"])
+        self.assertIsNone(hallucination_condition(cured, "rogue.blindness"))
+        self.assertIsNone(hallucination_condition(cured, "rogue.hallucinating"))
+        self.assertIsNone(checkpoint(self, owner)["actors"]["1"]["hallucination"])
+        self.assertEqual(observation(cured)["ground_items"][0]["item"]["name"], "gold coin")
+        self.assertIsNone(observation(cured)["ground_items"][0]["presentation"])
+        self.assertFalse(cured["state"]["wizard_game"])
+
+    @non_graphical
+    def test_imported_hallucination_acquired_map_and_paid_history_survive_door_cure_reopen(self):
+        package = prepare_imported_hallucination(self, historical=True)
+        server = self.server("--checkpoint-interval", 1, scenario=package)
+        owner, initial = self.client(actor=1)
+        peer, _ = self.client(actor=2)
+        ids = hallucination_initial_items(self, initial)
+        first = self.hallucination_drink(owner, peer, ids["hallucination"])
+        assert_hallucination_sample(self, observation(first), 0)
+        target, = {row["id"] for row in observation(first)["visible_actors"]
+                   if row["id"] != observation(first)["self_target"]}
+        self.assertIsNone(self.act(owner, {"type": "use_ability", "id": "fixture.hallucination_plan",
+            "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}}})["error"])
+        acquired = self.advance(owner, [peer])
+        plan = observation(acquired)["combat"]["public_plan"]
+        self.assertEqual((plan["observed_at"], plan["subject_name"]), ("200", "bat"))
+        remembered = self.hallucination_memory(owner, acquired)
+        self.assertTrue(any(row["item"]["presentation"] is not None for row in remembered["ground_items"]))
+        door, = {cell["door"]["id"] for cell in observation(acquired)["visible_cells"] if cell.get("door")}
+        self.assertIsNone(self.act(owner, {"type": "set_door", "door": door, "open": False})["error"])
+        hidden = self.advance(owner, [peer])
+        self.assertEqual(observation(hidden)["ground_items"], [])
+        self.assertNotIn(remembered["key"], {cell["key"] for cell in observation(hidden)["visible_cells"]})
+        self.assertEqual(self.hallucination_memory(owner, hidden), remembered)
+        cured = self.hallucination_drink(owner, peer, ids["extra"])
+        self.assertIsNone(hallucination_condition(cured, "rogue.hallucinating"))
+        self.assertEqual(observation(cured)["ground_items"], [])
+        self.assertEqual(observation(cured)["combat"]["public_plan"], plan)
+        self.assertEqual(self.hallucination_memory(owner, cured), remembered)
+        saved = checkpoint(self, owner)
+        owner.stop(save=False)
+        peer.stop(save=False)
+        server.stop(save=False)
+        shutil.rmtree(package)
+        self.server("--checkpoint-interval", 1, scenario=ROOT / "scenarios/two-room", seed=None)
+        owner, restored = self.client(actor=1)
+        self.assertEqual(checkpoint(self, owner), saved)
+        self.assertEqual(observation(restored)["combat"]["public_plan"], plan)
+        self.assertEqual(self.hallucination_memory(owner, restored), remembered)
+        self.assertEqual(observation(restored)["ground_items"], [])
 
     @non_graphical
     def test_imported_haste_adventure_paid_doses_and_source_free_reopen(self):
