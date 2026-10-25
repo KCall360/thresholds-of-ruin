@@ -293,11 +293,21 @@ fn torch_strict_item_policy_and_runtime_fuel_reject_missing_and_invalid_shapes()
     let encoded = serde_json::to_value(&game.items[&item]).unwrap();
     let valid: crate::Item = serde_json::from_value(encoded.clone()).unwrap();
     assert!(game.item_state_valid(item, &valid));
-    for field in ["fuel"] {
-        let mut bad = encoded.clone();
-        bad.as_object_mut().unwrap().remove(field);
-        assert!(serde_json::from_value::<crate::Item>(bad).is_err());
-    }
+    let mut missing = encoded.clone();
+    missing.as_object_mut().unwrap().remove("fuel");
+    assert!(serde_json::from_value::<crate::Item>(missing).is_err());
+    let mut stowed = game.clone();
+    paid(&mut stowed, Action::Unequip { item }, 100);
+    assert!(!stowed
+        .equipment(OWNER)
+        .unwrap()
+        .values()
+        .any(|held| *held == item));
+    let ordinary_stowed = stowed.items[&item].clone();
+    assert!(stowed.item_state_valid(item, &ordinary_stowed));
+    let mut impossible_lit = ordinary_stowed;
+    impossible_lit.fuel.as_mut().unwrap().lit = true;
+    assert!(!stowed.item_state_valid(item, &impossible_lit));
     for fuel in [
         serde_json::json!({"remaining":0,"lit":true}),
         serde_json::json!([10, false]),
@@ -624,4 +634,80 @@ fn torch_consumes_one_real_grip_and_failed_third_grip_is_atomic() {
     assert_eq!(game, before);
     assert!(!game.items[&first].fuel.unwrap().lit);
     assert!(!game.items[&second].fuel.unwrap().lit);
+}
+
+#[test]
+fn torch_observer_sight_removal_and_expiry_invalidate_map_with_steady_fuel() {
+    let blind = crate::content_ids::ConditionId::new("torch_blind").unwrap();
+    let mut game = super::ray_tests::fixture_with(|document, _, _| {
+        let modifier = crate::rules::Modifier {
+            cancellable: false,
+            scope: crate::rules::Scope::Always,
+            op: crate::rules::ModifierOp::Perception {
+                value: crate::perception::PerceptionValue::Sight { enabled: false },
+            },
+        };
+        document.conditions.push(serde_json::from_value(serde_json::json!({
+            "id":"torch_blind", "family":"torch_blind", "name":"Torch blind", "lifecycle":"timed",
+            "timing":{"kind":"actor_active","on_expiry":{"kind":"remove"}},
+            "restrictions":[],"preparation":"preserve",
+            "modifiers":[modifier],
+            "stacking":{"kind":"longest"},"source_scoped":false,"descriptors":[],"capacity":"reject"
+        })).unwrap());
+    });
+    game.actors.get_mut(&ActorId(2)).unwrap().ready_at = 100_000;
+    game.world.set_region_light(RegionId(1), false).unwrap();
+    let item = game
+        .place_item_stack(30, at(1), Some(OWNER), 1, spec(1000, 4))
+        .unwrap();
+    let slot = EquipmentSlotId(
+        game.anatomy(OWNER)
+            .unwrap()
+            .slots
+            .iter()
+            .position(|slot| slot.as_str() == "held_light")
+            .unwrap() as u16,
+    );
+    game.equip_authored(OWNER, item, slot).unwrap();
+    game.set_item_light(item, true).unwrap();
+    game.apply_condition(ActorId(2), &blind, OWNER, 100)
+        .unwrap();
+    assert!(!game.actors[&ActorId(2)].perception().sight);
+    seed_map(&mut game, ActorId(2));
+    assert!(game.scene_snapshot(ActorId(2)).unwrap().1.is_empty());
+    let before = game.clone();
+    // The same dependency changes through ordinary removal with unchanged item
+    // storage. This contrast remains an intended red under the original root guard.
+    let mut removed = before.clone();
+    removed
+        .apply_effects(
+            ActorId(2),
+            &[crate::rules::Effect::RemoveCondition { condition: blind }],
+        )
+        .unwrap();
+    assert!(removed.actors[&ActorId(2)].perception().sight);
+    assert!(removed.items.shares_storage(&before.items));
+    assert!(removed
+        .scene_snapshot(ActorId(2))
+        .unwrap()
+        .1
+        .iter()
+        .any(|cell| cell.location == at(5)));
+    assert!(removed.map_disclosure_changed_since(&before, ActorId(2)));
+    // Actual timed expiry while the source burns is the new fuel-relaxation case.
+    paid(&mut game, Action::Wait, 100);
+    assert!(game.actors[&ActorId(2)].perception().sight);
+    assert_eq!(game.items[&item].fuel.unwrap().remaining, 900);
+    assert_eq!(game.emitter_signature(), before.emitter_signature());
+    assert!(game.world.shares_storage(&before.world));
+    assert!(game.actors[&ActorId(2)]
+        .knowledge
+        .shares_storage(&before.actors[&ActorId(2)].knowledge));
+    assert!(game
+        .scene_snapshot(ActorId(2))
+        .unwrap()
+        .1
+        .iter()
+        .any(|cell| cell.location == at(5)));
+    assert!(game.map_disclosure_changed_since(&before, ActorId(2)));
 }

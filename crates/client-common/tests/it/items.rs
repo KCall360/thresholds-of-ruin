@@ -312,7 +312,13 @@ fn portable_light_actions_use_authoritative_affordances_without_auto_equipping()
         ignitable: true,
         extinguishable: false,
     });
-    assert!(view.validate().is_ok());
+    assert!(StateView {
+        revision: 0,
+        wizard_game: false,
+        observation: view.clone()
+    }
+    .validate()
+    .is_ok());
     for invalid in 0..3 {
         let mut forged = view.clone();
         match invalid {
@@ -326,7 +332,13 @@ fn portable_light_actions_use_authoritative_affordances_without_auto_equipping()
                     .id = "ring".into()
             }
         }
-        assert!(forged.validate().is_err());
+        assert!(StateView {
+            revision: 0,
+            wizard_game: false,
+            observation: forged.clone()
+        }
+        .validate()
+        .is_err());
     }
     assert_eq!(
         item_action(&view, target(1), ItemOperation::Ignite).unwrap(),
@@ -364,7 +376,13 @@ fn portable_light_actions_use_authoritative_affordances_without_auto_equipping()
         ignitable: false,
         extinguishable: false,
     });
-    assert!(view.validate().is_ok());
+    assert!(StateView {
+        revision: 0,
+        wizard_game: false,
+        observation: view.clone()
+    }
+    .validate()
+    .is_ok());
     assert!(item_action(&view, target(1), ItemOperation::Ignite).is_err());
     assert_eq!(
         item_action(&view, target(1), ItemOperation::Equip).unwrap(),
@@ -379,7 +397,13 @@ fn portable_light_actions_use_authoritative_affordances_without_auto_equipping()
         .unwrap()
         .ignitable = true;
     assert!(
-        view.validate().is_err(),
+        StateView {
+            revision: 0,
+            wizard_game: false,
+            observation: view.clone()
+        }
+        .validate()
+        .is_err(),
         "stowed action eligibility cannot contradict the enclosing observation"
     );
 }
@@ -408,7 +432,13 @@ fn portable_light_completion_narration_is_explicit_and_not_repeated_on_fuel_upda
         ignitable: true,
         extinguishable: false,
     });
-    assert!(elapsed.validate().is_ok());
+    assert!(StateView {
+        revision: 0,
+        wizard_game: false,
+        observation: elapsed.clone()
+    }
+    .validate()
+    .is_ok());
     assert_eq!(
         tor_client_common::narration::completed_items(&after, &elapsed),
         ["You finish extinguishing the torch."]

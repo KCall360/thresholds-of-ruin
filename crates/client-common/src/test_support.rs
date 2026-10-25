@@ -185,7 +185,12 @@ pub fn portable_light_observation(lit: bool) -> Observation {
             }),
         }],
     });
-    view.validate()
-        .expect("valid physical portable-light disclosure");
+    StateView {
+        revision: 0,
+        wizard_game: false,
+        observation: view.clone(),
+    }
+    .validate()
+    .expect("valid physical portable-light disclosure");
     view
 }

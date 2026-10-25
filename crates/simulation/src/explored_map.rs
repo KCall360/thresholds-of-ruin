@@ -641,7 +641,8 @@ impl Game {
         let (Some(a), Some(b)) = (self.actors.get(&id), before.actors.get(&id)) else {
             return true;
         };
-        a.location != b.location
+        self.actor_scene_witness(id) != before.actor_scene_witness(id)
+            || a.location != b.location
             || a.orientation != b.orientation
             || !a.body.shares_storage(&b.body)
             || a.alive() != b.alive()

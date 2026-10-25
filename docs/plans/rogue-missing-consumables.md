@@ -889,3 +889,12 @@ This source checkpoint has not yet passed Rust compilation or torch runtime
 acceptance. New live certificates and saved/wire fixtures require genuine current
 writer/recorder runs. Final verification, native, release and hosted gates remain
 pending; live weighted stock and starting kits remain unchanged.
+
+The first grouped all-target compile preflight stopped on two mechanical fixture
+issues: six new observations called validation on the wrong wrapper, and an
+existing Action inventory omitted the two new variants. Corrections use the
+actual StateView validator and retain the exhaustive action contract. Before the
+next preflight, the map dependency guard also gained an actual observer scene
+witness, with independent sight removal/expiry and strict cross-record negative
+controls. Eighteen core cases are now registered. These additions and corrections
+have not yet run; no portable-torch runtime qualification is implied.
