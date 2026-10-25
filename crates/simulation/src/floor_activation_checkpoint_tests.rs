@@ -308,7 +308,6 @@ fn checkpoint_population_plan_cache_never_trusts_another_pool_or_context() {
 
     // The same numeric pool index in another decoded checkpoint has no trust
     // relationship with the first context, even when Content is unchanged.
-    let mut encoded = encoded;
     encoded["floor_activations"][0] = invalid;
     let other_shared: SharedState = serde_json::from_value(encoded.clone()).unwrap();
     let mut other_context = RestoreContext::new(&other_shared, game.content.clone());

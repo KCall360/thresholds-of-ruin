@@ -246,7 +246,7 @@ macro_rules! scalar {
         }
     )+};
 }
-scalar!(String, u16, u32);
+scalar!(String, u16, u32, u64);
 
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "crate::Scenario", deny_unknown_fields)]
