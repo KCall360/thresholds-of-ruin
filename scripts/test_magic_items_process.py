@@ -720,10 +720,13 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         package = prepare_imported_drain(self, weak=True)
         self.server("--checkpoint-interval", 1, scenario=package)
         probe, initial = self.client(observe=True)
-        text, _ = self.text_client()
-        for ground in observation(initial)["ground_items"]:
-            self.assertIn("Taken", text.command("take #" + ground["item"]["id"]))
+        # Human narration belongs to adventure mode; --script is diagnostic output.
+        text, _ = self.adventure()
+        self.say(text, "take all")
         before = self.snapshot(probe)
+        self.assertEqual(len(items(before, "wand")), 2)
+        self.assertEqual(len(items(before, "scroll")), 1)
+        self.assertEqual(observation(before)["ground_items"], [])
         wand = items(before, "wand")[0]
         self.assertEqual(int(observation(before)["combat"]["hp"]), 1)
         self.assertEqual(int(observation(before)["combat"]["max_hp"]), 1)
@@ -732,7 +735,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         self.assertEqual(saved["actors"]["1"]["turn_ticks"], 100)
         self.assertTrue(all(3 <= saved["items"][key]["charges"] <= 7 for key in ("30", "31")))
         for attempt in range(2):
-            reply = text.command("zap #" + wand["id"] + " east")
+            reply = self.say(text, "zap #" + wand["id"] + " east")
             self.assertIn("too weak", reply.lower())
             self.assertNotIn("You finish zapping", reply)
             after = self.snapshot(probe)

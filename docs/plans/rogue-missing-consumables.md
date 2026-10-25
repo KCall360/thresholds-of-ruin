@@ -571,3 +571,42 @@ correlation rather than silently discarding publications. Full frame and final
 observation comparisons remain intact; snapshot equality alone is not evidence
 of intermediate-update privacy. The corrected privacy comparison, regenerated
 artifacts and actual Drain process acceptance remain pending.
+
+The first real Drain process run passes empty-target and nonempty Health-loss
+acceptance, but its weak-attempt prose assertion selected the diagnostic
+`--script` interface. The retained wire update already contains the genuine
+TooWeak refusal. Diagnostic command output and adventure narration have distinct
+presentation contracts: narration assertions must use `adventure()`/`say()`.
+The fixture correction preserves authoritative time, HP, charge, knowledge and
+raw recording checks; it does not change the raw-mode presenter or gameplay.
+
+With the intended adventure caller, all three actual Drain process cases now
+pass: empty targeting, repeated paid weak refusal, and nonempty odd-Health loss,
+including the existing real checkpoint/reopen controls. The genuine recorder
+passes and produces 50 client and 51 server samples, including a real nonempty
+TooWeak refusal snapshot. Production package validation and certificate checking
+also pass. These receipts do not yet qualify the final affected server,
+protocol/common corpus consumers or broader verification gates.
+
+### Proposed next batch: physical first contact
+
+Cancellation and Magic Missile should reuse the existing paid ray planner and
+immutable source capture, with a closed checkless-cancellation versus one-contest
+missile policy. Trace through `World::ray_step` and its rotations, not a copied
+portal graph or a fixed gameplay range. Missing preparable geometry requires the
+existing same-tick load-only continuation; it is not an automatic miss. Detect
+full geometric cycles using location, direction and source-footprint-exit state,
+with explicit atomic resource failure rather than a disguised range cutoff.
+The first living body, including noncombat and loaded-frozen bodies, intercepts
+without searching past an ineligible recipient or advancing its clock.
+
+Cancellation metadata and saved suppression semantics remain design choices.
+Prefer explicit source tags and the smallest state that preserves ordinary
+attacks, recovery and owned advancement; no suppression ledger is selected.
+Current invisibility, guise and relevant hold cleanup must remain distinct from
+lasting special suppression, so later independent invisibility can work.
+Missile reuses one opposed contest and ordinary damage/lifecycle publication.
+Required acceptance includes long initially-unloaded physical paths, complete
+cycles, frozen/noncombat interception, precise tagged cleanup, payment/privacy,
+rollback and source-free pending-plan reopening. This subsection proposes the
+next coherent batch; it does not claim implementation or qualification.
