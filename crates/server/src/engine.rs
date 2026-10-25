@@ -2414,14 +2414,52 @@ impl Engine {
         use tor_simulation::RecordStore;
         let mut game = self.game.clone();
         let mut records = tor_simulation::MemoryRecords::default();
-        game.apply_region_transition(
-            &tor_simulation::RegionTransition {
-                active: BTreeSet::new(),
-                loaded: BTreeSet::new(),
-            },
-            &mut records,
-        )
-        .unwrap();
+        let detached = tor_simulation::RegionTransition {
+            active: BTreeSet::new(),
+            loaded: BTreeSet::new(),
+        };
+        // The paid actor still has its ordinary observing point. Prove its
+        // active-region pin before deliberately removing the test clone's
+        // observers through the public lifecycle API (not by bypassing pins).
+        let before = game.clone();
+        assert!(matches!(
+            game.apply_region_transition(&detached, &mut records),
+            Err(tor_simulation::TransitionError::MustBeActive(_))
+        ));
+        assert_eq!(game, before);
+        assert_eq!(records.ids().count(), 0);
+        let paid_history = game
+            .chart_history(tor_simulation::ActorId(1))
+            .expect("paid fixture chart history")
+            .clone();
+        let points: Vec<_> = game.reference_points().map(|(id, _)| id).collect();
+        assert!(!points.is_empty());
+        for point in points {
+            assert!(game.remove_reference_point(point));
+        }
+        // An outstanding controller input boundary is an independent active
+        // pin. Leave it through ordinary Wait actions, not private state edits.
+        // This fixture's external actors need at most one scheduler cycle.
+        let mut waited = BTreeSet::new();
+        while !game
+            .region_requirements(&detached.active, &detached.loaded)
+            .active
+            .is_empty()
+        {
+            let actor = game.next_actor().expect("ready fixture actor");
+            assert!(
+                waited.insert(actor),
+                "fixture input pin failed to discharge"
+            );
+            game.act(actor, tor_simulation::Action::Wait).unwrap();
+        }
+        assert_eq!(
+            game.chart_history(tor_simulation::ActorId(1)),
+            Some(&paid_history),
+            "observer removal and ordinary Wait preserve the exact paid history"
+        );
+        game.apply_region_transition(&detached, &mut records)
+            .unwrap();
         let ids: Vec<_> = records.ids().collect();
         let records = ids
             .into_iter()

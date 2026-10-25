@@ -1,5 +1,5 @@
 //! Real authored potion -> paid Service -> chart reply -> source-deleted reopen.
-//! Synthetic source expands geometry only; no privileged condition/item injection.
+//! Synthetic authored source supplies detection effects and explicit magic; no privileged injection.
 use super::*;
 use tor_protocol::chart_pages::*;
 fn chart_source(root: &Path, kind: &str) -> crate::Scenario {
@@ -22,6 +22,10 @@ fn chart_source(root: &Path, kind: &str) -> crate::Scenario {
     manifest["spatial_scopes"] = json!({"study":{"members":[1],"rooms":{"1":[{"region":1,"min":[0,0,0],"max":[31,31,7]}]},"passages":[],"doorways":[]}});
     manifest["creatures"]["species"]["figure"]["detection_appearance"] =
         json!({"name":"fixture figure","asset":null});
+    // Item class/device effects alone do not satisfy the settled Magic census.
+    // Authored magic makes the ground positive and own-pack exclusion real.
+    manifest["archetypes"]["ember"]["magical"] = json!(true);
+    manifest["archetypes"]["draught"]["magical"] = json!(true);
     manifest["archetypes"]["draught"]["consumable"] = json!({"discovery":"self_effect","effects":[
         if kind=="detect_monsters"{json!({"kind":kind,"condition":"fixture.monster_sense"})}else{json!({"kind":kind})}
     ]});
@@ -272,8 +276,9 @@ fn historical_magic_is_frozen_across_movement_source_deleted_reopen_and_spectato
     assert_eq!(
         rows(&first).len(),
         1,
-        "ground magic only; own potion excluded"
+        "ground magic only; own magical potion excluded"
     );
+    assert_eq!(rows(&first)[0].mark, ChartMark::Magic);
     act_as(
         &mut wire,
         OWNER,
@@ -471,42 +476,65 @@ fn paid_magic_history_encoder_rollback(exact_retry: bool) {
         );
     }
     if !exact_retry {
-        // A failed completion retains the original queue. Cancel it explicitly
-        // through the ordinary user protocol before admitting a NEW transaction;
-        // resetting this test limit does not install any production auto-retry.
-        for actor in wire.clients.keys().copied().collect::<Vec<_>>() {
-            let pending = wire.snapshot(actor).readiness.cancel.clone();
-            for (ordinal, intention) in pending.into_iter().enumerate() {
-                let snapshot = wire.snapshot(actor);
-                let request = Request::Command {
-                    context: snapshot.reply_context().input,
-                    branch: snapshot.branch.clone(),
-                    command: Command::CancelIntention {
-                        expected_revision: snapshot.state.revision,
-                        intention,
-                        step: None,
-                    },
-                };
-                ack(wire.send(
-                    actor,
-                    &format!("storage-cancel-{}-{ordinal}", actor.0),
-                    request,
-                ));
-            }
-            assert!(wire.service.engine.pending_intentions(actor).is_empty());
-        }
+        // Item preparation is deliberately not cancellable. A storage failure
+        // preserves that exact admitted plan; use the established control-loss
+        // pause and a NEW ordinary ResumeIntention transaction, not a fabricated
+        // cancellation, fresh dose, or production automatic retry.
+        let original_intention = match &admitted {
+            RequestReceipt::Admitted { intention, .. } => intention.clone(),
+            _ => panic!("ordinary paid admission"),
+        };
+        let pending = wire.snapshot(OWNER);
+        assert!(!pending.readiness.cancel.contains(&original_intention));
+        assert!(wire
+            .service
+            .engine
+            .pending_intentions(OWNER)
+            .iter()
+            .any(|status| { status.intention == original_intention && status.phase.active() }));
+        ack(wire.send(OWNER, "storage-pause", Request::ReleaseControl));
+        ack(wire.send(OWNER, "storage-reacquire", Request::AcquireControl));
+        wire.service.run_until_blocked();
+        let paused = wire.snapshot(OWNER);
+        assert!(paused.readiness.resume.contains(&original_intention));
+        assert!(!paused.readiness.cancel.contains(&original_intention));
         assert_eq!(nothing_items(&wire.checkpoint())["10"]["quantity"], 3);
-        let cancelled = ack(wire.send(OWNER, "storage-dose", request));
+        assert!(!nothing_identified(&paused, dose));
+        let inactive = paused
+            .state
+            .observation
+            .charts
+            .iter()
+            .find(|summary| summary.kind == ChartKind::Magic)
+            .unwrap();
+        assert_eq!(inactive.status, ChartStatus::Inactive);
+        assert!(inactive.chart.is_none() && inactive.latest_attempt.is_none());
+        let resume = Request::Command {
+            context: paused.reply_context().input,
+            branch: paused.branch.clone(),
+            command: Command::ResumeIntention {
+                expected_revision: paused.state.revision,
+                intention: original_intention,
+            },
+        };
+        let resumed = ack(wire.send(OWNER, "storage-resume-new", resume.clone()));
+        assert!(
+            resumed.entry_id().is_some(),
+            "new user transaction is durable"
+        );
+        assert_ne!(
+            resumed.entry_id(),
+            admitted.entry_id(),
+            "the explicit new user transaction has its own durable receipt"
+        );
+        let completed = wire.finish(OWNER, "storage-dose", &request);
+        assert_eq!(
+            completed.entry_id(),
+            admitted.entry_id(),
+            "resuming preserves the original paid work identity"
+        );
         assert!(matches!(
-            cancelled,
-            RequestReceipt::Admitted {
-                phase: IntentionPhase::Cancelled,
-                ..
-            }
-        ));
-        let resumed = wire.act("storage-dose-new", Action::Drink { item: dose });
-        assert!(matches!(
-            resumed,
+            completed,
             RequestReceipt::Admitted {
                 phase: IntentionPhase::Resolved,
                 ..
@@ -533,6 +561,18 @@ fn paid_magic_history_encoder_rollback(exact_retry: bool) {
         assert_eq!(
             (summary.mode, summary.status),
             (ChartMode::Historical, ChartStatus::Available)
+        );
+        assert_eq!(
+            summary.latest_attempt.as_ref().unwrap().status,
+            ChartAttemptStatus::Positive
+        );
+        let published = wire.checkpoint();
+        assert_eq!(ack(wire.send(OWNER, "storage-resume-new", resume)), resumed);
+        assert_eq!(ack(wire.send(OWNER, "storage-dose", request)), completed);
+        assert_eq!(
+            wire.checkpoint(),
+            published,
+            "both exact receipt retries preserve one paid acquisition/consumption"
         );
         return;
     }
@@ -572,6 +612,10 @@ fn paid_magic_history_encoder_rollback(exact_retry: bool) {
     assert_eq!(
         (summary.mode, summary.status),
         (ChartMode::Historical, ChartStatus::Available)
+    );
+    assert_eq!(
+        summary.latest_attempt.as_ref().unwrap().status,
+        ChartAttemptStatus::Positive
     );
     let resolved = ack(wire.send(OWNER, "storage-dose", request.clone()));
     assert!(matches!(

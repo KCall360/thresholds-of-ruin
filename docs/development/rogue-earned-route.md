@@ -21,9 +21,14 @@ emus and two snakes. The source-only fixture
 `scripts/fixtures/rogue-earned-baseline-v24` retains exact package inputs and its
 current bundled-rule dependency hash. Its latest source-only transition advances
 the scenario header from 31 to 32 for detection/mapping compatibility and the
-bundled import from interactions-v52 to interactions-v53. The fresh rules identity
-records the already-authored portable-light held-light anatomy and slot addition;
-this transition does not qualify compiler output or route outcomes.
+bundled import from the preceding pinned identity to current `interactions-v53`.
+The [prior source receipt](../../scripts/fixtures/rogue-earned-baseline-v23/source.json)
+and [current transition receipt](../../scripts/fixtures/rogue-earned-baseline-v24/format-transition.json)
+retain the exact old/new identities and hashes; their historical proof is not
+rewritten. The fresh rules identity records the already-authored portable-light
+held-light anatomy and slot addition. This is not a claim that prior rule
+semantics or outcomes are unchanged, and the transition does not qualify
+compiler output or route outcomes.
 All other authored package bytes, including anatomy, items, player kits and
 population stages, are unchanged; no maze or room-omission policy, wandering policy, control
 scrolls, utility-magic or ring loot, discovery stages, traps or secret closures are

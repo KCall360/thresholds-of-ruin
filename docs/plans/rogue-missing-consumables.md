@@ -1882,3 +1882,23 @@ checkpoint is byte-for-byte the genuine decoded TORC payload, with matched hashe
 it retains Food and Magic positives beside later empty attempts, plus 1,024
 Mapping proof points. Corrected core/server execution, rebuilt apps and the
 bounded release performance gate are still pending at this source checkpoint.
+
+The final core regression passes **2,041 tests, zero failures and zero ignored**,
+including mandatory cached/uncached history controls. The next full server run
+passes 1,183 and fails four new native fixture assertions; all older lazy-loading
+regressions and the aggregate storage guards pass. The remaining fixtures now
+explicitly author their intended magical items, resume the original prepared
+drink through a fresh user resume transaction (never prohibited cancellation),
+and prove active-region refusal before publicly removing observation/input pins
+on a test clone while preserving exact paid history. Strict server all-target
+Clippy passes; corrected native execution remains pending.
+
+The user approved necessary independent 3D compatibility in separate commits.
+All 44 current scenario certificates now validate/check. The 3D workspace and
+all targets compile-check successfully, and all 38 model tests pass. App scene
+execution, release checks and native presentation are not inferred from those
+results. The independent local graphical inventory contains nine deferred methods
+and one retained non-graphical method; ordinary discovery contains 99 deferred
+and 2,153 retained methods. These are explicit local-only deferrals, never native
+passes, and graphical hosted-CI requirements remain unchanged. The bounded idle
+release performance gate and genuine aggregate verification remain outstanding.
