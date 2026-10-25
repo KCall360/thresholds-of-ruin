@@ -164,6 +164,7 @@ fn cooldowns_survive_permanent_drain_and_reacquisition_without_rephasing() {
         .unwrap()
         .modifiers
         .push(Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::GrantAbility {
                 ability: ability.clone(),
@@ -208,6 +209,7 @@ fn cooldowns_survive_temporary_and_equipment_grant_changes() {
     let ability = AbilityId::new("spark_lance_fire").unwrap();
     let condition = ConditionId::new("fear").unwrap();
     let grant = Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::GrantAbility {
             ability: ability.clone(),
@@ -247,6 +249,7 @@ fn cooldowns_survive_temporary_and_equipment_grant_changes() {
             modifiers: vec![
                 grant,
                 Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Add {
                         stat: Stat::HealthRecoveryPeriod,
@@ -254,6 +257,7 @@ fn cooldowns_survive_temporary_and_equipment_grant_changes() {
                     },
                 },
                 Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Add {
                         stat: Stat::Attribute {
@@ -372,6 +376,7 @@ fn lethal_condition_expiry_stops_cooldown_advancement_at_that_boundary() {
         .unwrap()
         .modifiers
         .push(Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Add {
                 stat: Stat::Health,

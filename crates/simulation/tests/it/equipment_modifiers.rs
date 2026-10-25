@@ -30,6 +30,7 @@ fn equipped(
 
 fn modifier(op: ModifierOp) -> Modifier {
     Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op,
     }

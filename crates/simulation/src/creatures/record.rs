@@ -789,6 +789,7 @@ mod tests {
                 item: crate::ItemId(1),
                 socket: crate::EquipmentSlotId(0),
                 modifiers: vec![Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Add {
                         stat: Stat::ResourceMax {
@@ -943,6 +944,7 @@ mod tests {
             .unwrap()
             .modifiers
             .push(Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Add {
                     stat: Stat::ResourceMax {
@@ -1015,6 +1017,7 @@ mod tests {
             .unwrap()
             .modifiers
             .push(Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Set {
                     stat: attribute.clone(),
@@ -1043,6 +1046,7 @@ mod tests {
             socket: crate::EquipmentSlotId(0),
             attack: None,
             modifiers: vec![Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Add {
                     stat: attribute,
@@ -1140,6 +1144,7 @@ mod tests {
             if conditioned {
                 let mut immune = equipment;
                 immune[0].modifiers.push(Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Immunity {
                         selector: crate::rules::Selector::Descriptor {

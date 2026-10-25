@@ -1619,6 +1619,7 @@ mod tests {
             preparation: tor_simulation::rules::ConditionPreparation::Preserve,
             name: "Borrowed grant".into(),
             modifiers: vec![Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::GrantAbility {
                     ability: ability.id.clone(),
@@ -1632,12 +1633,14 @@ mod tests {
         let mut template =
             crate::creatures::Template::new(TemplateId::new("borrowed_grant").unwrap(), 0);
         template.modifiers.push(Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::GrantAbility {
                 ability: ability.id,
             },
         });
         template.modifiers.push(Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::GrantAbility {
                 ability: AbilityId::new("fixture_paid_melee").unwrap(),
@@ -2419,6 +2422,7 @@ mod growth_tests {
                 .unwrap()
                 .modifiers
                 .push(crate::rules::Modifier {
+                    cancellable: false,
                     scope: crate::rules::Scope::Always,
                     op: crate::rules::ModifierOp::Set {
                         stat: crate::rules::Stat::Health,
@@ -2447,6 +2451,7 @@ mod growth_tests {
         equip_growth_obstruction(
             &mut game,
             vec![crate::rules::Modifier {
+                cancellable: false,
                 scope: crate::rules::Scope::Always,
                 op: crate::rules::ModifierOp::Set {
                     stat: crate::rules::Stat::Health,
@@ -2959,6 +2964,7 @@ mod growth_tests {
                 .iter()
                 .cloned()
                 .map(|descriptor| crate::rules::Modifier {
+                    cancellable: false,
                     scope: crate::rules::Scope::Always,
                     op: crate::rules::ModifierOp::Immunity {
                         selector: crate::rules::Selector::Descriptor { descriptor },

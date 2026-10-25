@@ -27,6 +27,7 @@ fn rolled() -> AmountExpr {
 }
 fn modifiers(value: i64) -> Vec<Modifier> {
     vec![Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Add {
             stat: Stat::Ability {
@@ -228,6 +229,7 @@ fn effective_interaction_natural_riders_keep_their_unmodified_rolled_amount() {
             ability.interaction = Interaction::NonHostile;
             ability.strikes = StrikeSource::NaturalMelee {
                 additional_riders: vec![RiderDef {
+                    cancellable: false,
                     condition: None,
                     trigger: RiderTrigger::Success,
                     check: None,
@@ -239,6 +241,7 @@ fn effective_interaction_natural_riders_keep_their_unmodified_rolled_amount() {
         |_, species| {
             species.modifiers.extend(modifiers(3));
             let strikes = vec![StrikeDef {
+                cancellable: false,
                 offset: 0,
                 unlock: None,
                 check: None,
@@ -320,6 +323,7 @@ fn effective_interaction_extra_dice_follow_rolled_and_fixed_scopes() {
             socket: EquipmentSlotId(0),
             attack: None,
             modifiers: vec![Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Add {
                     stat: Stat::Ability {
@@ -480,6 +484,7 @@ fn effective_interaction_combined_rebuild_cannot_evict_the_existing_condition() 
 #[test]
 fn effective_interaction_harmless_numeric_pool_conflict_keeps_soft_reconciliation() {
     let dice_modifier = |value| Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Add {
             stat: Stat::Ability {
@@ -745,6 +750,7 @@ fn growth_harmless_numeric_pool_conflict_retains_xp_and_conditions_until_source_
         .unwrap()
         .modifiers
         .push(Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Add {
                 stat: Stat::Ability {

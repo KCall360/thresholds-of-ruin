@@ -1459,6 +1459,7 @@ mod tests {
             slot: crate::EquipmentSlot::new("body_armor").unwrap(),
             attack: None,
             modifiers: vec![Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::GrantAbility {
                     ability: AbilityId::new("missing_ability").unwrap(),

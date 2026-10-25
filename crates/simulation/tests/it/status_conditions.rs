@@ -477,6 +477,7 @@ fn gaining_and_losing_descriptor_immunity_ends_effect_once_without_erasing_prote
         item: tor_simulation::ItemId(1),
         socket: tor_simulation::EquipmentSlotId(0),
         modifiers: vec![Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Immunity {
                 selector: Selector::Descriptor {

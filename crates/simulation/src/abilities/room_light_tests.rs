@@ -306,6 +306,7 @@ fn room_light_is_not_a_natural_melee_payload() {
             0 => strike.on_success.push(crate::rules::Effect::RoomLight),
             1 => strike.on_failure.push(crate::rules::Effect::RoomLight),
             _ => strike.riders.push(crate::rules::RiderDef {
+                cancellable: false,
                 trigger: crate::rules::RiderTrigger::Success,
                 condition: None,
                 check: None,

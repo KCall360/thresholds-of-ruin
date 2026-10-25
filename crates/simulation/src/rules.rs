@@ -2069,7 +2069,8 @@ impl Ruleset {
                                     scope: Scope::Always,
                                     op: ModifierOp::Locomotion {
                                         value: crate::locomotion::LocomotionValue::Confused { .. }
-                                    }
+                                    },
+                                    ..
                                 }
                             )
                         })),
@@ -3619,6 +3620,7 @@ mod tests {
         if matches!(doc.abilities[index].strikes, StrikeSource::SelectedMelee) {
             doc.abilities[index].strikes = StrikeSource::Authored {
                 strikes: vec![StrikeDef {
+                    cancellable: false,
                     offset: 0,
                     unlock: None,
                     check: None,
@@ -3673,6 +3675,7 @@ mod tests {
                 1 => definition.lifecycle = ConditionLifecycle::NextCheck,
                 2 => {
                     definition.modifiers.push(Modifier {
+                        cancellable: false,
                         scope: Scope::Always,
                         op: ModifierOp::Add {
                             stat: Stat::Health,
@@ -3718,6 +3721,7 @@ mod tests {
     #[test]
     fn unsupported_scoped_modifiers_and_flag_implications_reject() {
         let invalid = Modifier {
+            cancellable: false,
             scope: Scope::VersusSource,
             op: ModifierOp::Add {
                 stat: Stat::Health,
@@ -3726,6 +3730,7 @@ mod tests {
         };
         assert!(validate_modifier_shapes(&[invalid]).is_err());
         let scoped = Modifier {
+            cancellable: false,
             scope: Scope::VersusSource,
             op: ModifierOp::Add {
                 stat: Stat::Edge,
@@ -3757,6 +3762,7 @@ mod tests {
             name: "Many edges".into(),
             modifiers: vec![
                 Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Add {
                         stat: Stat::Edge,
@@ -3775,6 +3781,7 @@ mod tests {
             preparation: tor_simulation::rules::ConditionPreparation::Preserve,
             name: "Marked".into(),
             modifiers: vec![Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Flag { flag },
             }],
@@ -3797,6 +3804,7 @@ mod tests {
             name: "Many edges".into(),
             modifiers: vec![
                 Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Add {
                         stat: Stat::Edge,
@@ -3808,11 +3816,13 @@ mod tests {
         });
         let rules = Ruleset::validate(doc).unwrap();
         let mut source = vec![Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Flag { flag },
         }];
         source.extend(vec![
             Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Add {
                     stat: Stat::Edge,
@@ -3852,6 +3862,7 @@ mod tests {
                 requirements: vec![],
             },
             modifiers: vec![Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Add {
                     stat: Stat::Health,
@@ -3878,6 +3889,7 @@ mod tests {
             })
         ));
         let bad = Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::GrantAbility {
                 ability: AbilityId::new("missing").unwrap(),
@@ -3917,6 +3929,7 @@ mod tests {
     fn implied_flag_cycles_are_rejected() {
         let mut doc = document();
         doc.flags[0].modifiers.push(Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Flag {
                 flag: FlagId::new("mindless").unwrap(),
@@ -3995,6 +4008,7 @@ mod tests {
             Err(RulesetError::Bound { .. })
         ));
         let invalid = Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Add {
                 stat: Stat::Ability {
@@ -4052,6 +4066,7 @@ mod tests {
             matches!(Ruleset::validate(doc), Err(RulesetError::Bound { field }) if field == "ability_tags")
         );
         let invalid = Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Add {
                 stat: Stat::AbilityTag {
@@ -4256,6 +4271,7 @@ mod edge_source_validation_tests {
                     let mut document: RulesetDocument =
                         toml::from_str(DEFAULT_RULESET_TOML).unwrap();
                     let mut modifier = Modifier {
+                        cancellable: false,
                         scope: Scope::Always,
                         op: ModifierOp::Set {
                             stat: stat.clone(),
@@ -4270,6 +4286,7 @@ mod edge_source_validation_tests {
                             modifiers: vec![modifier],
                         });
                         modifier = Modifier {
+                            cancellable: false,
                             scope: Scope::Always,
                             op: ModifierOp::Flag { flag },
                         };
@@ -4344,6 +4361,7 @@ mod edge_source_validation_tests {
     fn talent_flat_check_bonuses_are_rejected_by_the_loader() {
         let mut document: RulesetDocument = toml::from_str(DEFAULT_RULESET_TOML).unwrap();
         document.talents[0].modifiers.push(Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Add {
                 stat: Stat::Ability {
@@ -4364,6 +4382,7 @@ mod edge_source_validation_tests {
                 id: id.clone(),
                 name: "Accuracy loophole".into(),
                 modifiers: vec![Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Set {
                         stat: Stat::AbilityTag {
@@ -4375,6 +4394,7 @@ mod edge_source_validation_tests {
                 }],
             });
             let modifier = Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Flag { flag: id },
             };
@@ -4390,6 +4410,7 @@ mod edge_source_validation_tests {
     fn condition_flat_check_bonuses_are_rejected_by_the_loader() {
         let mut document: RulesetDocument = toml::from_str(DEFAULT_RULESET_TOML).unwrap();
         document.conditions[0].modifiers.push(Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Add {
                 stat: Stat::Ability {

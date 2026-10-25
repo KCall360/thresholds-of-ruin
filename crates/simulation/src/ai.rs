@@ -924,7 +924,7 @@ impl Game {
                 };
                 plan
             };
-            if safe_healing_plan(&plan) {
+            if self.effective_safe_healing_plan(&plan) {
                 if let Some(plan) = self.physical_ai_plan(plan, view) {
                     return Some(plan);
                 }
@@ -1189,6 +1189,7 @@ mod tests {
         };
         let mut hero = test_creatures::species();
         hero.modifiers.push(Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Immunity {
                 selector: Selector::Descriptor {
@@ -1211,6 +1212,7 @@ mod tests {
             .chain(fear.then_some("fixture_focus_fear"))
         {
             foe.modifiers.push(Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::GrantAbility {
                     ability: AbilityId::new(name).unwrap(),
@@ -1219,6 +1221,7 @@ mod tests {
         }
         if magical {
             foe.modifiers.push(Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Flag {
                     flag: FlagId::new("magical").unwrap(),
@@ -1398,6 +1401,7 @@ mod tests {
             slot: crate::EquipmentSlot::new("ring").unwrap(),
             attack: None,
             modifiers: vec![crate::rules::Modifier {
+                cancellable: false,
                 scope: crate::rules::Scope::Always,
                 op: crate::rules::ModifierOp::Add {
                     stat: crate::rules::Stat::Defense {
@@ -1863,6 +1867,7 @@ mod tests {
             .unwrap();
         let mut foe = test_creatures::species();
         foe.modifiers.push(Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Flag {
                 flag: FlagId::new("magical").unwrap(),
@@ -1876,6 +1881,7 @@ mod tests {
             definition.ai.range_preference = RangePreference::Any;
             definition.cost = None;
             foe.modifiers.push(Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::GrantAbility {
                     ability: definition.id.clone(),
@@ -1895,6 +1901,7 @@ mod tests {
                 resolution: 100,
             });
             foe.modifiers.push(Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::GrantAbility {
                     ability: definition.id.clone(),
@@ -2051,12 +2058,14 @@ mod tests {
         let mut foe = test_creatures::species();
         foe.modifiers.extend([
             Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::GrantAbility {
                     ability: observation.clone(),
                 },
             },
             Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Set {
                     stat: Stat::ResourceMax {
@@ -2166,6 +2175,7 @@ mod tests {
         };
         let mut foe = test_creatures::species();
         foe.modifiers.push(Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::GrantAbility {
                 ability: AbilityId::new("read_the_rhythm").unwrap(),
@@ -2231,6 +2241,7 @@ mod tests {
         let mut foe = test_creatures::species();
         let ordinary = foe.clone();
         foe.modifiers.push(Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Locomotion {
                 value: LocomotionValue::Erratic {

@@ -956,6 +956,7 @@ mod tests {
             protected.restrictions = vec![ConditionRestriction::VoluntaryActions];
             protected.preparation = ConditionPreparation::Pause;
             protected.modifiers = vec![Modifier {
+                cancellable: false,
                 scope: crate::rules::Scope::Always,
                 op: crate::rules::ModifierOp::Locomotion {
                     value: crate::locomotion::LocomotionValue::Confused {

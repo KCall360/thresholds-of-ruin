@@ -11,6 +11,7 @@ fn recovery_translation_game() -> crate::Game {
     quiet.id = crate::content_ids::ConditionId::new("quiet_movement_probe").unwrap();
     quiet.family = crate::content_ids::ConditionFamilyId::new("quiet_movement_probe").unwrap();
     quiet.modifiers = vec![crate::rules::Modifier {
+        cancellable: false,
         scope: crate::rules::Scope::WhileNoSensedHostile,
         op: crate::rules::ModifierOp::Add {
             stat: crate::rules::Stat::HealthRecoveryPeriodPercent,

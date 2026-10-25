@@ -6984,6 +6984,7 @@ value = 13
             .get_mut("figure")
             .unwrap()
             .modifiers = vec![crate::creature_authoring::Modifier {
+            cancellable: false,
             scope: crate::creature_authoring::Scope::Always,
             op: crate::creature_authoring::Op::Add {
                 stat: crate::creature_authoring::Stat::Health,
@@ -7048,6 +7049,7 @@ value = 13
                 .unwrap()
                 .modifiers
                 .push(crate::creature_authoring::Modifier {
+                    cancellable: false,
                     scope: crate::creature_authoring::Scope::Always,
                     op: crate::creature_authoring::Op::Perception { value },
                 });
@@ -7178,6 +7180,7 @@ value = 13
         ])).unwrap();
         let mut override_species = definitions.creatures.species["figure"].clone();
         override_species.modifiers = vec![crate::creature_authoring::Modifier {
+            cancellable: false,
             scope: crate::creature_authoring::Scope::Always,
             op: crate::creature_authoring::Op::Add {
                 stat: crate::creature_authoring::Stat::Health,

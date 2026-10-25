@@ -51,6 +51,8 @@ pub struct Natural {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Strike {
+    #[serde(default)]
+    pub cancellable: bool,
     pub offset: u64,
     pub unlock: Option<String>,
     pub check: Option<Check>,
@@ -66,6 +68,8 @@ pub struct Strike {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Rider {
+    #[serde(default)]
+    pub cancellable: bool,
     pub trigger: RiderTrigger,
     pub condition: Option<RiderCondition>,
     pub check: Option<RiderCheck>,
@@ -226,6 +230,7 @@ fn descriptors(values: &[String], rules: &s::rules::Ruleset) -> Result<Vec<Descr
 impl Strike {
     fn compile(&self, rules: &s::rules::Ruleset) -> Result<s::rules::StrikeDef, Failure> {
         Ok(s::rules::StrikeDef {
+            cancellable: self.cancellable,
             offset: self.offset,
             unlock: self
                 .unlock
@@ -241,6 +246,7 @@ impl Strike {
                 .iter()
                 .map(|rider| {
                     Ok(s::rules::RiderDef {
+                        cancellable: rider.cancellable,
                         trigger: match rider.trigger {
                             RiderTrigger::Success => s::rules::RiderTrigger::Success,
                             RiderTrigger::Failure => s::rules::RiderTrigger::Failure,
@@ -418,6 +424,7 @@ fn effects(values: &[Effect], rules: &s::rules::Ruleset) -> Result<Vec<s::rules:
                 Effect::RestoreHitDie => s::rules::Effect::RestoreHitDie,
                 Effect::RoomLight => s::rules::Effect::RoomLight,
                 Effect::DrainLife => s::rules::Effect::DrainLife,
+                Effect::CancelSpecials => s::rules::Effect::CancelSpecials,
                 Effect::StepSelfOneCell => s::rules::Effect::StepSelfOneCell,
                 Effect::TeleportRandom => s::rules::Effect::TeleportRandom,
                 Effect::TeleportToRayOrigin => s::rules::Effect::TeleportToRayOrigin,

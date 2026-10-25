@@ -88,6 +88,7 @@ impl crate::EquipmentSpec {
             if amount != 0 {
                 for category in [DamageType::Impact, DamageType::Keen] {
                     modifiers.push(Modifier {
+                        cancellable: false,
                         scope: Scope::Always,
                         op: ModifierOp::Reduction {
                             selector: Selector::Category { category },
@@ -325,6 +326,7 @@ impl Item {
         if equipment.armor.is_some() && self.condition.armor_enchantment != 0 {
             for category in [DamageType::Energy, DamageType::Spirit, DamageType::Vital] {
                 equipment.modifiers.push(Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Reduction {
                         selector: Selector::Category { category },
@@ -488,6 +490,7 @@ mod tests {
             armor: Some(armor),
             attack: None,
             modifiers: vec![Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Reduction {
                     selector: Selector::Category {
@@ -879,6 +882,7 @@ mod tests {
         let mut spec = (*worn.spec).clone();
         let gear = spec.equipment.as_mut().unwrap();
         let zero = Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Add {
                 stat: crate::rules::Stat::AttackDamageRollBonus,

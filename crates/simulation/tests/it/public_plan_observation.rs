@@ -39,6 +39,7 @@ fn observation_duel(
     });
     observation.strikes = StrikeSource::Authored {
         strikes: vec![StrikeDef {
+            cancellable: false,
             offset: 0,
             unlock: None,
             check: None,
@@ -65,6 +66,7 @@ fn observation_duel(
     };
     slow.strikes = StrikeSource::Authored {
         strikes: vec![StrikeDef {
+            cancellable: false,
             offset: 0,
             unlock: None,
             check: None,
@@ -89,6 +91,7 @@ fn observation_duel(
         .unwrap()
         .modifiers
         .push(Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::GrantAbility {
                 ability: super::abilities::id("slow_plan"),
@@ -554,6 +557,7 @@ fn public_plan_review_ability_source_validation_rejects_ineligible_payload_matri
                     "success" => strike.on_success.push(qualified_source_effect()),
                     "failure" => strike.on_failure.push(qualified_source_effect()),
                     "rider" => strike.riders.push(RiderDef {
+                        cancellable: false,
                         condition: None,
                         trigger: RiderTrigger::Success,
                         check: None,
@@ -666,6 +670,7 @@ fn public_plan_review_natural_source_matrix_rejects_ineligible_qualified_effects
     let mut mismatches = Vec::new();
     for (label, effect, expected) in qualified_named_cases() {
         let strike = StrikeDef {
+            cancellable: false,
             offset: 0,
             unlock: None,
             check: None,

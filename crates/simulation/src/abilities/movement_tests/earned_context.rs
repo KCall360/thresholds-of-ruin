@@ -34,6 +34,7 @@ fn context_growth_game_with_rules(
             minimum: crate::HdCount(2),
         },
         modifiers: vec![crate::rules::Modifier {
+            cancellable: false,
             scope: crate::rules::Scope::WhileNoSensedHostile,
             op: crate::rules::ModifierOp::Add {
                 stat: crate::rules::Stat::HealthRecoveryPeriodPercent,
@@ -47,6 +48,7 @@ fn context_growth_game_with_rules(
     let mut species = crate::test_creatures::species();
     // Fatal-effect XP is the delivery path, not a quiet-clock reset experiment.
     species.modifiers.push(crate::rules::Modifier {
+        cancellable: false,
         scope: crate::rules::Scope::Always,
         op: crate::rules::ModifierOp::Set {
             stat: crate::rules::Stat::HealthRecoveryResetPercent,
@@ -351,6 +353,7 @@ fn pending_recovery_survives_repeated_growth_equipment_and_condition_folds_until
             preparation: tor_simulation::rules::ConditionPreparation::Preserve,
             name: "Pending quiet clock".into(),
             modifiers: vec![Modifier {
+                cancellable: false,
                 scope: Scope::WhileNoSensedHostile,
                 op: ModifierOp::Add {
                     stat: Stat::HealthRecoveryPeriodPercent,
@@ -371,6 +374,7 @@ fn pending_recovery_survives_repeated_growth_equipment_and_condition_folds_until
             preparation: tor_simulation::rules::ConditionPreparation::Preserve,
             name: "Ordinary clock change".into(),
             modifiers: vec![Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Add {
                     stat: Stat::HealthRecoveryPeriod,
@@ -435,6 +439,7 @@ fn pending_recovery_survives_repeated_growth_equipment_and_condition_folds_until
         slot: slot.clone(),
         attack: None,
         modifiers: vec![Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Set {
                 stat: Stat::HealthRecoveryPeriod,
@@ -450,6 +455,7 @@ fn pending_recovery_survives_repeated_growth_equipment_and_condition_folds_until
         .unwrap()
         .modifiers
         .push(Modifier {
+            cancellable: false,
             scope: Scope::WhileNoSensedHostile,
             op: ModifierOp::Add {
                 stat: Stat::HealthRecoveryPeriodPercent,

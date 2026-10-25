@@ -270,6 +270,7 @@ fn data_range_modifier_changes_both_disclosure_and_authoritative_targeting() {
     let mut catalog = original.catalog().clone();
     let mut extension = Template::new(TemplateId::new("long_reach").unwrap(), 0);
     extension.modifiers = vec![Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Add {
             stat: Stat::Ability {
@@ -521,6 +522,7 @@ fn phase5_supportive_sight_range_modifiers_are_frozen_and_disclosed() {
     let mut catalog = original.catalog().clone();
     let mut extension = Template::new(TemplateId::new("ally_reach").unwrap(), 0);
     extension.modifiers.push(Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Add {
             stat: Stat::Ability {

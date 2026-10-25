@@ -216,7 +216,8 @@ impl Game {
             let Ok(plan) = self.ability_plan_in_scene(actor, id, actor, sight) else {
                 continue;
             };
-            if !self.ai_plan_resources_available(&plan) || !crate::ai::safe_healing_plan(&plan) {
+            if !self.ai_plan_resources_available(&plan) || !self.effective_safe_healing_plan(&plan)
+            {
                 continue;
             }
             // Keep one complete recipe; component-wise minima across alternatives
@@ -1093,6 +1094,7 @@ mod tests {
     }
     fn defense(value: i64) -> Modifier {
         Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Add {
                 stat: Stat::Defense {
@@ -1104,6 +1106,7 @@ mod tests {
     }
     fn reduction(amount: u32) -> Modifier {
         Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Reduction {
                 selector: Selector::Category {
@@ -1154,6 +1157,7 @@ mod tests {
             60,
             40,
             vec![crate::rules::StrikeDef {
+                cancellable: false,
                 offset: 0,
                 unlock: None,
                 check: None,
@@ -1248,6 +1252,7 @@ mod tests {
                     slot: EquipmentSlot::new("head_armor").unwrap(),
                     attack: None,
                     modifiers: vec![Modifier {
+                        cancellable: false,
                         scope: Scope::Always,
                         op: ModifierOp::Add { stat, value },
                     }],
@@ -1288,6 +1293,7 @@ mod tests {
                         slot: EquipmentSlot::new("body_armor").unwrap(),
                         attack: None,
                         modifiers: vec![Modifier {
+                            cancellable: false,
                             scope: Scope::Always,
                             op: ModifierOp::Add {
                                 stat: Stat::HealthRecoveryResetPercent,
@@ -1314,6 +1320,7 @@ mod tests {
                     modifiers: vec![
                         defense(5),
                         Modifier {
+                            cancellable: false,
                             scope: Scope::Always,
                             op: ModifierOp::Add { stat, value },
                         },

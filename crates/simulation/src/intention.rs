@@ -884,7 +884,7 @@ impl Game {
                                         return false;
                                     }
                                     if matches!(invocation.aim, crate::abilities::AbilityAim::DirectionalRay { .. }) {
-                                        return matches!(definition.reach, crate::rules::Reach::Sight { .. });
+                                        return matches!(definition.reach, crate::rules::Reach::Sight { .. } | crate::rules::Reach::UntilObstruction);
                                     }
                                     if matches!(invocation.aim, crate::abilities::AbilityAim::DirectionalProjectile { .. }) {
                                         return invocation.valid() && matches!(definition.reach, crate::rules::Reach::Projectile);
@@ -2235,6 +2235,7 @@ mod tests {
         let ability = crate::content_ids::AbilityId::new("self_mend").unwrap();
         let mut document = game.content.rules.document().clone();
         document.abilities.push(AbilityDef {
+            cancellable: false,
             interaction: crate::rules::Interaction::NonHostile,
             invocation: Default::default(),
             id: ability.clone(),
@@ -2255,6 +2256,7 @@ mod tests {
             reach: Reach::SelfOnly,
             strikes: crate::rules::StrikeSource::Authored {
                 strikes: vec![crate::rules::StrikeDef {
+                    cancellable: false,
                     offset: 0,
                     unlock: None,
                     check: None,

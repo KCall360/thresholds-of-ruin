@@ -240,6 +240,7 @@ fn relocation_device_fixture(effect: crate::rules::Effect, hits: bool) -> Game {
         });
         if hits {
             species.modifiers.push(crate::rules::Modifier {
+                cancellable: false,
                 scope: crate::rules::Scope::Always,
                 op: crate::rules::ModifierOp::Add {
                     stat: crate::rules::Stat::Attribute {
@@ -261,6 +262,7 @@ fn levitation_drink_fixture() -> (Game, ItemId, crate::content_ids::ConditionId)
             name: "Test hover".into(),
             lifecycle: crate::rules::ConditionLifecycle::Timed,
             modifiers: vec![crate::rules::Modifier {
+                cancellable: false,
                 scope: crate::rules::Scope::Always,
                 op: crate::rules::ModifierOp::Locomotion {
                     value: crate::locomotion::LocomotionValue::Levitating { enabled: true },
@@ -943,6 +945,7 @@ fn private_utility_fixture(
             condition.stacking = Stacking::Keep;
             condition.source_scoped = false;
             condition.modifiers = vec![Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::ActionDuration { value: rate },
             }];
@@ -970,6 +973,7 @@ fn private_utility_fixture(
             condition.family = ConditionFamilyId::new(id).unwrap();
             condition.name = id.into();
             condition.modifiers = vec![Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op,
             }];
@@ -1421,9 +1425,17 @@ fn charged_item_uses_rank_zero_compiled_lore_without_grant_or_quantity_payment()
         )
         .unwrap();
     let ray = plan.as_ray().unwrap();
-    assert_eq!(ray.source_skill, crate::attributes::Skill::Lore);
+    let super::RayResolution::Opposed {
+        source_skill,
+        source_bonus,
+        ..
+    } = &ray.resolution
+    else {
+        panic!("fixture must capture its genuine opposed check");
+    };
+    assert_eq!(*source_skill, crate::attributes::Skill::Lore);
     assert_eq!(
-        ray.source_bonus,
+        *source_bonus,
         super::ray::named_bonus(before.derived(), crate::attributes::Skill::Lore)
     );
     assert!(plan.cost().is_none());
@@ -1877,6 +1889,7 @@ fn magic_item_regression_hostile_device_reveals_guise_without_ability_grant() {
     let mut game = super::ray_tests::fixture_with(|_, ray, species| {
         species.modifiers.retain(|m| !matches!(&m.op, crate::rules::ModifierOp::GrantAbility { ability } if ability == &ray.id));
         species.modifiers.push(crate::rules::Modifier {
+            cancellable: false,
             scope: crate::rules::Scope::Always,
             op: crate::rules::ModifierOp::Perception {
                 value: crate::perception::PerceptionValue::ObjectGuise {
@@ -1922,6 +1935,7 @@ fn charged_dodge_and_immunity_pay_once_and_death_releases_unpaid_device() {
             species.modifiers.retain(|m| !matches!(&m.op, crate::rules::ModifierOp::GrantAbility { ability } if ability == &ray.id));
             if immune {
                 species.modifiers.push(crate::rules::Modifier {
+                    cancellable: false,
                     scope: crate::rules::Scope::Always,
                     op: crate::rules::ModifierOp::Immunity {
                         selector: crate::rules::Selector::Category {
@@ -2575,6 +2589,7 @@ fn ray_and_device_capture_attack_bonus_once_per_pool_not_fixed_damage() {
     use crate::rules::*;
     let mut game = super::ray_tests::fixture_with(|_, ray, species| {
         species.modifiers.push(Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Add {
                 stat: Stat::AttackDamageRollBonus,

@@ -16,6 +16,7 @@ fn damage(amount: u32) -> Effect {
 }
 fn rider(amount: u32) -> RiderDef {
     RiderDef {
+        cancellable: false,
         condition: None,
         trigger: RiderTrigger::Success,
         check: None,
@@ -37,6 +38,7 @@ fn source_game() -> (crate::Game, crate::IntentionId) {
                 .into_iter()
                 .enumerate()
                 .map(|(ordinal, offset)| StrikeDef {
+                    cancellable: false,
                     offset,
                     unlock: (ordinal == 2)
                         .then(|| crate::content_ids::TalentId::new("rattling_blow").unwrap()),
@@ -85,6 +87,7 @@ fn natural_melee_source_ignores_equipped_weapon_operands_and_timing() {
         |ability| {
             ability.strikes = StrikeSource::NaturalMelee {
                 additional_riders: vec![RiderDef {
+                    cancellable: false,
                     condition: None,
                     trigger: RiderTrigger::Success,
                     check: Some(RiderCheckDef {
@@ -268,6 +271,7 @@ fn natural_melee_source_keeps_fixed_rider_values_and_shared_edge_scope() {
                 (Stat::CheckEdge, -6),
             ] {
                 species.modifiers.push(Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Add { stat, value },
                 });
@@ -353,6 +357,7 @@ fn natural_melee_source_invalid_equipment_grant_rejects_atomically() {
         socket: crate::EquipmentSlotId(0),
         attack: None,
         modifiers: vec![Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::GrantAbility { ability: id },
         }],
@@ -503,6 +508,7 @@ fn natural_rider_rolls_receive_attack_bonus_but_not_primary_only_melee_bonus() {
                 ),
             ] {
                 species.modifiers.push(Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Add { stat, value },
                 });
@@ -530,4 +536,61 @@ fn natural_rider_rolls_receive_attack_bonus_but_not_primary_only_melee_bonus() {
         panic!("pool")
     };
     assert_eq!((pool.count(), pool.bonus()), (2, 2));
+}
+
+#[test]
+fn cancellation_projects_tagged_natural_payload_without_erasing_wrapper_or_ordinary_damage() {
+    let (mut game, _) = super::strike_tests::sequence_game_custom(
+        &[0],
+        |ability| {
+            ability.strikes = StrikeSource::NaturalMelee {
+                additional_riders: vec![rider(3)],
+            };
+        },
+        |_, species| {
+            let natural = &species.melee;
+            let strikes = [0, 10]
+                .into_iter()
+                .enumerate()
+                .map(|(ordinal, offset)| {
+                    let mut own_rider = rider(2);
+                    own_rider.cancellable = true;
+                    StrikeDef {
+                        cancellable: ordinal == 0,
+                        offset,
+                        unlock: None,
+                        check: None,
+                        on_success: vec![damage(4)],
+                        on_failure: vec![],
+                        descriptors: vec![],
+                        riders: vec![own_rider],
+                    }
+                })
+                .collect();
+            species.melee = crate::attacks::NaturalAttack::new(
+                natural.skill(),
+                natural.bonus(),
+                natural.wind_up(),
+                natural.recovery(),
+                strikes,
+            )
+            .unwrap();
+        },
+    );
+    let original = game.preparation(ActorId(1)).unwrap().plan.clone();
+    assert!(game.plan_source_valid(&original));
+    let mut control = game.clone();
+    control.tick = 10;
+    control.resolve_preparations().unwrap();
+    assert_eq!(control.health(ActorId(2)).unwrap().0, 91);
+    game.apply_effects(ActorId(1), &[Effect::CancelSpecials])
+        .unwrap();
+    assert!(game.creature(ActorId(1)).unwrap().cancelled());
+    assert_eq!(game.preparation(ActorId(1)).unwrap().plan, original);
+    assert!(game.plan_source_valid(&original));
+    for (tick, expected) in [(10, 97), (20, 90)] {
+        game.tick = tick;
+        game.resolve_preparations().unwrap();
+        assert_eq!(game.health(ActorId(2)).unwrap().0, expected);
+    }
 }

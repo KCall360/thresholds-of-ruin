@@ -143,6 +143,7 @@ mod tests {
             ),
         ] {
             species.modifiers.push(Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Add { stat, value },
             });

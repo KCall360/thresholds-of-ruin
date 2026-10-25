@@ -674,6 +674,7 @@ mod tests {
             .unwrap()
             .modifiers
             .push(Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::GrantAbility {
                     ability: ability_id,
@@ -1234,6 +1235,7 @@ mod source_tests {
                 socket: crate::EquipmentSlotId(0),
                 attack: None,
                 modifiers: vec![crate::rules::Modifier {
+                    cancellable: false,
                     scope: crate::rules::Scope::Always,
                     op: crate::rules::ModifierOp::Add {
                         stat: crate::rules::Stat::Health,

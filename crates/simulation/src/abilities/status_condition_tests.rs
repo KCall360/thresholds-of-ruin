@@ -52,6 +52,7 @@ fn expiring_resource_sequence() -> (Game, crate::IntentionId) {
         },
         |rules, species| {
             species.modifiers.push(Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Flag {
                     flag: crate::content_ids::FlagId::new("magical").unwrap(),
@@ -73,6 +74,7 @@ fn expiring_resource_sequence() -> (Game, crate::IntentionId) {
                 preparation: crate::rules::ConditionPreparation::Preserve,
                 name: "Borrowed mana".into(),
                 modifiers: vec![Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Add {
                         stat: Stat::ResourceMax {
@@ -376,6 +378,7 @@ fn candidate_birth_setup_preserves_unfinished_event_suffix_without_nested_clones
         |_| {},
         |_, species| {
             species.modifiers.push(crate::rules::Modifier {
+                cancellable: false,
                 scope: crate::rules::Scope::WhileNoSensedHostile,
                 op: crate::rules::ModifierOp::Add {
                     stat: crate::rules::Stat::HealthRecoveryPeriodPercent,

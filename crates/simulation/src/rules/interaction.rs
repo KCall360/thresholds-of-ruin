@@ -407,6 +407,7 @@ mod tests {
                 );
                 strikes[0].on_success.clear();
                 strikes[0].riders = vec![RiderDef {
+                    cancellable: false,
                     condition: None,
                     trigger: RiderTrigger::Success,
                     check: None,
@@ -447,6 +448,7 @@ mod tests {
             ability.interaction = Interaction::NonHostile;
             ability.strikes = StrikeSource::NaturalMelee {
                 additional_riders: vec![RiderDef {
+                    cancellable: false,
                     condition: None,
                     trigger: RiderTrigger::Success,
                     check: None,
@@ -497,6 +499,7 @@ mod tests {
         )
         .unwrap();
         species.modifiers.push(Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::GrantAbility {
                 ability: ability_id,
@@ -518,6 +521,7 @@ mod tests {
             let flag = FlagId::new("fixture_zero_health").unwrap();
             let rules = condition_rules(
                 vec![Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Flag { flag: flag.clone() },
                 }],
@@ -526,6 +530,7 @@ mod tests {
                         id: flag,
                         name: "Zero Health".into(),
                         modifiers: vec![Modifier {
+                            cancellable: false,
                             scope: Scope::Always,
                             op: ModifierOp::Set {
                                 stat: Stat::Health,
@@ -549,6 +554,7 @@ mod tests {
         for value in [-1, 0, 1] {
             let rules = condition_rules(
                 vec![Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Set {
                         stat: Stat::ResourceMax {
@@ -572,6 +578,7 @@ mod tests {
     fn non_hostile_flag_dag_visits_each_authored_modifier_at_most_once() {
         let flag = |i| FlagId::new(format!("fixture_branch_{i}")).unwrap();
         let reference = |i| Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Flag { flag: flag(i) },
         };
@@ -605,6 +612,7 @@ mod tests {
                 let ability = AbilityId::new("basic_melee").unwrap();
                 let rules = condition_rules(
                     vec![Modifier {
+                        cancellable: false,
                         scope: Scope::Always,
                         op: ModifierOp::Add {
                             stat: Stat::Ability {

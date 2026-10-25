@@ -15,6 +15,7 @@ fn add(value: i64) -> Modifier {
 }
 fn set(value: i64) -> Modifier {
     Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Set {
             stat: Stat::Attribute {
@@ -79,6 +80,7 @@ fn historical_set_masks_attribute_and_add_sources_without_stored_amounts() {
 fn flag_expansion_is_deduplicated_per_source_not_across_owners() {
     let flag = FlagId::new("fixture_intellect").unwrap();
     let flag_modifier = Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Flag { flag: flag.clone() },
     };

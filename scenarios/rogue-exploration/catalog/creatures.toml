@@ -388,8 +388,8 @@ kind = "plant"
 attributes = { strength = 2, speed = 0, intellect = 0, willpower = 1, awareness = 1, presence = 0 }
 anatomy = { slots = [], capacities = {}, primary_attack_socket = { kind = "none" } }
 displacement = { size = "medium", anchored = false }
-modifiers = [{ scope = "always", op = { kind = "locomotion", value = { kind = "stationary", enabled = true } } }, { scope = "always", op = { kind = "flag", flag = "grasping" } }]
-melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 100, recovery = 100, strikes = [{ offset = 0, check = { actor = "user", skill = { kind = "natural_attack" }, against = { kind = "defense", defense = "physical" } }, on_success = [{ kind = "hold_damage", category = "impact" }], on_failure = [], descriptors = [], riders = [] }] }
+modifiers = [{ scope = "always", op = { kind = "locomotion", value = { kind = "stationary", enabled = true } } }, { cancellable = true, scope = "always", op = { kind = "flag", flag = "grasping" } }]
+melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 100, recovery = 100, strikes = [{ cancellable = true, offset = 0, check = { actor = "user", skill = { kind = "natural_attack" }, against = { kind = "defense", defense = "physical" } }, on_success = [{ kind = "hold_damage", category = "impact" }], on_failure = [], descriptors = [], riders = [] }] }
 
 [creatures.species."rogue.griffin"]
 behavior = { disposition = "mean", idle = "explore", memory_ticks = 1000, doors = false, care = false, equipment = false, loot = false, flee_percent = 25 }
@@ -505,7 +505,7 @@ subtypes = ["incorporeal"]
 attributes = { strength = 2, speed = 2, intellect = 0, willpower = 1, awareness = 1, presence = 0 }
 anatomy = { slots = [], capacities = {}, primary_attack_socket = { kind = "none" } }
 displacement = { size = "medium", anchored = false }
-modifiers = [{ scope = "always", op = { kind = "perception", value = { kind = "invisible", enabled = true } } }, { scope = "always", op = { kind = "locomotion", value = { kind = "erratic", chance = { numerator = 1, denominator = 5 } } } }]
+modifiers = [{ cancellable = true, scope = "always", op = { kind = "perception", value = { kind = "invisible", enabled = true } } }, { scope = "always", op = { kind = "locomotion", value = { kind = "erratic", chance = { numerator = 1, denominator = 5 } } } }]
 [creatures.species."rogue.phantom".melee]
 skill = "heavy_weaponry"
 bonus = 0

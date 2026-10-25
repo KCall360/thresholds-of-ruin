@@ -33,6 +33,7 @@ fn build() -> CreatureBuild {
 fn build_with_policy(policy: Value) -> CreatureBuild {
     let mut species = fixture::species();
     species.modifiers.push(Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Set {
             stat: Stat::HealthRecoveryPeriod,
@@ -2078,6 +2079,7 @@ fn digestion_source(
         attack: None,
         weapon_profile: None,
         modifiers: vec![Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Add {
                 stat: Stat::NutritionRateThirtieths,

@@ -110,3 +110,27 @@ impl Game {
         })
     }
 }
+
+impl Game {
+    /// AI evaluates the same live payload as execution without changing the
+    /// canonical plan or its captured payment/source operands.
+    pub(crate) fn effective_safe_healing_plan(&self, plan: &super::Plan) -> bool {
+        let super::Plan::Ability(ability) = plan else {
+            return false;
+        };
+        if !self
+            .creature(ability.actor)
+            .is_some_and(|actor| actor.cancelled())
+        {
+            return crate::ai::safe_healing_plan(plan);
+        }
+        let mut effective = (**ability).clone();
+        for (output, original) in effective.strikes.iter_mut().zip(&ability.strikes) {
+            let Ok(projected) = self.effective_cancelled_strike(ability, original) else {
+                return false;
+            };
+            *output = projected.strike.into_owned();
+        }
+        crate::ai::safe_healing_plan(&super::Plan::Ability(tor_world::Shared::new(effective)))
+    }
+}

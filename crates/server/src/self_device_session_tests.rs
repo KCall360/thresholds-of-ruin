@@ -2638,3 +2638,294 @@ fn actual_drain_life_hidden_recipient_count_does_not_change_owner_or_followed_ob
         "actual followed observation/delta publications hide recipient count"
     );
 }
+
+// Physical first-body delivery must close each real World frontier without
+// activating source population or replacing geometry with a room graph.
+fn first_contact_chain_source(root: &Path, noncombat: bool, ordinary: bool) -> crate::Scenario {
+    let baseline = self_device_source(root, false, false);
+    let source = baseline.package.as_ref().unwrap();
+    let mut document = source.rules().unwrap().document().clone();
+    let ability = document
+        .abilities
+        .iter_mut()
+        .find(|a| a.id.as_str() == "magic.ember_ray")
+        .unwrap();
+    ability.invocation = tor_simulation::abilities::InvocationKind::DirectionalContactRay;
+    ability.reach = tor_simulation::rules::Reach::UntilObstruction;
+    let tor_simulation::rules::StrikeSource::Authored { strikes } = &mut ability.strikes else {
+        panic!("authored source prerequisite")
+    };
+    strikes[0].on_success = vec![tor_simulation::rules::Effect::CancelSpecials];
+    assert!(strikes[0].check.is_none() && strikes[0].on_failure.is_empty());
+    let mut ordinary_ability = ability.clone();
+    ordinary_ability.id =
+        tor_simulation::content_ids::AbilityId::new("fixture.ordinary_cancellation").unwrap();
+    ordinary_ability.cost =
+        Some(serde_json::from_value(json!({"resource":"mana","start":0,"resolution":1})).unwrap());
+    document.abilities.push(ordinary_ability);
+    tor_simulation::rules::Ruleset::validate(document.clone()).unwrap();
+    let rules = toml::to_string(&document).unwrap();
+    let mut manifest = serde_json::to_value(&source.manifest).unwrap();
+    manifest["spatial_scopes"] = json!({});
+    let owner_species = manifest["characters"][0]["creature"]["species"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    manifest["creatures"]["species"]["fixture_remote"] =
+        manifest["creatures"]["species"][&owner_species].clone();
+    manifest["creatures"]["species"]["fixture_remote"]["modifiers"].as_array_mut().unwrap().push(json!({"cancellable":true,"scope":"always","op":{"kind":"perception","value":{"kind":"invisible","enabled":true}}}));
+    if ordinary {
+        manifest["creatures"]["species"][&owner_species]["modifiers"].as_array_mut().unwrap().push(json!({"scope":"always","op":{"kind":"grant_ability","ability":"fixture.ordinary_cancellation"}}));
+    }
+    let creature = manifest["characters"][0]["creature"].clone();
+    let mut remote_creature = creature.clone();
+    remote_creature["species"] = json!("fixture_remote");
+    let mut local = serde_json::to_value(&source.region_defs().unwrap()[0]).unwrap();
+    local["size"] = json!([32, 5, 2]);
+    local["lit"] = json!(false);
+    local["lighting"] = json!([]);
+    local["anchors"]["east"] = json!([31, 2, 0]);
+    local["portals"] =
+        json!([{"at":[31,2,0],"direction":"east","to":"2/west","kind":"portal","height":2}]);
+    local["actors"] =
+        json!([{"id":2,"at":[5,3,0],"turn_ticks":100,"controller":"external","creature":creature}]);
+    local["items"] = json!([{"id":30,"at":[1,2,0],"archetype":"ember","carried_by":1}]);
+    let mut regions = vec![serde_json::from_value(local).unwrap()];
+    for region in 2..=5 {
+        let mut portals = vec![
+            json!({"at":[0,2,0],"direction":"west","to":format!("{}/east",region-1),"kind":"portal","height":2}),
+        ];
+        if region < 5 {
+            portals.push(json!({"at":[31,2,0],"direction":"east","to":format!("{}/west",region+1),"kind":"portal","height":2}));
+        }
+        let mut value = json!({"id":region,"name":format!("Contact member {region}"),"size":[32,5,2],"chamber":true,"lit":false,"anchors":{"west":[0,2,0],"east":[31,2,0]},"portals":portals});
+        if region == 5 {
+            value["actors"] = json!([{"id":3,"at":[20,2,0],"turn_ticks":100,"controller":"ai","creature":remote_creature}]);
+        }
+        if region == 3 && noncombat {
+            value["actors"] = json!([{"id":4,"at":[10,2,0],"turn_ticks":100,"controller":"ai"}]);
+        }
+        regions.push(serde_json::from_value(value).unwrap());
+    }
+    let package =
+        Package::from_parts(serde_json::from_value(manifest).unwrap(), regions, &rules).unwrap();
+    package.check().unwrap();
+    assert!(package.manifest.floor_activation.is_none());
+    assert!(package.manifest.spatial_scopes.is_empty());
+    crate::scenario_package::write_package(
+        root,
+        &package.manifest,
+        &package.region_defs().unwrap(),
+        &rules,
+    )
+    .unwrap();
+    crate::scenario_package::check(root).unwrap();
+    let mut scenario = crate::scenario_package::load(root, 42, None, true).unwrap();
+    scenario.streaming = Some(crate::Streaming {
+        active_radius: 0,
+        load_radius: 0,
+    });
+    scenario
+}
+
+fn first_contact_remote_record(wire: &Wire, saved: &Value, actor: ActorId, region: u64) -> Value {
+    if !nothing_actor(saved, actor).is_null() {
+        return nothing_actor(saved, actor).clone();
+    }
+    crate::engine::Checkpoint::capture(&wire.service.engine)
+        .records
+        .values()
+        .map(|r| serde_json::to_value(tor_simulation::RegionRecordData::capture(r)).unwrap())
+        .find(|r| r["world"]["region"]["id"] == region)
+        .map(|r| {
+            assert_eq!(r["stamps"][actor.0.to_string()], 0);
+            r["actors"][actor.0.to_string()].clone()
+        })
+        .unwrap_or(Value::Null)
+}
+
+fn paid_first_contact_chain(noncombat: bool, ordinary: bool) {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("source");
+    let path = directory.path().join("first-contact.db");
+    let scenario = first_contact_chain_source(&root, noncombat, ordinary);
+    let mut wire = Wire::for_actors(
+        Engine::open_with_policy(
+            &path,
+            scenario,
+            crate::SavePolicy {
+                checkpoint_interval: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap(),
+        [OWNER, OTHER],
+    );
+    assert_eq!(wire.service.engine.next_actor(), Some(OWNER));
+    let initial = wire.checkpoint();
+    assert!(nothing_actor(&initial, ActorId(3)).is_null());
+    for region in 3..=5 {
+        assert_eq!(
+            room_light_world(&initial).is_lit(tor_world::Location {
+                region: tor_world::RegionId(region),
+                position: tor_world::Position { x: 20, y: 2, z: 0 }
+            }),
+            None
+        );
+    }
+    let wand = wire
+        .snapshot(OWNER)
+        .state
+        .observation
+        .inventory
+        .iter()
+        .find(|i| i.class == ItemClass::Wand)
+        .unwrap()
+        .id;
+    let physical = nothing_wand_id(&wire, wand);
+    assert_eq!(nothing_items(&initial)[&physical]["charges"], 3);
+    let action = if ordinary {
+        Action::UseAbility {
+            id: "fixture.ordinary_cancellation".into(),
+            invocation: AbilityInvocation::directional_ray(Direction::East),
+            supplies: Default::default(),
+        }
+    } else {
+        Action::Zap {
+            item: wand,
+            aim: DeviceAim::Direction {
+                direction: Direction::East,
+            },
+        }
+    };
+    let request = wire.request(OWNER, action);
+    ack(wire.send(OWNER, "physical-first-body", request.clone()));
+    wire.service.run_until_blocked();
+    for actor in [OWNER, OTHER] {
+        let messages = wire.drain(actor);
+        assert!(
+            !messages
+                .iter()
+                .any(|m| matches!(m, ServerMessage::Error { .. })),
+            "{messages:?}"
+        );
+    }
+    let receipt = ack(wire.send(OWNER, "physical-first-body", request.clone()));
+    assert!(
+        matches!(
+            receipt,
+            RequestReceipt::Admitted {
+                phase: IntentionPhase::Started,
+                ..
+            }
+        ),
+        "{receipt:?}"
+    );
+    let paused = wire.checkpoint();
+    assert_eq!(paused["game"]["tick"], initial["game"]["tick"]);
+    assert_eq!(paused["game"]["rules_rng"], initial["game"]["rules_rng"]);
+    assert_eq!(nothing_items(&paused)[&physical]["charges"], 3);
+    if !noncombat {
+        let world = room_light_world(&paused);
+        for region in 1..5 {
+            assert_eq!(
+                world
+                    .physics_neighbor(
+                        tor_world::Location {
+                            region: tor_world::RegionId(region),
+                            position: tor_world::Position { x: 31, y: 2, z: 0 }
+                        },
+                        tor_world::Direction::East
+                    )
+                    .unwrap()
+                    .0,
+                tor_world::Location {
+                    region: tor_world::RegionId(region + 1),
+                    position: tor_world::Position { x: 0, y: 2, z: 0 }
+                }
+            );
+        }
+        let remote = nothing_actor(&paused, ActorId(3));
+        assert!(remote.is_object());
+        assert_eq!(remote["combat"]["creature"]["cancelled"], false);
+        assert_eq!(remote["ready_at"], 0);
+        assert_eq!(remote["active_since"], 0);
+        let lifecycle = paused["game"]["lifecycle"].as_u64().unwrap() as usize;
+        assert_eq!(paused["shared"]["lifecycles"][lifecycle]["stamps"]["3"], 0);
+        assert!(paused["shared"]["lifecycles"][lifecycle]["frozen"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(5)));
+    } else {
+        assert!(nothing_actor(&paused, ActorId(4))["combat"].is_null());
+        assert!(nothing_actor(&paused, ActorId(4)).is_object());
+        assert!(
+            nothing_actor(&paused, ActorId(3)).is_null(),
+            "first noncombat body stops before later frontier"
+        );
+    }
+    wire.service.engine.flush().unwrap();
+    let serial = wire.serial;
+    drop(wire);
+    std::fs::remove_dir_all(&root).unwrap();
+    let mut wire = Wire::for_actors(
+        Engine::open(&path, crate::Scenario::two_room(999)).unwrap(),
+        [OWNER, OTHER],
+    );
+    wire.serial = serial;
+    assert_eq!(
+        wire.checkpoint(),
+        paused,
+        "actual pending plan survives source deletion"
+    );
+    let terminal = wire.finish(OWNER, "physical-first-body", &request);
+    let after = wire.checkpoint();
+    assert_eq!(
+        after["game"]["rules_rng"], paused["game"]["rules_rng"],
+        "cancellation has no opposed check or RNG claim"
+    );
+    assert!(after["game"]["tick"].as_u64().unwrap() > paused["game"]["tick"].as_u64().unwrap());
+    assert_eq!(
+        nothing_items(&after)[&physical]["charges"],
+        if ordinary { 3 } else { 2 }
+    );
+    if !noncombat {
+        let remote = first_contact_remote_record(&wire, &after, ActorId(3), 5);
+        assert_eq!(remote["combat"]["creature"]["cancelled"], true);
+        for field in [
+            "ready_at",
+            "active_since",
+            "location",
+            "pending",
+            "behavior",
+        ] {
+            assert_eq!(
+                remote[field],
+                nothing_actor(&paused, ActorId(3))[field],
+                "frozen {field}"
+            );
+        }
+    }
+    assert!(after["game"]["floor_activation"].is_null());
+    assert_eq!(
+        ack(wire.send(OWNER, "physical-first-body", request)),
+        terminal
+    );
+    assert_eq!(
+        wire.checkpoint(),
+        after,
+        "durable retry cannot pay or apply twice"
+    );
+}
+#[test]
+fn cancellation_first_body_closes_multiple_cold_frontiers_and_reopens_pending_without_sources() {
+    paid_first_contact_chain(false, false);
+}
+#[test]
+fn cancellation_first_noncombat_body_blocks_later_cold_recipient() {
+    paid_first_contact_chain(true, false);
+}
+#[test]
+fn ordinary_cancellation_grant_retains_resource_ledger_across_cold_frontiers() {
+    paid_first_contact_chain(false, true);
+}

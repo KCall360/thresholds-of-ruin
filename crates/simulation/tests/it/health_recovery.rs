@@ -29,6 +29,7 @@ use tor_world::{Extent, Location, Position, Region, RegionId, World};
 
 fn modifier(stat: Stat, value: i64) -> Modifier {
     Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Add { stat, value },
     }
@@ -460,6 +461,7 @@ fn immune_damage_and_overkill_use_actual_application_for_recovery_activity() {
         rules::{AmountExpr, DamageComponentExpr, DamageExpr, Effect, Selector},
     };
     let build = with_modifiers(vec![Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Immunity {
             selector: Selector::Category {

@@ -58,6 +58,7 @@ fn plan(damage: DamageSpec, edge: i64) -> AbilityPlan {
 fn snapshot() -> Snapshot {
     let mut species = super::creature_fixture::species();
     species.modifiers = vec![tor_simulation::rules::Modifier {
+        cancellable: false,
         scope: tor_simulation::rules::Scope::Always,
         op: tor_simulation::rules::ModifierOp::Add {
             stat: tor_simulation::rules::Stat::Health,

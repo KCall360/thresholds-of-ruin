@@ -54,21 +54,6 @@ impl NaturalAttack {
             strikes,
         })
     }
-    /// Effective payload projection only; source identity, authored timing and
-    /// underlying ordinary strikes remain intact in the immutable definition.
-    pub(crate) fn without_cancelled_payloads(&self) -> Self {
-        let mut result = self.clone();
-        for strike in &mut result.strikes {
-            if strike.cancellable {
-                strike.on_success.clear();
-                strike.on_failure.clear();
-                strike.riders.clear();
-            } else {
-                strike.riders.retain(|rider| !rider.cancellable);
-            }
-        }
-        result
-    }
     pub fn skill(&self) -> Skill {
         self.skill
     }
@@ -164,6 +149,7 @@ impl NaturalAttack {
             attack.wind_up(),
             attack.recovery(),
             vec![StrikeDef {
+                cancellable: false,
                 offset: 0,
                 unlock: None,
                 check: Some(CheckDef {

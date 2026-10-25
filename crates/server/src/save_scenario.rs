@@ -1368,6 +1368,7 @@ enum Effect {
     RestoreHitDie,
     RoomLight,
     DrainLife,
+    CancelSpecials,
     StepSelfOneCell,
     TeleportRandom,
     TeleportToRayOrigin,
@@ -1865,6 +1866,7 @@ struct Natural {
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "crate::creature_authoring::Strike", deny_unknown_fields)]
 struct Strike {
+    cancellable: bool,
     offset: u64,
     #[serde(deserialize_with = "required_option")]
     unlock: Option<String>,
@@ -1893,6 +1895,7 @@ struct Strike {
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "crate::creature_authoring::Rider", deny_unknown_fields)]
 struct Rider {
+    cancellable: bool,
     #[serde(with = "RiderTrigger")]
     trigger: crate::creature_authoring::RiderTrigger,
     #[serde(with = "mapped")]
@@ -2062,6 +2065,7 @@ enum NaturalAmount {
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "crate::creature_authoring::Modifier", deny_unknown_fields)]
 struct Modifier {
+    cancellable: bool,
     #[serde(with = "mapped")]
     scope: crate::creature_authoring::Scope,
     #[serde(with = "mapped")]
@@ -3443,6 +3447,7 @@ impl AdvancementPolicy {
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "tor_simulation::rules::AbilityDef", deny_unknown_fields)]
 struct AbilityDefinition {
+    cancellable: bool,
     #[serde(with = "mapped")]
     interaction: tor_simulation::rules::Interaction,
     #[serde(with = "InvocationKind")]
@@ -3556,6 +3561,7 @@ enum RulesProjectileDeliveryKind {
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "tor_simulation::rules::StrikeDef", deny_unknown_fields)]
 struct RulesStrike {
+    cancellable: bool,
     offset: u64,
     unlock: Option<tor_simulation::content_ids::TalentId>,
     check: Option<tor_simulation::rules::CheckDef>,
@@ -3580,6 +3586,7 @@ struct RulesStrike {
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "tor_simulation::rules::RiderDef", deny_unknown_fields)]
 struct RulesRider {
+    cancellable: bool,
     trigger: tor_simulation::rules::RiderTrigger,
     #[serde(with = "mapped")]
     condition: Option<tor_simulation::rules::RiderCondition>,
@@ -3651,6 +3658,7 @@ enum AbilityReach {
     MutualSight {
         range: u16,
     },
+    UntilObstruction,
     SelfOnly,
     SelfOrAlly {
         #[serde(with = "AllyRange")]
@@ -3672,6 +3680,7 @@ impl AbilityReach {
             MutualSight {
                 range: u16,
             },
+            UntilObstruction {},
             SelfOnly {},
             SelfOrAlly {
                 #[serde(with = "AllyRange")]
@@ -3683,6 +3692,7 @@ impl AbilityReach {
             Fields::Projectile {} => tor_simulation::rules::Reach::Projectile,
             Fields::Sight { range } => tor_simulation::rules::Reach::Sight { range },
             Fields::MutualSight { range } => tor_simulation::rules::Reach::MutualSight { range },
+            Fields::UntilObstruction {} => tor_simulation::rules::Reach::UntilObstruction,
             Fields::SelfOnly {} => tor_simulation::rules::Reach::SelfOnly,
             Fields::SelfOrAlly { range } => tor_simulation::rules::Reach::SelfOrAlly { range },
         })
@@ -4824,6 +4834,7 @@ mod tests {
             .unwrap();
         ability.strikes = tor_simulation::rules::StrikeSource::NaturalMelee {
             additional_riders: vec![tor_simulation::rules::RiderDef {
+                cancellable: false,
                 condition: None,
                 trigger: tor_simulation::rules::RiderTrigger::Success,
                 check: None,
@@ -5137,6 +5148,7 @@ mod tests {
     fn saved_talent_protection_uses_the_independent_named_category_schema() {
         use crate::creature_authoring::{Modifier, Op, Scope};
         let modifier = Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: Op::TalentReduction {
                 category: "impact".into(),
@@ -5161,6 +5173,7 @@ mod tests {
         }
         for (category, amount) in [("unknown", 2), ("impact", 1_000_001)] {
             let invalid = Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: Op::TalentReduction {
                     category: category.into(),
@@ -5189,6 +5202,7 @@ mod tests {
             ),
         ] {
             let modifier = Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: Op::Add {
                     stat,
@@ -6706,6 +6720,7 @@ impl Effect {
             RestoreHitDie {},
             RoomLight {},
             DrainLife {},
+            CancelSpecials {},
             StepSelfOneCell {},
             TeleportRandom {},
             TeleportToRayOrigin {},
@@ -6808,6 +6823,7 @@ impl Effect {
             Fields::RestoreHitDie {} => source::Effect::RestoreHitDie,
             Fields::RoomLight {} => source::Effect::RoomLight,
             Fields::DrainLife {} => source::Effect::DrainLife,
+            Fields::CancelSpecials {} => source::Effect::CancelSpecials,
             Fields::StepSelfOneCell {} => source::Effect::StepSelfOneCell,
             Fields::TeleportRandom {} => source::Effect::TeleportRandom,
             Fields::TeleportToRayOrigin {} => source::Effect::TeleportToRayOrigin,
@@ -9385,6 +9401,7 @@ mod worn_equipment_schema_tests {
             },
         ] {
             let modifier = Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op,
             };
@@ -9679,6 +9696,155 @@ mod drain_life_effect_tests {
                     .is_err(),
                 "{malformed}"
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod first_contact_schema_tests {
+    use super::*;
+    use crate::storage::codec::strict;
+    use serde_json::{json, Value};
+
+    fn required_metadata<T: Stored>(value: &T) {
+        let good = serde_json::to_value(Borrowed(value)).unwrap();
+        assert_eq!(good["cancellable"], false);
+        let bytes = serde_json::to_vec(&good).unwrap();
+        let _: Owned<T> = strict(&bytes).unwrap();
+        for replacement in [None, Some(Value::Null), Some(json!("false"))] {
+            let mut bad = good.clone();
+            match replacement {
+                None => {
+                    bad.as_object_mut().unwrap().remove("cancellable");
+                }
+                Some(v) => bad["cancellable"] = v,
+            }
+            assert!(strict::<Owned<T>>(&serde_json::to_vec(&bad).unwrap()).is_err());
+        }
+        let mut extra = good.clone();
+        extra["unknown"] = json!(false);
+        assert!(strict::<Owned<T>>(&serde_json::to_vec(&extra).unwrap()).is_err());
+        let duplicate = format!(
+            "{{\"cancellable\":false,{}",
+            &serde_json::to_string(&good).unwrap()[1..]
+        );
+        assert!(strict::<Owned<T>>(duplicate.as_bytes()).is_err());
+    }
+    #[test]
+    fn first_contact_metadata_is_optional_in_source_but_required_in_each_saved_mirror() {
+        let modifier = json!({"scope":"always","op":{"kind":"perception","value":{"kind":"invisible","enabled":true}}});
+        let strike = json!({"offset":0,"unlock":null,"check":null,"on_success":[],"on_failure":[],"descriptors":[],"riders":[]});
+        let rider = json!({"trigger":"success","condition":null,"check":null,"effects":[],"descriptors":[]});
+        let authored_modifier: crate::creature_authoring::Modifier =
+            serde_json::from_value(modifier.clone()).unwrap();
+        let authored_strike: crate::creature_authoring::Strike =
+            serde_json::from_value(strike.clone()).unwrap();
+        let authored_rider: crate::creature_authoring::Rider =
+            serde_json::from_value(rider.clone()).unwrap();
+        assert!(
+            !authored_modifier.cancellable
+                && !authored_strike.cancellable
+                && !authored_rider.cancellable
+        );
+        required_metadata(&authored_modifier);
+        required_metadata(&authored_strike);
+        required_metadata(&authored_rider);
+        required_metadata(
+            &serde_json::from_value::<tor_simulation::rules::StrikeDef>(strike).unwrap(),
+        );
+        required_metadata(
+            &serde_json::from_value::<tor_simulation::rules::RiderDef>(rider).unwrap(),
+        );
+        let document: tor_simulation::rules::RulesetDocument =
+            toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML).unwrap();
+        tor_simulation::rules::Ruleset::validate(document.clone()).unwrap();
+        required_metadata(&document.abilities[0]);
+        // Core Modifier source serde defaults false; the enclosing current
+        // saved RulesDocument must still reject omission via canonical decode.
+        let encoded = encode_rules_document(&document).unwrap();
+        decode_rules_document(&encoded).unwrap();
+        let good: Value = serde_json::from_str(&encoded).unwrap();
+        let mut paths = Vec::new();
+        fn walk(v: &Value, path: &mut Vec<String>, out: &mut Vec<Vec<String>>) {
+            match v {
+                Value::Object(m) => {
+                    if m.contains_key("scope")
+                        && m.contains_key("op")
+                        && m.contains_key("cancellable")
+                    {
+                        out.push(path.clone());
+                    }
+                    for (k, v) in m {
+                        path.push(k.clone());
+                        walk(v, path, out);
+                        path.pop();
+                    }
+                }
+                Value::Array(a) => {
+                    for (i, v) in a.iter().enumerate() {
+                        path.push(i.to_string());
+                        walk(v, path, out);
+                        path.pop();
+                    }
+                }
+                _ => {}
+            }
+        }
+        walk(&good, &mut Vec::new(), &mut paths);
+        assert!(
+            !paths.is_empty(),
+            "real rules modifier ownership prerequisite"
+        );
+        for path in paths {
+            let pointer = format!("/{}", path.join("/"));
+            let mut bad = good.clone();
+            bad.pointer_mut(&pointer)
+                .unwrap()
+                .as_object_mut()
+                .unwrap()
+                .remove("cancellable");
+            assert!(
+                decode_rules_document(&serde_json::to_string(&bad).unwrap()).is_err(),
+                "{pointer}"
+            );
+        }
+        for bad in [
+            json!({"scope":"always","op":{"kind":"perception","value":{"kind":"invisible","enabled":true}},"cancellable":null}),
+            json!({"scope":"always","op":{"kind":"perception","value":{"kind":"invisible","enabled":true}},"unknown":false}),
+        ] {
+            assert!(serde_json::from_value::<crate::creature_authoring::Modifier>(bad).is_err());
+        }
+    }
+    #[test]
+    fn cancellation_and_until_obstruction_are_closed_empty_named_maps() {
+        let raw = br#"{"kind":"cancel_specials"}"#;
+        let source: source::Effect = serde_json::from_slice(raw).unwrap();
+        assert_eq!(source, source::Effect::CancelSpecials);
+        let saved: Owned<source::Effect> = strict(raw).unwrap();
+        assert_eq!(saved.0, source);
+        for bad in [
+            r#"["cancel_specials"]"#,
+            r#"{"kind":"cancel_specials","changed":true}"#,
+            r#"{"kind":"cancel_specials","kind":"cancel_specials"}"#,
+        ] {
+            assert!(serde_json::from_str::<source::Effect>(bad).is_err());
+            assert!(strict::<Owned<source::Effect>>(bad.as_bytes()).is_err());
+        }
+        #[derive(Serialize, Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct ReachOwner {
+            #[serde(with = "AbilityReach")]
+            reach: tor_simulation::rules::Reach,
+        }
+        let good = br#"{"reach":{"kind":"until_obstruction"}}"#;
+        let saved: ReachOwner = strict(good).unwrap();
+        assert_eq!(saved.reach, tor_simulation::rules::Reach::UntilObstruction);
+        for bad in [
+            r#"["until_obstruction"]"#,
+            r#"{"kind":"until_obstruction","range":6}"#,
+            r#"{"kind":"until_obstruction","kind":"until_obstruction"}"#,
+        ] {
+            assert!(strict::<ReachOwner>(format!("{{\"reach\":{bad}}}").as_bytes()).is_err());
         }
     }
 }

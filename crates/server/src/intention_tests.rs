@@ -489,6 +489,7 @@ mod intention_admission_tests {
             )
         });
         hero.modifiers.push(crate::creature_authoring::Modifier {
+            cancellable: false,
             scope: crate::creature_authoring::Scope::Always,
             op: crate::creature_authoring::Op::Add {
                 stat: crate::creature_authoring::Stat::Health,
@@ -523,6 +524,7 @@ mod intention_admission_tests {
         enemy_species
             .modifiers
             .push(crate::creature_authoring::Modifier {
+                cancellable: false,
                 scope: crate::creature_authoring::Scope::Always,
                 op: crate::creature_authoring::Op::Add {
                     stat: crate::creature_authoring::Stat::Health,

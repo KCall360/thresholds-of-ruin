@@ -669,7 +669,31 @@ owner/follower privacy still need complete executable fixtures and validation.
 Planned opt-in definitions are `rogue.wand_cancellation` (3–7 charges, never
 self-identifying) and `rogue.wand_magic_missile` (3–7 charges, OnUse discovery).
 Missile uses the approved one Lore-versus-Agility contest and 1d4+1 plus the
-universal attack-damage bonus. These catalog entries and their appearance slots
-are not installed by this candidate; retain unchanged live pools and kits.
+universal attack-damage bonus. At that preceding checkpoint, these catalog entries and appearance slots
+were not installed; retain unchanged live pools and kits.
 Finish the coherent source and independently valid fixture prerequisites before
 one meaningful resolver-disabled first-red and the reviewed green cohort.
+
+The following source-only checkpoint migrates existing constructor literals to
+explicit non-cancellable defaults and updates old ray consumers, strict
+source/save mirrors and current effect consumers. This mechanical migration is
+broad in file count, not a new global cancellation policy. Live AI healing
+selection uses the same effective payload projection; ordinary public previews
+expose timing/counts, while privileged authored-effect inspection stays canonical.
+No Rust compilation or execution has yet validated this candidate.
+
+The two opt-in catalog definitions now have a causal pure-source first-red
+(two missing entries, with the unchanged live-pool control passing) and a
+24-case pure-content green. Hazel and yew provide distinct additional appearances;
+the existing eight-wand weighted pool and starting kits remain unchanged.
+Package-only tags cover the reviewed active special abilities and exact Phantom,
+flytrap and Xeroc contributors. Shared theft abilities are tagged only through
+package overrides; the independent `theft_vanish` talent remains unchanged.
+Pure content tests do not establish loaded gameplay or cancellation behavior.
+
+Before the grouped compile, finish and review the actual Service fixtures:
+restore hostile contact metadata in cloned source definitions, read detached
+actors through their exact retained region records, verify ordinary-resource
+payment and noncombat prerequisites, and complete pending-plan/reopen and actual
+process coverage. The current fixture drafts are not prerequisite-complete.
+Preserve all existing strict validation; these gaps are not reasons to relax it.

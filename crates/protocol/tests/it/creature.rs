@@ -552,7 +552,6 @@ fn persistent_personal_conditions_require_null_and_never_disclose_private_identi
     }
 }
 
-// Draft test additions only; integrate with existing registered owners after thaw.
 #[test]
 fn until_obstruction_reach_is_named_closed_and_directional_only() {
     let valid = serde_json::json!({"kind":"until_obstruction"});

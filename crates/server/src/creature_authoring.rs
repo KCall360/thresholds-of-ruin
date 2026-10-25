@@ -92,6 +92,8 @@ pub(crate) fn expertise(value: &str, rules: &s::rules::Ruleset) -> Result<Expert
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Modifier {
+    #[serde(default)]
+    pub cancellable: bool,
     pub scope: Scope,
     pub op: Op,
 }
@@ -1155,6 +1157,7 @@ mod strict_stat_tests {
                 json
             );
             Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: Op::Add { stat, value: 1 },
             }
@@ -1578,6 +1581,7 @@ mod wearable_modifier_tests {
         ];
         for op in ops {
             let modifier = Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op,
             };

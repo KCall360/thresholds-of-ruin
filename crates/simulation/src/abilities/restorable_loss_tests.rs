@@ -19,6 +19,7 @@ fn creature() -> CreatureState {
         })
         .unwrap();
     species.modifiers.push(Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Set {
             stat: Stat::Health,
@@ -335,6 +336,7 @@ fn checked_loss_immunity_skips_its_draw_without_suppressing_the_primary() {
                 unreachable!()
             };
             strikes[0].riders.push(RiderDef {
+                cancellable: false,
                 condition: None,
                 trigger: RiderTrigger::Success,
                 check: Some(RiderCheckDef {
@@ -360,6 +362,7 @@ fn checked_loss_immunity_skips_its_draw_without_suppressing_the_primary() {
                 name: "Poison probe".into(),
             });
             species.modifiers.push(Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Immunity {
                     selector: Selector::Descriptor {
@@ -750,6 +753,7 @@ fn loss_sensitive_timing(
         scaled_by: Some(Attribute::Strength),
     };
     species.modifiers.push(Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::GrantAbility {
             ability: ability.id.clone(),
@@ -1332,6 +1336,7 @@ fn hit_die_grant_loss_cancels_only_the_unresolved_tail_and_never_refunds_or_repl
                 form_choices: vec![],
                 expertise_grants: vec![],
                 modifiers: vec![Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::GrantAbility {
                         ability: ability.clone(),

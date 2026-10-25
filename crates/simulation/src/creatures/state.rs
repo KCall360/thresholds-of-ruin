@@ -2014,6 +2014,7 @@ mod compiled_tests {
                     )),
                     modifiers: vec![
                         Modifier {
+                            cancellable: false,
                             scope: Scope::Always,
                             op: if set {
                                 ModifierOp::Set {
@@ -2028,6 +2029,7 @@ mod compiled_tests {
                             },
                         },
                         Modifier {
+                            cancellable: false,
                             scope: Scope::Always,
                             op: ModifierOp::Add {
                                 stat: Stat::Attribute {

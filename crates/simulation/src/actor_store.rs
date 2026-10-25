@@ -947,6 +947,7 @@ mod tests {
         let species = crate::test_creatures::unmodified_species("index_subject");
         let mut template = Template::new(TemplateId::new("capacity").unwrap(), 0);
         template.modifiers.push(Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Add {
                 stat: Stat::ResourceMax {

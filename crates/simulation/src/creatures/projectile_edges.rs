@@ -273,6 +273,7 @@ mod tests {
         shooter.sources.insert(
             SourceId::Talent(talent.clone()),
             vec![Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Add {
                     stat: Stat::CheckEdge,
@@ -283,6 +284,7 @@ mod tests {
         defender.sources.insert(
             SourceId::Talent(talent.clone()),
             vec![Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Add {
                     stat: Stat::IncomingEdge {
@@ -374,6 +376,7 @@ mod tests {
         sheet.sources.insert(
             SourceId::Equipment(ItemId(2)),
             vec![Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Add {
                     stat: Stat::Edge,

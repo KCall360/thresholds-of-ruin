@@ -253,7 +253,7 @@ device = { ability = "rogue.wand_slow", initial_charges = { minimum = 3, maximum
 
 [appearance_pools."rogue.wands"]
 asset = "item.wand"
-appearances = ["ash wand", "copper wand", "ivory wand", "obsidian wand", "oak wand", "glass wand", "willow wand", "iron wand", "elm wand", "birch wand", "cedar wand"]
+appearances = ["ash wand", "copper wand", "ivory wand", "obsidian wand", "oak wand", "glass wand", "willow wand", "iron wand", "elm wand", "birch wand", "cedar wand", "hazel wand", "yew wand"]
 
 # Finite gear. Rogue source weapon dice and existing birth distributions are
 # preserved; skill/category, uniform 60/40 timing and armor physical DR are
@@ -733,3 +733,23 @@ class = "wand"
 stackable = false
 appearance_pool = "rogue.wands"
 device = { ability = "rogue.wand_drain_life", initial_charges = { minimum = 3, maximum = 7 }, discovery = "never" }
+
+[items."rogue.wand_cancellation"]
+asset = "item.wand"
+name = "wand of cancellation"
+identity = "rogue.wand_cancellation"
+magical = true
+class = "wand"
+stackable = false
+appearance_pool = "rogue.wands"
+device = { ability = "rogue.wand_cancellation", initial_charges = { minimum = 3, maximum = 7 }, discovery = "never" }
+
+[items."rogue.wand_magic_missile"]
+asset = "item.wand"
+name = "wand of magic missile"
+identity = "rogue.wand_magic_missile"
+magical = true
+class = "wand"
+stackable = false
+appearance_pool = "rogue.wands"
+device = { ability = "rogue.wand_magic_missile", initial_charges = { minimum = 3, maximum = 7 }, discovery = "on_use" }

@@ -240,6 +240,12 @@ fn record(
                                 amount: *amount,
                             }
                         }
+                        s::abilities::ResolvedEffect::CancelSpecials { changed } => {
+                            p::DiagnosticEffect::CancelSpecials {
+                                target,
+                                changed: *changed,
+                            }
+                        }
                         s::abilities::ResolvedEffect::DrainLife { changed } => {
                             p::DiagnosticEffect::DrainLife {
                                 target: p::ActorId(value.outcome.actor.0),

@@ -55,6 +55,7 @@ fn fixture_with_options(
                 assert!(!condition.protected_lifecycle());
                 condition.modifiers = vec![
                     crate::rules::Modifier {
+                        cancellable: false,
                         scope: crate::rules::Scope::Always,
                         op: crate::rules::ModifierOp::Add {
                             stat: crate::rules::Stat::Health,
@@ -90,6 +91,7 @@ fn fixture_with_options(
         species.behavior.disposition = crate::behavior::Disposition::Passive;
         species.modifiers.extend([
             crate::rules::Modifier {
+                cancellable: false,
                 scope: crate::rules::Scope::Always,
                 op: crate::rules::ModifierOp::Set {
                     stat: crate::rules::Stat::HealthRecoveryPeriod,
@@ -97,6 +99,7 @@ fn fixture_with_options(
                 },
             },
             crate::rules::Modifier {
+                cancellable: false,
                 scope: crate::rules::Scope::Always,
                 op: crate::rules::ModifierOp::Set {
                     stat: crate::rules::Stat::HealthRecoveryResetPercent,
@@ -106,6 +109,7 @@ fn fixture_with_options(
         ]);
         if guise {
             species.modifiers.push(crate::rules::Modifier {
+                cancellable: false,
                 scope: crate::rules::Scope::Always,
                 op: crate::rules::ModifierOp::Perception {
                     value: crate::perception::contract_fixtures::guise(),

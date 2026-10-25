@@ -21,6 +21,7 @@ fn at(region: u64, x: i32) -> Location {
 }
 fn context_modifier() -> Modifier {
     Modifier {
+        cancellable: false,
         scope: Scope::WhileNoSensedHostile,
         op: ModifierOp::Add {
             stat: Stat::HealthRecoveryPeriodPercent,
@@ -76,6 +77,7 @@ fn game_with_context(hostile_present: bool, contextual: bool) -> Game {
             preparation: tor_simulation::rules::ConditionPreparation::Preserve,
             name: id.into(),
             modifiers: vec![Modifier {
+                cancellable: false,
                 scope,
                 op: ModifierOp::Add { stat, value },
             }],

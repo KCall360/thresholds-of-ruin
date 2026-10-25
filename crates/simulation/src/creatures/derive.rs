@@ -1299,6 +1299,7 @@ fn compile_permanent(build: &CreatureBuild) -> Result<DerivedCreature, BuildErro
             // original root source and uses the ordinary ability grant pipeline.
             let definition = rules.form(form).ok_or(BuildError::InvalidTalentForm)?;
             modifiers.to_mut().push(Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::GrantAbility {
                     ability: definition.ability.clone(),
@@ -2530,6 +2531,7 @@ mod edge_tests {
                 (
                     SourceId::Talent(TalentId::new("incoming").unwrap()),
                     vec![Modifier {
+                        cancellable: false,
                         scope: Scope::Always,
                         op: ModifierOp::Add {
                             stat: Stat::IncomingEdge { defense: None },
@@ -2543,6 +2545,7 @@ mod edge_tests {
                         target,
                     ),
                     vec![Modifier {
+                        cancellable: false,
                         scope: Scope::Always,
                         op: ModifierOp::Add {
                             stat: Stat::IncomingEdge {
@@ -2592,6 +2595,7 @@ mod edge_tests {
 
     fn modifier(scope: Scope, set: bool, value: i64) -> Modifier {
         Modifier {
+            cancellable: false,
             scope,
             op: if set {
                 ModifierOp::Set {
@@ -2647,6 +2651,7 @@ mod edge_tests {
                 attack: None,
                 modifiers: vec![
                     Modifier {
+                        cancellable: false,
                         scope: Scope::Always,
                         op: ModifierOp::Add {
                             stat: Stat::CheckEdge,
@@ -2688,6 +2693,7 @@ mod edge_tests {
                 let id = ability.id.clone();
                 document.abilities.push(ability);
                 Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::GrantAbility { ability: id },
                 }
@@ -2753,6 +2759,7 @@ mod edge_tests {
                     item: crate::ItemId(value),
                     socket: crate::EquipmentSlotId(value as u16),
                     modifiers: vec![Modifier {
+                        cancellable: false,
                         scope: Scope::Always,
                         op: ModifierOp::Set {
                             stat: stat.clone(),
@@ -2859,6 +2866,7 @@ mod edge_tests {
             (
                 SourceId::Talent(TalentId::new("conditional").unwrap()),
                 vec![Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Add {
                         stat: Stat::Ability {
@@ -2899,6 +2907,7 @@ mod edge_tests {
                 vec![
                     modifier(Scope::Always, true, 1),
                     Modifier {
+                        cancellable: false,
                         scope: Scope::Always,
                         op: ModifierOp::Set {
                             stat: Stat::Ability {
@@ -2918,6 +2927,7 @@ mod edge_tests {
             &BTreeMap::from([(
                 SourceId::Equipment(crate::ItemId(11)),
                 vec![Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Set {
                         stat: Stat::IncomingEdge { defense: None },
@@ -2974,6 +2984,7 @@ mod edge_tests {
             &BTreeMap::from([(
                 SourceId::Talent(TalentId::new("incoming").unwrap()),
                 vec![Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Add {
                         stat: Stat::IncomingEdge { defense: None },
@@ -3014,6 +3025,7 @@ mod edge_tests {
             (
                 fear,
                 vec![Modifier {
+                    cancellable: false,
                     scope: Scope::VersusSource,
                     op: ModifierOp::Add {
                         stat: Stat::CheckEdge,
@@ -3165,6 +3177,7 @@ mod loss_fold_tests {
             &BTreeMap::from([(
                 SourceId::Equipment(crate::ItemId(1)),
                 vec![Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Add {
                         stat: Stat::Health,
@@ -3308,6 +3321,7 @@ mod worn_modifier_tests {
             SourceId::Equipment(crate::ItemId(1)),
             ops.into_iter()
                 .map(|op| Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op,
                 })
@@ -3508,6 +3522,7 @@ mod worn_modifier_tests {
                 item: crate::ItemId(1),
                 socket: crate::EquipmentSlotId(1),
                 modifiers: vec![Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::SustainAttribute {
                         attribute: Attribute::Strength,

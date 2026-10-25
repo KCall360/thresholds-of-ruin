@@ -1442,6 +1442,7 @@ mod tests {
             .get_mut("figure")
             .unwrap()
             .modifiers = vec![crate::creature_authoring::Modifier {
+            cancellable: false,
             scope: crate::creature_authoring::Scope::Always,
             op: crate::creature_authoring::Op::Add {
                 stat: crate::creature_authoring::Stat::Health,

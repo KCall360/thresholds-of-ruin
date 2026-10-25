@@ -333,6 +333,7 @@ mod tests {
             unreachable!()
         };
         let original = StrikeDef {
+            cancellable: false,
             offset: 0,
             unlock: None,
             check: None,

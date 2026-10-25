@@ -138,6 +138,7 @@ fn public_equipment_death_publishes_own_feedback_before_reopen() {
         slot: crate::EquipmentSlot::new("ring").unwrap(),
         attack: None,
         modifiers: vec![crate::rules::Modifier {
+            cancellable: false,
             scope: crate::rules::Scope::Always,
             op: crate::rules::ModifierOp::Add {
                 stat: crate::rules::Stat::Health,
@@ -189,6 +190,7 @@ fn expiring_health_game(contextual: bool) -> Game {
             });
             if contextual {
                 species.modifiers.push(Modifier {
+                    cancellable: false,
                     scope: Scope::WhileNoSensedHostile,
                     op: ModifierOp::Add {
                         stat: Stat::HealthRecoveryPeriodPercent,
@@ -205,6 +207,7 @@ fn expiring_health_game(contextual: bool) -> Game {
                 preparation: crate::rules::ConditionPreparation::Preserve,
                 name: "Borrowed health".into(),
                 modifiers: vec![Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Add {
                         stat: Stat::Health,

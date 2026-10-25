@@ -12,6 +12,12 @@ fn at(x: i32) -> Location {
     }
 }
 fn fixture(cancellation: bool) -> (Game, ItemId) {
+    fixture_with(cancellation, |_, _, _| {})
+}
+fn fixture_with(
+    cancellation: bool,
+    customize: impl FnOnce(&mut RulesetDocument, &mut AbilityDef, &mut crate::creatures::Species),
+) -> (Game, ItemId) {
     let mut game = super::ray_tests::fixture_with(|document, ray, species| {
         let mut special = document
             .abilities
@@ -114,6 +120,7 @@ fn fixture(cancellation: bool) -> (Game, ItemId) {
                 },
             }];
         }
+        customize(document, ray, species);
     });
     game.actors.get_mut(&ActorId(1)).unwrap().ready_at = 0;
     game.actors.get_mut(&ActorId(2)).unwrap().ready_at = 1000;
@@ -306,4 +313,191 @@ fn ordinary_granted_contact_uses_the_same_plan_and_not_item_payment() {
     assert!(game.combat_events().iter().any(|event| matches!(event,
         crate::combat::CombatEvent::Resolved { outcome, .. } if outcome.ability.as_ref() == Some(&ability)
         && outcome.intention == Some(id) && outcome.target == ActorId(2))));
+}
+
+#[test]
+fn paid_contact_empty_wall_and_noncombat_interception_do_not_roll_or_reach_behind() {
+    for cancellation in [false, true] {
+        for obstruction in [0, 1, 2] {
+            let (mut game, item) = fixture(cancellation);
+            if obstruction == 0 {
+                // Actual empty eastward flight: move the live target off the ray.
+                game.actors.get_mut(&ActorId(2)).unwrap().location = Location {
+                    region: RegionId(1),
+                    position: Position { x: 3, y: 2, z: 0 },
+                };
+            } else if obstruction == 1 {
+                game.world.set_wall(at(2), true).unwrap();
+            } else {
+                let body = game
+                    .spawn_actor(at(2), std::num::NonZeroU64::new(100).unwrap())
+                    .unwrap();
+                game.actors.get_mut(&body).unwrap().ready_at = 1000;
+                assert!(game.actors[&body].alive() && game.creature(body).is_none());
+            }
+            let before = game.creature(ActorId(2)).unwrap().into_owned();
+            let rng = game.rules_rng;
+            let events = game.combat_events().len();
+            complete(&mut game, item);
+            assert_eq!(
+                game.rules_rng, rng,
+                "mode {cancellation}, obstruction {obstruction}"
+            );
+            let after = game.creature(ActorId(2)).unwrap();
+            assert_eq!(after.health(), before.health());
+            assert_eq!(after.cancelled(), before.cancelled());
+            assert_eq!(
+                after.derived().perception.invisible,
+                before.derived().perception.invisible
+            );
+            assert!(!game
+                .combat_events()
+                .iter()
+                .skip(events)
+                .any(|event| matches!(event, crate::combat::CombatEvent::Resolved { .. })));
+        }
+    }
+}
+
+#[test]
+fn cancellation_record_requires_state_and_roundtrips_without_reintroducing_sources() {
+    use crate::creatures::record::CreatureRecord;
+    let (mut game, item) = fixture(true);
+    complete(&mut game, item);
+    let creature = game.creature(ActorId(2)).unwrap();
+    let value = serde_json::to_value(CreatureRecord::capture(&creature)).unwrap();
+    assert_eq!(value["cancelled"], true);
+    let decoded: CreatureRecord = serde_json::from_value(value.clone()).unwrap();
+    let restored = decoded
+        .restore(creature.build().content().clone(), vec![])
+        .unwrap();
+    assert_eq!(restored, *creature);
+    for malformed in [
+        None,
+        Some(serde_json::Value::Null),
+        Some(serde_json::json!(0)),
+    ] {
+        let mut bad = value.clone();
+        match malformed {
+            None => {
+                bad.as_object_mut().unwrap().remove("cancelled");
+            }
+            Some(value) => {
+                bad["cancelled"] = value;
+            }
+        }
+        assert!(serde_json::from_value::<CreatureRecord>(bad).is_err());
+    }
+}
+
+#[test]
+fn cancellation_of_tagged_health_uses_ordinary_death_and_atomic_cleanup() {
+    let (mut game, _) = fixture_with(true, |_, _, species| {
+        let health = species
+            .modifiers
+            .iter_mut()
+            .find(|modifier| {
+                matches!(
+                    modifier.op,
+                    ModifierOp::Set {
+                        stat: Stat::Health,
+                        ..
+                    }
+                )
+            })
+            .expect("shared ray fixture supplies one actual Health override");
+        assert_eq!(
+            health.op,
+            ModifierOp::Set {
+                stat: Stat::Health,
+                value: 100
+            }
+        );
+        health.cancellable = true;
+        health.op = ModifierOp::Set {
+            stat: Stat::Health,
+            value: 1000,
+        };
+    });
+    assert_eq!(game.health(ActorId(2)).unwrap(), (1000, 1000));
+    let mut baseline = game.clone();
+    baseline
+        .apply_effects(ActorId(2), &[Effect::CancelSpecials])
+        .unwrap();
+    assert!(baseline.alive(ActorId(2)));
+    assert!(baseline.health(ActorId(2)).unwrap().1 < 999);
+    let mut injury = game.actor_outcome(ActorId(2)).unwrap();
+    injury
+        .state
+        .combat
+        .as_mut()
+        .unwrap()
+        .with_recovery_context(None, |creature| {
+            creature.damage(999);
+            Ok::<(), crate::GameError>(())
+        })
+        .unwrap();
+    game.apply_outcome(injury).unwrap();
+    assert!(game.alive(ActorId(2)));
+    assert_eq!(game.health(ActorId(2)).unwrap().0, 1);
+    let mut positive = game.clone();
+    positive
+        .apply_effects(ActorId(2), &[Effect::CancelSpecials])
+        .unwrap();
+    assert!(!positive.alive(ActorId(2)));
+    assert!(positive
+        .items
+        .iter()
+        .any(|(_, item)| item.spec.class == crate::ItemClass::Corpse));
+    game.next_item_id = u64::MAX;
+    let before = game.clone();
+    assert_eq!(
+        game.apply_effects(ActorId(2), &[Effect::CancelSpecials]),
+        Err(crate::GameError::IdentityExhausted)
+    );
+    assert_eq!(
+        game, before,
+        "no cancellation, injury, corpse or publication escapes failed cleanup"
+    );
+}
+
+#[test]
+fn cancellation_live_ai_healing_selection_preserves_unmarked_healing() {
+    for tagged in [false, true] {
+        let id = AbilityId::new("fixture_selective_healing").unwrap();
+        let (mut game, _) = fixture_with(true, |document, ray, species| {
+            let mut healing = ray.clone();
+            healing.id = id.clone();
+            healing.invocation = InvocationKind::ActorTarget;
+            healing.reach = Reach::SelfOnly;
+            healing.interaction = Interaction::NonHostile;
+            healing.tags.clear();
+            let StrikeSource::Authored { strikes } = &mut healing.strikes else {
+                unreachable!()
+            };
+            strikes[0].cancellable = tagged;
+            strikes[0].on_success = vec![Effect::Heal {
+                amount: AmountExpr::Fixed { amount: 1 },
+            }];
+            species.modifiers.push(Modifier {
+                cancellable: false,
+                scope: Scope::Always,
+                op: ModifierOp::GrantAbility {
+                    ability: id.clone(),
+                },
+            });
+            document.abilities.push(healing);
+        });
+        let plan = game.ability_plan(ActorId(1), &id, ActorId(1)).unwrap();
+        assert!(crate::ai::safe_healing_plan(&plan));
+        assert!(game.effective_safe_healing_plan(&plan));
+        game.apply_effects(ActorId(1), &[Effect::CancelSpecials])
+            .unwrap();
+        assert!(game.plan_source_valid(&plan));
+        assert!(
+            crate::ai::safe_healing_plan(&plan),
+            "original frozen source is unchanged"
+        );
+        assert_eq!(game.effective_safe_healing_plan(&plan), !tagged);
+    }
 }

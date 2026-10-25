@@ -1012,6 +1012,7 @@ fn host_teleport_preserves_an_entry_from_cancel_released_preload_continuation() 
         strikes: [0, 20]
             .into_iter()
             .map(|offset| StrikeDef {
+                cancellable: false,
                 offset,
                 unlock: None,
                 check: None,
@@ -1280,6 +1281,7 @@ fn accepted_terminal_up_stops_scheduled_attack_recovery_and_hunger_work() {
     species.melee =
         crate::test_creatures::natural_melee(100, 60, crate::combat::DamageType::Impact, 4);
     species.modifiers.push(Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Set {
             stat: Stat::HealthRecoveryPeriod,

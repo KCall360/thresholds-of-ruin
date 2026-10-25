@@ -32,6 +32,7 @@ fn fixture() -> Game {
     let mut document = crate::test_creatures::ruleset().document().clone();
     let mut foe = crate::test_creatures::species();
     foe.modifiers.push(Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::GrantAbility {
             ability: definition.id.clone(),

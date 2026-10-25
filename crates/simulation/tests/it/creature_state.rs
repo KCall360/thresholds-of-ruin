@@ -104,6 +104,7 @@ pub(super) fn build() -> CreatureBuild {
     let mut immune = Template::new(TemplateId::new("immune_form").unwrap(), 0);
     immune.modifiers = vec![
         Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Add {
                 stat: Stat::Health,
@@ -111,6 +112,7 @@ pub(super) fn build() -> CreatureBuild {
             },
         },
         Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Set {
                 stat: Stat::ResourceMax {
@@ -120,6 +122,7 @@ pub(super) fn build() -> CreatureBuild {
             },
         },
         Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Immunity {
                 selector: Selector::Descriptor {
@@ -405,6 +408,7 @@ fn timed(id: &str, op: ModifierOp) -> tor_simulation::rules::ConditionDef {
         preparation: tor_simulation::rules::ConditionPreparation::Preserve,
         name: id.into(),
         modifiers: vec![Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op,
         }],
@@ -557,6 +561,7 @@ fn administrative_definition_replacement_cannot_spin_on_a_protected_entry() {
     replacement.preparation = tor_simulation::rules::ConditionPreparation::Preserve;
     replacement.timing = tor_simulation::rules::ConditionTiming::expiring();
     replacement.modifiers = vec![Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Add {
             stat: Stat::Attribute {

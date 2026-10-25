@@ -149,6 +149,28 @@ impl Sources<'_> {
             }
         }
     }
+    fn validate_cancellation(&self, rules: &r::Ruleset) -> Result<(), Failure> {
+        // Run after the COMPLETE closure: discovering Light or Cancellation cannot
+        // hide a later reachable mixed condition. Imported definitions are not roots.
+        if self.cancellation {
+            for source in &self.seen {
+                let Source::Condition(id) = source else {
+                    continue;
+                };
+                let condition = tor_simulation::content_ids::ConditionId::new(id.clone())
+                    .map_err(|_| fail("Invalid reachable cancellation condition"))?;
+                let shape = rules
+                    .cancellation_invisibility_shape(&condition)
+                    .map_err(|_| fail("Invalid reachable cancellation condition"))?;
+                if shape == r::CancellationInvisibilityShape::Mixed {
+                    return Err(fail(format!(
+                    "Cancellation source closure: conditions.{id} mixes invisibility with unrelated behavior"
+                )));
+                }
+            }
+        }
+        Ok(())
+    }
     fn finish(&mut self) -> Result<bool, Failure> {
         let rules = self.rules;
         let package = self.package;
@@ -505,25 +527,7 @@ pub(super) fn spatial_effect_enabled(package: &Package) -> Result<bool, Failure>
         }
     }
     let spatial = sources.finish()?;
-    // Run after the COMPLETE closure: discovering Light or Cancellation cannot
-    // hide a later reachable mixed condition. Imported definitions are not roots.
-    if sources.cancellation {
-        for source in &sources.seen {
-            let Source::Condition(id) = source else {
-                continue;
-            };
-            let condition = tor_simulation::content_ids::ConditionId::new(id.clone())
-                .map_err(|_| fail("Invalid reachable cancellation condition"))?;
-            let shape = rules
-                .cancellation_invisibility_shape(&condition)
-                .map_err(|_| fail("Invalid reachable cancellation condition"))?;
-            if shape == r::CancellationInvisibilityShape::Mixed {
-                return Err(fail(format!(
-                    "Cancellation source closure: conditions.{id} mixes invisibility with unrelated behavior"
-                )));
-            }
-        }
-    }
+    sources.validate_cancellation(&rules)?;
     // Cancellation alone does not require room/passage metadata.
     Ok(spatial)
 }
@@ -601,6 +605,7 @@ mod tests {
             .unwrap()
             .modifiers
             .push(a::Modifier {
+                cancellable: false,
                 scope: a::Scope::Always,
                 op: a::Op::GrantAbility {
                     ability: "fixture.room_light".into(),
@@ -628,6 +633,7 @@ mod tests {
             .unwrap()
             .modifiers
             .push(a::Modifier {
+                cancellable: false,
                 scope: a::Scope::Always,
                 op: a::Op::GrantAbility {
                     ability: "fixture.room_light".into(),
@@ -659,6 +665,7 @@ mod tests {
             id: flag.clone(),
             name: "Light grant".into(),
             modifiers: vec![r::Modifier {
+                cancellable: false,
                 scope: r::Scope::Always,
                 op: r::ModifierOp::GrantAbility {
                     ability: AbilityId::new("fixture.room_light").unwrap(),
@@ -668,6 +675,7 @@ mod tests {
         let condition = document.conditions.first_mut().unwrap();
         let condition_id = condition.id.to_string();
         condition.modifiers.push(r::Modifier {
+            cancellable: false,
             scope: r::Scope::Always,
             op: r::ModifierOp::Flag { flag },
         });
@@ -695,6 +703,7 @@ mod tests {
             .first_mut()
             .expect("production talent control");
         talent.modifiers.push(r::Modifier {
+            cancellable: false,
             scope: r::Scope::Always,
             op: r::ModifierOp::GrantAbility {
                 ability: AbilityId::new("fixture.room_light").unwrap(),
@@ -722,5 +731,182 @@ mod tests {
         assert!(!graph.finish().unwrap());
         graph.grants(&grants);
         assert!(graph.finish().unwrap());
+    }
+}
+
+#[cfg(test)]
+mod cancellation_source_tests {
+    use super::*;
+    use tor_simulation::content_ids::AbilityId;
+
+    fn fixture() -> Package {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/rogue-exploration");
+        let scenario = load(&root, 7, None, true).unwrap();
+        let mut package = (**scenario.package.as_ref().unwrap()).clone();
+        let mut document = package.rules().unwrap().document().clone();
+        let mut ability = document
+            .abilities
+            .iter()
+            .find(|a| a.id.as_str() == "rogue.wand_invisibility")
+            .unwrap()
+            .clone();
+        ability.id = AbilityId::new("fixture.cancellation").unwrap();
+        ability.reach = r::Reach::UntilObstruction;
+        let r::StrikeSource::Authored { strikes } = &mut ability.strikes else {
+            panic!("authored ray prerequisite")
+        };
+        assert_eq!(strikes.len(), 1);
+        strikes[0].check = None;
+        strikes[0].on_success = vec![r::Effect::CancelSpecials];
+        strikes[0].on_failure.clear();
+        document.abilities.push(ability);
+        package.rules_document =
+            crate::storage::schema::scenario::encode_rules_document(&document).unwrap();
+        let rules = package.rules().unwrap();
+        let mut item = package.manifest.archetypes["rogue.wand_invisibility"].clone();
+        item.identity = Some("fixture.cancellation".into());
+        item.appearance_pool = None;
+        item.device.as_mut().unwrap().ability = "fixture.cancellation".into();
+        item.device.as_ref().unwrap().compile(&rules).unwrap();
+        package
+            .manifest
+            .archetypes
+            .insert("fixture.cancellation".into(), item);
+        package
+    }
+    fn enable(package: &mut Package) {
+        package.manifest.characters[0]
+            .loadout
+            .push(CharacterLoadout {
+                archetype: "fixture.cancellation".into(),
+                quantity: 1,
+                equipped_slot: None,
+            });
+    }
+    fn mixed(package: &mut Package, unused: bool) {
+        let mut document = package.rules().unwrap().document().clone();
+        let mut condition = document
+            .conditions
+            .iter()
+            .find(|c| c.id.as_str() == "rogue.invisible")
+            .unwrap()
+            .clone();
+        assert!(condition.restrictions.is_empty());
+        assert_eq!(condition.modifiers.len(), 1);
+        condition.modifiers.push(r::Modifier {
+            cancellable: false,
+            scope: r::Scope::Always,
+            op: r::ModifierOp::Add {
+                stat: r::Stat::Attribute {
+                    attribute: tor_simulation::attributes::Attribute::Strength,
+                },
+                value: 1,
+            },
+        });
+        if unused {
+            condition.id =
+                tor_simulation::content_ids::ConditionId::new("fixture.unused_mixed").unwrap();
+            document.conditions.push(condition);
+        } else {
+            *document
+                .conditions
+                .iter_mut()
+                .find(|c| c.id == condition.id)
+                .unwrap() = condition;
+        }
+        r::Ruleset::validate(document.clone()).unwrap();
+        package.rules_document =
+            crate::storage::schema::scenario::encode_rules_document(&document).unwrap();
+    }
+    #[test]
+    fn cancellation_source_policy_is_reachable_only_and_not_a_spatial_requirement() {
+        let mut package = fixture();
+        assert!(
+            !spatial_effect_enabled(&package).unwrap(),
+            "unused imported cancellation is not a root"
+        );
+        mixed(&mut package, false);
+        assert!(
+            !spatial_effect_enabled(&package).unwrap(),
+            "reachable mixed invisibility is legal without cancellation"
+        );
+        enable(&mut package);
+        let error = spatial_effect_enabled(&package).unwrap_err();
+        assert!(format!("{error:?}").contains("conditions.rogue.invisible"));
+        let mut pure = fixture();
+        enable(&mut pure);
+        assert!(
+            !spatial_effect_enabled(&pure).unwrap(),
+            "cancellation alone needs no room metadata"
+        );
+        mixed(&mut pure, true);
+        assert!(
+            !spatial_effect_enabled(&pure).unwrap(),
+            "unused mixed definition is not forbidden"
+        );
+        assert!(super::super::spatial_runtime::SpatialAudit::new(Some(&pure), 7).is_ok());
+        assert!(
+            super::super::spatial_runtime::SpatialAudit::new(Some(&package), 7).is_err(),
+            "source-free audit shares enabled-source policy"
+        );
+    }
+    #[test]
+    fn cancellation_closure_follows_flag_implied_invisibility_and_future_talent_grants() {
+        let package = fixture();
+        let mut document = package.rules().unwrap().document().clone();
+        let flag = tor_simulation::content_ids::FlagId::new("fixture.invisible_flag").unwrap();
+        let condition = document
+            .conditions
+            .iter_mut()
+            .find(|c| c.id.as_str() == "rogue.invisible")
+            .unwrap();
+        let invisible = condition.modifiers.clone();
+        let condition_id = condition.id.to_string();
+        condition.modifiers = vec![r::Modifier {
+            cancellable: false,
+            scope: r::Scope::Always,
+            op: r::ModifierOp::Flag { flag: flag.clone() },
+        }];
+        document.flags.push(r::FlagDef {
+            id: flag,
+            name: "Invisible wrapper".into(),
+            modifiers: invisible,
+        });
+        let talent = document
+            .talents
+            .first_mut()
+            .expect("real future talent prerequisite");
+        talent.modifiers.push(r::Modifier {
+            cancellable: false,
+            scope: r::Scope::Always,
+            op: r::ModifierOp::GrantAbility {
+                ability: AbilityId::new("fixture.cancellation").unwrap(),
+            },
+        });
+        let rules = r::Ruleset::validate(document.clone()).unwrap();
+        let grants = document.constants.racial_point_grants.clone();
+        assert!(grants.iter().any(|g| g.points > 0
+            && document
+                .point_pools
+                .iter()
+                .any(|p| p.id == g.pool && p.allowed.contains(&r::PurchaseKind::Talent))));
+        let mut graph = Sources {
+            package: &package,
+            rules: &document,
+            pending: vec![],
+            seen: BTreeSet::new(),
+            light: false,
+            cancellation: false,
+        };
+        graph.add(Source::Condition(condition_id));
+        assert!(!graph.finish().unwrap());
+        graph.validate_cancellation(&rules).unwrap();
+        graph.grants(&grants);
+        assert!(!graph.finish().unwrap());
+        assert!(graph.cancellation);
+        assert!(
+            graph.validate_cancellation(&rules).is_err(),
+            "future reachable cancellation cannot erase an unrelated flag identity"
+        );
     }
 }

@@ -18,6 +18,7 @@ use tor_simulation::{
 
 fn reduction(amount: u32) -> Modifier {
     Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Reduction {
             selector: Selector::Category {
@@ -37,6 +38,7 @@ fn ward(id: &str, amount: u32) -> ConditionDef {
         preparation: tor_simulation::rules::ConditionPreparation::Preserve,
         name: id.into(),
         modifiers: vec![Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: serde_json::from_str(&format!(
                 r#"{{"kind":"talent_reduction","category":"impact","amount":{amount}}}"#

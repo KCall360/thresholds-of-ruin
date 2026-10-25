@@ -81,6 +81,8 @@ impl<'de> Deserialize<'de> for Ability {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Fields {
+            #[serde(default)]
+            cancellable: bool,
             interaction: Interaction,
             id: AbilityId,
             #[serde(default)]
@@ -106,6 +108,7 @@ impl<'de> Deserialize<'de> for Ability {
         }
         let fields: Fields = crate::creature_authoring::named_map(deserializer)?;
         Ok(Self(AbilityDef {
+            cancellable: fields.cancellable,
             interaction: fields.interaction,
             id: fields.id,
             invocation: fields.invocation,
@@ -275,6 +278,8 @@ impl<'de> Deserialize<'de> for Strike {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Fields {
+            #[serde(default)]
+            cancellable: bool,
             offset: u64,
             unlock: Option<TalentId>,
             check: Option<CheckDef>,
@@ -293,6 +298,7 @@ impl<'de> Deserialize<'de> for Strike {
         }
         let fields: Fields = crate::creature_authoring::named_map(deserializer)?;
         Ok(Self(StrikeDef {
+            cancellable: fields.cancellable,
             offset: fields.offset,
             unlock: fields.unlock,
             check: fields.check,
@@ -310,6 +316,8 @@ impl<'de> Deserialize<'de> for Rider {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Fields {
+            #[serde(default)]
+            cancellable: bool,
             trigger: RiderTrigger,
             condition: Option<RiderCondition>,
             check: Option<RiderCheckDef>,
@@ -322,6 +330,7 @@ impl<'de> Deserialize<'de> for Rider {
         }
         let fields: Fields = crate::creature_authoring::named_map(deserializer)?;
         Ok(Self(RiderDef {
+            cancellable: fields.cancellable,
             trigger: fields.trigger,
             condition: fields.condition,
             check: fields.check,
