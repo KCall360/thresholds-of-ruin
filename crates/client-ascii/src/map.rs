@@ -226,19 +226,32 @@ pub fn in_view(o: &Observation, position: Position) -> bool {
         && BAND.contains(&(position.z - o.position.z))
 }
 
-struct Column<'a> {
-    cells: BTreeMap<i32, &'a RememberedMapCell>,
+/// A chart occurrence has its own position; retained payload storage is independent.
+pub(crate) struct PositionedAppearance<'a> {
+    pub position: Position,
+    pub appearance: std::borrow::Cow<'a, RememberedMapCell>,
 }
 
-impl Column<'_> {
-    fn at(&self, dz: i32) -> Option<&RememberedMapCell> {
+impl std::ops::Deref for PositionedAppearance<'_> {
+    type Target = RememberedMapCell;
+    fn deref(&self) -> &Self::Target {
+        &self.appearance
+    }
+}
+
+struct Column<'a, 'b> {
+    cells: BTreeMap<i32, &'a PositionedAppearance<'b>>,
+}
+
+impl<'b> Column<'_, 'b> {
+    fn at(&self, dz: i32) -> Option<&PositionedAppearance<'b>> {
         self.cells.get(&dz).copied()
     }
     fn open(&self, dz: i32) -> bool {
         self.at(dz).is_some_and(|c| !c.wall)
     }
     /// The column's terrain, and the cell it stands for.
-    fn terrain(&self) -> Option<(Kind, &RememberedMapCell)> {
+    fn terrain(&self) -> Option<(Kind, &PositionedAppearance<'b>)> {
         for dz in [0, 1] {
             if let Some(cell) = self.at(dz).filter(|c| c.door.is_some()) {
                 return Some((Kind::Door, cell));
@@ -280,7 +293,13 @@ pub fn tiles(
     palette: &Palette,
     current: &dyn Fn(&CellView) -> bool,
 ) -> Vec<MapTile> {
-    let cells = appearance_cells(o);
+    let cells: Vec<_> = appearance_cells(o)
+        .into_iter()
+        .map(|cell| PositionedAppearance {
+            position: cell.position,
+            appearance: std::borrow::Cow::Owned(cell),
+        })
+        .collect();
     let current_positions: std::collections::BTreeSet<_> = o
         .visible_cells
         .iter()
@@ -336,7 +355,7 @@ pub(crate) fn appearance_cells(o: &Observation) -> Vec<RememberedMapCell> {
 /// Appearance-only map input keeps remembered items and doors incapable of actions.
 pub(crate) fn appearance_tiles(
     o: &Observation,
-    cells: &[RememberedMapCell],
+    cells: &[PositionedAppearance<'_>],
     palette: &Palette,
     current: &dyn Fn(Position) -> bool,
 ) -> Vec<MapTile> {

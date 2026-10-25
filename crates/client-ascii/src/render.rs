@@ -36,17 +36,41 @@ pub fn map_tiles(
         .iter()
         .map(|c| (c.position.x, c.position.y, c.position.z))
         .collect();
-    let mut cells: std::collections::BTreeMap<_, _> = state
-        .map_memory()
-        .map(|cell| (cell.position, cell.appearance()))
-        .collect();
-    for cell in map::appearance_cells(&state.state().observation) {
-        cells.insert(cell.position, cell);
-    }
-    let cells: Vec<_> = cells.into_values().collect();
+    let cells = prepare_appearances(
+        state.map_memory(),
+        map::appearance_cells(&state.state().observation),
+    );
     map::appearance_tiles(&state.state().observation, &cells, palette, &|position| {
         current.contains(&(position.x, position.y, position.z))
     })
+}
+
+fn prepare_appearances<'a>(
+    memory: impl Iterator<Item = tor_client_common::MapCell<'a>>,
+    current: Vec<tor_protocol::RememberedMapCell>,
+) -> Vec<map::PositionedAppearance<'a>> {
+    let mut cells: std::collections::BTreeMap<_, _> = memory
+        .map(|cell| {
+            (
+                cell.position,
+                map::PositionedAppearance {
+                    position: cell.position,
+                    // First-red scaffold retains the existing materialization until storage regression runs.
+                    appearance: std::borrow::Cow::Owned(cell.appearance()),
+                },
+            )
+        })
+        .collect();
+    for cell in current {
+        cells.insert(
+            cell.position,
+            map::PositionedAppearance {
+                position: cell.position,
+                appearance: std::borrow::Cow::Owned(cell),
+            },
+        );
+    }
+    cells.into_values().collect()
 }
 
 /// The known cell under a pixel, current or remembered.
@@ -719,4 +743,202 @@ pub fn logical_mouse(x: f32, y: f32, width: usize, height: usize) -> Option<(usi
     let y = (y - (height as f32 - HEIGHT as f32 * scale) / 2.0) / scale;
     (x >= 0.0 && y >= 0.0 && x < WIDTH as f32 && y < HEIGHT as f32)
         .then_some((x as usize, y as usize))
+}
+
+#[cfg(test)]
+mod borrowed_map_tests {
+    use super::*;
+    use std::borrow::Cow;
+    use tor_client_common::{MapCell, RememberedCell};
+    use tor_protocol::{ItemClass, MapItemAppearance, Position, RememberedMapCell};
+
+    fn position(x: i32, z: i32) -> Position {
+        Position { x, y: 0, z }
+    }
+    fn cell(x: i32, z: i32) -> RememberedMapCell {
+        RememberedMapCell {
+            key: format!("cell-{x}-{z}"),
+            position: position(x, z),
+            wall: false,
+            material: "retained stone description".into(),
+            asset: None,
+            place_hint: false,
+            stairs_up: false,
+            stairs_down: false,
+            door: None,
+            trap: None,
+            ground_items: vec![],
+        }
+    }
+    fn record(appearance: RememberedMapCell) -> RememberedCell {
+        RememberedCell {
+            appearance,
+            last_seen_tick: Some(1),
+            last_seen_revision: Some(1),
+        }
+    }
+    fn pile(class: ItemClass) -> MapItemAppearance {
+        MapItemAppearance {
+            class,
+            name: "remembered object".into(),
+            description: "long retained description".into(),
+            appearance: "remembered object".into(),
+            identified: false,
+            quantity: 1,
+            asset: None,
+        }
+    }
+
+    #[test]
+    fn retained_map_occurrences_borrow_original_payload_storage() {
+        let mut appearance = cell(90, 7);
+        appearance.ground_items.push(pile(ItemClass::Potion));
+        let saved = record(appearance);
+        let prepared = prepare_appearances(
+            [
+                MapCell {
+                    position: position(2, 0),
+                    cell: &saved,
+                },
+                MapCell {
+                    position: position(4, 1),
+                    cell: &saved,
+                },
+            ]
+            .into_iter(),
+            vec![],
+        );
+        assert_eq!(
+            prepared.iter().map(|row| row.position).collect::<Vec<_>>(),
+            [position(2, 0), position(4, 1)]
+        );
+        for row in &prepared {
+            assert!(
+                matches!(&row.appearance, Cow::Borrowed(_)),
+                "retained cells must borrow their original payload"
+            );
+            assert!(std::ptr::eq(row.appearance.as_ref(), &saved.appearance));
+            assert_eq!(row.material.as_ptr(), saved.material.as_ptr());
+            assert_eq!(row.ground_items.as_ptr(), saved.ground_items.as_ptr());
+        }
+    }
+
+    #[test]
+    fn positioned_merge_preserves_materialized_tiles_heights_order_and_current_overlays() {
+        let mut o = tor_client_common::test_support::observation();
+        o.visible_actors.clear();
+        let mut lower = cell(90, 7);
+        lower.ground_items.push(pile(ItemClass::Potion));
+        let mut stairs = cell(91, 7);
+        stairs.stairs_up = true;
+        let mut wall = cell(92, 7);
+        wall.wall = true;
+        let saved = [
+            record(lower),
+            record(stairs),
+            record(wall),
+            record(cell(93, 7)),
+        ];
+        let memory = [
+            MapCell {
+                position: position(0, 0),
+                cell: &saved[2],
+            },
+            MapCell {
+                position: position(1, -1),
+                cell: &saved[0],
+            },
+            MapCell {
+                position: position(2, 0),
+                cell: &saved[1],
+            },
+            MapCell {
+                position: position(3, 0),
+                cell: &saved[2],
+            },
+            MapCell {
+                position: position(3, 1),
+                cell: &saved[3],
+            },
+            MapCell {
+                position: position(4, 1),
+                cell: &saved[1],
+            },
+        ];
+        let mut current_item = cell(1, 0);
+        current_item.ground_items.push(pile(ItemClass::Wand));
+        let current = vec![cell(0, 0), current_item];
+        let prepared = prepare_appearances(memory.into_iter(), current.clone());
+        assert!(
+            !prepared[0].wall,
+            "current disclosure replaces the stale wall at the same occurrence"
+        );
+        // Independent old materialized merge; each retained occurrence gets its own position.
+        let mut old: std::collections::BTreeMap<_, _> = memory
+            .into_iter()
+            .map(|row| (row.position, row.appearance()))
+            .collect();
+        for row in &current {
+            old.insert(row.position, row.clone());
+        }
+        let old: Vec<_> = old
+            .into_values()
+            .map(|row| map::PositionedAppearance {
+                position: row.position,
+                appearance: Cow::Owned(row),
+            })
+            .collect();
+        let is_current = |p| current.iter().any(|row| row.position == p);
+        let expected = map::appearance_tiles(&o, &old, &Default::default(), &is_current);
+        let actual = map::appearance_tiles(&o, &prepared, &Default::default(), &is_current);
+        assert_eq!(actual, expected);
+        assert_eq!(
+            actual
+                .iter()
+                .map(|row| (row.position, row.kind, row.glyph, row.remembered))
+                .collect::<Vec<_>>(),
+            [
+                (position(0, 0), Kind::Player, '@', false),
+                (position(1, 0), Kind::Item, '!', false),
+                (position(2, 0), Kind::StairsUp, '<', true),
+                (position(3, 0), Kind::LowWall, '#', true),
+                (position(4, 1), Kind::Floor, '.', true),
+            ]
+        );
+        // Current disclosed piles precede even lower retained planes, then creatures win.
+        o.ground_items.push(tor_protocol::GroundItemView {
+            item: tor_protocol::ItemView {
+                id: tor_protocol::ItemTarget::from_digest([44; 32]),
+                name: "wand".into(),
+                class: ItemClass::Wand,
+                appearance: "wand".into(),
+                identified: false,
+                quantity: 1,
+                description: String::new(),
+                corpse: None,
+                asset: None,
+                known_currency: None,
+                known_supply: None,
+            },
+            position: position(1, 0),
+            reachable: false,
+            supply_reachable: false,
+        });
+        let overlaid = map::appearance_tiles(&o, &prepared, &Default::default(), &is_current);
+        assert_eq!(overlaid[1].glyph, '/');
+        o.visible_actors.push(tor_protocol::ActorView {
+            id: tor_protocol::ActorTarget::from_digest([45; 32]),
+            name: "disclosed creature".into(),
+            description: String::new(),
+            asset: None,
+            appearance_seed: None,
+            position: position(1, 0),
+        });
+        let occupied = map::appearance_tiles(&o, &prepared, &Default::default(), &is_current);
+        assert_eq!(occupied[1].kind, Kind::Creature);
+        assert_eq!(
+            occupied,
+            map::appearance_tiles(&o, &old, &Default::default(), &is_current)
+        );
+    }
 }

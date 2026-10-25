@@ -1015,9 +1015,9 @@ current ordinary threshold P=100 and held XP X:
 The existing seams are `growth_pending`,
 `apply_held_growth_with_recovery_context`, and earned-growth `projected_tier` and
 `award`; the last has a u32 operand over a u64 ledger. No speculative dry-run or
-new authority selects the unresolved policy. Blocked-dose payment and discovery
-also require an explicit decision where no approved contract already exists.
-Pinned Rogue has no corresponding TOR gate model; no implementation is selected.
+new authority selects the unresolved policy. Ordinary dose consumption and OnUse identification remain the baseline; no
+TooWeak-like progression refusal is introduced. Pinned Rogue has no corresponding
+TOR funding-gate model; no funding implementation is selected.
 The corrected full simulation library passes all 1,868 tests. The next full
 server run passes 1,093 tests and fails one remaining assertion in the source
 negative fixture; all remote illumination, true cold-frontier, frozen-actor,
@@ -1093,3 +1093,49 @@ These tests exercise mocked verifier execution and real helper accounting; they
 are not an actual v3 verification gate, native run, graphical waiver receipt or
 final discovered execution inventory. Final independent debug/release and hosted
 qualification remain pending. No gameplay change accompanies this checkpoint.
+
+### Strength-only next batch: accepted design, cap basis unresolved
+
+The next potion uses a unit `GainStrength` source/planned effect and a proposed
+closed actual result (`unchanged`, `restored`, `acquired`), not an arbitrary bonus
+operand. Existing paid self-consumption and OnUse identification remain its
+ledger; no RNG is needed. A restorable Strength deficit restores exactly one
+point and finishes, including when that reaches zero. Only a dose without that
+deficit can consider a permanent acquisition. Existing Restore Strength remains
+a distinct restoration effect and catalog entry; live pools remain unchanged.
+
+Acquired Strength needs a bounded permanent consumable input separate from initial
+allocation, ordinary purchases, equipment and conditions. It survives edits;
+refunds remain attached only to genuine purchases. No historical high-water ledger
+is added. The input participates in permanent equality, rebuild/respec,
+drain/regrowth and strict current/history restoration. Strength can enable an
+Intellect-granting talent, so historical acquisition must retain its then-current
+source composition: an acquisition-count increase preserves exact choice rows and
+increments by one; other receipt transitions keep the count fixed. Captured counts
+are monotone and bounded by current acquisition, but gaps are legal when doses
+produce no Intellect receipt. Birth starts at zero. Historical sources must not be
+replayed with today's acquired count.
+
+One Strength policy remains unresolved: cap five may use initial allocation plus
+ordinary attribute choices and consumable points, or include other permanent innate
+species/type/class/template/talent modifiers. Equipment, rings and current
+conditions do not determine it. The separate Raise Level blocked-obligation
+funding eligibility choice remains unresolved and Raise stays excluded. Neither
+choice is inferred from implementation convenience. This is accepted design only;
+no new Strength schema, source compiler or gameplay implementation is claimed by
+this note. Its eventual cohort requires real admitted deficit/acquisition/cap,
+refund/Intellect history and source-free witnesses before qualification.
+
+### ASCII retained-map storage regression: first-red scaffold
+
+The renderer now has a narrow internal positioned-appearance scaffold retaining
+occurrence coordinates separately from the appearance payload. Its initial
+implementation deliberately still materializes owned memory appearances. A
+pointer/storage regression requires borrowing the original retained payload;
+an independent positive compares exact rendered tiles with the previous
+materialized merge, including differing canonical/occurrence positions, multiple
+heights, ordering, current-cell precedence and item/creature overlays. Public
+rendering APIs and gameplay remain unchanged. These two tests are registered but
+unrun at this checkpoint; no borrowing optimization or runtime result is claimed.
+The final five qualified torch executables were separately hash-verified and
+preserved before this future ASCII build can replace an ordinary executable path.
