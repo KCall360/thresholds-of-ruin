@@ -1,4 +1,53 @@
 use super::*;
+
+/// A retained authored package consists of metadata AND compiled input rows.
+/// Exercise the production writer/reader instead of synthesizing those rows or
+/// relying on the live source's in-memory TOML cache.
+pub(crate) fn retained_authored_inputs(
+    package: &Package,
+) -> (tempfile::TempDir, crate::storage::SourceReader) {
+    assert!(package.directory.is_none());
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("inputs.db");
+    let scenario = crate::Scenario {
+        seed: 42,
+        actors: Vec::new(),
+        regions: package.index.regions.len() as u64,
+        workload_version: None,
+        package: Some(Arc::new(package.clone())),
+        streaming: None,
+    };
+    let engine = crate::Engine::open(&path, scenario).unwrap();
+    engine.flush().unwrap();
+    let reader = engine.flush_handle().unwrap().source_reader();
+    drop(engine);
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    let rows: i64 = connection
+        .query_row("SELECT COUNT(*) FROM region_sources", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(usize::try_from(rows).unwrap(), package.index.regions.len());
+    drop(connection);
+    (temp, reader)
+}
+
+/// Missing retained authored input must remain a rejection, even though the
+/// package metadata itself decodes correctly. Attaching the real saved closure
+/// is the source-free positive, not a parser/default bypass.
+pub(crate) fn attach_retained_authored_inputs(
+    package: &Package,
+    reader: crate::storage::SourceReader,
+) {
+    assert!(package.directory.is_none());
+    let error = package.check().unwrap_err();
+    assert!(
+        error
+            .message
+            .contains("isn't in the save and the scenario package isn't available"),
+        "missing source closure must be the rejection cause: {error:?}"
+    );
+    package.attach_persisted_inputs(reader, None);
+    package.check().unwrap();
+}
 pub(crate) fn package() -> Package {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/magic-items");
     let resolved = resolve_source(&root).unwrap();

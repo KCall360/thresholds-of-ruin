@@ -756,6 +756,40 @@ impl Regions {
         self.resident.len()
     }
 
+    #[cfg(test)]
+    pub(crate) fn test_prepare_record_read(&mut self, id: RecordId) {
+        self.start_preloading();
+        self.preload.as_ref().unwrap().want(&[Job::Read(id)]);
+        self.settle_preloading();
+    }
+    #[cfg(test)]
+    pub(crate) fn test_pending_get(
+        &mut self,
+        id: RecordId,
+        record: Shared<RegionRecord>,
+    ) -> Option<Shared<RegionRecord>> {
+        let mut made = vec![(id, record)];
+        Pending {
+            regions: self,
+            made: &mut made,
+        }
+        .get(id)
+    }
+    /// A decoded detached chart is not authority until its retained source is
+    /// checked. Keep unopened/no-chart blobs lazy; never read unrelated records
+    /// merely because a checkpoint names them. All get paths use this boundary.
+    fn checked_history_record(&self, record: Shared<RegionRecord>) -> Option<Shared<RegionRecord>> {
+        if record.historical_chart_authorities().next().is_none() {
+            return Some(record);
+        }
+        let mut audit =
+            crate::scenario_package::HistoricalSourceAudit::new(Some(&self.package), self.seed)
+                .ok()?;
+        for (world, registry, scope) in record.historical_chart_authorities() {
+            audit.check_shared(world, registry, scope).ok()?;
+        }
+        Some(record)
+    }
     pub(crate) fn encoded_resident(&self) -> Result<Vec<(u64, Vec<u8>)>, Failure> {
         self.resident
             .iter()
@@ -773,9 +807,10 @@ impl RecordStore for Regions {
     }
     fn get(&mut self, id: RecordId) -> Option<Shared<RegionRecord>> {
         if let Some(record) = self.resident.get(&id) {
-            return Some(record.clone());
+            return self.checked_history_record(record.clone());
         }
         if let Some((record, _)) = self.preload.as_ref().and_then(|p| p.take(Job::Read(id))) {
+            let record = self.checked_history_record(record)?;
             self.reads += 1;
             self.prepared += 1;
             if let Some(acquisition) = &mut self.acquisition {
@@ -785,6 +820,7 @@ impl RecordStore for Regions {
         }
         let started = self.acquisition.as_ref().map(|_| Instant::now());
         let record = Shared::new(self.disk.as_ref()?.read_region(id).ok()??);
+        let record = self.checked_history_record(record)?;
         self.reads += 1;
         if let (Some(acquisition), Some(started)) = (&mut self.acquisition, started) {
             acquisition.fallback_reads += 1;
@@ -865,7 +901,7 @@ impl RecordStore for Pending<'_> {
     }
     fn get(&mut self, id: RecordId) -> Option<Shared<RegionRecord>> {
         match self.made.iter().find(|(made, _)| *made == id) {
-            Some((_, record)) => Some(record.clone()),
+            Some((_, record)) => self.regions.checked_history_record(record.clone()),
             None => self.regions.get(id),
         }
     }

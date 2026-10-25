@@ -1932,6 +1932,15 @@ pub struct Engine {
     regions: Option<crate::regions::Regions>,
 }
 
+#[cfg(test)]
+pub(crate) struct DetachedChartTestFixture {
+    pub(crate) game: Game,
+    pub(crate) records: Vec<(
+        tor_simulation::RecordId,
+        tor_world::Shared<tor_simulation::RegionRecord>,
+    )>,
+    pub(crate) package: Arc<crate::scenario_package::Package>,
+}
 impl Engine {
     pub fn scenario_validation(&self) -> Option<bool> {
         self.archive
@@ -2394,32 +2403,36 @@ impl Engine {
                 return Err(invalid_archive());
             }
         }
-        {
-            let package = engine.archive.scenario.package.clone();
-            let mut audit = crate::scenario_package::HistoricalSourceAudit::new(
-                package.as_deref(),
-                engine.archive.scenario.seed,
-            )
-            .map_err(|_| invalid_archive())?;
-            let records: BTreeSet<_> = std::iter::once(&engine.game)
-                .chain(engine.boundaries.iter().map(|boundary| &boundary.game))
-                .flat_map(|game| game.detached_records().map(|(_, id)| id))
-                .collect();
-            if !records.is_empty() {
-                let regions = engine.regions.as_mut().ok_or_else(invalid_archive)?;
-                for id in records {
-                    let record = tor_simulation::RecordStore::get(regions, id)
-                        .ok_or_else(invalid_archive)?;
-                    for (world, registry, scope) in record.historical_chart_authorities() {
-                        audit.check_shared(world, registry, scope)?;
-                    }
-                }
-            }
-        }
+        // Detached blobs remain lazy. Their historical chart source authority
+        // is checked by Regions at actual materialization, before core attach.
         engine.wizard_enabled = false;
         Ok(engine)
     }
 
+    #[cfg(test)]
+    pub(crate) fn test_detach_chart_records(&self) -> DetachedChartTestFixture {
+        use tor_simulation::RecordStore;
+        let mut game = self.game.clone();
+        let mut records = tor_simulation::MemoryRecords::default();
+        game.apply_region_transition(
+            &tor_simulation::RegionTransition {
+                active: BTreeSet::new(),
+                loaded: BTreeSet::new(),
+            },
+            &mut records,
+        )
+        .unwrap();
+        let ids: Vec<_> = records.ids().collect();
+        let records = ids
+            .into_iter()
+            .map(|id| (id, records.get(id).unwrap()))
+            .collect();
+        DetachedChartTestFixture {
+            game,
+            records,
+            package: self.archive.scenario.package.as_ref().unwrap().clone(),
+        }
+    }
     pub fn branch(&self) -> &BranchId {
         &self.current_branch
     }

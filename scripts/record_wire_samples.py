@@ -425,7 +425,7 @@ class Recorder(ProcessTestCase):
             mapping_payloads.append(historical_payload(pages))
         self.assertEqual(mapping_payloads[0], mapping_payloads[1])
         mapping_rows = [row for row in mapping_payloads[0]["records"] if row["record"] == "row"]
-        self.assertEqual(len(mapping_rows), 380)
+        self.assertEqual(len(mapping_rows), 1024)
         self.assertTrue(all(row["mark"]["fact"]["kind"] == "wall_face"
                             and row["mark"]["fact"]["normal"][2] == 0 for row in mapping_rows))
         self.assertIsInstance(samples["checkpoint_payload"], bytes)

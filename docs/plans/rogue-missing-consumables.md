@@ -1828,3 +1828,57 @@ The actual native chart-window method remains locally deferred under the user's
 explicit same-batch all-graphical permission and the recovered display-socket
 denial. Its exact ID is retained in the local99-method manifest; it is not a
 native pass and remains mandatory in hosted CI. No alternate display was launched.
+
+### Current apps, native regression and historical admission correction
+
+The five ordinary applications build successfully from the corrected source.
+The genuine current compiler validates and checks all 43 ordinary scenario
+certificates; the separate menagerie/3D consumer gate remains outstanding.
+The genuine current writer produces save60 fixtures. The first full server run
+passes 1,160 tests and fails 22, with none ignored; it is not a server-green claim.
+
+Seven older deep/storage failures expose a real regression in the new historical
+source audit: opening a save eagerly reads every detached row, violating existing
+lazy loading and moving corruption/capacity failures away from atomic re-entry.
+The apparent two-versus-four storage result counts reads, not stored rows; the
+actual committed row identities and garbage collection are correct. The correction
+removes the eager scan and validates chart-bearing detached records at their
+resident, preloaded, disk or pending materialization boundary before attachment.
+Attached current/history audits remain. Existing atomicity assertions are unchanged;
+new paid-source-free and forged-source controls cover every materialization route.
+
+Other first-server failures include three not-yet-generated wire62 consumers,
+two stale schema inventories, illegal native fixture dimensions, omitted genuine
+persisted source-reader closures and an intentionally featureless corridor whose
+Mapping result is correctly empty. Fixture corrections retain missing-source
+rejection and give the paid streaming guard an actual authored doorway rather than
+fabricated interior facts. All corrected server cases still require execution.
+
+Historical Mapping restoration now memoizes only exact pooled World/Registry/scope
+authority and compares every serialized public/private sample on a hit. Host source
+reconstruction may reuse exact canonical scope/extents while still validating each
+new captured World and registry. Optional caches are metered; exhaustion never
+licenses unverified data or imposes a historical root-count cap. Mandatory tests
+retain cached/uncached equality, malformed-proof and large lawful geometry controls.
+No permanently ignored diagnostics are introduced. The bounded idle release
+latency/RSS gate remains pending; archive byte limits are not a claim of globally
+linear restore work or cross-detached-record cache reuse.
+
+The four actual Detection/Mapping process owners now pass across the corrected
+runs against the protected ordinary apps, together with three Hallucination
+regressions. Driver corrections preserve exact attachment epoch, request identity
+and complete page order; an automatically managed transfer is not combined with
+or duplicated by another explicit request. The Text Monster assertion is a
+current-snapshot presentation witness; the headless channel independently proves
+live factual, hallucinated phase, refresh and cure transitions. Genuine wire62
+recording passes with 52 schema client examples, eight captured queries and 70
+server samples, including three-page Mapping and source-free restored Mapping.
+The current apps precede the memo/lazy-audit corrections, so rebuilt-app and native
+regressions remain required before claiming the combined source qualified.
+
+The complete corrected source group passes eight-crate all-target strict Clippy
+and 156 source/driver/recorder/provenance contracts. The exported source-free
+checkpoint is byte-for-byte the genuine decoded TORC payload, with matched hashes;
+it retains Food and Magic positives beside later empty attempts, plus 1,024
+Mapping proof points. Corrected core/server execution, rebuilt apps and the
+bounded release performance gate are still pending at this source checkpoint.

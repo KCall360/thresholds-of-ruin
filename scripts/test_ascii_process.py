@@ -350,26 +350,25 @@ class DetectionChartAsciiProcesses(ProcessTestCase):
     def chart_wire_pages(self, relay, kind):
         import detection_process_package as detection
         with relay.chart_lock:
-            requests = [json.loads(json.dumps(value)) for value in relay.chart_requests]
-            replies = [json.loads(json.dumps(value)) for value in relay.chart_replies
-                       if value["page"]["kind"] == kind]
-        self.assertFalse(relay.errors, relay.errors)
-        self.assertGreaterEqual(len(replies), 2, "complete native UI must hydrate genuine wire continuations")
-        identities = {reply["request_id"] for reply in replies}
-        requests = [request for request in requests if request["request_id"] in identities]
-        self.assertEqual(len(requests), len(replies))
-        requested = next(request["request"]["query"] for request in requests
-                         if request["request"]["query"]["cursor"] is None)
-        pages = [reply["page"] for reply in replies]
-        records = detection.validate_pages(pages, requested)
-        by_id = {request["request_id"]: request["request"]["query"] for request in requests}
-        for reply in replies:
-            query = by_id[reply["request_id"]]
-            page = reply["page"]
-            self.assertEqual(query["cursor"], None if page["start"] == "0" else page["start"])
-            for key in ("context", "branch", "base", "chart"):
-                self.assertEqual(query[key], page[key])
-        return [record for record in records if record["record"] == "row"]
+            replies = [message for message in relay.chart_replies if message["page"]["kind"] == kind]
+            self.assertTrue(replies, "the selected native chart must have actual replies")
+            boundary = replies[-1]["page"]
+            initials = [message for message in relay.chart_requests
+                        if message["request"]["query"]["cursor"] is None
+                        and all(message["request"]["query"][key] == boundary[key]
+                                for key in ("context", "branch", "base", "chart"))]
+            self.assertTrue(initials, "native replies require an actual initial request")
+            initial = json.loads(json.dumps(initials[-1]))
+        # A modal refresh can reuse its token/base. Select its exact latest
+        # initial request, then require every real cursor-linked continuation.
+        # The shared selector rejects duplicates, omission, reordering and base
+        # changes; neither pages nor equal occurrence rows are deduplicated.
+        query = initial["request"]["query"]
+        exchange = relay.stream(query, initial["request_id"])
+        self.assertGreaterEqual(len(exchange["pages"]), 2,
+                                "complete native UI must hydrate genuine wire continuations")
+        pages = [reply["page"] for reply in exchange["pages"]]
+        return [record for record in detection.validate_pages(pages, query) if record["record"] == "row"]
 
     def test_source_free_food_and_mapping_chart_modal_pages_capture_and_never_submit_actions(self):
         import detection_process_package as detection
@@ -447,7 +446,7 @@ class DetectionChartAsciiProcesses(ProcessTestCase):
             self.key(window, "up")
         for _ in range(3):
             self.key(window, "down")
-        mapping = self.chart_completed_frame(window, self.key(window, "enter"), "Occurrences 1–20 of 556")
+        mapping = self.chart_completed_frame(window, self.key(window, "enter"), "Occurrences 1–20 of 1024")
         text = "\n".join(mapping["chart_rows"])
         self.assertIn("Mapping: historical, available", text)
         self.assertIn("wall face (normal", text)
@@ -455,7 +454,7 @@ class DetectionChartAsciiProcesses(ProcessTestCase):
         self.assertEqual(mapping["map_tiles"], initial["map_tiles"], "Mapping cannot discover ordinary map cells")
         self.assertNotEqual(self.chart_capture(capture), baseline)
         mapping_rows = self.chart_wire_pages(relay, "mapping")
-        self.assertEqual(len(mapping_rows), 556, "130x9 room: both heights of four side walls only")
+        self.assertEqual(len(mapping_rows), 1024, "32x32x8 room: eight heights of four side walls only")
         self.assertTrue(all(row["mark"]["fact"]["kind"] == "wall_face"
                             and row["mark"]["fact"]["normal"][2] == 0 for row in mapping_rows))
         closed = self.key(window, "escape")

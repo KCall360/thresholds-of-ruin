@@ -43,12 +43,12 @@ def fixture(*, paging=False, mapping=False, certified=True, production=PRODUCTIO
     species["fixture.detection"] = human
     peer = copy.deepcopy(owner["creature"])
     peer["name"] = "PRIVATE detection peer"
-    width, depth = (130, 9) if paging else ((90, 5) if mapping else (7, 5))
+    width, depth, height = (32, 32, 8) if paging or mapping else (7, 5, 2)
     manifest.update(id="imported-detection-pages" if paging else "imported-detection",
                     default_character=1, characters=[owner], archetypes={**actors, **items["items"]},
                     creatures={"species": species}, appearance_pools=items["appearance_pools"],
                     spatial_scopes={"study": {"members": [1], "rooms": {"1": [
-                        {"region": 1, "min": [0, 0, 0], "max": [width - 1, depth - 1, 1]}]},
+                        {"region": 1, "min": [0, 0, 0], "max": [width - 1, depth - 1, height - 1]}]},
                         "passages": [], "doorways": []}})
     if mapping and certified:
         manifest["spatial_scopes"]["study"]["mapping"] = {
@@ -60,11 +60,16 @@ def fixture(*, paging=False, mapping=False, certified=True, production=PRODUCTIO
                       "quantity": 2, "carried_by": 1})
     # Presence coalesces by TRUE location. These 513 distinct far floor cells
     # cross the wire page boundary without confusing item count with row count.
-    food = [{"id": 1000 + i, "at": [70 + i % 57, i // 57, 0] if paging else [2, 2, 0],
-             "archetype": "rogue.ration", "quantity": 1} for i in range(513 if paging else 1)]
+    # Source regions permit at most32x32x8. Use513 distinct supported floor
+    # locations outside the genuine Manhattan sight16 from eye(2,2,1).
+    food_cells = ([[x, y, 0] for y in range(depth) for x in range(width)
+                   if abs(x - 2) + abs(y - 2) + 1 > 16][:513] if paging else [[2, 2, 0]])
+    assert len(food_cells) == (513 if paging else 1)
+    food = [{"id": 1000 + i, "at": at, "archetype": "rogue.ration", "quantity": 1}
+            for i, at in enumerate(food_cells)]
     ground = food + ([] if paging else [{"id": 2000, "at": [2, 2, 0],
                                        "archetype": "rogue.wand_nothing"}])
-    region = {"id": 1, "name": "Detection fixture chamber", "size": [width, depth, 2],
+    region = {"id": 1, "name": "Detection fixture chamber", "size": [width, depth, height],
               "chamber": True, "lit": True, "gravity": [0, 0, -1],
               "anchors": {"start": [2, 2, 0]}, "items": stock + ground,
               "actors": [{"id": 2, "at": [4, 2, 0], "turn_ticks": 100,
@@ -123,6 +128,21 @@ def query(frame, kind):
     return {"context": copy.deepcopy(frame["input_context"]["stream"]),
             "branch": frame["branch"], "base": copy.deepcopy(base),
             "chart": selected["chart"], "cursor": None}
+
+
+def explicit_chart_reply(frames, requested):
+    """Last transact response is its correlated completion, unlike idle updates."""
+    found = [frame["message"] for frame in frames
+             if frame.get("type") == "response" and (frame.get("message") or {}).get("type") == "chart_page"
+             and frame["message"]["page"]["start"] == "0"
+             and all(frame["message"]["page"][key] == requested[key]
+                     for key in ("context", "branch", "base", "chart"))]
+    if not found:
+        raise AssertionError("explicit chart request has no exact initial response")
+    initial = found[-1]
+    if sum((frame.get("message") or {}).get("request_id") == initial["request_id"] for frame in frames) != 1:
+        raise AssertionError("duplicate explicit chart reply ID")
+    return initial
 
 
 def wire_integer(value, *, signed=False):
@@ -276,32 +296,81 @@ class ChartCaptureRelay(StreamRelay):
             with self.chart_lock:
                 self.chart_replies.append(copy.deepcopy(message))
 
-    def pair(self, requested):
-        with self.chart_lock:
-            requests = [message for message in self.chart_requests
-                        if message["request"]["query"] == requested]
-            if not requests:
-                raise AssertionError("no actual client Chart query was captured")
-            request = requests[-1]
-            replies = [message for message in self.chart_replies
-                       if message["request_id"] == request["request_id"]]
-            if len(replies) != 1:
-                raise AssertionError("expected one actual correlated initial Chart reply")
-            return copy.deepcopy(request), copy.deepcopy(replies[0])
+    def initial_request(self, requested):
+        """The unique real initial request at this exact snapshot boundary.
 
-    def stream(self, requested):
+        None means the common client has not sent its managed request yet, not
+        permission for another writer to compete with a locally bound request.
+        """
         with self.chart_lock:
-            requests = [copy.deepcopy(message) for message in self.chart_requests
-                        if all(message["request"]["query"][key] == requested[key]
-                               for key in ("context", "branch", "base", "chart"))]
-            if not requests or requests[0]["request"]["query"]["cursor"] is not None:
-                raise AssertionError("missing genuine initial chart request")
-            ids = {message["request_id"] for message in requests}
-            replies = [copy.deepcopy(message) for message in self.chart_replies
-                       if message["request_id"] in ids]
-            if len(replies) != len(requests):
-                raise AssertionError("incomplete genuine chart exchange")
-            return {"queries": requests, "pages": replies}
+            if self.errors:
+                raise AssertionError(self.errors)
+            found = [message for message in self.chart_requests
+                     if message["request"]["query"] == requested]
+            if len(found) > 1:
+                raise AssertionError("multiple initial chart requests at selected snapshot boundary")
+            return copy.deepcopy(found[0]) if found else None
+
+    def pair(self, requested, initial_request_id=None):
+        exchange = self.stream(requested, initial_request_id)
+        if len(exchange["queries"]) != 1:
+            raise AssertionError("expected one actual correlated Chart reply")
+        return exchange["queries"][0], exchange["pages"][0]
+
+    def stream(self, requested, initial_request_id=None, *, complete=True):
+        """One request-bound transfer, not every hydration of a reused token.
+
+        Automatic refresh and explicit reads can lawfully share all query header
+        values. The initial real request ID selects a transfer; continuation IDs
+        come only from actual requests with that boundary and the previous cursor.
+        No page/row is deduplicated. Missing, repeated, swapped or extra replies
+        within the selected transfer remain errors.
+        """
+        with self.chart_lock:
+            if self.errors:
+                raise AssertionError(self.errors)
+            candidates = [message for message in self.chart_requests
+                          if all(message["request"]["query"][key] == requested[key]
+                                 for key in ("context", "branch", "base", "chart"))]
+            initials = [message for message in candidates if message["request"]["query"]["cursor"] is None
+                        and (initial_request_id is None or message["request_id"] == initial_request_id)]
+            if not initials or (initial_request_id is not None and len(initials) != 1):
+                raise AssertionError("missing or duplicate genuine initial chart request")
+            initial = initials[-1]
+            start = next(index for index, message in enumerate(candidates) if message is initial)
+            requests = []
+            for message in candidates[start:]:
+                if requests and message["request"]["query"]["cursor"] is None:
+                    break  # a separate actual initial request, not continuation
+                requests.append(message)
+            if len({message["request_id"] for message in requests}) != len(requests):
+                raise AssertionError("duplicate actual chart request ID")
+            replies, cursor = [], None
+            for index, request in enumerate(requests):
+                query = request["request"]["query"]
+                if query["cursor"] != cursor or (index and cursor is None):
+                    raise AssertionError("actual chart continuation cursor mismatch")
+                matching = [reply for reply in self.chart_replies if reply["request_id"] == request["request_id"]]
+                if not matching and not complete and index + 1 == len(requests):
+                    break  # actual request is in flight; never publish this prefix
+                if len(matching) != 1:
+                    raise AssertionError("missing or duplicate actual chart reply")
+                reply = matching[0]
+                if any(reply["page"][key] != query[key] for key in ("context", "branch", "base", "chart")):
+                    raise AssertionError("actual chart reply changed request boundary")
+                if reply["page"]["start"] != (query["cursor"] or "0"):
+                    raise AssertionError("actual chart reply skipped/repeated an ordinal")
+                replies.append(reply)
+                cursor = reply["page"]["next"]
+            selected_ids = {request["request_id"] for request in requests}
+            wire_order = [reply["request_id"] for reply in self.chart_replies if reply["request_id"] in selected_ids]
+            if wire_order != [reply["request_id"] for reply in replies]:
+                raise AssertionError("actual chart replies repeated or arrived outside request order")
+            if complete:
+                if len(replies) != len(requests) or cursor is not None:
+                    raise AssertionError("incomplete genuine chart exchange")
+                validate_pages([reply["page"] for reply in replies], requested)
+            return copy.deepcopy({"queries": requests, "pages": replies})
 
     def forward(self, source, target):
         try:

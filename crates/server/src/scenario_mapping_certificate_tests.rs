@@ -182,13 +182,14 @@ fn source_free_content_retains_certificate_and_recompiles_identical_scope() {
         .unwrap()
         .check(&game)
         .unwrap();
+    let (_saved_inputs, reader) = super::tests::retained_authored_inputs(&package);
     let bytes = crate::storage::schema::scenario::encode_content_package(&package).unwrap();
     let restored = crate::storage::schema::scenario::decode_content_package(&bytes).unwrap();
     assert!(
         restored.directory.is_none(),
         "source-free input must not retain a path dependency"
     );
-    restored.check().unwrap();
+    super::tests::attach_retained_authored_inputs(&restored, reader);
     let original = package
         .compile_authored_spatial("study", 42, &mut 0, &mut 0)
         .unwrap();

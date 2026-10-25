@@ -1105,28 +1105,63 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
             client, frame = self.client(*(() if token is None else (token,)), observe=observe, actor=1)
         finally:
             self.address = upstream
+        if not hasattr(self, "detection_relays"):
+            self.detection_relays = {}
+        self.detection_relays[id(client)] = relay
+        if not hasattr(self, "detection_selected"):
+            self.detection_selected = {}
+        self.detection_selected[id(client)] = None
+        if not hasattr(self, "detection_boundaries"):
+            self.detection_boundaries = {}
         return client, frame, relay
 
     def detection_pages(self, client, kind):
         frame = self.snapshot(client)
         requested = detection.query(frame, kind)
-        start = len(client.transcript)
-        ready = self.request(client, {"type": "chart", "query": requested})
-        self.assertIsNone(ready["error"])
+        relay = self.detection_relays[id(client)]
+        selected = getattr(self, "detection_selected", {}).get(id(client))
+        initial = None
+        if selected == kind:
+            self.assertNotEqual(requested["context"], self.detection_boundaries[id(client)],
+                                "same-kind read requires this snapshot's fresh attachment epoch")
+            # Snapshot advances the attachment epoch even if base/token do not
+            # change. Common ChartPages rehydrates the selected kind itself.
+            # Its request may already be locally bound before it hits the wire;
+            # never compete with it by writing another initial Request::Chart.
+            actual_request = relay.initial_request(requested)
+            while actual_request is None:
+                received = self.frame(client, lambda value: (value.get("message") or {}).get("type")
+                                      in ("chart_page", "error"))
+                self.assertNotEqual((received.get("message") or {}).get("type"), "error", received)
+                actual_request = relay.initial_request(requested)
+            initial_id = actual_request["request_id"]
+        else:
+            start = len(client.transcript)
+            ready = self.request(client, {"type": "chart", "query": requested})
+            self.assertIsNone(ready["error"])
+            frames = [json.loads(line) for line in client.transcript[start:] if line.startswith("{")]
+            initial = detection.explicit_chart_reply(frames, requested)
+            initial_id = initial["request_id"]
         while True:
-            messages = [json.loads(line).get("message") for line in client.transcript[start:]
-                        if line.startswith("{")]
-            errors = [message for message in messages if message and message["type"] == "error"]
-            self.assertEqual(errors, [])
-            pages = [message["page"] for message in messages if message and message["type"] == "chart_page"
-                     and message["page"]["chart"] == requested["chart"]]
+            exchange = relay.stream(requested, initial_id, complete=False)
+            pages = [message["page"] for message in exchange["pages"]]
             if pages and pages[-1]["next"] is None:
-                detection.validate_pages(pages, requested)
+                complete = relay.stream(requested, initial_id)
+                if initial is not None:
+                    self.assertEqual(complete["pages"][0], initial)
+                # Initial/continuation messages remain genuine raw captures,
+                # including managed same-kind reads; recorder uses this exact ID.
+                self.detection_last_request = initial_id
+                if not hasattr(self, "detection_selected"):
+                    self.detection_selected = {}
+                self.detection_selected[id(client)] = kind
+                if not hasattr(self, "detection_boundaries"):
+                    self.detection_boundaries = {}
+                self.detection_boundaries[id(client)] = dict(requested["context"])
                 return frame, requested, pages
-            # Connection owns every continuation. Never issue a competing manual
-            # next query through the same managed client transport.
-            self.frame(client, lambda value: (value.get("message") or {}).get("type")
-                       in ("chart_page", "error"))
+            received = self.frame(client, lambda value: (value.get("message") or {}).get("type")
+                                  in ("chart_page", "error"))
+            self.assertNotEqual((received.get("message") or {}).get("type"), "error", received)
 
     def detection_memory(self, client, frame):
         if not frame["map_hydration"]["complete"]:
@@ -1151,9 +1186,8 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
     def test_imported_detection_monsters_adventure_hallucination_channel_and_refresh(self):
         package = detection.prepare(self)
         self.server("--checkpoint-interval", 1, scenario=package)
-        owner, initial = self.client(actor=1)
+        owner, initial, _ = self.detection_client()
         peer, _ = self.client(actor=2)
-        text, _ = self.adventure(SPECTATOR_TOKEN)
         ids = detection.initial_doses(self, initial)
         actual = {row["id"] for row in observation(initial)["visible_actors"]
                   if row["name"] == "PRIVATE detection peer"}
@@ -1177,6 +1211,10 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         phase0, _, first_chart = self.detection_pages(owner, "monsters")
         detection.assert_monster_sample(self, phase0, first_chart, 0)
         saved = detection.raw_checkpoint(self, owner)
+        # Attach at the witnessed phase0 boundary. Adventure emits prompts for
+        # asynchronous paid narration; an older attachment would still have the
+        # preceding drink prompts queued ahead of this genuine chart command.
+        text, _ = self.adventure(SPECTATOR_TOKEN)
         self.assertIn("Monster detection: live, available", self.say(text, "charts"))
         shown = self.say(text, "chart monsters")
         self.assertIn("snake", shown)
@@ -1232,7 +1270,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
             self.assertEqual(len(detection.rows(pages)), 1)
             positive[kind] = detection.historical_payload(pages)
             if kind == "magic":
-                original_query, original_page = relay.pair(requested)
+                original_query, original_page = relay.pair(requested, self.detection_last_request)
         before_mapping = self.snapshot(owner)
         ordinary_memory = self.detection_memory(owner, before_mapping)
         scroll, = [row for row in items(before_mapping, "scroll") if row["quantity"] == "2"]
@@ -1246,14 +1284,15 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         self.assertEqual(self.detection_memory(owner, mapped), ordinary_memory,
                          "paid Mapping does not acquire ordinary map cells or action keys")
         _, mapping_requested, mapping_pages = self.detection_pages(owner, "mapping")
+        self.assertGreaterEqual(len(mapping_pages), 3, "Mapping must cross real wire page boundaries")
         mapping_rows = detection.rows(mapping_pages)
-        self.assertEqual(len(mapping_rows), 380, "90x5 room: both heights of four wall faces, no floor/ceiling")
+        self.assertEqual(len(mapping_rows), 1024, "32x32x8 room: eight heights of four wall faces, no floor/ceiling")
         self.assertTrue(all(row["mark"]["fact"]["kind"] == "wall_face"
                             and row["mark"]["fact"]["normal"][2] == 0 for row in mapping_rows))
-        self.assertTrue(any(int(row["position"][0]) > 60 for row in mapping_rows),
+        self.assertTrue(any(int(row["position"][0]) > 20 for row in mapping_rows),
                         "chart genuinely includes remote walls not ordinarily observed")
         positive["mapping"] = detection.historical_payload(mapping_pages)
-        mapping_exchange = relay.stream(mapping_requested)
+        mapping_exchange = relay.stream(mapping_requested, self.detection_last_request)
         for item in (ground["food"], ground["wand"]):
             self.assertIsNone(self.act(owner, {"type": "take", "item": item, "quantity": None})["error"])
             self.advance(owner, [peer])
@@ -1317,9 +1356,9 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
                 self.assertIn(": empty.", shown)
             self.say(text, "chart cancel")
             if kind == "magic":
-                restored_query, restored_page = replay.pair(requested)
+                restored_query, restored_page = replay.pair(requested, self.detection_last_request)
             if kind == "mapping":
-                restored_mapping_exchange = replay.stream(requested)
+                restored_mapping_exchange = replay.stream(requested, self.detection_last_request)
         self.assertEqual(detection.raw_checkpoint(self), saved)
         self.assertFalse(self.snapshot(spectator)["state"]["wizard_game"])
         # Published by recorder only after this case AND all cleanup succeeds.
@@ -1334,7 +1373,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
     def test_imported_mapping_uncertified_rejects_before_payment_or_identification(self):
         package = detection.prepare(self, mapping=True, certified=False)
         self.server("--checkpoint-interval", 1, scenario=package)
-        owner, _ = self.client(actor=1)
+        owner, _, _ = self.detection_client()
         peer, _ = self.client(actor=2)
         self.assertIsNone(self.act(owner, {"type": "wait"})["error"])
         self.advance(owner, [peer])
@@ -1361,7 +1400,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
     def test_imported_detection_food_complete_multipage_adventure_and_pure_reads(self):
         package = detection.prepare(self, paging=True)
         self.server("--checkpoint-interval", 1, scenario=package)
-        owner, initial = self.client(actor=1)
+        owner, initial, _ = self.detection_client()
         peer, _ = self.client(actor=2)
         ids = detection.initial_doses(self, initial)
         frame = self.detection_use(owner, peer, ids["food"])

@@ -1,20 +1,20 @@
 {
-  "validator": "tor-scenario-43",
-  "ruleset": "interactions-v52",
-  "ruleset_hash": "304ef88547b56f560cbdeaed00a860558d405d523c5a0d0d170f49fcafffdafa",
+  "validator": "tor-scenario-44",
+  "ruleset": "interactions-v53",
+  "ruleset_hash": "63217eca5432891c63421b59da7712887b8eaa9e1928fb36fa4d9f47cbfe5cea",
   "ruleset_dependencies": {
-    "interactions-v52": "07ff86819e6516d4f97ba1cb85e18bd3452ff649effe4c0ce8da77e042702bb0"
+    "interactions-v53": "78c83cdf72d1c3901963028d99db3e97981b584b178f44ad1110ac8afbb869ca"
   },
-  "content_hash": "011bd09bb5193062019e0203e2c269908983362f1223868752d5e4335f851e94",
+  "content_hash": "7d9b8123180a11d8e5a51487f8a5d40477293300d2c40c216427e042f4455339",
   "files": {
     "catalog/actors.toml": "da841b457cfaa355c1ad0347a5d7bcbb66f7047bcb3901ae479dea11c4f17700",
-    "catalog/creatures.toml": "ab6abd9e30c742ac09d1226a366347606cfa5d796adfd1d2566c7287a3d3e864",
-    "catalog/items.toml": "5950c68205777b2fa3e91ce362690f27064b16829fa98d8894885f430d2a0132",
+    "catalog/creatures.toml": "9f5bd274a631b2982d05ab80c24279fb560798a0e678084d722b99e051b9b46e",
+    "catalog/items.toml": "421c3ad8e4182da4ab3d4d1507435ee4d44d449bf7fb11306c2ee34ce7b55297",
     "index.json": "9bcdcd8e7340350480abf05c4edbe9b8a8ef04e77258d462167b598589354902",
-    "rules.toml": "638be176874ea8884dace1aca4d77c38167c3cae8855a75c62977118c7f28562",
-    "scenario.toml": "af055d8383b910ed91a479f0ff097cd1bd35efc2782980acdc016912c4cf0b33"
+    "rules.toml": "0f1d2f50b0be186af4c571dc05ff6be5d42dd334ff3db6e5718b4e7dfb6a8768",
+    "scenario.toml": "b46e55f5de8713bb7fe71187c8810f88ee669d73491c78df32fdf20ce5d31cd2"
   },
   "regions": 0,
-  "model_hash": "0db9932e3c36296007f16976f5111567b2e3b7330beb9797d5830615f8147378",
+  "model_hash": "58ee5567ad79059def4725fa5abd95246e0a628f2d0d93561ba72dad8c2a1ec1",
   "coverage": "all authored regions and character starts; descriptor structural bounds; deterministic sampled groups at seeds 0, 1, 42 under explicit work budget; no all-seed or winnability proof"
 }

@@ -381,7 +381,7 @@ pub struct RestoreContext<'a> {
     spatial_roots: BTreeMap<usize, Shared<crate::spatial_scope::registry::Registry>>,
     content: Arc<Content>,
     worlds: BTreeMap<usize, Shared<World>>,
-    chart_history: BTreeMap<usize, Shared<crate::chart_history::HistoricalChart>>,
+    chart_history: crate::chart_history::RestoreCache,
     validated_chart_worlds: BTreeSet<usize>,
     navigation: BTreeMap<usize, Shared<Navigation>>,
     /// Validation is reusable only for these immutable decoded pool entries.
@@ -449,7 +449,7 @@ impl<'a> RestoreContext<'a> {
             spatial_roots: BTreeMap::new(),
             content,
             worlds: BTreeMap::new(),
-            chart_history: BTreeMap::new(),
+            chart_history: crate::chart_history::RestoreCache::default(),
             validated_chart_worlds: BTreeSet::new(),
             navigation: BTreeMap::new(),
             validated_navigation: BTreeSet::new(),

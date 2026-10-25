@@ -6394,7 +6394,9 @@ mod ordered_strike_save_tests {
     fn authored_species_rejects_a_complete_positional_record() {
         let author: crate::creature_authoring::Species = serde_json::from_value(source()).unwrap();
         let named = serde_json::to_value(author).unwrap();
+        assert!(named["detection_appearance"].is_null());
         let fields = [
+            "detection_appearance",
             "behavior",
             "displacement",
             "kind",

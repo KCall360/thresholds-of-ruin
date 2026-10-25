@@ -332,8 +332,8 @@ def detection_recording_inputs():
         "owners": [[{"actor": 1, "slots": slots}]], "roots": roots}}}
     samples = {"query": original["queries"][0], "page": original["pages"][0],
                "restored_query": restored["queries"][0], "restored_page": restored["pages"][0],
-               "mapping": exchange("mapping", 380, "-original"),
-               "restored_mapping": exchange("mapping", 380, "-restored"),
+               "mapping": exchange("mapping", 1024, "-original"),
+               "restored_mapping": exchange("mapping", 1024, "-restored"),
                "checkpoint_payload": b"unit-only-decoder-input-not-a-save"}
     return samples, book
 

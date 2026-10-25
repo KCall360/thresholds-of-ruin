@@ -58,6 +58,97 @@ pub(crate) struct Pool {
     owners: Vec<Vec<Binding>>,
     captured: Vec<Shared<HistoricalChart>>,
 }
+/// Restore-pass cache. Indices belong only to this exact immutable Pool namespace.
+/// Representative indices retain no second geometry graph or cloned scope text.
+pub(crate) struct RestoreCache {
+    roots: BTreeMap<usize, Shared<HistoricalChart>>,
+    mapping: Vec<usize>,
+    memo_work_left: usize,
+    max_scope_bytes: usize,
+    #[cfg(test)]
+    mapping_replays: usize,
+}
+impl Default for RestoreCache {
+    fn default() -> Self {
+        Self {
+            roots: BTreeMap::new(),
+            mapping: Vec::new(),
+            memo_work_left: crate::checkpoint::ARCHIVE_BYTE_LIMIT,
+            max_scope_bytes: 0,
+            #[cfg(test)]
+            mapping_replays: 0,
+        }
+    }
+}
+impl RestoreCache {
+    fn pay_lookup(&mut self, scope_bytes: usize, insertion: bool) -> bool {
+        let comparisons = usize::BITS as usize - self.mapping.len().leading_zeros() as usize + 1;
+        let cost = self
+            .max_scope_bytes
+            .max(scope_bytes)
+            .checked_add(3)
+            .and_then(|n| n.checked_mul(comparisons))
+            .and_then(|n| {
+                if insertion {
+                    self.mapping
+                        .len()
+                        .checked_mul(2)
+                        .and_then(|moves| n.checked_add(moves))
+                        .and_then(|n| n.checked_add(1))
+                } else {
+                    Some(n)
+                }
+            });
+        let Some(left) = cost.and_then(|n| self.memo_work_left.checked_sub(n)) else {
+            self.memo_work_left = 0;
+            return false;
+        };
+        self.memo_work_left = left;
+        true
+    }
+    fn mapping_proof(&mut self, pool: &Pool, root: &Root) -> Option<usize> {
+        if root.kind != Kind::Mapping || !self.pay_lookup(root.scope.len(), false) {
+            return None;
+        }
+        self.mapping
+            .binary_search_by(|i| {
+                let old = &pool.roots[*i];
+                (old.world, old.spatial, old.scope.as_str()).cmp(&(
+                    root.world,
+                    root.spatial,
+                    root.scope.as_str(),
+                ))
+            })
+            .ok()
+            .map(|i| self.mapping[i])
+    }
+    fn remember_mapping(&mut self, pool: &Pool, index: usize) {
+        let root = &pool.roots[index];
+        // Precharge comparisons and worst-case index moves/reallocation copies.
+        // Work exhaustion disables this optional cache, never root validation.
+        if !self.pay_lookup(root.scope.len(), true) {
+            return;
+        }
+        let position = match self.mapping.binary_search_by(|i| {
+            let old = &pool.roots[*i];
+            (old.world, old.spatial, old.scope.as_str()).cmp(&(
+                root.world,
+                root.spatial,
+                root.scope.as_str(),
+            ))
+        }) {
+            Ok(_) => return,
+            Err(i) => i,
+        };
+        // Pool structure already charges >=256 bytes per root; one usize per
+        // representative is inside that bound. Allocation failure merely skips
+        // this optimization; it never admits an unverified sample or adds a cap.
+        if self.mapping.try_reserve_exact(1).is_ok() {
+            self.mapping.insert(position, index);
+            self.max_scope_bytes = self.max_scope_bytes.max(root.scope.len());
+        }
+    }
+}
 struct Meter {
     left: usize,
 }
@@ -405,7 +496,7 @@ impl Pool {
                             .iter()
                             .enumerate()
                             .map(|(i, row)| {
-                                let (source, mapping) = match &root.source {
+                                let (source, mapping) = match root.source.as_ref() {
                                     SourceProof::Points(points) => (points[i], None),
                                     SourceProof::Mapping(points) => (
                                         points[i].location,
@@ -485,7 +576,7 @@ impl Pool {
         index: usize,
         tick: u64,
         mut actor_exists: impl FnMut(ActorId) -> bool,
-        cache: &mut BTreeMap<usize, Shared<HistoricalChart>>,
+        cache: &mut RestoreCache,
         validated_worlds: &mut BTreeSet<usize>,
         mut authority: impl FnMut(usize, usize) -> Result<AcquisitionAuthority, Error>,
     ) -> Result<Shared<BTreeMap<ActorId, Owner>>, Error> {
@@ -499,8 +590,30 @@ impl Pool {
             }
             let mut slot = |stored: SlotRef| -> Result<Slot, Error> {
                 let latest = if let Some(index) = stored.latest {
-                    if let std::collections::btree_map::Entry::Vacant(entry) = cache.entry(index) {
+                    if let Some(existing) = cache.roots.get(&index) {
+                        return Ok(Slot {
+                            latest: Some(existing.clone()),
+                            attempt: stored.attempt,
+                        });
+                    }
+                    {
                         let root = self.roots.get(index).ok_or(Error::Reference)?;
+                        if let Some(previous) = cache.mapping_proof(self, root) {
+                            let old = &self.roots[previous];
+                            // Even a memo hit checks this root's complete canonical
+                            // public chart and private occurrence proof, not its ID.
+                            if root.components != old.components || root.points != old.points {
+                                return Err(Error::Projection);
+                            }
+                            let mut value =
+                                (**cache.roots.get(&previous).ok_or(Error::Reference)?).clone();
+                            value.acquired_tick = root.acquired_tick;
+                            cache.roots.insert(index, Shared::new(value));
+                            return Ok(Slot {
+                                latest: Some(cache.roots[&index].clone()),
+                                attempt: stored.attempt,
+                            });
+                        }
                         let proof = authority(root.world, root.spatial)?;
                         if !validated_worlds.contains(&root.world) {
                             if !proof.world.historical_checkpoint_valid() {
@@ -556,6 +669,10 @@ impl Pool {
                                     mark: p.mapping.as_ref().ok_or(Error::Structure)?.decode()?.0,
                                 });
                             }
+                            #[cfg(test)]
+                            {
+                                cache.mapping_replays += 1;
+                            }
                             HistoricalChart::mapping_after_world_validation(
                                 root.acquired_tick,
                                 root.scope.clone(),
@@ -580,9 +697,12 @@ impl Pool {
                                 archive_budget(),
                             )?
                         };
-                        entry.insert(Shared::new(value));
+                        cache.roots.insert(index, Shared::new(value));
+                        if root.kind == Kind::Mapping {
+                            cache.remember_mapping(self, index);
+                        }
                     }
-                    Some(cache[&index].clone())
+                    Some(cache.roots[&index].clone())
                 } else {
                     None
                 };
@@ -631,6 +751,14 @@ impl LocalHistory {
         }
     }
     pub(crate) fn restore(self) -> Result<Shared<BTreeMap<ActorId, Owner>>, Error> {
+        self.restore_with_cache(&mut RestoreCache::default())
+    }
+    // Private invocation keeps one cache namespace per local blob. Tests may
+    // choose the optional memo work allowance while exercising this exact path.
+    fn restore_with_cache(
+        &self,
+        cache: &mut RestoreCache,
+    ) -> Result<Shared<BTreeMap<ActorId, Owner>>, Error> {
         // Actual global boundary time is checked again by RegionRecord attach;
         // active actor stamps are not global time and cannot substitute here.
         if !self.history.references_valid([(self.owners, u64::MAX)]) {
@@ -654,7 +782,7 @@ impl LocalHistory {
             self.owners,
             u64::MAX,
             |_| true,
-            &mut BTreeMap::new(),
+            cache,
             &mut BTreeSet::new(),
             |w, s| {
                 let world = worlds
@@ -897,3 +1025,7 @@ impl<'de> Deserialize<'de> for MappingProof {
         Ok(value)
     }
 }
+
+#[cfg(test)]
+#[path = "codec_memo_tests.rs"]
+mod memo_tests;

@@ -5,7 +5,7 @@ use crate::spatial_scope::mapping::tests::{
 };
 use tor_world::Direction;
 
-fn root() -> Shared<HistoricalChart> {
+pub(super) fn root() -> Shared<HistoricalChart> {
     let world = chamber_world(1, [2, 2, 2]);
     let mut scope = source_scope(&world, &[(1, box_cells(1, [0, 0, 0], [1, 1, 1]))], &[], &[]);
     certify(&world, &mut scope, &[frame(1, 1, Direction::Up)], &[]);

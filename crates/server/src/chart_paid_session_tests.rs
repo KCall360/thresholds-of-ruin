@@ -19,7 +19,7 @@ fn chart_source(root: &Path, kind: &str) -> crate::Scenario {
     )
     .unwrap();
     let mut manifest = serde_json::to_value(&source.manifest).unwrap();
-    manifest["spatial_scopes"] = json!({"study":{"members":[1],"rooms":{"1":[{"region":1,"min":[0,0,0],"max":[89,4,1]}]},"passages":[],"doorways":[]}});
+    manifest["spatial_scopes"] = json!({"study":{"members":[1],"rooms":{"1":[{"region":1,"min":[0,0,0],"max":[31,31,7]}]},"passages":[],"doorways":[]}});
     manifest["creatures"]["species"]["figure"]["detection_appearance"] =
         json!({"name":"fixture figure","asset":null});
     manifest["archetypes"]["draught"]["consumable"] = json!({"discovery":"self_effect","effects":[
@@ -27,17 +27,19 @@ fn chart_source(root: &Path, kind: &str) -> crate::Scenario {
     ]});
     let mut regions = source.region_defs().unwrap();
     let mut region = serde_json::to_value(&regions[0]).unwrap();
-    region["size"] = json!([90, 5, 2]);
-    region["actors"][0]["at"] = json!([70, 2, 0]);
+    // Stay inside the authored side ceiling while placing subjects beyond
+    // sight16 on both axes; eight heights retain a genuinely multipage wall chart.
+    region["size"] = json!([32, 32, 8]);
+    region["actors"][0]["at"] = json!([25, 25, 0]);
     region["actors"][0]["creature"]["name"] = json!("PRIVATE peer personal name");
     // An ordinary non-creature external body keeps a same-tick scheduler peer
     // ready after actor 2 moves. It is not a monster-census subject.
     region["actors"].as_array_mut().unwrap().push(json!({
-        "id":3,"at":[75,2,0],"turn_ticks":100,"controller":"external"
+        "id":3,"at":[27,27,0],"turn_ticks":100,"controller":"external"
     }));
     region["items"] = json!([
         {"id":10,"at":[1,2,0],"archetype":"draught","quantity":3,"carried_by":1},
-        {"id":30,"at":[80,2,0],"archetype":"ember"}
+        {"id":30,"at":[28,25,0],"archetype":"ember"}
     ]);
     regions[0] = serde_json::from_value(region).unwrap();
     let package =
@@ -642,6 +644,12 @@ fn aggregate_history_source(root: &Path, streaming: bool) -> crate::Scenario {
                 json!({"id":41,"at":[15,1,0],"archetype":"sigil"}),
             ]);
         }
+        if streaming && id == 4 {
+            // A nonchamber all-room corridor has no wall facts. Give the paid
+            // Mapping witness one real authored feature; an open door leaves
+            // the ordinary movement/streaming path unobstructed.
+            value["doors"] = json!([{"id":400,"at":[10,1,0],"open":true,"height":1}]);
+        }
         let size = value["size"].as_array().unwrap();
         let max: Vec<_> = size.iter().map(|v| v.as_i64().unwrap() - 1).collect();
         scopes.insert(format!("hall-{id}"), json!({
@@ -728,7 +736,12 @@ fn paid_combined_food_magic_mapping_roots_use_whole_checkpoint_exact_ceiling() {
     let old_roots = old["shared"]["chart_history"]["roots"].as_array().unwrap();
     assert!(old_roots.iter().any(|r| r["kind"] == "food"));
     assert!(old_roots.iter().any(|r| r["kind"] == "magic"));
-    assert!(old_roots.iter().any(|r| r["kind"] == "mapping"));
+    let mapping = old_roots.iter().find(|r| r["kind"] == "mapping").unwrap();
+    assert_eq!(
+        mapping["points"].as_array().unwrap().len(),
+        1024,
+        "32x32x8 certified room retains all four side faces at eight heights, beyond one wire page"
+    );
     let request = wire.request(OWNER, Action::Drink { item: items[0] });
     ack(wire.send(OWNER, "aggregate-new-magic", request));
     let before = wire.checkpoint();
@@ -827,6 +840,21 @@ fn paid_history_guard_checks_every_unwritten_detached_row_before_publication() {
     }
     assert_eq!(wire.service.engine.region_counts().unwrap().detached, 2);
     acquire_three_histories(&mut wire, items);
+    let saved = wire.checkpoint();
+    let mapping = saved["shared"]["chart_history"]["roots"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|root| root["kind"] == "mapping")
+        .unwrap();
+    let points = mapping["points"].as_array().unwrap();
+    assert_eq!(points.len(), 1, "ordinary room interiors remain omitted");
+    assert_eq!(points[0]["mapping"]["tag"], "doorway");
+    assert_eq!(
+        points[0]["source"],
+        json!({"region":4,"position":{"x":10,"y":1,"z":0}}),
+        "the retained positive comes from the actual authored open door"
+    );
     let captured = crate::engine::Checkpoint::capture(&wire.service.engine);
     assert_eq!(
         captured.records.len(),
@@ -885,3 +913,6 @@ fn paid_history_guard_checks_every_unwritten_detached_row_before_publication() {
     assert_eq!(nothing_items(&wire.checkpoint())["10"]["quantity"], 1);
     wire.service.engine.flush().unwrap();
 }
+
+#[path = "detached_chart_admission_tests.rs"]
+mod detached_admission;

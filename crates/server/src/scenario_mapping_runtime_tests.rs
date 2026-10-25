@@ -80,10 +80,11 @@ fn ordinary_uncertified_package_remains_admissible_but_preparation_is_explicitly
         .unwrap()
         .check(&game)
         .unwrap();
+    let (_saved_inputs, reader) = super::tests::retained_authored_inputs(&package);
     let bytes = crate::storage::schema::scenario::encode_content_package(&package).unwrap();
     let saved = crate::storage::schema::scenario::decode_content_package(&bytes).unwrap();
     assert!(saved.directory.is_none());
-    saved.check().unwrap();
+    super::tests::attach_retained_authored_inputs(&saved, reader);
     assert_eq!(scope, mapping_scope(&saved));
 }
 
@@ -105,6 +106,7 @@ fn genuine_source_free_package_and_core_checkpoint_preserve_frames_and_prepared_
     let root = game.checkpoint(&mut shared);
     let shared_bytes = serde_json::to_vec(&shared).unwrap();
     let root_bytes = serde_json::to_vec(&root).unwrap();
+    let (_saved_inputs, reader) = super::tests::retained_authored_inputs(&package);
     let content_bytes = crate::storage::schema::scenario::encode_content_package(&package).unwrap();
     drop(package);
     let restored =
@@ -113,7 +115,7 @@ fn genuine_source_free_package_and_core_checkpoint_preserve_frames_and_prepared_
         restored.directory.is_none(),
         "decoder must use retained source, not a path fallback"
     );
-    restored.check().unwrap();
+    super::tests::attach_retained_authored_inputs(&restored, reader);
     let restored_scope = mapping_scope(&restored);
     assert_eq!(source, restored_scope);
     assert_eq!(prepared_faces(&restored, &restored_scope), before);

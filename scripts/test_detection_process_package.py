@@ -33,6 +33,155 @@ def public_pages(count=513, kind="food"):
 
 
 class DetectionProcessHelperContracts(unittest.TestCase):
+    def test_live_text_spectator_attaches_after_the_paid_phase_zero_boundary(self):
+        # Source-owned lifecycle contract, not a fabricated native prompt proof.
+        # Real Adventure emits prompts for asynchronous paid narration; attaching
+        # before the dose leaves those prompts queued ahead of a later command.
+        import ast
+        import inspect
+        import textwrap
+        from test_magic_items_process import MagicItemProcesses
+        method = MagicItemProcesses.test_imported_detection_monsters_adventure_hallucination_channel_and_refresh
+        tree = ast.parse(textwrap.dedent(inspect.getsource(method)))
+        calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
+        attach, = [node.lineno for node in calls if isinstance(node.func, ast.Attribute)
+                   and node.func.attr == "adventure"]
+        phase_zero, = [node.lineno for node in calls if isinstance(node.func, ast.Attribute)
+                       and node.func.attr == "assert_monster_sample"
+                       and isinstance(node.args[-1], ast.Constant) and node.args[-1].value == 0]
+        commands = [node.lineno for node in calls if isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "say"]
+        self.assertGreater(attach, phase_zero, "attach after paid events, not with queued earlier prompts")
+        self.assertLess(attach, min(commands))
+
+    def test_same_selected_chart_after_snapshot_consumes_new_epoch_auto_request_without_competing_write(self):
+        from types import SimpleNamespace
+        from test_magic_items_process import MagicItemProcesses
+        requested, pages = public_pages(513, "food")
+        requested["context"]["epoch"] = "8"
+        for page in pages:
+            page["context"]["epoch"] = "8"
+        frame = {"input_context": {"stream": requested["context"]}, "branch": requested["branch"],
+                 "observation_base": requested["base"], "state": {"observation": {
+                     "charts": [{"kind": "food", "chart": requested["chart"]}]}}}
+        subject = MagicItemProcesses("test_imported_detection_food_complete_multipage_adventure_and_pure_reads")
+        subject.snapshot = lambda client: copy.deepcopy(frame)
+        client = SimpleNamespace(transcript=[])
+        relay = object.__new__(detection.ChartCaptureRelay)
+        relay.chart_lock, relay.errors = threading.Lock(), []
+        relay.chart_requests, relay.chart_replies = [], []
+        # Old epoch7 has a lawful full transfer with identical base/token. It
+        # cannot fulfill a read at snapshot epoch8; no prefix/row normalization.
+        for epoch in ("7", "8"):
+            cursor = None
+            for index, page in enumerate(pages):
+                query = {**copy.deepcopy(requested), "cursor": cursor}
+                query["context"]["epoch"] = epoch
+                reply_page = copy.deepcopy(page)
+                reply_page["context"]["epoch"] = epoch
+                identity = "managed-" + epoch + "-" + str(index)
+                relay.chart_requests.append({"type": "request", "request_id": identity,
+                    "request": {"type": "chart", "query": query}})
+                relay.chart_replies.append({"type": "chart_page", "request_id": identity, "page": reply_page})
+                cursor = page["next"]
+        subject.detection_relays = {id(client): relay}
+        subject.detection_selected = {id(client): "food"}
+        subject.detection_boundaries = {id(client): {**requested["context"], "epoch": "7"}}
+        subject.request = lambda *args: self.fail("competing explicit Chart would collide with managed active.pending")
+        observed, query, actual = subject.detection_pages(client, "food")
+        self.assertEqual((observed, query, actual), (frame, requested, pages))
+        self.assertEqual(subject.detection_last_request, "managed-8-0")
+        # A repeated caller that did not acquire a fresh snapshot epoch must not
+        # recycle a completed transfer just because the chart kind still matches.
+        with self.assertRaisesRegex(AssertionError, "fresh attachment epoch"):
+            subject.detection_pages(client, "food")
+
+    def test_managed_request_can_be_locally_pending_before_capture_and_waits_for_complete_pages(self):
+        from types import SimpleNamespace
+        from test_magic_items_process import MagicItemProcesses
+        requested, pages = public_pages(513, "food")
+        requested["context"]["epoch"] = "8"
+        for page in pages:
+            page["context"]["epoch"] = "8"
+        frame = {"input_context": {"stream": requested["context"]}, "branch": requested["branch"],
+                 "observation_base": requested["base"], "state": {"observation": {
+                     "charts": [{"kind": "food", "chart": requested["chart"]}]}}}
+        subject = MagicItemProcesses("test_imported_detection_food_complete_multipage_adventure_and_pure_reads")
+        subject.snapshot = lambda client: copy.deepcopy(frame)
+        client = SimpleNamespace(transcript=[])
+        relay = object.__new__(detection.ChartCaptureRelay)
+        relay.chart_lock, relay.errors = threading.Lock(), []
+        relay.chart_requests, relay.chart_replies = [], []
+        subject.detection_relays = {id(client): relay}
+        subject.detection_selected = {id(client): "food"}
+        subject.detection_boundaries = {id(client): {**requested["context"], "epoch": "7"}}
+        subject.request = lambda *args: self.fail("unsent managed request is not permission to send another")
+        delivered = []
+        def receive(client, predicate):
+            index = len(delivered)
+            self.assertLess(index, len(pages), "must stop once the exact transfer completes")
+            page = copy.deepcopy(pages[index])
+            query = {**copy.deepcopy(requested), "cursor": None if index == 0 else pages[index - 1]["next"]}
+            identity = "managed-" + str(index)
+            relay.chart_requests.append({"type": "request", "request_id": identity,
+                                          "request": {"type": "chart", "query": query}})
+            reply = {"type": "chart_page", "request_id": identity, "page": page}
+            relay.chart_replies.append(reply)
+            value = {"type": "update", "message": reply}
+            self.assertTrue(predicate(value))
+            delivered.append(value)
+            return value
+        subject.frame = receive
+        observed, query, actual = subject.detection_pages(client, "food")
+        self.assertEqual((observed, query, actual), (frame, requested, pages))
+        self.assertEqual(len(delivered), 2)
+        self.assertEqual(subject.detection_last_request, "managed-0")
+
+    def test_managed_initial_lookup_requires_exact_epoch_and_unique_request_identity(self):
+        requested, _ = public_pages(1, "monsters")
+        requested["context"]["epoch"] = "8"
+        old = copy.deepcopy(requested)
+        old["context"]["epoch"] = "7"
+        relay = object.__new__(detection.ChartCaptureRelay)
+        relay.chart_lock, relay.errors = threading.Lock(), []
+        relay.chart_requests = [{"type": "request", "request_id": "old",
+                                  "request": {"type": "chart", "query": old}}]
+        self.assertIsNone(relay.initial_request(requested))
+        actual = {"type": "request", "request_id": "new",
+                  "request": {"type": "chart", "query": requested}}
+        relay.chart_requests.append(copy.deepcopy(actual))
+        self.assertEqual(relay.initial_request(requested), actual)
+        relay.chart_requests.append({**copy.deepcopy(actual), "request_id": "competing"})
+        with self.assertRaisesRegex(AssertionError, "multiple initial"):
+            relay.initial_request(requested)
+
+    def test_headless_explicit_reply_is_not_concatenated_with_an_automatic_refresh(self):
+        from types import SimpleNamespace
+        from test_magic_items_process import MagicItemProcesses
+        requested, pages = public_pages(1, "monsters")
+        frame = {"input_context": {"stream": requested["context"]}, "branch": requested["branch"],
+                 "observation_base": requested["base"], "state": {"observation": {
+                     "charts": [{"kind": "monsters", "chart": requested["chart"]}]}}}
+        subject = MagicItemProcesses("test_imported_detection_monsters_adventure_hallucination_channel_and_refresh")
+        subject.snapshot = lambda client: copy.deepcopy(frame)
+        client = SimpleNamespace(transcript=[])
+        relay = object.__new__(detection.ChartCaptureRelay)
+        relay.chart_lock, relay.errors = threading.Lock(), []
+        relay.chart_requests, relay.chart_replies = [], []
+        subject.detection_relays = {id(client): relay}
+        def request(client, query):
+            self.assertEqual(query, {"type": "chart", "query": requested})
+            for kind, identity in (("update", "automatic-refresh"), ("response", "explicit-query")):
+                reply = {"type": "chart_page", "request_id": identity, "page": copy.deepcopy(pages[0])}
+                relay.chart_requests.append({"type": "request", "request_id": identity,
+                                             "request": {"type": "chart", "query": copy.deepcopy(requested)}})
+                relay.chart_replies.append(reply)
+                client.transcript.append(__import__("json").dumps({"type": kind, "message": reply}))
+            return {"error": None}
+        subject.request = request
+        observed, query, actual = subject.detection_pages(client, "monsters")
+        self.assertEqual((observed, query, actual), (frame, requested, pages))
+
     def test_query_uses_observation_base_not_later_readiness_cursor(self):
         requested, _ = public_pages(1)
         frame = {"input_context": {"stream": requested["context"]}, "branch": requested["branch"],
@@ -120,12 +269,98 @@ class DetectionProcessHelperContracts(unittest.TestCase):
             with self.assertRaises(AssertionError):
                 detection.assert_monster_sample(self, frame, pages, phase)
 
+    def test_ascii_capture_keeps_one_complete_request_bound_transfer_not_repeated_hydrations(self):
+        from test_ascii_process import DetectionChartAsciiProcesses
+        query, pages = public_pages(1024, "mapping")
+        relay = object.__new__(detection.ChartCaptureRelay)
+        relay.chart_lock, relay.errors = threading.Lock(), []
+        relay.chart_requests, relay.chart_replies = [], []
+        for prefix in ("prior-hydration", "selected-hydration"):
+            cursor = None
+            for index, page in enumerate(pages):
+                identity = prefix + str(index)
+                relay.chart_requests.append({"type": "request", "request_id": identity,
+                    "request": {"type": "chart", "query": {**copy.deepcopy(query), "cursor": cursor}}})
+                relay.chart_replies.append({"type": "chart_page", "request_id": identity, "page": copy.deepcopy(page)})
+                cursor = page["next"]
+        subject = DetectionChartAsciiProcesses("test_source_free_food_and_mapping_chart_modal_pages_capture_and_never_submit_actions")
+        actual = subject.chart_wire_pages(relay, "mapping")
+        self.assertEqual(actual, detection.rows(pages))
+        self.assertEqual(len(actual), 1024)
+
+    def test_explicit_response_requires_exact_base_and_single_reply_identity(self):
+        query, pages = public_pages(1, "monsters")
+        reply = {"type": "chart_page", "request_id": "explicit", "page": pages[0]}
+        earlier = copy.deepcopy(reply)
+        earlier["request_id"] = "automatic"
+        earlier["page"]["base"]["revision"] = "3"
+        frames = [{"type": "update", "message": earlier}, {"type": "response", "message": reply}]
+        self.assertEqual(detection.explicit_chart_reply(frames, query), reply)
+        with self.assertRaises(AssertionError):
+            detection.explicit_chart_reply([frames[0]], query)
+        with self.assertRaises(AssertionError):
+            detection.explicit_chart_reply([*frames, copy.deepcopy(frames[1])], query)
+        wrong = copy.deepcopy(frames[1])
+        wrong["message"]["page"]["base"]["revision"] = "5"
+        with self.assertRaises(AssertionError):
+            detection.explicit_chart_reply([wrong], query)
+
+    def test_relay_isolates_one_complete_transfer_and_rejects_corrupt_continuations(self):
+        query, pages = public_pages(1024, "mapping")
+        def relay_fixture():
+            relay = object.__new__(detection.ChartCaptureRelay)
+            relay.chart_lock, relay.errors = threading.Lock(), []
+            relay.chart_requests, relay.chart_replies = [], []
+            for prefix in ("auto", "explicit", "later"):
+                cursor = None
+                for index, page in enumerate(pages):
+                    current = {**copy.deepcopy(query), "cursor": cursor}
+                    identity = prefix + str(index)
+                    relay.chart_requests.append({"type": "request", "request_id": identity,
+                        "request": {"type": "chart", "query": current}})
+                    relay.chart_replies.append({"type": "chart_page", "request_id": identity, "page": copy.deepcopy(page)})
+                    cursor = page["next"]
+            return relay
+        relay = relay_fixture()
+        exchange = relay.stream(query, "explicit0")
+        self.assertEqual([row["request_id"] for row in exchange["queries"]], ["explicit0", "explicit1", "explicit2"])
+        self.assertEqual([row["page"] for row in exchange["pages"]], pages)
+        self.assertEqual(len(detection.rows([row["page"] for row in exchange["pages"]])), 1024)
+        # Synthetic repeated-coordinate rows are preserved, not deduplicated.
+        self.assertEqual(len({repr(row) for row in detection.rows(pages)}), 1)
+        mutations = (
+            lambda r: r.chart_replies.pop(4),
+            lambda r: r.chart_replies.append(copy.deepcopy(r.chart_replies[4])),
+            lambda r: r.chart_requests[4]["request"]["query"].update(cursor="511"),
+            lambda r: r.chart_requests[4]["request"]["query"]["base"].update(revision="5"),
+            lambda r: r.chart_replies[4]["page"].update(start="511"),
+            lambda r: r.chart_replies[4]["page"]["base"].update(revision="5"),
+            lambda r: r.chart_replies[4]["page"].update(next=None),
+            lambda r: r.chart_requests[4].update(request_id="explicit0"),
+            lambda r: r.chart_replies[4].update(request_id="explicit0"),
+            lambda r: r.chart_replies.__setitem__(slice(3, 5), list(reversed(r.chart_replies[3:5]))),
+        )
+        for mutation in mutations:
+            with self.subTest(mutation=mutation):
+                changed = relay_fixture()
+                mutation(changed)
+                with self.assertRaises(AssertionError):
+                    changed.stream(query, "explicit0")
+        pending = relay_fixture()
+        pending.chart_requests = pending.chart_requests[:5]
+        pending.chart_replies = pending.chart_replies[:4]
+        partial = pending.stream(query, "explicit0", complete=False)
+        self.assertEqual(len(partial["pages"]), 1)
+        with self.assertRaises(AssertionError):
+            pending.stream(query, "explicit0")
+
     def test_relay_selection_preserves_actual_envelopes_and_correlations(self):
         query, pages = public_pages(1)
         request = {"type": "request", "request_id": "actual-id", "request": {"type": "chart", "query": query}}
         reply = {"type": "chart_page", "request_id": "actual-id", "context": query["context"], "page": pages[0]}
         relay = object.__new__(detection.ChartCaptureRelay)  # no socket/thread constructor
         relay.chart_lock = threading.Lock()
+        relay.errors = []
         relay.chart_requests = [copy.deepcopy(request)]
         relay.chart_replies = []
         relay.observe_server(reply)
@@ -139,6 +374,15 @@ class DetectionProcessHelperContracts(unittest.TestCase):
 class DetectionAuthoredFixtureContracts(unittest.TestCase):
     def source(self):
         return Path(os.environ.get("TOR_DETECTION_TEST_SOURCE", detection.PRODUCTION))
+
+    def test_all_fixture_dimensions_obey_real_source_bounds(self):
+        for paging, mapping in ((False, False), (True, False), (False, True), (True, True)):
+            with self.subTest(paging=paging, mapping=mapping):
+                fixture = detection.fixture(paging=paging, mapping=mapping, production=self.source())
+                for region in fixture["regions"]:
+                    self.assertTrue(1 <= region["size"][0] <= 32, region["size"])
+                    self.assertTrue(1 <= region["size"][1] <= 32, region["size"])
+                    self.assertTrue(1 <= region["size"][2] <= 8, region["size"])
 
     def test_real_production_effects_conditions_species_and_opt_in_stock_are_not_rewritten(self):
         root = self.source()
@@ -163,20 +407,19 @@ class DetectionAuthoredFixtureContracts(unittest.TestCase):
         self.assertEqual(len(food), 513)
         self.assertEqual(len({tuple(row["at"]) for row in food}), 513)
         self.assertEqual(len({row["id"] for row in food}), 513)
-        self.assertTrue(all(row["at"][0] >= 70 and row["at"][2] == 0 for row in food))
+        self.assertTrue(all(abs(row["at"][0] - 2) + abs(row["at"][1] - 2) + 1 > 16 and row["at"][2] == 0 for row in food))
         self.assertTrue(all(0 <= value < region["size"][axis] for row in food
                             for axis, value in enumerate(row["at"])))
-        self.assertEqual(fixture["manifest"]["spatial_scopes"]["study"]["rooms"]["1"][0]["max"], [129, 8, 1])
+        self.assertEqual(fixture["manifest"]["spatial_scopes"]["study"]["rooms"]["1"][0]["max"], [31, 31, 7])
 
     def test_mapping_has_lawful_optional_certificate_and_remote_geometry(self):
         present = detection.fixture(mapping=True, production=self.source())
         absent = detection.fixture(mapping=True, certified=False, production=self.source())
         self.assertEqual(present["regions"], absent["regions"])
-        self.assertEqual(present["regions"][0]["size"], [90, 5, 2])
+        self.assertEqual(present["regions"][0]["size"], [32, 32, 8])
         paging = detection.fixture(paging=True, mapping=True, production=self.source())
-        self.assertEqual(paging["regions"][0]["size"], [130, 9, 2])
-        self.assertEqual(2 * (90 + 5) * 2, 380)
-        self.assertEqual(2 * (130 + 9) * 2, 556)
+        self.assertEqual(paging["regions"][0]["size"], [32, 32, 8])
+        self.assertEqual(2 * (32 + 32) * 8, 1024)
         self.assertEqual(present["manifest"]["spatial_scopes"]["study"].pop("mapping"),
                          {"room_frames": [{"room": 1, "region": 1, "up": "up"}]})
         self.assertEqual(present, absent)

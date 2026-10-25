@@ -1,7 +1,7 @@
 //! Actor-owned historical Food/Magic/Mapping samples and separate latest attempt facts.
 mod codec;
 use crate::{chart, scope_projection, spatial_scope::registry::Registry, ActorId};
-pub(crate) use codec::{local_owners, Pool as StoredPool};
+pub(crate) use codec::{local_owners, Pool as StoredPool, RestoreCache};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -38,7 +38,7 @@ pub struct HistoricalChart {
     authority: Shared<AcquisitionAuthority>,
     chart: Arc<chart::Chart>,
     /// One point per row, in exactly the row occurrence order. Private proof only.
-    source: SourceProof,
+    source: Arc<SourceProof>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum SourceProof {
@@ -201,7 +201,7 @@ impl HistoricalChart {
             scope,
             authority,
             chart,
-            source: SourceProof::Points(source_points),
+            source: Arc::new(SourceProof::Points(source_points)),
         };
         value.validate_geometry(budget)?;
         Ok(value)
@@ -233,7 +233,7 @@ impl HistoricalChart {
             scope,
             authority,
             chart,
-            source: SourceProof::Mapping(rows),
+            source: Arc::new(SourceProof::Mapping(rows)),
         };
         value.validate_geometry(budget)?;
         Ok(value)
@@ -278,7 +278,7 @@ impl HistoricalChart {
             .scopes()
             .find(|s| s.id == self.scope)
             .ok_or(Error::Source)?;
-        let points = match &self.source {
+        let points = match self.source.as_ref() {
             SourceProof::Mapping(rows) if self.kind == Kind::Mapping => {
                 return crate::mapping_history::validate_mapping_history(
                     &self.authority.world,

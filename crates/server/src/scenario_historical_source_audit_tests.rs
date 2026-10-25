@@ -156,6 +156,7 @@ fn source_free_retained_package_roundtrip_authenticates_the_same_captured_world(
     let (mut world, registry) = captured(&package);
     world.set_door(loc(1, [2, 2, 0]), false);
     check(&package, &world, &registry).unwrap();
+    let (_saved_inputs, reader) = super::tests::retained_authored_inputs(&package);
     let package_bytes = crate::storage::schema::scenario::encode_content_package(&package).unwrap();
     let world_bytes = serde_json::to_vec(&world).unwrap();
     drop(package);
@@ -166,7 +167,7 @@ fn source_free_retained_package_roundtrip_authenticates_the_same_captured_world(
         restored.directory.is_none(),
         "retained package needs no source directory"
     );
-    restored.check().unwrap();
+    super::tests::attach_retained_authored_inputs(&restored, reader);
     let world: World = serde_json::from_slice(&world_bytes).unwrap();
     assert!(world.historical_checkpoint_valid());
     check(&restored, &world, &registry).unwrap();
