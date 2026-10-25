@@ -156,6 +156,7 @@ impl ScenarioCatalog {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Content {
+    presentation: Arc<crate::appearance_catalog::PresentationCatalog>,
     pub(crate) rules: Arc<Ruleset>,
     pub(crate) catalog: Arc<ScenarioCatalog>,
     /// Immutable ordinary projectile definitions, reconstructed from the saved
@@ -163,6 +164,20 @@ pub struct Content {
     trap_ammunition: Arc<BTreeMap<String, crate::ItemSpec>>,
 }
 impl Content {
+    pub fn presentation_catalog(&self) -> &Arc<crate::appearance_catalog::PresentationCatalog> {
+        &self.presentation
+    }
+    pub fn with_presentation_catalog(
+        content: &Arc<Self>,
+        presentation: Arc<crate::appearance_catalog::PresentationCatalog>,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            rules: content.rules.clone(),
+            catalog: content.catalog.clone(),
+            trap_ammunition: content.trap_ammunition.clone(),
+            presentation,
+        })
+    }
     pub fn trap_ammunition(&self, key: &str) -> Option<&crate::ItemSpec> {
         self.trap_ammunition.get(key)
     }
@@ -187,6 +202,7 @@ impl Content {
             return Err(BuildError::InvalidDefinition);
         }
         Ok(Arc::new(Self {
+            presentation: content.presentation.clone(),
             rules: content.rules.clone(),
             catalog: content.catalog.clone(),
             trap_ammunition: Arc::new(ammunition),
@@ -233,6 +249,7 @@ impl Content {
         Ok(Arc::new(Self {
             rules,
             catalog: Arc::new(catalog),
+            presentation: crate::appearance_catalog::PresentationCatalog::new(vec![], vec![])?,
             trap_ammunition: Arc::new(BTreeMap::new()),
         }))
     }

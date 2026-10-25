@@ -29,3 +29,5 @@ mod map_pages;
 
 mod currency;
 mod magic_items;
+
+mod object_presentation;

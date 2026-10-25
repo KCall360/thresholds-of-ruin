@@ -59,7 +59,7 @@ consumable = { discovery = "self_effect", effects = [{ kind = "restore_attribute
 
 [appearance_pools."rogue.potions"]
 asset = "item.potion"
-appearances = ["amber potion", "smoky potion", "violet potion", "azure potion", "crimson potion", "silver potion", "pearl potion", "teal potion", "ochre potion", "indigo potion", "copper potion"]
+appearances = ["amber potion", "smoky potion", "violet potion", "azure potion", "crimson potion", "silver potion", "pearl potion", "teal potion", "ochre potion", "indigo potion", "copper potion", "chartreuse potion"]
 
 # Ordinary recoverable stacks; neither a purse abstraction nor a supply item.
 [items."rogue.gold"]
@@ -86,7 +86,8 @@ appearance_pool = "rogue.potions"
 consumable = { discovery = "on_use", effects = [{ kind = "heal_per_hit_die", sides = 4, bonus = 0, overflow = "improve_earliest_hit_die" }, { kind = "remove_condition", condition = "rogue.blindness" }] }
 
 # Extra healing uses independent HDd8 rolls. Strict overflow selects one or two
-# earliest eligible owned-HD improvements; hallucination cure is unsupported.
+# earliest eligible owned-HD improvements; the marked visual condition is cured
+# unconditionally, including when the drinker cannot see.
 [items."rogue.extra_healing"]
 asset = "item.potion"
 name = "potion of extra healing"
@@ -95,7 +96,7 @@ magical = true
 class = "potion"
 stackable = true
 appearance_pool = "rogue.potions"
-consumable = { discovery = "on_use", effects = [{ kind = "heal_per_hit_die", sides = 8, bonus = 0, overflow = "improve_earliest_hit_dice_by_excess" }, { kind = "remove_condition", condition = "rogue.blindness" }] }
+consumable = { discovery = "on_use", effects = [{ kind = "heal_per_hit_die", sides = 8, bonus = 0, overflow = "improve_earliest_hit_dice_by_excess" }, { kind = "remove_condition", condition = "rogue.blindness" }, { kind = "remove_condition", condition = "rogue.hallucinating" }] }
 
 # Ordinary timed potion conditions have no gaze-expiry protection. Durations
 # preserve source ranges in actor turns; TOR actor-active ticks are an adaptation.
@@ -792,3 +793,15 @@ class = "potion"
 stackable = true
 appearance_pool = "rogue.potions"
 consumable = { discovery = "on_use", effects = [{ kind = "raise_level" }] }
+
+# Opt-in only: no live stock, starter kit or generation weight change. Each dose
+# draws the source-equivalent 808..892 base-turn duration, including extensions.
+[items."rogue.hallucination"]
+asset = "item.potion"
+name = "potion of hallucination"
+identity = "rogue.hallucination"
+magical = true
+class = "potion"
+stackable = true
+appearance_pool = "rogue.potions"
+consumable = { discovery = "on_use", effects = [{ kind = "apply_condition_for_turns", condition = "rogue.hallucinating", duration = { kind = "rolled", dice = { count = 1, sides = 85, bonus = 807 } } }] }

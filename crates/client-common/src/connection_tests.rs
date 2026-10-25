@@ -1981,6 +1981,7 @@ async fn spectator_map_hydration_survives_cancellation_without_blocking_live_sta
         queried.send(()).unwrap();
         released.await.unwrap();
         let cell = |x, key: &str| RememberedMapCell {
+            object_presentation: None,
             key: key.into(),
             position: Position {
                 x,

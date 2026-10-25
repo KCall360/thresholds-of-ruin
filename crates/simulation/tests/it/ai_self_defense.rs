@@ -21,6 +21,7 @@ fn defensive_ai_admission_replays_the_same_paid_plan_then_stops_reapplying() {
     let mut document = fixture::ruleset().document().clone();
     let condition = ConditionId::new("integration_ward").unwrap();
     document.conditions.push(ConditionDef {
+        hallucinating: false,
         id: condition.clone(),
         family: ConditionFamilyId::new("integration_ward").unwrap(),
         lifecycle: ConditionLifecycle::Timed,

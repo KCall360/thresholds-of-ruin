@@ -11,6 +11,7 @@ pub enum InvalidState {
     DuplicateActor,
     DuplicatePlace,
     InvalidItem,
+    InvalidPresentation,
     ConflictingItemLocation,
     InvalidCombat,
     InvalidMotion,
@@ -69,6 +70,13 @@ impl StateView {
             || (o.combat.as_ref().is_some_and(|combat| combat.dead) && !o.linked_holds.is_empty())
         {
             return Err(InvalidState::InvalidLinkedHold);
+        }
+        if o.visible_cells
+            .iter()
+            .any(|cell| !cell.valid_presentation())
+            || o.ground_items.iter().any(|item| !item.valid_presentation())
+        {
+            return Err(InvalidState::InvalidPresentation);
         }
         if !unique(o.visible_cells.iter().map(|cell| cell.position)) {
             return Err(InvalidState::DuplicateCell);

@@ -134,6 +134,7 @@ pub struct ItemView {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GroundItemView {
+    pub presentation: Option<crate::appearance_catalog::ObjectPresentation>,
     pub corpse: Option<CorpseAppearance>,
     pub class: crate::ItemClass,
     pub description: String,
@@ -158,6 +159,7 @@ pub struct KnownPlace {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActorView {
+    pub presentation: Option<crate::appearance_catalog::CreaturePresentation>,
     pub disclosure: crate::perception::ActorDisclosure,
     /// Empty when nothing names it.
     pub name: String,
@@ -200,6 +202,7 @@ pub struct TrapView {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CellView {
+    pub object_presentation: Option<crate::appearance_catalog::ObjectPresentation>,
     /// Illumination of this disclosed occurrence, including dark awareness.
     pub lit: bool,
     pub frame: u8,
@@ -347,6 +350,7 @@ impl Game {
             match item.location {
                 ItemLocation::Ground(location) if visible(location) => {
                     ground_items.push(GroundItemView {
+                        presentation: None,
                         corpse: identified.then(|| item.corpse.clone()).flatten(),
                         class: item.spec.class,
                         description: item_description(name),
@@ -505,7 +509,7 @@ impl Game {
             })
             .collect::<Result<Vec<_>, _>>()?;
         let portable_lit = self.portable_lit_cells();
-        Ok(Observation {
+        let mut view = Observation {
             linked_holds: self.linked_holds(id),
             interactions: (!actor.anatomy.slots.is_empty()
                 || actor.pending.is_some()
@@ -565,6 +569,7 @@ impl Game {
                     }
                     let state = &self.actors[subject];
                     visible(state.location).then(|| crate::perception::ApparentObjectView {
+                        presentation: None,
                         subject: *subject,
                         location: state.location,
                         appearance: state.guise.appearance().expect("classified guise").clone(),
@@ -574,6 +579,7 @@ impl Game {
             visible_cells: occurrences
                 .iter()
                 .map(|&(location, frame)| CellView {
+                    object_presentation: None,
                     lit: self.world.is_lit(location) == Some(true)
                         || portable_lit.contains(&location),
                     frame,
@@ -636,6 +642,7 @@ impl Game {
                             visible(*at) && (other_id != id || *at != actor.location)
                         })
                         .map(move |(location, _)| ActorView {
+                            presentation: None,
                             disclosure,
                             name: if disclosure == crate::perception::ActorDisclosure::Creature {
                                 projected_actor_name(actor, other).to_owned()
@@ -692,7 +699,9 @@ impl Game {
                         .clone(),
                 })
                 .collect(),
-        })
+        };
+        self.apply_hallucinated_presentation(&mut view, sight)?;
+        Ok(view)
     }
 
     /// Closed undiscovered entrances disclose the same solid appearance as the wall.

@@ -942,6 +942,13 @@ pub struct Recipe {
     nutrition: s::nutrition::NutritionRequirement,
 }
 impl CompiledCatalog {
+    pub(crate) fn with_presentation_catalog(
+        mut self,
+        catalog: Arc<s::appearance_catalog::PresentationCatalog>,
+    ) -> Self {
+        self.content = s::creatures::Content::with_presentation_catalog(&self.content, catalog);
+        self
+    }
     pub(crate) fn with_trap_ammunition(
         mut self,
         ammunition: BTreeMap<String, s::ItemSpec>,

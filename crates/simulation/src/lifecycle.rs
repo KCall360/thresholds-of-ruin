@@ -1625,6 +1625,7 @@ mod tests {
         ability.cost = None;
         document.abilities.push(ability.clone());
         document.conditions.push(crate::rules::ConditionDef {
+            hallucinating: false,
             id: crate::content_ids::ConditionId::new("borrowed_grant").unwrap(),
             family: crate::content_ids::ConditionFamilyId::new("borrowed_grant").unwrap(),
             lifecycle: crate::rules::ConditionLifecycle::Timed,
@@ -2782,6 +2783,7 @@ mod growth_tests {
             rules.growth.minimum_reward = 100;
             rules.growth.maximum_reward = 100;
             rules.conditions.push(crate::rules::ConditionDef {
+                hallucinating: false,
                 id: condition.clone(),
                 family: crate::content_ids::ConditionFamilyId::new("growth_health_buffer").unwrap(),
                 lifecycle: crate::rules::ConditionLifecycle::Timed,

@@ -27,7 +27,7 @@ fn sample_state() -> StateView {
                     "wall": false,
                     "material": "stone",
                     "lit":true,"place_hint": true,
-                    "trap":null,"stairs_up": false,
+                    "trap":null,"object_presentation":null,"stairs_up": false,
                     "stairs_down": false,
                     "door": null
                 },
@@ -37,7 +37,7 @@ fn sample_state() -> StateView {
                     "wall": false,
                     "material": "stone",
                     "lit":true,"place_hint": false,
-                    "trap":null,"stairs_up": false,
+                    "trap":null,"object_presentation":null,"stairs_up": false,
                     "stairs_down": false,
                     "door": {
                         "id":super::door_target(101),
@@ -54,7 +54,7 @@ fn sample_state() -> StateView {
                     "wall": false,
                     "material": "stone",
                     "lit":true,"place_hint": false,
-                    "trap":null,"stairs_up": false,
+                    "trap":null,"object_presentation":null,"stairs_up": false,
                     "stairs_down": false,
                     "door": {
                         "id":super::door_target(102),
@@ -67,7 +67,7 @@ fn sample_state() -> StateView {
                 }
             ],
             "ground_items": [
-                {"supply_reachable":false,
+                {"presentation":null,"supply_reachable":false,
                     "reachable": true,
                     "position": {"x": 0, "y": 0, "z": 0},
                     "item": {"known_currency":null,"known_supply":null,
@@ -79,7 +79,7 @@ fn sample_state() -> StateView {
                         "identified": true
                     }
                 },
-                {"supply_reachable":false,
+                {"presentation":null,"supply_reachable":false,
                     "reachable": true,
                     "position": {"x": 0, "y": 0, "z": 0},
                     "item": {"known_currency":null,"known_supply":null,
@@ -91,7 +91,7 @@ fn sample_state() -> StateView {
                         "identified": true
                     }
                 },
-                {"supply_reachable":false,
+                {"presentation":null,"supply_reachable":false,
                     "reachable": false,
                     "position": {"x": 1, "y": 0, "z": 0},
                     "item": {"known_currency":null,"known_supply":null,

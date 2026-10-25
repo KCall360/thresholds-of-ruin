@@ -508,6 +508,7 @@ mod tests {
             category: crate::expertise::ExpertiseCategory::Equipment,
         });
         document.conditions.push(crate::rules::ConditionDef {
+            hallucinating: false,
             id: crate::content_ids::ConditionId::new("fixture_action_rate").unwrap(),
             family: crate::content_ids::ConditionFamilyId::new("fixture_action_rate").unwrap(),
             lifecycle: crate::rules::ConditionLifecycle::Timed,

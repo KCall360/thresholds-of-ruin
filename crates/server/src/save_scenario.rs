@@ -2844,6 +2844,7 @@ enum NutritionConditionTrigger {
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "tor_simulation::rules::ConditionDef", deny_unknown_fields)]
 struct ConditionDefinition {
+    hallucinating: bool,
     id: tor_simulation::content_ids::ConditionId,
     family: tor_simulation::content_ids::ConditionFamilyId,
     #[serde(with = "mapped")]
@@ -7187,6 +7188,7 @@ mod condition_boundary_tests {
     fn condition() -> Value {
         json!({
             "id": "test.held",
+            "hallucinating": false,
             "family": "test.hold",
             "lifecycle": "timed",
             "name": "Held",
@@ -7270,6 +7272,9 @@ mod condition_boundary_tests {
     #[test]
     fn saved_condition_semantics_reject_unknown_values_and_surplus_unit_fields() {
         for (path, invalid) in [
+            ("/hallucinating", json!(null)),
+            ("/hallucinating", json!(1)),
+            ("/hallucinating", json!("true")),
             ("/lifecycle", json!("unknown")),
             ("/lifecycle", json!([])),
             ("/lifecycle", json!({"timed": null})),
@@ -7390,6 +7395,54 @@ mod condition_boundary_tests {
     }
 
     #[test]
+    fn hallucination_marker_is_author_optional_but_strict_in_saved_rules_envelope() {
+        let mut author = condition();
+        author.as_object_mut().unwrap().remove("hallucinating");
+        let ordinary: ConditionDef = serde_json::from_value(author).unwrap();
+        assert!(!ordinary.hallucinating);
+        let mut marked = condition();
+        marked["hallucinating"] = json!(true);
+        marked["stacking"] = json!({"kind": "extend"});
+        marked["timing"] = json!({"kind": "actor_active", "on_expiry": {"kind": "remove"}});
+        marked["restrictions"] = json!([]);
+        marked["preparation"] = json!("preserve");
+        let mut document: RulesetDocument =
+            toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML).unwrap();
+        document.conditions.push(
+            serde_json::from_value::<Owned<ConditionDef>>(marked)
+                .unwrap()
+                .0,
+        );
+        tor_simulation::rules::Ruleset::validate(document.clone()).unwrap();
+        let good = encode_rules_document(&document).unwrap();
+        assert!(decode_rules_document(&good)
+            .unwrap()
+            .conditions
+            .iter()
+            .any(|condition| condition.hallucinating));
+        assert_eq!(
+            encode_rules_document(&decode_rules_document(&good).unwrap()).unwrap(),
+            good
+        );
+        // These reach the enclosing canonical strict decoder, not merely a live
+        // authoring deserialize with its intentionally permissive omission.
+        for replacement in [
+            "",
+            "\"hallucinating\":null,",
+            "\"hallucinating\":1,",
+            "\"hallucinating\":\"true\",",
+            "\"hallucinating\":true,\"hallucinating\":true,",
+        ] {
+            let bad = good.replacen("\"hallucinating\":true,", replacement, 1);
+            assert_ne!(bad, good);
+            assert!(
+                decode_rules_document(&bad).is_err(),
+                "accepted {replacement:?}"
+            );
+        }
+    }
+
+    #[test]
     fn saved_rules_conditions_use_the_strict_bounded_independent_adapter() {
         let mut document: RulesetDocument =
             toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML).unwrap();
@@ -7407,7 +7460,7 @@ mod condition_boundary_tests {
             encode_rules_document(&decode_rules_document(&encoded).unwrap()).unwrap(),
             encoded
         );
-        for field in ["timing", "restrictions", "preparation"] {
+        for field in ["timing", "restrictions", "preparation", "hallucinating"] {
             let mut bad = good.clone();
             bad["conditions"][0].as_object_mut().unwrap().remove(field);
             assert!(serde_json::from_value::<Owned<RulesetDocument>>(bad).is_err());

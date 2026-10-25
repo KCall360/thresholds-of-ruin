@@ -199,7 +199,10 @@ impl Chronicler {
                         .ground_items
                         .iter()
                         .find(|g| g.item.id == *result)
-                        .map_or_else(|| "thing".into(), |g| crate::safe(&g.item.name)),
+                        .map_or_else(
+                            || "thing".into(),
+                            |g| crate::safe(tor_client_common::items::ground_name(g)),
+                        ),
                     quantity: *quantity,
                 }),
                 Event::DoorChanged { door, open } => {
@@ -428,7 +431,7 @@ mod tests {
             "actor":"1","self_target":tor_protocol::ActorTarget::from_digest([1; 32]),"tick":"5","position":{"x":0,"y":0,"z":0},"ready":true,
             "places":[],"visible_cells":[{"key":"here","position":{"x":0,"y":0,"z":0},
                 "wall":false,"material":"stone","lit":true,"place_hint":false,
-                "trap":null,"stairs_up":false,"stairs_down":false,
+                "trap":null,"object_presentation":null,"stairs_up":false,"stairs_down":false,
                 "door":{"id":tor_protocol::DoorTarget::from_digest([7; 32]),"name":"Oak Door","description":"","open":false,
                     "reachable":true,"approaches":[]}}],
             "ground_items":[],"inventory":[],
@@ -729,5 +732,53 @@ mod tests {
         assert!(chronicler
             .observe(&after, &after, None, &palette)
             .is_empty());
+    }
+    #[test]
+    fn dropped_object_narration_captures_cosmetic_name_without_true_sibling() {
+        let before = view();
+        let mut after = before.clone();
+        after.observation.tick += 1;
+        let id = ItemTarget::from_digest([82; 32]);
+        after.observation.ground_items.push(GroundItemView {
+            presentation: Some(ObjectPresentation {
+                name: "silver flask".into(),
+                asset: None,
+                kind: ObjectPresentationKind::Item {
+                    class: ItemClass::Potion,
+                },
+            }),
+            item: ItemView {
+                corpse: None,
+                class: ItemClass::Misc,
+                quantity: 1,
+                appearance: "object".into(),
+                identified: true,
+                description: String::new(),
+                id,
+                name: "object".into(),
+                asset: None,
+                known_supply: None,
+                known_currency: None,
+            },
+            position: after.observation.position,
+            reachable: true,
+            supply_reachable: false,
+        });
+        let event = Event::Dropped {
+            item: id,
+            result: id,
+            quantity: 1,
+        };
+        assert_eq!(
+            tor_client_common::narration::action(&event, &after.observation),
+            "You drop 1 x silver flask."
+        );
+        let entry = action(event);
+        let beats =
+            Chronicler::default().observe(&before, &after, Some(&entry), &Palette::default());
+        assert!(beats.contains(&Beat::Dropped {
+            name: "silver flask".into(),
+            quantity: 1
+        }));
     }
 }

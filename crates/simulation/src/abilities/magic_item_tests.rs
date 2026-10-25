@@ -257,6 +257,7 @@ fn levitation_drink_fixture() -> (Game, ItemId, crate::content_ids::ConditionId)
     let condition = crate::content_ids::ConditionId::new("fixture_hover").unwrap();
     let mut game = super::ray_tests::fixture_with(|document, _, _| {
         document.conditions.push(crate::rules::ConditionDef {
+            hallucinating: false,
             id: condition.clone(),
             family: crate::content_ids::ConditionFamilyId::new("fixture_hover").unwrap(),
             name: "Test hover".into(),

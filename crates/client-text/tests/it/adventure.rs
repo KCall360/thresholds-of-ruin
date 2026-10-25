@@ -21,11 +21,11 @@ fn state() -> StateView {
         "places":[],"visible_cells":(0..7).map(|x| serde_json::json!({
             "key":format!("cell-{x}"),"position":{"x":x,"y":0,"z":0},
             "wall":false,"material":"stone","lit":true,"place_hint":x==1 || x==6,
-            "trap":null,"stairs_up":false,"stairs_down":false
+            "trap":null,"object_presentation":null,"stairs_up":false,"stairs_down":false
         })).collect::<Vec<_>>(),
         "ground_items":[
-            {"supply_reachable":false,"reachable":true,"item":{"known_currency":null,"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(1),"name":"copper token","description":"A small copper disc."},"position":{"x":0,"y":0,"z":0}},
-            {"supply_reachable":false,"reachable":false,"item":{"known_currency":null,"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(2),"name":"stone tablet","description":"A weathered slab of stone."},"position":{"x":6,"y":0,"z":0}}
+            {"presentation":null,"supply_reachable":false,"reachable":true,"item":{"known_currency":null,"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(1),"name":"copper token","description":"A small copper disc."},"position":{"x":0,"y":0,"z":0}},
+            {"presentation":null,"supply_reachable":false,"reachable":false,"item":{"known_currency":null,"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(2),"name":"stone tablet","description":"A weathered slab of stone."},"position":{"x":6,"y":0,"z":0}}
         ],"inventory":[],"linked_holds":[],"visible_actors":[]}})).unwrap()
 }
 
@@ -683,6 +683,7 @@ fn surfaces_and_unnamed_figures_use_asset_words_the_palette_holds() {
     let mut s = state();
     let here = s.observation.visible_cells[0].clone();
     let solid = |key: &str, position: Position, asset: &str| CellView {
+        object_presentation: None,
         lit: true,
         wall: true,
         key: key.into(),
@@ -1001,7 +1002,7 @@ pub(crate) fn walled(map: &[&str]) -> StateView {
                 );
             }
             if ch == 'i' {
-                items.push(serde_json::json!({"supply_reachable":false,"reachable": x == 0 && y == 0,
+                items.push(serde_json::json!({"presentation":null,"supply_reachable":false,"reachable": x == 0 && y == 0,
                     "item": {"known_currency":null,"known_supply":null,"quantity": "1", "class":"misc","appearance": "item", "identified": true,
                         "id":super::item_target(1), "name": "copper token", "description": ""},
                     "position": {"x": x, "y": y, "z": 0}}));
@@ -1013,7 +1014,7 @@ pub(crate) fn walled(map: &[&str]) -> StateView {
                     "position": {"x": x, "y": y, "z": z},
                     "wall": solid,
                     "material": "stone",
-                    "lit":true,"place_hint": false, "trap":null,"stairs_up": false, "stairs_down": false,
+                    "lit":true,"place_hint": false, "trap":null,"object_presentation":null,"stairs_up": false, "stairs_down": false,
                     "door": (matches!(ch, '+' | '\'') && z == 0).then(|| serde_json::json!({
                         "id":super::door_target(9), "name": "oak door", "description": "",
                         "open": ch == '\'', "reachable": false, "approaches": []
@@ -1179,7 +1180,7 @@ fn things_and_figures_are_told_in_sentences() {
         "#########",
     ]);
     let token = |id: u64, x: i32, quantity: u64| {
-        serde_json::from_value::<GroundItemView>(serde_json::json!({"supply_reachable":false,
+        serde_json::from_value::<GroundItemView>(serde_json::json!({"presentation":null,"supply_reachable":false,
             "reachable": x == 0, "position": {"x": x, "y": 0, "z": 0},
             "item": {"known_currency":null,"known_supply":null,"quantity": quantity.to_string(), "class":"misc","appearance": "item", "identified": true,
                 "id": super::item_target(id), "name": "copper token", "description": ""}}))
@@ -1763,6 +1764,7 @@ fn phase5_using_clause_keeps_exact_ground_supply_through_both_text_modes() {
     s.observation.combat.as_mut().unwrap().hp = 5;
     let item = super::item_target(9);
     s.observation.ground_items.push(GroundItemView {
+        presentation: None,
         reachable: false,
         supply_reachable: true,
         position: Position { x: 1, y: 0, z: 0 },
@@ -2228,5 +2230,94 @@ fn portable_light_adventure_verbs_use_explicit_current_item_goals() {
         said("ignite torch", &s),
         "You can't ignite that item now.",
         "a matching noun is not permission to operate an ordinary item"
+    );
+}
+
+#[test]
+fn cosmetic_ground_names_and_noun_heads_never_change_item_authority() {
+    let mut s = state();
+    let real = s.observation.ground_items[0].item.clone();
+    s.observation.inventory.push(real.clone());
+    s.observation.inventory[0].id = super::item_target(19);
+    s.observation.ground_items[0].item.name = "object".into();
+    s.observation.ground_items[0].item.appearance = "object".into();
+    s.observation.ground_items[0].item.description.clear();
+    s.observation.ground_items[0].item.asset = None;
+    s.observation.ground_items[0].presentation = Some(ObjectPresentation {
+        name: "silver flask".into(),
+        asset: None,
+        kind: ObjectPresentationKind::Item {
+            class: ItemClass::Potion,
+        },
+    });
+    let palette = Palette::default();
+    let scene = Scene::new(&s, &palette);
+    let referent = scene
+        .get(tor_client_text::engine::scene::Key::Item(real.id))
+        .unwrap();
+    assert_eq!(referent.name, "silver flask");
+    assert!(referent.heads.iter().any(|head| head == "potion"));
+    assert_eq!(referent.class, Some(ItemClass::Misc));
+    assert!(referent.description.is_empty());
+    assert!(!referent.identity.contains("copper"));
+    assert_eq!(goals("take potion", &s), [take(1)]);
+    assert!(matches!(tor_client_text::parse("take silver flask", &s),
+        Ok(Input::Command(Command::Act { action: Action::Take { item, .. }, .. })) if item == real.id));
+    assert!(tor_client_text::parse("take copper token", &s).is_err());
+    assert!(!matches!(
+        meaning("drink flask", &s),
+        Interpretation::Goals(_)
+    ));
+    assert!(tor_client_text::inventory(&s).contains("copper token"));
+    assert_eq!(s.observation.ground_items[0].item.id, real.id);
+    assert_eq!(s.observation.ground_items[0].item.class, real.class);
+    assert_eq!(s.observation.ground_items[0].item.quantity, real.quantity);
+}
+
+#[test]
+fn fake_ground_stairs_are_an_object_not_a_way_and_known_stairs_stay_factual() {
+    let mut s = state();
+    s.observation.ground_items[0].item.name = "object".into();
+    s.observation.ground_items[0].item.appearance = "object".into();
+    s.observation.ground_items[0].item.description.clear();
+    s.observation.ground_items[0].item.asset = None;
+    s.observation.ground_items[0].presentation = Some(ObjectPresentation {
+        name: "stairs".into(),
+        asset: None,
+        kind: ObjectPresentationKind::Stairs,
+    });
+    assert_eq!(goals("take stairs", &s), [take(1)]);
+    assert!(!matches!(
+        meaning("climb stairs", &s),
+        Interpretation::Goals(_)
+    ));
+    assert!(tor_client_text::engine::place::survey(&s)
+        .ways
+        .iter()
+        .all(|way| !matches!(way.kind, tor_client_text::engine::place::Opening::Stairs)));
+    s.observation.ground_items.clear();
+    s.observation.visible_cells[0].stairs_down = true;
+    assert_eq!(
+        goals("down", &s),
+        [Goal::Step {
+            direction: Direction::Down
+        }]
+    );
+    assert!(describe_with(&s, &Palette::default()).contains("Stairs lead down"));
+    s.observation.visible_cells[0].object_presentation = Some(ObjectPresentation {
+        name: "silver flask".into(),
+        asset: None,
+        kind: ObjectPresentationKind::Item {
+            class: ItemClass::Potion,
+        },
+    });
+    let words = describe_with(&s, &Palette::default());
+    assert!(words.contains("silver flask"), "{words}");
+    assert!(!words.contains("Stairs"), "{words}");
+    assert_eq!(
+        goals("down", &s),
+        [Goal::Step {
+            direction: Direction::Down
+        }]
     );
 }

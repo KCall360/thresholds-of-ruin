@@ -158,6 +158,7 @@ impl StateDelta {
                     let (was, is) = (&old[i], &new[j]);
                     // Exhaustive so that a new cell field cannot be missed.
                     let CellView {
+                        object_presentation: None,
                         lit,
                         door,
                         trap,

@@ -165,6 +165,7 @@ fn synthetic_digest(index: u64) -> [u8; 32] {
 
 fn cell(x: i32, y: i32, z: i32, key: &str) -> CellView {
     CellView {
+        object_presentation: None,
         lit: true,
         asset: None,
         trap: None,
@@ -790,6 +791,7 @@ fn collection_view(count: usize) -> StateView {
         };
         state.observation.inventory.push(item.clone());
         state.observation.ground_items.push(GroundItemView {
+            presentation: None,
             reachable: false,
             supply_reachable: false,
             item: ItemView {

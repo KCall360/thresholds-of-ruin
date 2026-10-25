@@ -517,8 +517,9 @@ impl<'a> RestoreContext<'a> {
 
     fn explored_map(&mut self, index: usize, world: usize) -> Option<Shared<ExploredMap>> {
         if self.explored_maps.is_none() {
-            self.explored_maps = Some(explored_map_regions::RestoreValidation::new(
+            self.explored_maps = Some(explored_map_regions::RestoreValidation::new_with_catalog(
                 &self.shared.explored_maps,
+                self.content.presentation_catalog(),
             )?);
         }
         self.explored_maps
@@ -945,6 +946,7 @@ impl Game {
     /// attaching a stored region gives its actors the same.
     pub(crate) fn actor_state_valid(&self, id: ActorId, actor: &Actor) -> bool {
         id.0 != 0
+            && crate::hallucination_clock::valid_for(actor)
             && actor.periodic_relocations.valid_for(actor, &self.items)
             && actor
                 .guise
@@ -3033,7 +3035,19 @@ mod explored_map_regions {
         pub(super) fn new(maps: &[Shared<ExploredMap>]) -> Option<Self> {
             Self::from_saved(collect(maps))
         }
+        pub(super) fn new_with_catalog(
+            maps: &[Shared<ExploredMap>],
+            catalog: &crate::appearance_catalog::PresentationCatalog,
+        ) -> Option<Self> {
+            Self::from_saved_with_catalog(collect(maps), Some(catalog))
+        }
         fn from_saved(saved: Regions) -> Option<Self> {
+            Self::from_saved_with_catalog(saved, None)
+        }
+        fn from_saved_with_catalog(
+            saved: Regions,
+            catalog: Option<&crate::appearance_catalog::PresentationCatalog>,
+        ) -> Option<Self> {
             let directories = directories(&saved)?;
             let mut valid_appearances = BTreeSet::new();
             for bucket in &saved.cells {
@@ -3041,7 +3055,9 @@ mod explored_map_regions {
                     visit!(appearance_cells);
                     if valid_appearances.insert(std::ptr::from_ref::<MapAppearance>(appearance)) {
                         visit!(@local appearance_payloads);
-                        if !appearance.valid() {
+                        if !appearance.valid()
+                            || catalog.is_some_and(|catalog| !appearance.valid_for_catalog(catalog))
+                        {
                             return None;
                         }
                     }
@@ -3375,6 +3391,7 @@ mod explored_map_tests {
 
     fn appearance(material: &str) -> Shared<MapAppearance> {
         Shared::new(MapAppearance {
+            object_presentation: None,
             wall: true,
             material: material.into(),
             asset: Some("wall/remembered".into()),
@@ -3389,6 +3406,7 @@ mod explored_map_tests {
                 asset: Some("door/closed".into()),
             }),
             ground_items: vec![MapItemAppearance {
+                presentation: None,
                 class: crate::ItemClass::Potion,
                 description: "a blue bottle".into(),
                 name: "blue potion".into(),

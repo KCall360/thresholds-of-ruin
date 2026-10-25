@@ -53,6 +53,8 @@ impl<'de> Deserialize<'de> for MapTrapAppearance {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct MapItemAppearance {
+    #[serde(deserialize_with = "crate::bounded::required_option")]
+    pub presentation: Option<crate::appearance_catalog::ObjectPresentation>,
     pub class: ItemClass,
     pub description: String,
     pub name: String,
@@ -66,6 +68,8 @@ pub struct MapItemAppearance {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct MapAppearance {
+    #[serde(deserialize_with = "crate::bounded::required_option")]
+    pub object_presentation: Option<crate::appearance_catalog::ObjectPresentation>,
     pub wall: bool,
     pub material: String,
     #[serde(deserialize_with = "crate::bounded::required_option")]
@@ -140,6 +144,8 @@ impl<'de> Deserialize<'de> for MapItemAppearance {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Fields {
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            presentation: Option<crate::appearance_catalog::ObjectPresentation>,
             class: ItemClass,
             #[serde(deserialize_with = "read_map_text")]
             description: String,
@@ -153,10 +159,17 @@ impl<'de> Deserialize<'de> for MapItemAppearance {
             asset: Option<String>,
         }
         let fields: Fields = crate::bounded::named_map(d)?;
-        if fields.quantity == 0 {
-            return Err(serde::de::Error::custom("invalid explored-map quantity"));
+        if fields.quantity == 0
+            || (fields.presentation.is_some()
+                && (fields.name != "object"
+                    || fields.appearance != "object"
+                    || !fields.description.is_empty()
+                    || fields.asset.is_some()))
+        {
+            return Err(serde::de::Error::custom("invalid explored-map item"));
         }
         Ok(Self {
+            presentation: fields.presentation,
             class: fields.class,
             description: fields.description,
             name: fields.name,
@@ -173,6 +186,8 @@ impl<'de> Deserialize<'de> for MapAppearance {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Fields {
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            object_presentation: Option<crate::appearance_catalog::ObjectPresentation>,
             wall: bool,
             #[serde(deserialize_with = "read_map_text")]
             material: String,
@@ -190,6 +205,7 @@ impl<'de> Deserialize<'de> for MapAppearance {
         }
         let fields: Fields = crate::bounded::named_map(d)?;
         Ok(Self {
+            object_presentation: fields.object_presentation,
             wall: fields.wall,
             material: fields.material,
             asset: fields.asset,
@@ -445,15 +461,39 @@ pub(crate) struct ExploredMap {
 }
 
 impl MapAppearance {
+    pub(crate) fn valid_for_catalog(
+        &self,
+        catalog: &crate::appearance_catalog::PresentationCatalog,
+    ) -> bool {
+        self.object_presentation
+            .as_ref()
+            .is_none_or(|p| catalog.contains_object(p))
+            && self.ground_items.iter().all(|i| {
+                i.presentation
+                    .as_ref()
+                    .is_none_or(|p| catalog.contains_object(p))
+            })
+    }
     pub(crate) fn valid(&self) -> bool {
         let text = |s: &str| s.len() <= 4096 && !s.chars().any(char::is_control);
         text(&self.material)
+            && self
+                .object_presentation
+                .as_ref()
+                .is_none_or(|p| p.valid() && !self.wall && (self.stairs_up || self.stairs_down))
             && self
                 .door
                 .as_ref()
                 .is_none_or(|d| text(&d.name) && text(&d.description))
             && self.ground_items.iter().all(|i| {
                 i.quantity > 0
+                    && i.presentation.as_ref().is_none_or(|p| {
+                        p.valid()
+                            && i.name == "object"
+                            && i.appearance == "object"
+                            && i.description.is_empty()
+                            && i.asset.is_none()
+                    })
                     && source_item_label(&i.name)
                     && text(&i.description)
                     && source_item_label(&i.appearance)
@@ -641,7 +681,12 @@ impl Game {
         let (Some(a), Some(b)) = (self.actors.get(&id), before.actors.get(&id)) else {
             return true;
         };
-        self.actor_scene_witness(id) != before.actor_scene_witness(id)
+        self.projected_hallucination(id)
+            .map(|c| c.map(|c| c.phase()))
+            != before
+                .projected_hallucination(id)
+                .map(|c| c.map(|c| c.phase()))
+            || self.actor_scene_witness(id) != before.actor_scene_witness(id)
             || a.location != b.location
             || a.orientation != b.orientation
             || !a.body.shares_storage(&b.body)
@@ -732,6 +777,9 @@ impl Game {
                     .known_region(cell.location.region)
                     .is_some_and(|region| region.bounds.contains(cell.location.position))
                 || !cell.appearance.valid()
+                || !cell
+                    .appearance
+                    .valid_for_catalog(self.content.presentation_catalog())
             {
                 return Err(GameError::InvalidLocation);
             }
@@ -958,6 +1006,9 @@ impl MapAppearance {
         let mut bytes = 400usize
             .saturating_add(text(&self.material))
             .saturating_add(asset(&self.asset));
+        if let Some(p) = &self.object_presentation {
+            bytes = bytes.saturating_add(p.encoded_size_bound());
+        }
         if let Some(d) = &self.door {
             bytes = bytes
                 .saturating_add(256)
@@ -969,6 +1020,9 @@ impl MapAppearance {
             bytes = bytes.saturating_add(64);
         }
         for i in &self.ground_items {
+            if let Some(p) = &i.presentation {
+                bytes = bytes.saturating_add(p.encoded_size_bound());
+            }
             bytes = bytes
                 .saturating_add(256)
                 .saturating_add(text(&i.name))
@@ -1453,6 +1507,7 @@ mod tests {
     }
     fn appearance(label: &str) -> MapAppearance {
         MapAppearance {
+            object_presentation: None,
             wall: true,
             material: label.into(),
             asset: Some("old-stone".into()),
@@ -2059,6 +2114,7 @@ mod tests {
         let mut huge = appearance("stone");
         huge.ground_items = (0..4096)
             .map(|_| MapItemAppearance {
+                presentation: None,
                 class: ItemClass::Potion,
                 description: "x".repeat(80),
                 name: "bottle".into(),
@@ -2206,6 +2262,7 @@ mod tests {
             asset: Some("old door".into()),
         });
         old.ground_items.push(MapItemAppearance {
+            presentation: None,
             class: ItemClass::Potion,
             description: "unknown bottle".into(),
             name: "blue bottle".into(),
@@ -2256,6 +2313,7 @@ mod tests {
         large.asset = Some("a".repeat(8192));
         large.ground_items = (0..4097)
             .map(|_| MapItemAppearance {
+                presentation: None,
                 class: ItemClass::Potion,
                 description: String::new(),
                 name: "bottle".into(),
@@ -2356,6 +2414,7 @@ mod tests {
     #[test]
     fn saved_item_labels_obey_the_ordinary_source_bounds() {
         let mut item = MapItemAppearance {
+            presentation: None,
             class: ItemClass::Potion,
             description: String::new(),
             name: "bottle".into(),

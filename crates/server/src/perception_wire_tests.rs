@@ -27,6 +27,7 @@ fn fixture() -> (s::Observation, Vec<tor_world::SightCell>, TargetScope) {
 
 fn guise(observation: &mut s::Observation) {
     observation.apparent_objects.push(ApparentObjectView {
+        presentation: None,
         subject: SUBJECT,
         location: observation.location,
         appearance: GuiseAppearance {
@@ -41,6 +42,7 @@ fn guise(observation: &mut s::Observation) {
 fn contact(observation: &mut s::Observation, disclosure: ActorDisclosure) {
     observation.visible_actors.clear();
     observation.visible_actors.push(s::ActorView {
+        presentation: None,
         disclosure,
         id: SUBJECT,
         location: observation.location,
@@ -296,6 +298,7 @@ fn currency_projection_preserves_identification_ownership_and_exact_stack_units(
     let scope = TargetScope::new(uuid::Uuid::from_u128(7), actor);
     let (mut observation, scene) = game.observe_scene(actor).unwrap();
     observation.apparent_objects.push(ApparentObjectView {
+        presentation: None,
         subject: SUBJECT,
         location: at,
         appearance: GuiseAppearance {
@@ -358,6 +361,7 @@ fn real_ground_item_and_guise_with_equal_private_numbers_resolve_separately() {
     let (mut view, _, scope) = fixture();
     guise(&mut view);
     view.ground_items.push(s::GroundItemView {
+        presentation: None,
         corpse: None,
         class: s::ItemClass::Misc,
         description: String::new(),
@@ -680,6 +684,7 @@ fn apparent_mundane_mace_matches_ordinary_ground_mace_except_opaque_identity() {
     let (mut view, scene, scope) = fixture();
     let real = s::ItemId(55);
     view.ground_items.push(s::GroundItemView {
+        presentation: None,
         corpse: None,
         class: s::ItemClass::Weapon,
         description: String::new(),
@@ -695,6 +700,7 @@ fn apparent_mundane_mace_matches_ordinary_ground_mace_except_opaque_identity() {
         asset: Some("item.weapon.mace".into()),
     });
     view.apparent_objects.push(ApparentObjectView {
+        presentation: None,
         subject: SUBJECT,
         location: view.location,
         appearance: GuiseAppearance {
@@ -1283,4 +1289,199 @@ fn concealed_closure_projection_uses_disclosed_wall_not_raw_scene_and_has_no_doo
     assert_eq!(wall["wall"], true);
     assert_eq!(wall["material"], "stone");
     assert!(wall.get("door").is_none_or(Value::is_null));
+}
+
+#[test]
+fn hallucination_adapter_flattens_cosmetics_without_changing_real_targets_or_capabilities() {
+    use s::appearance_catalog::{CreaturePresentation, ObjectPresentation, ObjectPresentationKind};
+    use std::sync::Arc;
+    let (mut view, scene, scope) = fixture();
+    contact(&mut view, ActorDisclosure::Creature);
+    view.visible_actors[0].presentation = Some(CreaturePresentation {
+        name: Arc::from("cosmetic bat"),
+        asset: Some(Arc::from("creature.bat")),
+        seed: 0,
+    });
+    guise(&mut view);
+    view.apparent_objects[0].presentation = Some(ObjectPresentation {
+        name: Arc::from("cosmetic arrow"),
+        asset: Some(Arc::from("item.arrow")),
+        kind: ObjectPresentationKind::Item {
+            class: s::ItemClass::Weapon,
+        },
+    });
+    // Core owns replacement/suppression of object siblings. This adapter accepts
+    // only its already sanitized display tuple, retaining true physical facts.
+    view.apparent_objects[0].appearance = GuiseAppearance {
+        name: "object".into(),
+        description: String::new(),
+        class: s::ItemClass::Misc,
+        asset: None,
+    };
+    view.ground_items.push(s::GroundItemView {
+        presentation: Some(ObjectPresentation {
+            name: Arc::from("cosmetic stair"),
+            asset: None,
+            kind: ObjectPresentationKind::Stairs,
+        }),
+        corpse: None,
+        class: s::ItemClass::Coin,
+        description: String::new(),
+        id: s::ItemId(40),
+        name: "object".into(),
+        quantity: 7,
+        appearance: "object".into(),
+        identified: true,
+        known_supply: None,
+        known_currency: Some(s::CurrencyKind::Gold),
+        supply_reachable: true,
+        location: view.location,
+        asset: None,
+    });
+    let wire = projected(view, scene, &scope);
+    let actor = wire["visible_actors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|actor| actor["id"] == json!(scope.actor(SUBJECT)))
+        .unwrap();
+    assert_eq!(actor["name"], "cosmetic bat");
+    assert_eq!(actor["asset"], "creature.bat");
+    assert_eq!(
+        actor["appearance_seed"],
+        json!(p::AppearanceSeed::from_digest([0; 32]))
+    );
+    assert_eq!(actor["description"], "");
+    assert!(actor.get("presentation").is_none());
+    let ground = wire["ground_items"].as_array().unwrap();
+    let item = ground
+        .iter()
+        .find(|item| item["item"]["id"] == json!(scope.item(s::ItemId(40))))
+        .unwrap();
+    assert_eq!(
+        item["presentation"],
+        json!({"name":"cosmetic stair", "asset":null, "kind":{"kind":"stairs"}})
+    );
+    assert_eq!(item["item"]["class"], "coin");
+    assert_eq!(item["item"]["known_currency"], "gold");
+    assert_eq!(item["item"]["quantity"], "7");
+    assert_eq!(item["item"]["name"], "object");
+    assert_eq!(item["item"]["appearance"], "object");
+    assert_eq!(item["supply_reachable"], true);
+    assert_eq!(item["reachable"], true);
+    let apparent = ground
+        .iter()
+        .find(|item| item["item"]["id"] == json!(scope.apparent_object(SUBJECT)))
+        .unwrap();
+    assert_eq!(apparent["presentation"]["name"], "cosmetic arrow");
+    assert_eq!(apparent["item"]["name"], "object");
+    assert_eq!(apparent["item"]["class"], "misc");
+    let encoded = wire.to_string();
+    for private in [
+        "private_subject_name",
+        "private_species_asset",
+        "palette",
+        "phase",
+        "remaining_to_shift",
+    ] {
+        assert!(!encoded.contains(private), "leaked {private}");
+    }
+}
+
+#[test]
+fn hallucination_map_acquisition_freezes_payload_without_granting_stair_facts() {
+    use s::appearance_catalog::{ObjectPresentation, ObjectPresentationKind};
+    use std::sync::Arc;
+    let (mut view, _, _) = fixture();
+    let at = view.location;
+    view.exits.clear();
+    let cosmetic = ObjectPresentation {
+        name: Arc::from("cosmetic stair"),
+        asset: None,
+        kind: ObjectPresentationKind::Stairs,
+    };
+    view.ground_items.push(s::GroundItemView {
+        presentation: Some(cosmetic.clone()),
+        corpse: None,
+        class: s::ItemClass::Coin,
+        description: String::new(),
+        id: s::ItemId(40),
+        name: "object".into(),
+        quantity: 7,
+        appearance: "object".into(),
+        identified: true,
+        known_supply: None,
+        known_currency: Some(s::CurrencyKind::Gold),
+        supply_reachable: true,
+        location: at,
+        asset: None,
+    });
+    let terrain = |_: tor_world::RegionId| [None, None, None];
+    let frozen = crate::map_memory::inputs(&view, &terrain)
+        .into_iter()
+        .find(|cell| cell.location == at)
+        .unwrap();
+    assert!(frozen.appearance.object_presentation.is_none());
+    assert_eq!(
+        frozen.appearance.ground_items[0].presentation.as_ref(),
+        Some(&cosmetic)
+    );
+    assert_eq!(frozen.appearance.ground_items[0].class, s::ItemClass::Coin);
+    assert!(!frozen.appearance.stairs_up && !frozen.appearance.stairs_down);
+    view.exits.push(s::ExitView {
+        location: at,
+        direction: tor_world::Direction::Down,
+    });
+    view.visible_cells
+        .iter_mut()
+        .filter(|cell| cell.location == at)
+        .for_each(|cell| cell.object_presentation = Some(cosmetic.clone()));
+    let known = crate::map_memory::inputs(&view, &terrain)
+        .into_iter()
+        .find(|cell| cell.location == at)
+        .unwrap();
+    assert!(
+        known.appearance.stairs_down,
+        "lawful real exit remains factual"
+    );
+    assert_eq!(
+        known.appearance.object_presentation.as_ref(),
+        Some(&cosmetic)
+    );
+    // Cure/phase changes after acquisition do not enter frozen-data hydration.
+    view.ground_items[0].presentation = None;
+    view.visible_cells
+        .iter_mut()
+        .for_each(|cell| cell.object_presentation = None);
+    let wire = crate::map_memory::wire_cell(
+        s::ProjectedMapCell {
+            location: at,
+            position: tor_world::Position { x: 0, y: 0, z: 0 },
+            appearance: tor_world::Shared::new(frozen.appearance.clone()),
+        },
+        "salt",
+        p::ActorId(1),
+    );
+    assert!(wire.object_presentation.is_none());
+    let known_wire = crate::map_memory::wire_cell(
+        s::ProjectedMapCell {
+            location: at,
+            position: tor_world::Position { x: 0, y: 0, z: 0 },
+            appearance: tor_world::Shared::new(known.appearance),
+        },
+        "salt",
+        p::ActorId(1),
+    );
+    assert_eq!(
+        known_wire.object_presentation.as_ref().unwrap().name,
+        "cosmetic stair"
+    );
+    assert!(known_wire.stairs_down);
+    assert_eq!(
+        wire.ground_items[0].presentation.as_ref().unwrap().name,
+        "cosmetic stair"
+    );
+    assert!(!wire.stairs_up && !wire.stairs_down);
+    assert_eq!(wire.ground_items[0].class, p::ItemClass::Coin);
+    assert_eq!(wire.ground_items[0].quantity, 7);
 }

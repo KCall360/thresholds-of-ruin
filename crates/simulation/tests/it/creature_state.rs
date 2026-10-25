@@ -400,6 +400,7 @@ fn condition_build(definitions: Vec<tor_simulation::rules::ConditionDef>) -> Cre
 }
 fn timed(id: &str, op: ModifierOp) -> tor_simulation::rules::ConditionDef {
     tor_simulation::rules::ConditionDef {
+        hallucinating: false,
         id: ConditionId::new(id).unwrap(),
         family: tor_simulation::content_ids::ConditionFamilyId::new(id).unwrap(),
         lifecycle: tor_simulation::rules::ConditionLifecycle::Timed,

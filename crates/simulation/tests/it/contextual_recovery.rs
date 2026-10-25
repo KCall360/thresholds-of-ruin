@@ -46,6 +46,7 @@ fn game_with_context(hostile_present: bool, contextual: bool) -> Game {
     template.modifiers.push(context_modifier());
     let mut document = fixture::ruleset().document().clone();
     document.conditions.push(ConditionDef {
+        hallucinating: false,
         id: ConditionId::new("quiet_recovery").unwrap(),
         family: ConditionFamilyId::new("quiet_recovery").unwrap(),
         lifecycle: ConditionLifecycle::Timed,
@@ -69,6 +70,7 @@ fn game_with_context(hostile_present: bool, contextual: bool) -> Game {
         ("borrowed_vitality", Scope::Always, Stat::Health, 100),
     ] {
         document.conditions.push(ConditionDef {
+            hallucinating: false,
             id: ConditionId::new(id).unwrap(),
             family: ConditionFamilyId::new(id).unwrap(),
             lifecycle: ConditionLifecycle::Timed,

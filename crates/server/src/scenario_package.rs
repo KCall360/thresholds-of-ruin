@@ -19,6 +19,8 @@ mod diagnostics;
 mod instantiation;
 #[path = "scenario_population.rs"]
 mod population;
+#[path = "scenario_presentation.rs"]
+mod presentation;
 #[path = "scenario_retrieval.rs"]
 mod retrieval;
 #[path = "scenario_spatial.rs"]
@@ -1432,7 +1434,7 @@ impl Package {
     }
 
     pub(crate) fn content(&self) -> Result<Arc<tor_simulation::creatures::Content>, Failure> {
-        Ok(compiler::compile_trap_ammunition(
+        Ok(compiler::compile_content_decorations(
             &self.manifest,
             self.manifest
                 .creatures

@@ -6,7 +6,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use tor_client_common::{presentation, presentation::AsciiAppearance, Palette};
 use tor_protocol::{
     ActorView, CellView, ItemClass, ItemView, MapDoorAppearance, MapItemAppearance,
-    MapTrapAppearance, Observation, Position, RememberedMapCell,
+    MapTrapAppearance, ObjectPresentation, ObjectPresentationKind, Observation, Position,
+    RememberedMapCell,
 };
 
 /// Map cells shown across and down; odd, so the player is centred.
@@ -197,6 +198,24 @@ fn item_appearance(palette: &Palette, class: ItemClass, asset: Option<&str>) -> 
     )
 }
 
+/// Cosmetic art never changes the tile's mechanical kind or the item's class.
+pub fn object(palette: &Palette, appearance: &ObjectPresentation) -> AsciiAppearance {
+    match appearance.kind {
+        ObjectPresentationKind::Item { class } => {
+            item_appearance(palette, class, appearance.asset.as_deref())
+        }
+        ObjectPresentationKind::Stairs => {
+            presentation::resolve(palette, appearance.asset.as_deref()).map_or(
+                AsciiAppearance {
+                    glyph: '>',
+                    color: STAIRS,
+                },
+                |entry| entry.ascii,
+            )
+        }
+    }
+}
+
 /// The pixel centre of a column relative to the player.
 fn center(dx: i32, dy: i32) -> Option<(usize, usize)> {
     let col = dx + COLS / 2;
@@ -318,6 +337,7 @@ pub(crate) fn appearance_cells(o: &Observation) -> Vec<RememberedMapCell> {
     o.visible_cells
         .iter()
         .map(|cell| RememberedMapCell {
+            object_presentation: cell.object_presentation.clone(),
             key: cell.key.clone(),
             position: cell.position,
             wall: cell.wall,
@@ -340,6 +360,7 @@ pub(crate) fn appearance_cells(o: &Observation) -> Vec<RememberedMapCell> {
                 .into_iter()
                 .flatten()
                 .map(|g| MapItemAppearance {
+                    presentation: g.presentation.clone(),
                     class: g.item.class,
                     name: g.item.name.clone(),
                     description: g.item.description.clone(),
@@ -379,22 +400,27 @@ pub(crate) fn appearance_tiles(
             .or_insert(cell);
     }
     let creatures = CreatureColumns::new(o);
-    let mut items: BTreeMap<(i32, i32), (ItemClass, Option<&str>)> = BTreeMap::new();
+    let mut items: BTreeMap<(i32, i32), (ItemClass, Option<&str>, Option<&ObjectPresentation>)> =
+        BTreeMap::new();
     // Current piles retain their disclosed order and win over every stale
     // occurrence in this column, even a lower remembered height plane.
     for item in &o.ground_items {
         if (-2..=0).contains(&(item.position.z - feet.z)) {
-            items
-                .entry((item.position.x, item.position.y))
-                .or_insert((item.item.class, item.item.asset.as_deref()));
+            items.entry((item.position.x, item.position.y)).or_insert((
+                item.item.class,
+                item.item.asset.as_deref(),
+                item.presentation.as_ref(),
+            ));
         }
     }
     for cell in cells {
         if (-2..=0).contains(&(cell.position.z - feet.z)) {
             if let Some(item) = cell.ground_items.first() {
-                items
-                    .entry((cell.position.x, cell.position.y))
-                    .or_insert((item.class, item.asset.as_deref()));
+                items.entry((cell.position.x, cell.position.y)).or_insert((
+                    item.class,
+                    item.asset.as_deref(),
+                    item.presentation.as_ref(),
+                ));
             }
         }
     }
@@ -415,9 +441,27 @@ pub(crate) fn appearance_tiles(
         } else if let Some(actor) = creatures.actor(*x, *y).filter(|_| !remembered) {
             let look = creature(palette, actor.asset.as_deref());
             (Kind::Creature, look.glyph, look.color)
+        } else if matches!(terrain, Kind::StairsUp | Kind::StairsDown)
+            && cell.object_presentation.is_none()
+        {
+            (
+                terrain,
+                if terrain == Kind::StairsUp { '<' } else { '>' },
+                STAIRS,
+            )
         } else if let Some(item) = items.get(&(*x, *y)) {
-            let look = item_appearance(palette, item.0, item.1);
+            let look = item.2.map_or_else(
+                || item_appearance(palette, item.0, item.1),
+                |p| object(palette, p),
+            );
             (Kind::Item, look.glyph, look.color)
+        } else if let Some(presentation) = cell
+            .object_presentation
+            .as_ref()
+            .filter(|_| matches!(terrain, Kind::StairsUp | Kind::StairsDown))
+        {
+            let look = object(palette, presentation);
+            (terrain, look.glyph, look.color)
         } else {
             // Geometry and open/closed state remain authoritative. Cosmetic
             // assets may tint terrain but cannot turn a drop into floor or hide

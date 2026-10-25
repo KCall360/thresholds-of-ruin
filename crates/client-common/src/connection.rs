@@ -665,13 +665,7 @@ impl Connection {
                 self.state
                     .accept_map_page(context, request_id, page, response_bytes)?;
                 self.map_request = None;
-                let ask = self.palette.notice(page.cells.iter().flat_map(|c| {
-                    c.asset
-                        .iter()
-                        .chain(c.door.iter().flat_map(|d| d.asset.iter()))
-                        .chain(c.ground_items.iter().flat_map(|i| i.asset.iter()))
-                        .map(String::as_str)
-                }));
+                let ask = self.palette.notice(crate::palette::map_assets(&page.cells));
                 if ask {
                     self.pending_presentation = Some(message);
                     self.palette_request = Some(PendingQuery::new());

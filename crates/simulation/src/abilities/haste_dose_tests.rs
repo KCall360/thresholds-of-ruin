@@ -17,6 +17,7 @@ fn slow() -> ConditionId {
 }
 fn definition(id: ConditionId) -> ConditionDef {
     ConditionDef {
+        hallucinating: false,
         family: ConditionFamilyId::new(id.as_str()).unwrap(),
         name: id.as_str().into(),
         id,

@@ -199,6 +199,7 @@ fn expiring_health_game(contextual: bool) -> Game {
                 });
             }
             rules.conditions.push(ConditionDef {
+                hallucinating: false,
                 id: condition.clone(),
                 family: crate::content_ids::ConditionFamilyId::new(condition.as_str()).unwrap(),
                 lifecycle: crate::rules::ConditionLifecycle::Timed,

@@ -522,6 +522,7 @@ fn expiring_recovery_modifier_settles_the_old_period_then_rephases_remaining_wor
     let mut rules = build.ruleset().document().clone();
     let condition = ConditionId::new("recovery_boost").unwrap();
     rules.conditions.push(ConditionDef {
+        hallucinating: false,
         id: condition.clone(),
         family: tor_simulation::content_ids::ConditionFamilyId::new(condition.as_str()).unwrap(),
         lifecycle: tor_simulation::rules::ConditionLifecycle::Timed,
@@ -674,6 +675,7 @@ fn damage_resets_quiet_before_later_effects_can_change_its_policy() {
     let mut rules = original.ruleset().document().clone();
     let condition = ConditionId::new("steady_progress").unwrap();
     rules.conditions.push(ConditionDef {
+        hallucinating: false,
         id: condition.clone(),
         family: tor_simulation::content_ids::ConditionFamilyId::new(condition.as_str()).unwrap(),
         lifecycle: tor_simulation::rules::ConditionLifecycle::Timed,

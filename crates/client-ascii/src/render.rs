@@ -753,6 +753,7 @@ mod borrowed_map_tests {
     }
     fn cell(x: i32, z: i32) -> RememberedMapCell {
         RememberedMapCell {
+            object_presentation: None,
             key: format!("cell-{x}-{z}"),
             position: position(x, z),
             wall: false,
@@ -775,6 +776,7 @@ mod borrowed_map_tests {
     }
     fn pile(class: ItemClass) -> MapItemAppearance {
         MapItemAppearance {
+            presentation: None,
             class,
             name: "remembered object".into(),
             description: "long retained description".into(),
@@ -789,6 +791,22 @@ mod borrowed_map_tests {
     fn retained_map_occurrences_borrow_original_payload_storage() {
         let mut appearance = cell(90, 7);
         appearance.ground_items.push(pile(ItemClass::Potion));
+        appearance.ground_items[0].presentation = Some(tor_protocol::ObjectPresentation {
+            name: "retained false stairs".into(),
+            asset: None,
+            kind: tor_protocol::ObjectPresentationKind::Stairs,
+        });
+        appearance.stairs_down = true;
+        appearance.ground_items[0].name = "object".into();
+        appearance.ground_items[0].appearance = "object".into();
+        appearance.ground_items[0].description.clear();
+        appearance.object_presentation = Some(tor_protocol::ObjectPresentation {
+            name: "retained false potion".into(),
+            asset: None,
+            kind: tor_protocol::ObjectPresentationKind::Item {
+                class: ItemClass::Potion,
+            },
+        });
         let saved = record(appearance);
         let prepared = prepare_appearances(
             [
@@ -812,6 +830,24 @@ mod borrowed_map_tests {
             assert!(std::ptr::eq(row.appearance, &saved.appearance));
             assert_eq!(row.material.as_ptr(), saved.material.as_ptr());
             assert_eq!(row.ground_items.as_ptr(), saved.ground_items.as_ptr());
+            assert_eq!(
+                row.object_presentation.as_ref().unwrap().name.as_ptr(),
+                saved.object_presentation.as_ref().unwrap().name.as_ptr()
+            );
+            assert_eq!(
+                row.ground_items[0]
+                    .presentation
+                    .as_ref()
+                    .unwrap()
+                    .name
+                    .as_ptr(),
+                saved.ground_items[0]
+                    .presentation
+                    .as_ref()
+                    .unwrap()
+                    .name
+                    .as_ptr()
+            );
         }
     }
 
@@ -900,6 +936,7 @@ mod borrowed_map_tests {
         );
         // Current disclosed piles precede even lower retained planes, then creatures win.
         o.ground_items.push(tor_protocol::GroundItemView {
+            presentation: None,
             item: tor_protocol::ItemView {
                 id: tor_protocol::ItemTarget::from_digest([44; 32]),
                 name: "wand".into(),

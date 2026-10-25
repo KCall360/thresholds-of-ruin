@@ -1523,6 +1523,7 @@ fn projectile_launch_fixture_with(
                 delivery: ProjectileDeliveryKind::Launch,
             };
             document.conditions.push(ConditionDef {
+                hallucinating: false,
                 id: crate::content_ids::ConditionId::new("fixture_invisible").unwrap(),
                 family: crate::content_ids::ConditionFamilyId::new("fixture_invisible").unwrap(),
                 lifecycle: ConditionLifecycle::Timed,

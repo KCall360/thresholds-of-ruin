@@ -645,6 +645,27 @@ pub(crate) fn door_appearance(secret: bool) -> (&'static str, &'static str) {
     }
 }
 
+/// Convert only the core-selected closed cosmetic payload. No palette selection,
+/// live identity lookup or presentation cadence enters the wire adapter.
+pub(crate) fn object_presentation(
+    value: &s::appearance_catalog::ObjectPresentation,
+) -> p::ObjectPresentation {
+    p::ObjectPresentation {
+        name: value.name.to_string(),
+        asset: value.asset.as_deref().map(str::to_owned),
+        kind: match value.kind {
+            s::appearance_catalog::ObjectPresentationKind::Item { class } => {
+                p::ObjectPresentationKind::Item {
+                    class: item_class(class),
+                }
+            }
+            s::appearance_catalog::ObjectPresentationKind::Stairs => {
+                p::ObjectPresentationKind::Stairs
+            }
+        },
+    }
+}
+
 pub fn observation(
     view: s::Observation,
     scene: Vec<w::SightCell>,
@@ -679,6 +700,10 @@ pub fn observation(
         };
         let [floor, wall, door_asset] = terrain(cell.location.region);
         visible_cells.push(p::CellView {
+            object_presentation: visible
+                .object_presentation
+                .as_ref()
+                .map(object_presentation),
             lit: visible.lit,
             asset: if visible.wall { wall } else { floor },
             door: visible.door.map(|door| p::DoorView {
@@ -719,6 +744,7 @@ pub fn observation(
             .filter(|item| item.location == cell.location)
         {
             ground_items.push(p::GroundItemView {
+                presentation: item.presentation.as_ref().map(object_presentation),
                 item: p::ItemView {
                     corpse: item.corpse.as_ref().map(|source| p::CreatureAppearance {
                         seed: targets.appearance_seed(source.actor),
@@ -749,6 +775,7 @@ pub fn observation(
             .filter(|object| object.location == cell.location)
         {
             ground_items.push(p::GroundItemView {
+                presentation: object.presentation.as_ref().map(object_presentation),
                 item: p::ItemView {
                     corpse: None,
                     class: item_class(object.appearance.class),
@@ -773,9 +800,18 @@ pub fn observation(
             .filter(|actor| actor.location == cell.location)
         {
             visible_actors.push(p::ActorView {
-                name: actor.name.clone(),
-                appearance_seed: (actor.disclosure == s::perception::ActorDisclosure::Creature)
-                    .then(|| targets.appearance_seed(actor.id)),
+                name: actor
+                    .presentation
+                    .as_ref()
+                    .map_or_else(|| actor.name.clone(), |value| value.name.to_string()),
+                appearance_seed: actor
+                    .presentation
+                    .as_ref()
+                    .map(|_| p::AppearanceSeed::from_digest([0; 32]))
+                    .or_else(|| {
+                        (actor.disclosure == s::perception::ActorDisclosure::Creature)
+                            .then(|| targets.appearance_seed(actor.id))
+                    }),
                 description: String::new(),
                 id: targets.actor_reference(
                     actor.id,
@@ -785,7 +821,10 @@ pub fn observation(
                         .expect("selectable actor disclosure"),
                 ),
                 position: offset(cell.offset),
-                asset: actor.asset.clone(),
+                asset: actor.presentation.as_ref().map_or_else(
+                    || actor.asset.clone(),
+                    |value| value.asset.as_deref().map(str::to_owned),
+                ),
             });
         }
         if cell.location == view.location && cell.offset != (w::Position { x: 0, y: 0, z: 0 }) {

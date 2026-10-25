@@ -606,7 +606,22 @@ impl App {
             .iter()
             .enumerate()
             .map(|(index, item)| {
-                let mut label = item_phrase(&item.name, item.quantity);
+                let name = if !self.dropping && self.item_operation.is_none() {
+                    self.state
+                        .as_ref()
+                        .and_then(|state| {
+                            state
+                                .state()
+                                .observation
+                                .ground_items
+                                .iter()
+                                .find(|g| g.item.id == item.id)
+                        })
+                        .map_or(item.name.as_str(), tor_client_common::items::ground_name)
+                } else {
+                    &item.name
+                };
+                let mut label = item_phrase(name, item.quantity);
                 if let Some(charges) = self
                     .state
                     .as_ref()
@@ -3548,6 +3563,21 @@ pub fn inventory_entries(app: &App, o: &Observation) -> Vec<InventoryEntry> {
         .collect()
 }
 
+// A current cell's explicit null is factual; it must not fall back to old art.
+fn stair_presentation<'a>(
+    current: &'a [CellView],
+    memory: impl Iterator<Item = tor_client_common::MapCell<'a>>,
+    position: Position,
+) -> Option<&'a ObjectPresentation> {
+    if let Some(cell) = current.iter().find(|cell| cell.position == position) {
+        return cell.object_presentation.as_ref();
+    }
+    memory
+        .into_iter()
+        .find(|cell| cell.position == position)
+        .and_then(|cell| cell.cell.appearance.object_presentation.as_ref())
+}
+
 /// What the look command says about a column.
 pub fn describe(
     state: &ClientState,
@@ -3612,6 +3642,20 @@ pub fn describe(
     else {
         return "You don't know what's there.".into();
     };
+    if matches!(
+        tile.kind,
+        crate::map::Kind::StairsUp | crate::map::Kind::StairsDown
+    ) {
+        if let Some(presentation) =
+            stair_presentation(&o.visible_cells, state.map_memory(), tile.position)
+        {
+            return format!(
+                "{} - {}.",
+                tile.glyph,
+                item_phrase(tor_client_common::items::object_name(presentation), 1)
+            );
+        }
+    }
     let what = match tile.kind {
         crate::map::Kind::Item => {
             let live = o
@@ -3621,7 +3665,7 @@ pub fn describe(
                     (i.position.x, i.position.y) == (x, y)
                         && (-2..=0).contains(&(i.position.z - o.position.z))
                 })
-                .map(|i| (&i.item.name, i.item.quantity));
+                .map(|i| (tor_client_common::items::ground_name(i), i.item.quantity));
             let remembered = state
                 .map_memory()
                 .filter(|c| {
@@ -3629,7 +3673,7 @@ pub fn describe(
                         && (-2..=0).contains(&(c.position.z - o.position.z))
                 })
                 .find_map(|c| c.items().first())
-                .map(|i| (&i.name, i.quantity));
+                .map(|i| (tor_client_common::items::map_item_name(i), i.quantity));
             match live.or(remembered) {
                 Some((name, quantity)) => item_phrase(name, quantity),
                 None => "an object".into(),
@@ -4008,5 +4052,65 @@ impl Key {
             Self::Descend => Direction::Down,
             _ => return None,
         })
+    }
+}
+
+#[cfg(test)]
+mod cosmetic_tests {
+    use super::*;
+
+    #[test]
+    fn current_factual_stairs_do_not_resurrect_remembered_cosmetics() {
+        let position = Position { x: 1, y: 0, z: 0 };
+        let current = CellView {
+            object_presentation: None,
+            lit: true,
+            door: None,
+            trap: None,
+            material: String::new(),
+            key: "stairs".into(),
+            stairs_up: true,
+            stairs_down: false,
+            position,
+            wall: false,
+            place_hint: false,
+            asset: None,
+        };
+        let false_art = ObjectPresentation {
+            name: "silver flask".into(),
+            asset: None,
+            kind: ObjectPresentationKind::Item {
+                class: ItemClass::Potion,
+            },
+        };
+        let old = tor_client_common::RememberedCell {
+            appearance: RememberedMapCell {
+                object_presentation: Some(false_art.clone()),
+                key: "stairs".into(),
+                position,
+                wall: false,
+                material: String::new(),
+                asset: None,
+                place_hint: false,
+                stairs_up: true,
+                stairs_down: false,
+                door: None,
+                trap: None,
+                ground_items: vec![],
+            },
+            last_seen_tick: Some(1),
+            last_seen_revision: Some(1),
+        };
+        let memory = || {
+            std::iter::once(tor_client_common::MapCell {
+                position,
+                cell: &old,
+            })
+        };
+        assert_eq!(
+            stair_presentation(&[], memory(), position),
+            Some(&false_art)
+        );
+        assert_eq!(stair_presentation(&[current], memory(), position), None);
     }
 }

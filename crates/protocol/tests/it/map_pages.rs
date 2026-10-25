@@ -25,6 +25,7 @@ fn query() -> MapQuery {
 }
 fn cell(index: i32) -> RememberedMapCell {
     RememberedMapCell {
+        object_presentation: None,
         key: format!("remembered-{index}"),
         position: Position {
             x: index % 63 - 31,
@@ -97,6 +98,7 @@ fn appearance_response() -> Value {
         asset: None,
     });
     p.cells[0].ground_items.push(MapItemAppearance {
+        presentation: None,
         class: ItemClass::Potion,
         description: "A red flask".into(),
         name: "red potion".into(),

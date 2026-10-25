@@ -196,6 +196,7 @@ fn seed_map(game: &mut Game, observer: ActorId) {
         .map(|cell| crate::MapCellInput {
             location: cell.location,
             appearance: crate::MapAppearance {
+                object_presentation: None,
                 wall: game.world.is_wall(cell.location),
                 material: "stone".into(),
                 asset: None,

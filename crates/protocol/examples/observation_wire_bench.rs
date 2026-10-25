@@ -57,6 +57,7 @@ fn views(count: usize, case: &str) -> (StateView, StateView) {
         };
         o.inventory.push(item.clone());
         o.ground_items.push(GroundItemView {
+            presentation: None,
             reachable: false,
             supply_reachable: false,
             item: ItemView {

@@ -30,10 +30,10 @@ class RogueGrowthContent(unittest.TestCase):
                           if item.get("appearance_pool") == "rogue.potions"}, {
             "rogue.restore_strength", "rogue.healing", "rogue.extra_healing", "rogue.confusion",
             "rogue.blindness", "rogue.poison", "rogue.see_invisible", "rogue.levitation", "rogue.haste",
-            "rogue.gain_strength", "rogue.raise_level"})
+            "rogue.gain_strength", "rogue.raise_level", "rogue.hallucination"})
         self.assertEqual(catalog["appearance_pools"]["rogue.potions"]["appearances"], [
             "amber potion", "smoky potion", "violet potion", "azure potion", "crimson potion",
-            "silver potion", "pearl potion", "teal potion", "ochre potion", "indigo potion", "copper potion"])
+            "silver potion", "pearl potion", "teal potion", "ochre potion", "indigo potion", "copper potion", "chartreuse potion"])
 
     def test_existing_restoration_and_live_stock_are_unchanged(self):
         manifest = source("scenario.toml")

@@ -23,7 +23,7 @@ fn snapshot() -> Snapshot {
             for (z, wall) in [(-1, true), (0, false), (1, false), (2, true)] {
                 cells.push(serde_json::json!({
                     "key":format!("{x}:{y}:{z}"),"position":{"x":x,"y":y,"z":z},"wall":wall,
-                    "trap":null,"stairs_up":false,"stairs_down":x == -3 && y == 0 && z == 0,"lit":true,"place_hint":false
+                    "trap":null,"object_presentation":null,"stairs_up":false,"stairs_down":x == -3 && y == 0 && z == 0,"lit":true,"place_hint":false
                 }));
             }
         }
@@ -34,7 +34,7 @@ fn snapshot() -> Snapshot {
         "state":{"wizard_game":false,"revision":"5","observation":{"linked_holds":[],
             "actor":"1","self_target":super::actor_target(1),"tick":"100","position":{"x":0,"y":0,"z":0},
             "places":[],"visible_cells":cells,
-            "ground_items":[{"supply_reachable":false,"reachable":true,"item":{"known_currency":null,"known_supply":null,"quantity":"1","class":"weapon","appearance":"sword","identified":true,"id":super::item_target(7),"name":"sword"},"position":{"x":-1,"y":0,"z":0}}],
+            "ground_items":[{"presentation":null,"supply_reachable":false,"reachable":true,"item":{"known_currency":null,"known_supply":null,"quantity":"1","class":"weapon","appearance":"sword","identified":true,"id":super::item_target(7),"name":"sword"},"position":{"x":-1,"y":0,"z":0}}],
             "inventory":[
                 {"known_currency":null,"known_supply":null,"quantity":"1","class":"potion","appearance":"red potion","identified":false,"id":super::item_target(1),"name":"red potion"},
                 {"known_currency":null,"known_supply":null,"quantity":"1","class":"armor","appearance":"mail","identified":true,"id":super::item_target(2),"name":"mail"}
@@ -639,7 +639,7 @@ fn the_single_map_merges_heights_and_never_draws_the_player_as_a_creature() {
     let cell = |x: i32, z: i32, wall: bool| {
         serde_json::from_value::<CellView>(serde_json::json!({
             "key":format!("extra:{x}:{z}"),"position":{"x":x,"y":-1,"z":z},"wall":wall,
-            "trap":null,"stairs_up":false,"stairs_down":false,"lit":true,"place_hint":false
+            "trap":null,"object_presentation":null,"stairs_up":false,"stairs_down":false,"lit":true,"place_hint":false
         }))
         .unwrap()
     };
@@ -1545,4 +1545,98 @@ fn unnamed_actor_look_uses_the_shared_english_indefinite_form() {
             format!("{phrase} (hostile, wounded).")
         );
     }
+}
+
+#[test]
+fn cosmetic_items_and_unknown_stairs_change_art_not_map_authority() {
+    let mut o = view();
+    let real = o.ground_items[0].item.clone();
+    o.ground_items[0].item.name = "object".into();
+    o.ground_items[0].item.appearance = "object".into();
+    o.ground_items[0].item.description.clear();
+    o.ground_items[0].item.asset = None;
+    o.ground_items[0].presentation = Some(ObjectPresentation {
+        name: "stairs".into(),
+        asset: None,
+        kind: ObjectPresentationKind::Stairs,
+    });
+    let palette = tor_client_common::Palette::default();
+    let tiles = map::tiles(&o, &palette, &|_| true);
+    let fake = tiles
+        .iter()
+        .find(|tile| tile.position.x == -1 && tile.position.y == 0)
+        .unwrap();
+    assert_eq!(fake.glyph, '>');
+    assert_eq!(fake.kind, map::Kind::Item);
+    assert_eq!(o.ground_items[0].item.id, real.id);
+    assert_eq!(o.ground_items[0].item.class, real.class);
+    assert_eq!(o.ground_items[0].item.quantity, real.quantity);
+    let known = tiles
+        .iter()
+        .find(|tile| tile.position.x == -3 && tile.position.y == 0)
+        .unwrap();
+    assert_eq!(known.glyph, '>');
+    assert_eq!(known.kind, map::Kind::StairsDown);
+    let stairs = o
+        .visible_cells
+        .iter_mut()
+        .find(|cell| cell.stairs_down)
+        .unwrap();
+    stairs.object_presentation = Some(ObjectPresentation {
+        name: "silver flask".into(),
+        asset: None,
+        kind: ObjectPresentationKind::Item {
+            class: ItemClass::Potion,
+        },
+    });
+    let tiles = map::tiles(&o, &palette, &|_| true);
+    let altered = tiles
+        .iter()
+        .find(|tile| tile.position.x == -3 && tile.position.y == 0)
+        .unwrap();
+    assert_eq!(altered.glyph, '!');
+    assert_eq!(altered.kind, map::Kind::StairsDown);
+    assert!(o.visible_cells.iter().any(|cell| cell.stairs_down));
+}
+
+#[test]
+fn cosmetic_look_picker_and_take_use_display_name_but_original_opaque_item() {
+    let mut snap = snapshot();
+    let o = &mut Arc::make_mut(&mut snap.state).observation;
+    o.ground_items[0].item.name = "object".into();
+    o.ground_items[0].item.appearance = "object".into();
+    o.ground_items[0].item.description.clear();
+    o.ground_items[0].item.asset = None;
+    o.ground_items[0].presentation = Some(ObjectPresentation {
+        name: "silver flask".into(),
+        asset: None,
+        kind: ObjectPresentationKind::Item {
+            class: ItemClass::Potion,
+        },
+    });
+    let mut other = o.ground_items[0].clone();
+    other.item.id = super::item_target(88);
+    other.presentation.as_mut().unwrap().name = "stairs".into();
+    other.presentation.as_mut().unwrap().kind = ObjectPresentationKind::Stairs;
+    o.ground_items.push(other);
+    let state = ClientState::from_snapshot(snap).unwrap();
+    let look = tor_client_ascii::describe(&state, &tor_client_common::Palette::default(), -1, 0);
+    assert!(look.contains("silver flask"), "{look}");
+    assert!(!look.contains("sword"), "{look}");
+    let mut app = App::new();
+    app.role = AccessRole::Player;
+    app.set_state(state);
+    app.ready();
+    assert_eq!(app.input(Input::Key { key: Key::Pickup }), Effect::None);
+    let rows = app.item_rows().join("\n");
+    assert!(
+        rows.contains("silver flask") && rows.contains("stairs"),
+        "{rows}"
+    );
+    assert!(!rows.contains("sword"), "{rows}");
+    assert!(
+        matches!(super::request(app.input(Input::Key { key: Key::Enter })),
+        Some(Request::Command { command: Command::Act { action: Action::Take { item, .. }, .. }, .. })
+        if item == super::item_target(7))
+    );
 }

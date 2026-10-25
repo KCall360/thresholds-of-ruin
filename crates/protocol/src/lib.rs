@@ -44,6 +44,8 @@ pub use targets::{
 mod validation;
 mod weapon_preview;
 pub use weapon_preview::*;
+mod object_presentation;
+pub use object_presentation::*;
 mod wire;
 pub use codec::*;
 pub use delta::*;

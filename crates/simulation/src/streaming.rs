@@ -3518,6 +3518,7 @@ mod explored_map_tests {
 
     fn remembered() -> Shared<MapAppearance> {
         Shared::new(MapAppearance {
+            object_presentation: None,
             wall: true,
             material: "stale stone".into(),
             asset: None,

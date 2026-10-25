@@ -290,3 +290,26 @@ pub fn equipment_details(view: &Observation, item: ItemTarget) -> Option<String>
     }
     (!parts.is_empty()).then(|| parts.join(", "))
 }
+
+/// A cosmetic name never falls back to the real object's hidden identity.
+pub fn object_name(presentation: &tor_protocol::ObjectPresentation) -> &str {
+    if !presentation.name.trim().is_empty() {
+        &presentation.name
+    } else {
+        match presentation.kind {
+            tor_protocol::ObjectPresentationKind::Item { .. } => "object",
+            tor_protocol::ObjectPresentationKind::Stairs => "stairs",
+        }
+    }
+}
+
+pub fn ground_name(ground: &tor_protocol::GroundItemView) -> &str {
+    ground
+        .presentation
+        .as_ref()
+        .map_or(&ground.item.name, object_name)
+}
+
+pub fn map_item_name(item: &tor_protocol::MapItemAppearance) -> &str {
+    item.presentation.as_ref().map_or(&item.name, object_name)
+}

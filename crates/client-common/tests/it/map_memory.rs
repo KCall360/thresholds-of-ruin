@@ -11,7 +11,7 @@ fn snapshot(cells: &[(&str, i32, i32)], revision: u64) -> Snapshot {
             "actor":"1","self_target":tor_protocol::ActorTarget::from_digest([1; 32]),"tick":revision.to_string(),"position":{"x":0,"y":0,"z":0},
             "places":[],"visible_cells":cells.iter().map(|(key,x,y)| serde_json::json!({
                 "key":key,"position":{"x":x,"y":y,"z":0},"wall":false,
-                "trap":null,"stairs_up":false,"stairs_down":false,"lit":true,"place_hint":false
+                "trap":null,"object_presentation":null,"stairs_up":false,"stairs_down":false,"lit":true,"place_hint":false
             })).collect::<Vec<_>>(),
             "ground_items":[],"inventory":[],"linked_holds":[],"visible_actors":[],"ready":true
         }}
@@ -86,6 +86,7 @@ fn map_aligns_every_update_and_refreshes_items_without_retaining_actors() {
         .observation
         .ground_items
         .push(GroundItemView {
+            presentation: None,
             item: ItemView {
                 corpse: None,
                 class: Default::default(),
@@ -322,6 +323,7 @@ fn known_map_lookup_preserves_opaque_memory_keys_and_prefers_current_terrain() {
 
 fn map_cell(position: Position, key: &str) -> RememberedMapCell {
     RememberedMapCell {
+        object_presentation: None,
         key: key.into(),
         position,
         wall: false,
@@ -886,6 +888,7 @@ fn incremental_map_ambiguous_region_survives_later_failure_and_current_sight_win
         .observation
         .visible_cells
         .push(CellView {
+            object_presentation: None,
             key: "live-edge".into(),
             position: Position { x: 31, y: 0, z: 0 },
             wall: false,
@@ -1049,4 +1052,110 @@ fn trap_memory_keeps_only_last_disclosed_family_and_never_an_action_reference() 
         serde_json::json!({"family":"sleeping_gas"})
     );
     assert!(!encoded.to_string().contains(&target.to_string()));
+}
+
+#[test]
+fn sampled_cosmetics_survive_acquisition_hydration_and_stale_memory_without_authority() {
+    let item_presentation = ObjectPresentation {
+        name: "stairs".into(),
+        asset: None,
+        kind: ObjectPresentationKind::Stairs,
+    };
+    let stair_presentation = ObjectPresentation {
+        name: "silver flask".into(),
+        asset: None,
+        kind: ObjectPresentationKind::Item {
+            class: ItemClass::Potion,
+        },
+    };
+    let mut initial = snapshot(
+        &[("a", 0, 0), ("b", 1, 0), ("c", 0, 1), ("object", 3, 0)],
+        0,
+    );
+    let o = &mut Arc::make_mut(&mut initial.state).observation;
+    o.visible_cells[3].stairs_down = true;
+    o.visible_cells[3].object_presentation = Some(stair_presentation.clone());
+    o.ground_items.push(GroundItemView {
+        presentation: Some(item_presentation.clone()),
+        reachable: false,
+        supply_reachable: false,
+        position: Position { x: 3, y: 0, z: 0 },
+        item: ItemView {
+            corpse: None,
+            class: ItemClass::Coin,
+            quantity: 3,
+            appearance: "object".into(),
+            identified: true,
+            description: String::new(),
+            id: ItemTarget::from_digest([67; 32]),
+            name: "object".into(),
+            asset: None,
+            known_supply: None,
+            known_currency: Some(CurrencyKind::Gold),
+        },
+    });
+    let mut client = ClientState::from_snapshot(initial).unwrap();
+    let assert_saved = |client: &ClientState| {
+        let saved = client
+            .map_memory()
+            .find(|cell| cell.key == "object")
+            .unwrap();
+        assert_eq!(saved.object_presentation, Some(stair_presentation.clone()));
+        assert_eq!(
+            saved.items()[0].presentation,
+            Some(item_presentation.clone())
+        );
+        assert_eq!(saved.items()[0].class, ItemClass::Coin);
+        assert_eq!(saved.items()[0].quantity, 3);
+        assert!(saved.stairs_down);
+        assert_eq!(
+            saved.appearance().object_presentation,
+            Some(stair_presentation.clone())
+        );
+    };
+    assert_saved(&client);
+    advance(
+        &mut client,
+        snapshot(&[("a", 0, 0), ("b", 1, 0), ("c", 0, 1)], 1),
+    );
+    assert_saved(&client);
+    let before = client.clone();
+    let row = client
+        .map_memory()
+        .find(|cell| cell.key == "object")
+        .unwrap()
+        .appearance();
+    let encoded = serde_json::to_value(&row).unwrap();
+    let decoded: RememberedMapCell = serde_json::from_value(encoded).unwrap();
+    assert_eq!(decoded, row);
+    assert_eq!(client, before);
+    let mut hydrated = ClientState::from_snapshot(snapshot(&[("a", 0, 0)], 0)).unwrap();
+    bind_map(&mut hydrated, "cosmetics");
+    let page = map_page(&hydrated, vec![decoded], 1, 0, 0);
+    accept_map(&mut hydrated, "cosmetics", &page).unwrap();
+    assert_saved(&hydrated);
+}
+
+#[test]
+fn typed_cosmetic_projection_is_validated_before_client_publication() {
+    let mut initial = snapshot(&[("a", 0, 0)], 0);
+    let cell = &mut Arc::make_mut(&mut initial.state).observation.visible_cells[0];
+    cell.stairs_down = true;
+    cell.object_presentation = Some(ObjectPresentation {
+        name: "stairs".into(),
+        asset: None,
+        kind: ObjectPresentationKind::Stairs,
+    });
+    assert!(initial.state.validate().is_ok());
+    let mut invalid = initial;
+    Arc::make_mut(&mut invalid.state).observation.visible_cells[0]
+        .object_presentation
+        .as_mut()
+        .unwrap()
+        .name = "x".repeat(257);
+    assert_eq!(
+        invalid.state.validate(),
+        Err(InvalidState::InvalidPresentation)
+    );
+    assert!(ClientState::from_snapshot(invalid).is_err());
 }

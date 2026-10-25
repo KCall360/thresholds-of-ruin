@@ -6,6 +6,7 @@ pub(crate) use cancellation::expand_cancellable_source;
 pub use cancellation::CancellationInvisibilityShape;
 mod forms;
 mod growth;
+mod hallucination;
 mod interaction;
 mod strikes;
 pub use advancement::AdvancementPolicy;
@@ -1345,6 +1346,8 @@ impl<'de> Deserialize<'de> for Effect {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConditionDef {
+    /// Opt-in pure, target-wide temporary visual disorientation.
+    pub hallucinating: bool,
     pub id: ConditionId,
     pub family: ConditionFamilyId,
     pub lifecycle: ConditionLifecycle,
@@ -1383,6 +1386,8 @@ impl<'de> Deserialize<'de> for ConditionDef {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Fields {
+            #[serde(default)]
+            hallucinating: bool,
             id: ConditionId,
             family: ConditionFamilyId,
             lifecycle: ConditionLifecycle,
@@ -1398,6 +1403,7 @@ impl<'de> Deserialize<'de> for ConditionDef {
         }
         let fields: Fields = crate::bounded::named_map(deserializer)?;
         Ok(Self {
+            hallucinating: fields.hallucinating,
             id: fields.id,
             family: fields.family,
             lifecycle: fields.lifecycle,
@@ -1853,6 +1859,7 @@ impl Ruleset {
         let subtypes = catalog!(subtypes);
         let classes = catalog!(classes);
         let conditions = catalog!(conditions);
+        hallucination::validate_hallucination_conditions(&document.conditions)?;
         let condition_definitions = document.conditions.clone();
         let persistent_conditions = document
             .conditions
@@ -3732,6 +3739,7 @@ mod tests {
     fn repeatable_restriction_document() -> RulesetDocument {
         let mut document = document();
         document.conditions.push(ConditionDef {
+            hallucinating: false,
             id: ConditionId::new("fixture_repeatable_lock").unwrap(),
             family: ConditionFamilyId::new("fixture_repeatable_lock").unwrap(),
             lifecycle: ConditionLifecycle::Timed,
@@ -3863,6 +3871,7 @@ mod tests {
             ],
         });
         doc.conditions.push(ConditionDef {
+            hallucinating: false,
             id: ConditionId::new("marked").unwrap(),
             family: crate::content_ids::ConditionFamilyId::new("marked").unwrap(),
             lifecycle: crate::rules::ConditionLifecycle::Timed,

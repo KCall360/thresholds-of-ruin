@@ -9,6 +9,7 @@ mod actions;
 mod actor_creatures;
 mod actor_record;
 mod actor_store;
+pub mod appearance_catalog;
 pub mod appearance_state;
 pub mod arena;
 mod awareness;
@@ -19,6 +20,8 @@ mod creature_time;
 pub mod equipment_capacity;
 pub mod equipment_capture;
 pub mod expertise;
+mod hallucination;
+mod hallucination_clock;
 mod hazard_checks;
 mod lifecycle;
 pub mod linked_hold;
@@ -504,6 +507,7 @@ pub struct ActionOutcome {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Actor {
+    hallucination: Option<hallucination_clock::HallucinationCadence>,
     guise: perception::GuiseState,
     readied_ambush: readied_ambush::ReadiedAmbush,
     holds: linked_hold::HoldBook,
@@ -884,6 +888,7 @@ impl Game {
         self.actors.insert(
             id,
             Actor {
+                hallucination: None,
                 guise: perception::GuiseState::default(),
                 readied_ambush: readied_ambush::ReadiedAmbush::default(),
                 holds: linked_hold::HoldBook::default(),

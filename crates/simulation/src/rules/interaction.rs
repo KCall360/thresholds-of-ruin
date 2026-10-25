@@ -268,7 +268,8 @@ impl Ruleset {
     }
     fn condition_directly_harms(&self, condition: &ConditionId) -> bool {
         self.condition(condition).is_some_and(|definition| {
-            !definition.restrictions.is_empty()
+            definition.hallucinating
+                || !definition.restrictions.is_empty()
                 || definition.preparation == ConditionPreparation::Pause
                 || self.modifiers_directly_harm(&definition.modifiers)
         })

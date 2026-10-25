@@ -498,18 +498,24 @@ pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
             let noun = noun.to_lowercase();
             let noun = noun.strip_prefix("the ").unwrap_or(&noun);
             let items: Vec<_> = if verb == "drop" {
-                state.observation.inventory.iter().collect()
+                state
+                    .observation
+                    .inventory
+                    .iter()
+                    .map(|item| (item, item.name.as_str()))
+                    .collect()
             } else {
                 state
                     .observation
                     .ground_items
                     .iter()
-                    .map(|i| &i.item)
+                    .map(|i| (&i.item, tor_client_common::items::ground_name(i)))
                     .collect()
             };
             let mut matches: Vec<_> = items
                 .into_iter()
-                .filter(|item| item_matches(noun, item))
+                .filter(|(item, name)| item_name_matches(noun, item.id, name))
+                .map(|(item, _)| item)
                 .collect();
             matches.sort_by_key(|item| item.id);
             matches.dedup_by_key(|item| item.id);
@@ -687,7 +693,7 @@ pub fn describe(state: &StateView) -> String {
         lines.push(format!(
             "You see {} x {} (#{}), at offset ({}, {}, {}).{}",
             item.item.quantity,
-            safe(&item.item.name),
+            safe(tor_client_common::items::ground_name(item)),
             item.item.id,
             item.position.x,
             item.position.y,
@@ -714,7 +720,15 @@ pub fn describe(state: &StateView) -> String {
                 if door.reachable { " Within reach." } else { "" }
             ));
         }
-        if cell.stairs_up || cell.stairs_down {
+        if let Some(presentation) = &cell.object_presentation {
+            lines.push(format!(
+                "You see {} at offset ({}, {}, {}).",
+                safe(tor_client_common::items::object_name(presentation)),
+                cell.position.x,
+                cell.position.y,
+                cell.position.z
+            ));
+        } else if cell.stairs_up || cell.stairs_down {
             lines.push(format!(
                 "Stairs {} at offset ({}, {}, {}).",
                 if cell.stairs_up && cell.stairs_down {
@@ -758,10 +772,14 @@ pub fn item_quantity(noun: &str) -> Result<(Option<u64>, &str), String> {
 }
 
 pub fn item_matches(noun: &str, item: &tor_protocol::ItemView) -> bool {
+    item_name_matches(noun, item.id, &item.name)
+}
+
+fn item_name_matches(noun: &str, target: ItemTarget, name: &str) -> bool {
     if let Some(id) = noun.strip_prefix('#') {
-        return id.parse::<ItemTarget>() == Ok(item.id);
+        return id.parse::<ItemTarget>() == Ok(target);
     }
-    let name = item.name.to_lowercase();
+    let name = name.to_lowercase();
     let noun = noun.strip_prefix("the ").unwrap_or(noun);
     !noun.is_empty()
         && (name == noun

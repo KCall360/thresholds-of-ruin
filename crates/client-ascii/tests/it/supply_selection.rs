@@ -22,6 +22,7 @@ fn app() -> App {
         .unwrap()
         .abilities = vec![ability];
     view.ground_items.push(GroundItemView {
+        presentation: None,
         reachable: false,
         supply_reachable: true,
         position: Position { x: 1, y: 0, z: 0 },

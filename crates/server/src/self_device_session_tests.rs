@@ -2265,7 +2265,7 @@ fn drain_normalize_cells(cells: &mut [CellView], keys: &mut BTreeMap<String, Str
 fn drain_cell_normalization_preserves_aliases_and_all_substantive_fields() {
     fn cell(key: &str, x: i32) -> CellView {
         serde_json::from_value(json!({"key":key,"position":{"x":x,"y":0,"z":0},
-            "lit":false,"door":null,"trap":null,"material":"unchanged narrative",
+            "lit":false,"door":null,"trap":null,"object_presentation":null,"material":"unchanged narrative",
             "stairs_up":false,"stairs_down":false,"wall":false,"place_hint":false}))
         .unwrap()
     }
@@ -3234,3 +3234,6 @@ mod haste_dose;
 
 #[path = "growth_potion_session_tests.rs"]
 mod growth_potions;
+
+#[path = "hallucination_session_tests.rs"]
+mod hallucination;

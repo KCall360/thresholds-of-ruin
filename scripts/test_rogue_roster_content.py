@@ -232,7 +232,7 @@ class RogueRosterContent(unittest.TestCase):
             "form_choices": [], "modifiers": [{"scope": "always", "op": {
                 "kind": "grant_ability", "ability": identity}}]}})
         self.assertEqual(rows[("abilities", identity)], {"op": "add", "path": ["abilities", identity], "value": {
-            "id": identity, "name": "Energy Drain", "interaction": "hostile_to_target", "tags": ["attack"],
+            "cancellable": True, "id": identity, "name": "Energy Drain", "interaction": "hostile_to_target", "tags": ["attack"],
             "basic_attack": False, "invocation": "actor_target", "timing": {
                 "source": {"kind": "fixed", "prepare": 100, "recover": 100}, "scaled_by": "speed"},
             "reach": {"kind": "melee"}, "strikes": {"kind": "natural_melee", "additional_riders": [{

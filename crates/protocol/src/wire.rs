@@ -589,11 +589,25 @@ impl<'de> Deserialize<'de> for ItemView {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct GroundItemView {
+    /// Cosmetic only; never changes the enclosed item's capabilities.
+    pub presentation: Option<crate::ObjectPresentation>,
     pub reachable: bool,
     /// Server-owned known-supply touch affordance, separate from pickup reach.
     pub supply_reachable: bool,
     pub item: ItemView,
     pub position: Position,
+}
+impl GroundItemView {
+    pub(crate) fn valid_presentation(&self) -> bool {
+        self.presentation.as_ref().is_none_or(|p| {
+            p.validate().is_ok()
+                && self.item.name == "object"
+                && self.item.appearance == "object"
+                && self.item.description.is_empty()
+                && self.item.asset.is_none()
+                && self.item.corpse.is_none()
+        })
+    }
 }
 impl<'de> Deserialize<'de> for GroundItemView {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
@@ -602,6 +616,8 @@ impl<'de> Deserialize<'de> for GroundItemView {
         struct Fields {
             reachable: bool,
             supply_reachable: bool,
+            #[serde(deserialize_with = "required_option")]
+            presentation: Option<crate::ObjectPresentation>,
             item: ItemView,
             position: Position,
         }
@@ -611,12 +627,19 @@ impl<'de> Deserialize<'de> for GroundItemView {
                 "ground supply reach without a known supply",
             ));
         }
-        Ok(Self {
+        let value = Self {
             reachable: f.reachable,
             supply_reachable: f.supply_reachable,
+            presentation: f.presentation,
             item: f.item,
             position: f.position,
-        })
+        };
+        if !value.valid_presentation() {
+            return Err(serde::de::Error::custom(
+                "invalid ground object presentation",
+            ));
+        }
+        Ok(value)
     }
 }
 
@@ -1240,13 +1263,14 @@ fn read_anonymous_ability<'de, D: serde::Deserializer<'de>>(
     Ok((fields.caster, fields.target, outcome))
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct CellView {
+    /// Sampled object art; stair flags remain authoritative.
+    pub object_presentation: Option<crate::ObjectPresentation>,
     /// Current server illumination, independent of sight or body awareness.
     pub lit: bool,
     pub door: Option<DoorView>,
     /// Discovered physical presence only; family stays absent until examined or witnessed.
-    #[serde(deserialize_with = "required_option")]
     pub trap: Option<TrapView>,
     /// Cosmetic material of a solid cell, not a physical interaction rule.
     /// Floors and ceilings are ordinary seen solid cells; clients derive them.
@@ -1264,6 +1288,57 @@ pub struct CellView {
     /// scenario names none; clients then fall back to their own look.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub asset: Option<String>,
+}
+
+impl CellView {
+    pub(crate) fn valid_presentation(&self) -> bool {
+        self.object_presentation.as_ref().is_none_or(|p| {
+            p.validate().is_ok() && !self.wall && (self.stairs_up || self.stairs_down)
+        })
+    }
+}
+impl<'de> Deserialize<'de> for CellView {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            #[serde(deserialize_with = "required_option")]
+            object_presentation: Option<crate::ObjectPresentation>,
+            lit: bool,
+            door: Option<DoorView>,
+            #[serde(deserialize_with = "required_option")]
+            trap: Option<TrapView>,
+            #[serde(default)]
+            material: String,
+            key: String,
+            stairs_up: bool,
+            stairs_down: bool,
+            position: Position,
+            wall: bool,
+            place_hint: bool,
+            #[serde(default)]
+            asset: Option<String>,
+        }
+        let f: Fields = crate::bounded::named_map(d)?;
+        let value = Self {
+            object_presentation: f.object_presentation,
+            lit: f.lit,
+            door: f.door,
+            trap: f.trap,
+            material: f.material,
+            key: f.key,
+            stairs_up: f.stairs_up,
+            stairs_down: f.stairs_down,
+            position: f.position,
+            wall: f.wall,
+            place_hint: f.place_hint,
+            asset: f.asset,
+        };
+        if !value.valid_presentation() {
+            return Err(serde::de::Error::custom("invalid cell object presentation"));
+        }
+        Ok(value)
+    }
 }
 
 /// A disclosed trap family; no effect operands or discovery difficulty cross the wire.

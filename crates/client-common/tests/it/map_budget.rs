@@ -16,7 +16,7 @@ fn snapshot(revision: u64, shift: i32) -> Snapshot {
         .into_iter()
         .map(|(key, x, y)| {
             serde_json::json!({"key":key,"position":{"x":x+shift,"y":y+shift,"z":0},
-                "wall":false,"lit":true,"trap":null,"stairs_up":false,"stairs_down":false,"place_hint":false})
+                "wall":false,"lit":true,"trap":null,"object_presentation":null,"stairs_up":false,"stairs_down":false,"place_hint":false})
         })
         .collect::<Vec<_>>();
     serde_json::from_value(serde_json::json!({
@@ -66,6 +66,7 @@ async fn map_request(server: &mut Server) -> (String, MapQuery) {
 
 fn cell(position: Position, key: &str) -> RememberedMapCell {
     RememberedMapCell {
+        object_presentation: None,
         key: key.into(),
         position,
         wall: false,

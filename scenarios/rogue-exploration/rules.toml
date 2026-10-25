@@ -374,3 +374,10 @@ value = true
 op = "add"
 path = ["conditions", "rogue.haste_exhaustion"]
 value = { id = "rogue.haste_exhaustion", family = "rogue.haste_exhaustion", lifecycle = "timed", name = "Exhausted", modifiers = [], stacking = { kind = "keep" }, source_scoped = false, descriptors = [], capacity = "reject", timing = { kind = "actor_active", on_expiry = { kind = "remove" } }, restrictions = ["voluntary_actions"], preparation = "pause" }
+
+# Shared pure visual condition. Repeated doses extend lifetime without resetting
+# the observer's captured base-turn cosmetic cadence.
+[[overrides]]
+op = "add"
+path = ["conditions", "rogue.hallucinating"]
+value = { id = "rogue.hallucinating", family = "rogue.hallucinating", lifecycle = "timed", name = "Hallucinating", hallucinating = true, modifiers = [], stacking = { kind = "extend" }, source_scoped = false, descriptors = [], capacity = "reject", timing = { kind = "actor_active", on_expiry = { kind = "remove" } }, restrictions = [], preparation = "preserve" }

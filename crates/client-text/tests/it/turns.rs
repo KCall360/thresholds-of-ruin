@@ -376,11 +376,11 @@ fn state() -> StateView {
         "places":[],"visible_cells":(0..7).map(|x| serde_json::json!({
             "key":format!("cell-{x}"),"position":{"x":x,"y":0,"z":0},
             "wall":false,"material":"stone","lit":true,"place_hint":x==1 || x==6,
-            "trap":null,"stairs_up":false,"stairs_down":false
+            "trap":null,"object_presentation":null,"stairs_up":false,"stairs_down":false
         })).collect::<Vec<_>>(),
         "ground_items":[
-            {"supply_reachable":false,"reachable":true,"item":{"known_currency":null,"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(1),"name":"copper token","description":"A small copper disc."},"position":{"x":0,"y":0,"z":0}},
-            {"supply_reachable":false,"reachable":false,"item":{"known_currency":null,"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(2),"name":"stone tablet","description":"A weathered slab of stone."},"position":{"x":6,"y":0,"z":0}}
+            {"presentation":null,"supply_reachable":false,"reachable":true,"item":{"known_currency":null,"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(1),"name":"copper token","description":"A small copper disc."},"position":{"x":0,"y":0,"z":0}},
+            {"presentation":null,"supply_reachable":false,"reachable":false,"item":{"known_currency":null,"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(2),"name":"stone tablet","description":"A weathered slab of stone."},"position":{"x":6,"y":0,"z":0}}
         ],"inventory":[],"linked_holds":[],"visible_actors":[],
         "combat":{"own_stats":tor_client_common::test_support::stats(),"public_plan":null,"hp":"50","max_hp":"50","sequence":null,"preparation_remaining":null,"preparation_active":false,
             "recovery_remaining":"0","actors":[],"events":[],"objective":null,
@@ -505,6 +505,7 @@ fn obliging(request: &Request, now: &StateView) -> Vec<Frame> {
                 .unwrap();
             let thing = after.observation.inventory.remove(index);
             after.observation.ground_items.push(GroundItemView {
+                presentation: None,
                 reachable: true,
                 item: thing,
                 position: Position { x: 0, y: 0, z: 0 },
@@ -1754,7 +1755,7 @@ async fn stacks_of_alike_things_are_counted_together() {
     // three red potionses".
     let mut s = state();
     let stack = |id: u64, name: &str, quantity: u64| {
-        serde_json::from_value::<GroundItemView>(serde_json::json!({"supply_reachable":false,
+        serde_json::from_value::<GroundItemView>(serde_json::json!({"presentation":null,"supply_reachable":false,
             "reachable": true, "position": {"x": 0, "y": 0, "z": 0},
             "item": {"known_currency":null,"known_supply":null,"quantity": quantity.to_string(), "class":"misc","appearance": "item", "identified": true,
                 "id": super::item_target(id), "name": name, "description": ""}}))
@@ -2061,7 +2062,7 @@ fn open_ground(find: usize) -> Scripted {
             }
             if legs.get() == find {
                 there.observation.ground_items.push(
-                    serde_json::from_value(serde_json::json!({"supply_reachable":false,
+                    serde_json::from_value(serde_json::json!({"presentation":null,"supply_reachable":false,
                         "reachable": false, "position": {"x": 5, "y": 0, "z": 0},
                         "item": {"known_currency":null,"known_supply":null,"quantity": "1", "class":"misc","appearance": "item", "identified": true,
                             "id":super::item_target(7), "name": "pebble", "description": ""}}))
@@ -3104,7 +3105,7 @@ async fn a_fight_bounds_a_continuous_inter_round_stream_without_another_action()
 fn with_corpse(mut s: StateView, x: i32) -> StateView {
     s.observation.ground_items.push(
         serde_json::from_value(serde_json::json!({
-            "supply_reachable":false,"reachable":x == 0,
+            "presentation":null,"supply_reachable":false,"reachable":x == 0,
             "item":{"known_currency":null,"known_supply":null,"quantity":"1","class":"corpse","appearance":"item","identified":true,
                 "id":super::item_target(7),"name":"ruin scout corpse","description":""},
             "position":{"x":x,"y":0,"z":0}}))
@@ -3372,6 +3373,7 @@ fn a_cold_hydrated_doorway_is_descriptive_and_current_sight_wins() {
         .expect("new attachment hydrates");
     link.client.bind_map_query(&query, "cold-map").unwrap();
     let remembered = RememberedMapCell {
+        object_presentation: None,
         key: door_cell.key.clone(),
         position: door_cell.position,
         wall: door_cell.wall,
@@ -3388,6 +3390,7 @@ fn a_cold_hydrated_doorway_is_descriptive_and_current_sight_wins() {
             asset: None,
         }),
         ground_items: vec![MapItemAppearance {
+            presentation: None,
             class: ItemClass::Potion,
             description: "Last seen flask.".into(),
             name: "red potion".into(),
@@ -3459,6 +3462,7 @@ fn a_cold_hydrated_doorway_is_descriptive_and_current_sight_wins() {
         .observation
         .visible_cells
         .push(CellView {
+            object_presentation: None,
             trap: None,
 
             door: None,

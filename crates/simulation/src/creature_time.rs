@@ -334,6 +334,7 @@ mod tests {
         };
         definition.timing.scaled_by = None;
         document.conditions.push(ConditionDef {
+            hallucinating: false,
             id: borrowed.clone(),
             family: crate::content_ids::ConditionFamilyId::new(borrowed.as_str()).unwrap(),
             lifecycle: crate::rules::ConditionLifecycle::Timed,
@@ -822,6 +823,7 @@ mod tests {
         };
         attack.timing.scaled_by = None;
         document.conditions.push(ConditionDef {
+            hallucinating: false,
             id: id.clone(),
             family: crate::content_ids::ConditionFamilyId::new(id.as_str()).unwrap(),
             lifecycle: crate::rules::ConditionLifecycle::Timed,
@@ -932,6 +934,7 @@ mod tests {
         let id = crate::content_ids::ConditionId::new("temporary_health").unwrap();
         let mut document = original.ruleset().document().clone();
         document.conditions.push(ConditionDef {
+            hallucinating: false,
             id: id.clone(),
             family: crate::content_ids::ConditionFamilyId::new(id.as_str()).unwrap(),
             lifecycle: crate::rules::ConditionLifecycle::Timed,

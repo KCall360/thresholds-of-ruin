@@ -77,6 +77,7 @@ fn returned_floor_rehydrates_unseen_walls_and_stairs_after_source_free_resume() 
             .unwrap();
     };
     let appearance = |cell: &CellView, position| RememberedMapCell {
+        object_presentation: cell.object_presentation.clone(),
         key: cell.key.clone(),
         position,
         wall: cell.wall,

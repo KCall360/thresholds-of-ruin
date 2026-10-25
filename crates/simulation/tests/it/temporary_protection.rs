@@ -30,6 +30,7 @@ fn reduction(amount: u32) -> Modifier {
 }
 fn ward(id: &str, amount: u32) -> ConditionDef {
     ConditionDef {
+        hallucinating: false,
         id: ConditionId::new(id).unwrap(),
         family: ConditionFamilyId::new("test_ward").unwrap(),
         lifecycle: ConditionLifecycle::Timed,

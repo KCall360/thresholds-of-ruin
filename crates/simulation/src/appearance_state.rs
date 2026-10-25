@@ -34,6 +34,22 @@ pub fn presentation_index(key: AppearanceKey, count: usize) -> Option<usize> {
     if !(1..=MAX_PRESENTATION_CHOICES).contains(&count) {
         return None;
     }
+    presentation_index_in_validated_palette(key, count)
+}
+
+/// Internal selection after immutable palette construction has charged its
+/// complete canonical rows against the retained source-envelope budget. This
+/// does not change the public primitive's independent 4096-choice contract.
+/// No allocation, query RNG, source scan or hierarchical probability change.
+pub(crate) fn presentation_index_in_validated_palette(
+    key: AppearanceKey,
+    count: usize,
+) -> Option<usize> {
+    let count = u64::try_from(count).ok().filter(|count| *count != 0)?;
+    usize::try_from(appearance_hash(key) % count).ok()
+}
+
+fn appearance_hash(key: AppearanceKey) -> u64 {
     let mut mixed = 0x6170706561727631;
     for operand in [
         key.seed,
@@ -44,7 +60,7 @@ pub fn presentation_index(key: AppearanceKey, count: usize) -> Option<usize> {
     ] {
         mixed = mix(mixed ^ operand);
     }
-    Some((mixed % count as u64) as usize)
+    mixed
 }
 
 fn mix(mut value: u64) -> u64 {
@@ -65,6 +81,26 @@ mod tests {
             subject: 2,
             channel: AppearanceChannel::Creature,
             phase: 0,
+        }
+    }
+
+    #[test]
+    fn validated_palette_selector_preserves_old_recipe_without_old_public_cap() {
+        for count in [1, 2, 26, 75, MAX_PRESENTATION_CHOICES] {
+            assert_eq!(
+                presentation_index_in_validated_palette(key(), count),
+                presentation_index(key(), count),
+            );
+        }
+        assert_eq!(presentation_index_in_validated_palette(key(), 0), None);
+        for count in [MAX_PRESENTATION_CHOICES + 1, 8192, 100_000] {
+            assert_eq!(presentation_index(key(), count), None);
+            let index = presentation_index_in_validated_palette(key(), count).unwrap();
+            assert!(index < count);
+            assert_eq!(
+                Some(index),
+                presentation_index_in_validated_palette(key(), count)
+            );
         }
     }
 

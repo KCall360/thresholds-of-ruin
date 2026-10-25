@@ -412,6 +412,7 @@ fn respec_exact_supplies_reuse_known_touch_ground_facts_and_one_cost_ordinal() {
     let pages = opened();
     let mut view = crate::test_support::observation();
     let ground = GroundItemView {
+        presentation: None,
         reachable: false,
         supply_reachable: true,
         position: view.position,

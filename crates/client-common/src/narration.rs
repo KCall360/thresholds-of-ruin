@@ -614,7 +614,13 @@ pub fn action(event: &Event, view: &Observation) -> String {
             .find(|i| i.item.id == *result)
             .map_or_else(
                 || "You drop the item.".into(),
-                |i| format!("You drop {} x {}.", quantity, label(&i.item.name, "item")),
+                |i| {
+                    format!(
+                        "You drop {} x {}.",
+                        quantity,
+                        label(crate::items::ground_name(i), "item")
+                    )
+                },
             ),
         Event::DoorChanged { door, open } => {
             let name = view
@@ -785,6 +791,7 @@ mod tests {
     fn doors_require_consecutive_sight_and_do_not_name_a_cause() {
         let mut before = observation();
         before.visible_cells.push(CellView {
+            object_presentation: None,
             lit: true,
             key: "seen".into(),
             position: Position { x: 1, y: 0, z: 0 },

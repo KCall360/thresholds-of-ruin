@@ -345,6 +345,7 @@ fn pending_recovery_survives_repeated_growth_equipment_and_condition_folds_until
     let contextual_condition = crate::content_ids::ConditionId::new("pending_quiet_clock").unwrap();
     let mut game = context_growth_game_with_rules(|document| {
         document.conditions.push(ConditionDef {
+            hallucinating: false,
             id: contextual_condition.clone(),
             family: crate::content_ids::ConditionFamilyId::new("pending_quiet_clock").unwrap(),
             lifecycle: ConditionLifecycle::Timed,
@@ -366,6 +367,7 @@ fn pending_recovery_survives_repeated_growth_equipment_and_condition_folds_until
             capacity: Eviction::Oldest,
         });
         document.conditions.push(ConditionDef {
+            hallucinating: false,
             id: condition.clone(),
             family: crate::content_ids::ConditionFamilyId::new("ordinary_clock_change").unwrap(),
             lifecycle: ConditionLifecycle::Timed,
