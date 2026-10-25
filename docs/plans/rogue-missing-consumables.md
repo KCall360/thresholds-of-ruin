@@ -599,6 +599,16 @@ privacy. Actual owner/follower Update and delta comparisons remain required;
 this corrected comparison still awaits runtime. These are focused receipts,
 not quick, push, full, native or hosted qualification.
 
+The final focused rerun passes all ten selected cases, including the actual
+paired owner/followed completion Update and delta privacy comparison and its
+normalization negative controls. This closes the one fixture failure from the
+preceding 1,074-pass server run; it is not a new full-server or full-gate run.
+Together with 1,827 core passes, 280 protocol integration passes, 144 common-client
+passes, three actual process passes and the genuine 50/51 wire recording, this
+supports the bounded internal Drain reconstruction checkpoint. Live weighted
+stock remains unchanged;
+Cancellation, Missile and remaining batch work and broader gates remain pending.
+
 ### Proposed next batch: physical first contact
 
 Cancellation and Magic Missile should reuse the existing paid ray planner and

@@ -40,15 +40,16 @@ became unavailable. Strict device aim, captured self-device planning and
 knowledge-gated common/Text/ASCII prompts now have fresh focused coverage. Paid
 self-device execution passes Nothing and nonempty-effect Service contrasts,
 including charge/retry and paused identification with source-deleted reopen. The
-pure room/passage predicate and appearance selector also pass their fresh tests;
-neither is integrated into gameplay yet. Fresh Service checks cover OnUse observer
-isolation and storage rollback; actual Text/process checks and genuine current
-save/wire fixtures pass. Remaining consumables, spatial integration and broader
-qualification are unfinished. The opt-in Nothing catalog definition now has pure
-content coverage, a freshly validated package certificate, and imported-catalog
-Text/Service acceptance including source-deleted reopen. The complete-pool test
-fixture is corrected and the fresh full server library passes. Live pools are unchanged. Historical local results do not qualify
-this tree.
+room/passage foundation and appearance selector pass their fresh tests; the
+appearance selector remains a primitive, not integrated hallucination gameplay.
+Fresh Service checks cover OnUse observer isolation and storage rollback;
+actual Text/process checks and genuine current save/wire fixtures pass.
+Remaining consumables and broader qualification are unfinished. The opt-in
+Nothing catalog definition now has pure content coverage, a freshly validated
+package certificate, and imported-catalog Text/Service acceptance including
+source-deleted reopen. The complete-pool test fixture is corrected and the
+fresh full server library passes. Live pools are unchanged. Historical local
+results do not qualify this tree.
 A bounded row-run registry, pooled Game/history retention and canonical authored/
 generated source verification now support the opt-in Room Light device. Focused
 Service coverage includes paid room illumination, passage/maze no-ops, connected
@@ -62,6 +63,13 @@ Focused spatial/effect tests and the full server library pass; remaining
 consumables and broader verification gates are still unfinished.
 The [spatial integration plan](plans/rogue-spatial-registry-reconstruction.md) owns
 exact acceptance scope and remaining qualification.
+The opt-in Drain Life wand now has paid weak-refusal, empty-target and exact
+wide/odd-Health behavior, canonical asymmetric room/passage targeting, frozen
+contact, privacy and source-free persistence coverage. Three actual imported
+processes and genuine refusal recording pass. The final ten-case focused rerun
+closes the privacy fixture failure from the preceding 1,074-pass server run;
+this is not a new full-suite or gate result. Remaining consumables and final
+verification remain unfinished.
 Existing live item distributions remain unchanged and polymorph remains separate.
 
 Characters retain last-seen terrain, doors, stairs and item appearances in the

@@ -200,13 +200,13 @@ the old rate and leaves the target at normal speed until a later application.
 These effects do not change the Speed attribute. Utility use does not identify
 the wand. Status screens show these persistent effects as “until removed”.
 
-## Opt-in Nothing and Light wands
+## Opt-in Nothing, Light and Drain Life wands
 
-The catalog also contains `rogue.wand_nothing` and `rogue.wand_light` for scenario
-selection. Neither is added to the existing eight-wand live floor pool or starting
-kits; ordinary Rogue floor stock is unchanged.
+The catalog also contains `rogue.wand_nothing`, `rogue.wand_light` and
+`rogue.wand_drain_life` for scenario selection. None is added to the existing
+eight-wand live floor pool or starting kits; ordinary Rogue floor stock is unchanged.
 
-Both use the normal paid Zap action. An unidentified wand still asks for a
+All three use the normal paid Zap action. An unidentified wand still asks for a
 direction, so its hidden self-targeting behavior is not disclosed by the prompt.
 Once its type is known, the client can use it on yourself without that direction
 step. Remaining charges are not revealed merely by identifying the type.
@@ -220,6 +220,23 @@ region or every neighboring room. A passage or generated maze is a paid no-op;
 an already-lit room also spends the charge without further change. Loading remote
 surfaces does not give frozen creatures turns. Illumination persists in the save;
 it is not a map-reveal, creature-detection or targeting command.
+
+Drain Life starts with 3–7 charges and never identifies itself automatically.
+With less than 2 current HP, the attempt spends ordinary action time but refuses
+without spending a charge. With no eligible other creatures it spends a charge
+without changing HP. Otherwise, for starting HP `H` and `N` eligible recipients,
+you retain `floor(H/2)` HP and each recipient loses `floor(floor(H/2)/N)` HP.
+The recipient set is fixed before applying losses; fractional loss rounds down,
+including to zero, without suppressing attack-contact consequences.
+
+Eligibility follows canonical topology, not sight, direction or distance. Room
+interiors reach their own room; a doorway retains those room targets and adds
+its affiliated passage-interior targets, not other rooms' doorways. A passage
+interior reaches that passage and its affiliated doorways, not neighboring room
+interiors. Direct Health loss bypasses armor and resistance. Living creatures
+with Health are eligible regardless of allegiance; bodies without Health and
+the caster are excluded. Frozen recipients do not receive turns. Hidden recipients and their count are not listed in ordinary output.
+Paid results and current Health persist through source-free checkpoint reopening.
 
 ## Flight and linked holds
 
