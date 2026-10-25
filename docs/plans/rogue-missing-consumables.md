@@ -1151,3 +1151,9 @@ old materialized baseline remains locally owned, with only its wrapper
 construction adapted; pointer, payload-storage and semantic assertions remain.
 The fresh green library/integration rerun is pending. Pointer identity establishes
 storage reuse, not measured runtime or release-performance parity.
+
+The reference-only green ASCII implementation passes both library controls and
+all 150 integration tests with checked inputs unchanged. This closes the causal
+original-storage regression while retaining the independent materialized-output
+oracle. The result proves the exercised borrowing and rendering contracts, not
+historical timing, broad performance parity, native presentation or final gates.

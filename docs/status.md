@@ -95,6 +95,12 @@ checks all 44 live certificates. Genuine wire recording contains 52 generated
 client examples and 55 captured server frames, including torch lit/off states.
 Native ASCII, independent 3D, final verification/release/hosted gates and broader
 performance qualification remain pending. No live weighted stock or kit changes.
+ASCII retained-map rendering now borrows original appearance payloads through
+compact occurrence-position references instead of cloning remembered payloads.
+A causal storage-pointer regression and independent materialized-output oracle
+pass, alongside all 150 ASCII integration tests. This establishes the exercised
+storage/rendering contract, not timing or broader performance parity; native and
+final verification obligations remain separate.
 Existing live item distributions remain unchanged and polymorph remains separate.
 
 Characters retain last-seen terrain, doors, stairs and item appearances in the
