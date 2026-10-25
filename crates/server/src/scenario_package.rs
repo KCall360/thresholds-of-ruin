@@ -3369,6 +3369,7 @@ impl Package {
                 &item.consumable,
                 &item.readable,
                 &item.device,
+                &item.held_light,
                 &item.edible,
                 &item.supply,
             );
@@ -3421,6 +3422,23 @@ impl Package {
                             projectile.as_ref(),
                         ),
                         "Invalid equipment generation definition",
+                    )?;
+                }
+                if let Some(policy) = a.held_light {
+                    policy.compile()?;
+                    require(
+                        a.class == ItemClass::Tool
+                            && !a.stackable
+                            && a.equipment.as_ref().is_some_and(|equipment| {
+                                equipment.slot == "held_light" && equipment.attack.is_none()
+                            })
+                            && a.device.is_none()
+                            && a.consumable.is_none()
+                            && a.readable.is_none()
+                            && a.edible.is_none()
+                            && a.projectile.is_none()
+                            && a.supply.is_none(),
+                        "Invalid held light capability combination",
                     )?;
                 }
                 if let Some(equipment) = &a.equipment {

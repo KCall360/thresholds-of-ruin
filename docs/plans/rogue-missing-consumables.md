@@ -979,3 +979,42 @@ restored. The task's local graphical deferral authority does not waive any
 non-graphical, debug/release or hosted-native requirement. That narrow tooling
 restoration belongs to a separate qualification checkpoint, not another torch
 compilation cycle.
+
+The fresh server executable records three passes and four failures in the torch
+filter; its full-library collection records 1,090 passes and the same four
+failures. One is a genuine source-admission gap: package checking did not enforce
+held-light/equipment compatibility, although runtime item validation did. The
+source correction uses the shared capability bounds and includes held-light
+policy in identity consistency, with identical-alias and independent policy
+mismatch controls. The other failures expose fixture premises: default streaming
+radii activated/loaded remote regions before ignition, and resolving one owner's
+Wait did not advance time while a second owner remained ready. The corrected
+clock witness waits through that lawful peer and retains exact fuel/time and
+map-work assertions without resetting counters between commands.
+
+The cold optical witness separately uses supported, unusual authored geometry:
+a nine-cell body with an offset eye and radius-sixteen torch, not an ordinary
+humanoid or default-radius claim. The remote actor retains the normal narrow figure body. Initial Unbuilt and absent-world positives remain mandatory,
+followed by actual illumination, load-only preparation and frozen actor checks.
+No production eye-scene dependency or activation policy is changed to obtain
+those premises. The ordinary linked-loaded optical contrast remains separate.
+These grouped corrections and the genuine current saved-scenario fixture await
+fresh qualification; the full server result is not a clean pass or final gate.
+
+Raise Level's remaining policy choices are design-only and unresolved. For a
+current ordinary threshold P=100 and held XP X:
+
+| Current obligation | Approved invariant or unresolved choice |
+| --- | --- |
+| Applicable, X=30 | Fund shortfall 70 through ordinary growth, never append HD directly. |
+| Drained, X=30 | Use the same current-price shortfall 70 and restore the ordinary source/ordinal first, not a fresh tier. |
+| Already funded but blocked, X=120 | Shortfall zero; retain 120, never overwrite it with 100 or fund a later tier. |
+| Underfunded; future growth disabled, next source/Health seed absent, or actual HD row cap reached | Potion credit 70 and explicit banking versus credit zero while blocked remains unresolved. Ordinary XP banking alone does not decide it. |
+| Underfunded selected/authored source; growth obstructed or resulting fold exceeds limits/conflicts | Preserve obstruction and ordinal. Potion credit 70 versus zero remains unresolved. |
+
+The existing seams are `growth_pending`,
+`apply_held_growth_with_recovery_context`, and earned-growth `projected_tier` and
+`award`; the last has a u32 operand over a u64 ledger. No speculative dry-run or
+new authority selects the unresolved policy. Blocked-dose payment and discovery
+also require an explicit decision where no approved contract already exists.
+Pinned Rogue has no corresponding TOR gate model; no implementation is selected.

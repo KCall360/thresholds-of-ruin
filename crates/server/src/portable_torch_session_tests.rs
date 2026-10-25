@@ -377,6 +377,43 @@ fn portable_torch_source_requires_single_tool_and_real_hand_equipment() {
         .and_then(|package| package.check());
         assert!(result.is_err(), "invalid torch {field}");
     }
+    let mut aliases = original.clone();
+    aliases["archetypes"]["torch"]["identity"] = json!("fixture.shared_torch");
+    aliases["archetypes"]["torch_alias"] = aliases["archetypes"]["torch"].clone();
+    Package::from_parts(
+        serde_json::from_value(aliases.clone()).unwrap(),
+        source.region_defs().unwrap(),
+        &rules,
+    )
+    .unwrap()
+    .check()
+    .unwrap();
+    for (field, value) in [("radius", json!(5)), ("fuel_ticks", json!(999))] {
+        let mut mismatch = aliases.clone();
+        mismatch["archetypes"]["torch_alias"]["held_light"][field] = value;
+        assert!(
+            Package::from_parts(
+                serde_json::from_value(mismatch).unwrap(),
+                source.region_defs().unwrap(),
+                &rules
+            )
+            .and_then(|package| package.check())
+            .is_err(),
+            "identity mismatched {field}"
+        );
+    }
+    let mut mismatch = aliases;
+    mismatch["archetypes"]["torch_alias"]["held_light"] = Value::Null;
+    assert!(
+        Package::from_parts(
+            serde_json::from_value(mismatch).unwrap(),
+            source.region_defs().unwrap(),
+            &rules
+        )
+        .and_then(|package| package.check())
+        .is_err(),
+        "identity mismatched capability presence"
+    );
     let mut regions = source.region_defs().unwrap();
     let mut region = serde_json::to_value(&regions[0]).unwrap();
     region["items"][0]["quantity"] = json!(2);
@@ -404,14 +441,24 @@ fn blind_portal_torch_source(root: &Path, cold_frontier: bool) -> crate::Scenari
     manifest["characters"][0]["creature"]["species"] = json!("blind_figure");
     let mut remote_creature = manifest["characters"][0]["creature"].clone();
     remote_creature["species"] = json!("figure");
+    if cold_frontier {
+        // This is deliberately unusual but lawful authored geometry: the
+        // carrier origin/emitter is eight cells ahead of its eye. Existing
+        // conservative eye dependencies therefore do not preload the far room.
+        manifest["characters"][0]["body"] = json!({
+            "cells":(-8..=0).map(|x| [x,0,0]).collect::<Vec<_>>(),
+            "eye":[-8,0,0], "mass":80
+        });
+    }
+    let origin_x = if cold_frontier { 22 } else { 28 };
     let mut local = serde_json::to_value(&source.region_defs().unwrap()[0]).unwrap();
     local["size"] = json!([32, 5, 2]);
-    local["anchors"]["start"] = json!([28, 2, 0]);
+    local["anchors"]["start"] = json!([origin_x, 2, 0]);
     local["anchors"]["east"] = json!([31, 2, 0]);
     local["portals"] =
         json!([{"at":[31,2,0],"direction":"east","to":"2/west","kind":"portal","height":2}]);
     for item in local["items"].as_array_mut().unwrap() {
-        item["at"] = json!([28, 2, 0]);
+        item["at"] = json!([origin_x, 2, 0]);
     }
     let remote = json!({"id":2,"name":"Unobserved torch dependency","size":[5,5,2],"chamber":true,"lit":false,
         "anchors":{"west":[0,2,0]},
@@ -420,8 +467,8 @@ fn blind_portal_torch_source(root: &Path, cold_frontier: bool) -> crate::Scenari
     });
     let mut regions = vec![serde_json::from_value(local).unwrap()];
     if cold_frontier {
-        // Explicit supported radius override; ordinary default-radius test stays4.
-        manifest["archetypes"]["torch"]["held_light"]["radius"] = json!(8);
+        // Explicit maximum supported radius for this offset-eye fixture only.
+        manifest["archetypes"]["torch"]["held_light"]["radius"] = json!(16);
         let middle = json!({"id":2,"name":"Load-only intermediate","size":[3,5,2],"chamber":true,"lit":false,
             "anchors":{"west":[0,2,0],"east":[2,2,0]},
             "portals":[
@@ -447,7 +494,13 @@ fn blind_portal_torch_source(root: &Path, cold_frontier: bool) -> crate::Scenari
     )
     .unwrap();
     crate::scenario_package::check(root).unwrap();
-    crate::scenario_package::load(root, 42, None, true).unwrap()
+    let mut scenario = crate::scenario_package::load(root, 42, None, true).unwrap();
+    // The witness concerns optical dependencies, not configured portal-hop activation.
+    scenario.streaming = Some(crate::Streaming {
+        active_radius: 0,
+        load_radius: 0,
+    });
+    scenario
 }
 
 #[test]
@@ -603,6 +656,38 @@ fn portable_torch_missing_optical_frontier_is_prepared_load_only_before_receipt(
     let initial = wire.checkpoint();
     assert_eq!(wire.service.engine.region_counts().unwrap().unbuilt, 1);
     assert!(nothing_actor(&initial, ActorId(3)).is_null());
+    let owner = nothing_actor(&initial, OWNER);
+    assert_eq!(owner["location"]["position"], json!({"x":22,"y":2,"z":0}));
+    assert_eq!(owner["body"]["eye"], json!([-8, 0, 0]));
+    assert_eq!(
+        owner["body"]["cells"],
+        json!((-8..=0).map(|x| [x, 0, 0]).collect::<Vec<_>>())
+    );
+    let initial_world = room_light_world(&initial);
+    for x in 14..=22 {
+        assert!(
+            initial_world.walkable(tor_world::Location {
+                region: tor_world::RegionId(1),
+                position: tor_world::Position { x, y: 2, z: 0 }
+            }),
+            "every authored body cell fits the actual initial World"
+        );
+    }
+    let eye = tor_world::Location {
+        region: tor_world::RegionId(1),
+        position: tor_world::Position { x: 14, y: 2, z: 0 },
+    };
+    assert_eq!(
+        initial_world
+            .illuminated_eye_scene_regions(
+                eye,
+                0,
+                u8::try_from(tor_simulation::limits::SIGHT_RANGE).unwrap()
+            )
+            .unwrap(),
+        vec![tor_world::RegionId(1), tor_world::RegionId(2)],
+        "historical conservative eye dependencies stop before the optical frontier"
+    );
     let far = tor_world::Location {
         region: tor_world::RegionId(3),
         position: tor_world::Position { x: 0, y: 2, z: 0 },
@@ -648,9 +733,9 @@ fn portable_torch_missing_optical_frontier_is_prepared_load_only_before_receipt(
     let world = room_light_world(&after);
     let mut cursor = tor_world::Location {
         region: tor_world::RegionId(1),
-        position: tor_world::Position { x: 28, y: 2, z: 0 },
+        position: tor_world::Position { x: 22, y: 2, z: 0 },
     };
-    for _ in 0..7 {
+    for _ in 0..13 {
         cursor = world
             .physics_neighbor(cursor, tor_world::Direction::East)
             .unwrap()
@@ -668,7 +753,17 @@ fn portable_torch_missing_optical_frontier_is_prepared_load_only_before_receipt(
         .unwrap()
         .contains(&json!(3)));
     assert_eq!(after["shared"]["lifecycles"][index]["stamps"]["3"], 0);
-    let light = torch_view(&wire.snapshot(OWNER), torch);
+    let owner = wire.snapshot(OWNER);
+    assert!(
+        owner
+            .state
+            .observation
+            .visible_cells
+            .iter()
+            .all(|cell| (-9..=1).contains(&cell.position.x) && cell.position.y.abs() <= 1),
+        "offset body's tactile disclosure remains local despite actual remote light"
+    );
+    let light = torch_view(&owner, torch);
     assert!(light.lit);
     assert_eq!(
         light.remaining, 1000,
@@ -741,9 +836,20 @@ fn portable_torch_engine_fuel_only_wait_skips_map_work_and_matches_conservative_
     assert!(before.lit);
     let seeded = wire.service.engine.test_conservative_map_reacquisition();
     assert!(seeded.observed_cells > 0);
+    let before_tick = wire.checkpoint()["game"]["tick"].as_u64().unwrap();
     tor_simulation::reset_map_work_counts();
     wire.act("steady-fuel-wait", Action::Wait);
+    // Immediate Wait completes the owner's action before the other external
+    // actor has supplied its same-tick decision. Drive that legal peer once.
+    assert_eq!(wire.service.engine.next_actor(), Some(OTHER));
+    let peer_wait = wire.request(OTHER, Action::Wait);
+    ack(wire.send(OTHER, "steady-fuel-peer-wait", peer_wait.clone()));
+    wire.finish(OTHER, "steady-fuel-peer-wait", &peer_wait);
     let optimized = tor_simulation::map_work_counts();
+    assert_eq!(
+        wire.checkpoint()["game"]["tick"].as_u64().unwrap(),
+        before_tick + 100
+    );
     assert_eq!(optimized.observed_cells, 0);
     assert_eq!(optimized.placement_proposals, 0);
     assert_eq!(optimized.appearance_changes, 0);
