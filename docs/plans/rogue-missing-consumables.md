@@ -1511,3 +1511,61 @@ known epoch fixtures and two stale production Rogue certificate checks. No other
 failure was observed. The corrected Service rerun, final core fixture rerun,
 current application build, genuine certificates and Growth process/wire capture
 remain pending; this checkpoint is not full-suite or verification-gate success.
+
+### Growth applications and genuine artifact checkpoint
+
+The five ordinary application binaries built successfully from the frozen
+context-correction source, with unchanged inputs; all five hashes were verified
+and their exact executables preserved before further integration-test builds.
+The current compiler validated and checked all 44 live scenario packages. Only
+the Rogue certificate changed. Both previously stale certificate controls now
+pass on the same existing server executable without a relink; this is two focused
+reruns, not a new full-server green run.
+
+All three actual Growth process cases pass against those applications: ordinary
+Adventure Gain Strength reaches the combined cap with truthful permanent-potion
+label and source-free reopening; ordinary Adventure Raise funds successive
+blocked levels and preserves them through reopening; a separate privileged,
+materialized self-ability caller captures actual acquisition and positive credit.
+The latter is not a claim that potion Drink Exposure emits combat diagnostics.
+Its actual credit is small and independently corroborated by XP state; core and
+protocol controls separately cover full-width numeric boundaries.
+
+The genuine recorder produced 52 client schema examples and 59 captured server
+frames, including both Growth diagnostics. The saved-scenario writer remained
+byte-identical, so no saved fixture was edited. Final corrected core and server
+fixture runs and affected protocol/common/ASCII regression remain pending. No
+quick/push/full, native, release, hosted-CI or performance qualification is implied.
+
+### Further Hallucination design decisions (not implemented)
+
+Only genuinely visual
+objects, monsters, intact guise objects and unknown real stair artwork substitute;
+plain terrain remains unchanged. Existing genuine stair knowledge from either
+lawful visual or nonvisual evidence is preserved. Sampled false stairs never
+create navigation or recognition. Prior saved true stair facts without cosmetic
+substitution can retain recognition; first hallucinated visual acquisition keeps
+its cosmetic sample even if that sample resembles stairs. Ordinary current
+nonvisual/cured acquisition may refresh it, never a global stale-memory rewrite.
+
+The canonical cosmetic palette will be immutable Content data reconstructed from
+the retained validated package through the same normal/source-free path, not from
+loaded actors or item population and not a new save pool. Empty categories use
+existing neutral item/creature presentation; creature cosmetic seed is constant,
+not true subject appearance state. All true display siblings must be replaced or
+cleared together. The public 4096-choice selection primitive remains unchanged;
+a separate internal selector shares its exact hash recipe for a validated larger
+palette, with source-envelope construction charging required before materializing
+rows. No truncation or pool-first probability change is authorized. Production
+inventory is small (75 object choices including cosmetic stairs, 26 creatures),
+but legal shared appearance pools can exceed 4096 aggregate choices, so that pure
+primitive cap cannot become a new source-admission restriction.
+
+Pinned Hallucination duration is uniform 808..892 base turns: P_LSD uses
+SEEDURATION 850 and spread(850)=808+rnd(85), expressible as ordinary 1d85+807.
+Cadence uses only an existing condition generation plus phase/period/remaining
+shift. A conservative u128 elapsed-phase bound against actor settlement time
+rejects impossible records without claiming historical authenticity. Expiry wins
+simultaneous shift and bounds the next executable timer; no phantom post-expiry
+shift is required. These details await integrated paid/peer-driven, frozen,
+source-free, strict, privacy, map and client runtime qualification.
