@@ -544,3 +544,18 @@ forbids Health modifiers. The correction explicitly authors a Timed condition,
 retaining the same wide operands and unchanged admission limits. It is not a
 capacity increase. Restoring the protected area implementation and this fixture
 correction form one green cohort; gameplay acceptance is still pending.
+
+The first green collection passes nine Drain cases and all 1,815 prior core
+cases. Three remaining cases distinguish two fixture errors from one real
+executor defect. A fixture Health Set overrides additive wide operands; its
+correction removes only that Set and checks the seeded contributions and
+unchanged injury-preserving maximum update explicitly. Normal action admission
+also rejects exhausted identity reserves before a supposed late failure, so
+that rollback witness is correctly labeled direct transactional effect execution,
+with a separate genuine paid successful-kill control. Neither guard is relaxed.
+The actual generic ability batch returned its pure prepublication outcome rather
+than the canonical live changed result; the correction returns the published
+receipt outcome while preserving other batch metadata. Item Exposure remains
+anonymous, and ordinary granted abilities retain their original attribution.
+These corrections and an authentic refused-item recording hook join one next
+cohort; no success is inferred before runtime.

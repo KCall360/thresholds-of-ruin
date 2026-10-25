@@ -112,11 +112,55 @@ fn fixture_with_options(
                 },
             });
         }
+        if wide {
+            // The reused unit_subject source contributes exactly +22 Health.
+            let added: i64 = species
+                .modifiers
+                .iter()
+                .filter_map(|modifier| match modifier.op {
+                    crate::rules::ModifierOp::Add {
+                        stat: crate::rules::Stat::Health,
+                        value,
+                    } => Some(value),
+                    _ => None,
+                })
+                .sum();
+            assert_eq!(added, 22);
+            // Health Set overrides, rather than adds to, every source. The wide
+            // fixture uses ordinary sampled birth Health plus bounded additions.
+            species.modifiers.retain(|modifier| {
+                !matches!(
+                    modifier.op,
+                    crate::rules::ModifierOp::Set {
+                        stat: crate::rules::Stat::Health,
+                        ..
+                    }
+                )
+            });
+        }
         if !keep_ability {
             species.modifiers.retain(|m|!matches!(&m.op,crate::rules::ModifierOp::GrantAbility{ability:id} if id==&ability.id));
         }
     });
-    assert_eq!(game.health(ActorId(1)).unwrap().0, health as u64);
+    if wide {
+        let creature = game.creature(ActorId(1)).unwrap();
+        let expected = creature
+            .derived()
+            .health_contributions
+            .iter()
+            .map(|entry| u64::from(entry.health))
+            .sum::<u64>()
+            + 22
+            + u64::from(
+                creature
+                    .derived()
+                    .attributes
+                    .get(crate::attributes::Attribute::Strength),
+            );
+        assert_eq!(game.health(ActorId(1)).unwrap(), (expected, expected));
+    } else {
+        assert_eq!(game.health(ActorId(1)).unwrap().0, health as u64);
+    }
     assert!(targets <= 3);
     if targets > 1 {
         let build = game.creature(ActorId(1)).unwrap().build().clone();
@@ -423,23 +467,12 @@ fn drain_life_snapshots_denominator_before_death_and_rolls_back_late_cleanup_fai
         .iter()
         .any(|(_, item)| item.spec.class == crate::ItemClass::Corpse));
     game.next_item_id = u64::MAX;
-    let intention = admit(&mut game, item);
     let before = game.clone();
-    // The exact admitted executor transaction, before its outer queue retirement.
-    // Failure must roll back payment/time/effects; retiring the queued request is
-    // separately owned by execute_next_intention, not falsely treated as rollback.
+    // The successful control above is an actual paid device completion. This
+    // failure isolates the direct effect transaction after staged life loss;
+    // ordinary action admission correctly reserves corpse identities earlier.
     assert_eq!(
-        game.act_with_context(
-            ActorId(1),
-            crate::Action::Zap {
-                item,
-                aim: crate::DeviceAim::Direction {
-                    direction: StepDirection::West
-                }
-            },
-            Some(intention),
-            None
-        ),
+        game.apply_effects(ActorId(1), &[crate::rules::Effect::DrainLife]),
         Err(crate::GameError::IdentityExhausted)
     );
     assert_eq!(game, before);
@@ -478,6 +511,24 @@ fn drain_life_resets_actual_damage_activity_once_for_more_than_two_recipients() 
 fn drain_life_valid_condition_sources_preserve_health_and_loss_beyond_u32() {
     let (mut game, item) =
         fixture_with_options(11, 1, crate::ItemDiscovery::Never, 1000, false, true, false);
+    let base = {
+        let creature = game.creature(ActorId(1)).unwrap();
+        creature
+            .derived()
+            .health_contributions
+            .iter()
+            .map(|entry| u64::from(entry.health))
+            .sum::<u64>()
+            + 22
+            + u64::from(
+                creature
+                    .derived()
+                    .attributes
+                    .get(crate::attributes::Attribute::Strength),
+            )
+    };
+    let expected = base + 68 * 128 * 1_000_000_u64;
+    assert!(expected / 2 > u64::from(u32::MAX));
     for target in [ActorId(1), ActorId(2)] {
         game.apply(Outcome {
             actor: target,
@@ -498,11 +549,11 @@ fn drain_life_valid_condition_sources_preserve_health_and_loss_beyond_u32() {
                 .collect(),
         })
         .unwrap();
-        assert_eq!(game.health(target).unwrap().0, 8_704_000_011);
+        assert_eq!(game.health(target).unwrap(), (expected, expected));
     }
     complete(&mut game, item);
-    assert_eq!(game.health(ActorId(1)).unwrap().0, 4_352_000_005);
-    assert_eq!(game.health(ActorId(2)).unwrap().0, 4_352_000_006);
+    assert_eq!(game.health(ActorId(1)).unwrap().0, expected / 2);
+    assert_eq!(game.health(ActorId(2)).unwrap().0, expected - expected / 2);
     assert!(game.combat_events().iter().any(|event|matches!(event,
         crate::combat::CombatEvent::Resolved{outcome,..} if outcome.effects.iter().any(|effect|
             matches!(effect,ResolvedEffect::DirectHealthLoss{amount} if *amount>u64::from(u32::MAX))))));

@@ -746,7 +746,10 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
             self.assertTrue(all(row["device_activation"] == "direction" for row in interactions(after)["inventory"] if row["zappable"]))
             self.assertIsNone(charges(after, wand["id"]))
             self.assertFalse(after["state"]["wizard_game"])
-
+        messages = [json.loads(line).get("message") for line in probe.transcript if line.startswith("{")]
+        self.drain_refusal_sample = next(message for message in reversed(messages)
+            if message and message["type"] == "snapshot"
+            and message["snapshot"]["state"]["observation"]["interactions"]["refused"])
 
 
     @non_graphical

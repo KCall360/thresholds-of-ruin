@@ -720,5 +720,44 @@ class SelfDeviceRecordingContracts(unittest.TestCase):
                 self.assertEqual(samples, {"existing": {"type": "palette"}})
 
 
+class DrainRefusalRecordingContracts(unittest.TestCase):
+    def case(self, failure=None):
+        source = {"type": "snapshot", "request_id": "exact-drain-refusal", "snapshot": {
+            "state": {"wizard_game": False, "observation": {"interactions": {
+                "completed": [], "refused": [{"action": {"type": "zap", "item": "opaque-item", "aim": {"kind": "direction", "direction": "east"}}, "reason": "too_weak"}]}}}}}
+        case, trace = recording_case(failure)
+        original = type(case).runTest
+        def record(subject):
+            subject.drain_refusal_sample = copy.deepcopy(source)
+            original(subject)
+        type(case).runTest = record
+        return case, trace, source
+
+    def test_factory_selects_existing_non_graphical_actual_text_case(self):
+        case = record_wire_samples.drain_refusal_recording_case()
+        self.assertEqual(case.id(), "test_magic_items_process.MagicItemProcesses."
+                         "test_imported_drain_weak_text_attempt_spends_time_not_charge_or_identity")
+        self.assertFalse(is_graphical_test(case))
+
+    def test_drain_refusal_snapshot_is_preserved_only_after_cleanup(self):
+        case, trace, source = self.case()
+        samples = {}
+        with patch("record_wire_samples.drain_refusal_recording_case", return_value=case):
+            record_wire_samples.Recorder().record_drain_refusal(samples)
+        self.assertEqual(samples, {"zz.drain_refusal": source})
+        self.assertEqual(trace[-1], "class_cleanup")
+        self.assertIsNot(samples["zz.drain_refusal"], case.drain_refusal_sample)
+
+    def test_drain_refusal_failed_cleanup_does_not_publish_partial_sample(self):
+        for failure in ("cleanup", "class_cleanup"):
+            with self.subTest(failure=failure):
+                case, _, _ = self.case(failure)
+                samples = {"existing": {"type": "palette"}}
+                with patch("record_wire_samples.drain_refusal_recording_case", return_value=case):
+                    with self.assertRaises(AssertionError):
+                        record_wire_samples.Recorder().record_drain_refusal(samples)
+                self.assertEqual(samples, {"existing": {"type": "palette"}})
+
+
 if __name__ == "__main__":
     unittest.main()

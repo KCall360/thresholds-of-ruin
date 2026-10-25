@@ -430,6 +430,10 @@ impl Game {
                 disclosure_origin,
             )?
         };
+        // Live effects can refine a pure placeholder (for example room light
+        // or Drain). Downstream receipt checks and rider accounting must use
+        // the committed outcome, while preserving branch/check budget metadata.
+        result.outcome = self.published_resolution(receipt)?.clone();
         Ok((result, receipt))
     }
     #[allow(clippy::too_many_arguments)]

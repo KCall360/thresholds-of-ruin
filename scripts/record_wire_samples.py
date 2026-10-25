@@ -71,6 +71,12 @@ def self_device_recording_case():
     return MagicItemProcesses("test_text_nothing_unknown_direction_and_identified_self_skip")
 
 
+def drain_refusal_recording_case():
+    """Reuse actual imported Drain Text refusal; never synthesize wire facts."""
+    from test_magic_items_process import MagicItemProcesses
+    return MagicItemProcesses("test_imported_drain_weak_text_attempt_spends_time_not_charge_or_identity")
+
+
 def discovery_recording_case():
     """Reuse Text examination/opening and source-free checkpoint acceptance."""
     from test_discovery_process import DiscoveryProcesses
@@ -235,6 +241,19 @@ class Recorder(ProcessTestCase):
         self.assertTrue(any(row["device_activation"] == "self_target" for row in rows),
                         "capture the actual known-self device affordance")
         server_samples["zz.self_device"] = sample
+
+    def record_drain_refusal(self, server_samples):
+        sample = run_recording_case(drain_refusal_recording_case(), "drain_refusal_sample")
+        self.assertEqual(sample["type"], "snapshot")
+        state = sample["snapshot"]["state"]
+        self.assertFalse(state["wizard_game"])
+        interactions = state["observation"]["interactions"]
+        self.assertTrue(interactions["refused"], "capture a real nonempty paid refusal")
+        self.assertFalse(interactions["completed"], "refusal is not successful completion")
+        for refusal in interactions["refused"]:
+            self.assertEqual(refusal["reason"], "too_weak")
+            self.assertEqual(refusal["action"]["type"], "zap")
+        server_samples["zz.drain_refusal"] = sample
 
     def record_scare_crumble(self, server_samples):
         sample = run_recording_case(scare_pickup_recording_case(), "crumble_sample")
@@ -640,6 +659,7 @@ class Recorder(ProcessTestCase):
         self.record_nutrition(server_samples)
         self.record_magic_items(server_samples)
         self.record_self_device(server_samples)
+        self.record_drain_refusal(server_samples)
         self.record_personal_conditions(server_samples)
         self.record_persistent_conditions(server_samples)
         self.record_amulet_escape(server_samples)
