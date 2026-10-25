@@ -24,6 +24,10 @@ impl DiagnosticOutput {
         mut fields: serde_json::Value,
         state: &tor_client_common::ClientState,
     ) -> serde_json::Value {
+        // This is the last admitted observation boundary, not the possibly
+        // later readiness/control cursor printed alongside it. Chart queries
+        // must echo this exact common-client authority.
+        fields["observation_base"] = serde_json::json!(state.observation_base());
         // Background transport is still emitted verbatim. Only the repeated
         // derived snapshot is omitted, and the absence is explicit. Every
         // observation/lifecycle update, ready result and error stays complete.
@@ -389,6 +393,7 @@ mod tests {
         serde_json::json!({
             "type":"response", "state":state.state(), "branch":state.branch(),
             "cursor":state.cursor(), "readiness":state.readiness(),
+            "observation_base":state.observation_base(),
             "input_context":state.input_context(), "history":state.history(),
             "intentions":state.intentions(), "travel":state.travel(),
             "has_control":state.has_control(), "role":"player", "synchronized":true,
@@ -397,6 +402,42 @@ mod tests {
             "palette":tor_client_common::Palette::default(),
             "message":{"fixture":{"memory":"Retain nested fields too"}}, "error":null
         })
+    }
+
+    #[test]
+    fn ready_observation_base_does_not_follow_a_readiness_only_cursor() {
+        let mut state = diagnostic_state(1);
+        let base = state.observation_base();
+        let mut readiness = state.readiness().clone();
+        readiness.revision += 1;
+        let mut cursor = state.cursor();
+        cursor.sequence += 1;
+        state
+            .apply(StreamUpdate {
+                context: state.context().clone(),
+                actor: state.snapshot().actor,
+                branch: state.branch().clone(),
+                cursor,
+                body: UpdateBody::Readiness { readiness },
+            })
+            .unwrap();
+        assert_eq!(state.observation_base(), base);
+        assert_ne!(state.cursor(), base.cursor);
+        for compact_background in [false, true] {
+            let mut fields = retained_diagnostic_fields(&state);
+            fields["type"] = "ready".into();
+            fields["observation_base"] = serde_json::Value::Null;
+            let actual = DiagnosticOutput {
+                omit_memory: false,
+                compact_background,
+            }
+            .project(fields, &state);
+            assert_eq!(
+                actual["observation_base"],
+                serde_json::to_value(base).unwrap()
+            );
+            assert_eq!(actual["cursor"], serde_json::to_value(cursor).unwrap());
+        }
     }
 
     #[test]

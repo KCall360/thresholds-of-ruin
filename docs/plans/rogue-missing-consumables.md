@@ -1736,9 +1736,14 @@ labels independent of the Hallucination roster. The world, simulation and server
 all-target compilation preflight passes, including their new test bodies. Runtime
 qualification is still pending. The grouped consumer integration owns the required
 current-format bump and genuine certificate/save/wire refresh; existing artifacts
-are not evidence for these new shapes. Two neutral primitive assertion-sensitivity
-runs rejected deliberately swapped rotation composition and duplicate-occurrence
-loss; those mutations were removed, and this is not a historical first-red claim.
+are not evidence for these new shapes. The duplicate-occurrence assertion-sensitivity run rejected its mutation.
+The original rotation-composition sensitivity attempt was later invalidated by a
+bad baseline oracle; its failure is not valid sensitivity evidence. The corrected
+literal oracle is independently derived from World's declared AXES and physical
+seam anchors, not copied from the implementation result. An isolated exact-module
+native harness passes all 19 tests and rejects the deliberately swapped
+composition with exactly one failure. Production projection is unchanged; this
+is neither a whole-core pass nor a historical first-red claim.
 
 ### Detection integration checkpoint (2026-10-25, compile-only)
 
@@ -1791,3 +1796,24 @@ migration. Genuine current certificates/save/wire samples still require producti
 regeneration. The 43 ordinary scenario headers are migrated here; the menagerie
 header and 3D consumer changes remain in a separate unapplied compatibility patch.
 The final 44-scenario/stacked-consumer gate is not waived.
+
+
+### First combined native regression and corrections
+
+The first full core run executed 2,031 tests: 2,028 passed and three failed, none
+ignored. One new oracle confused rotation8 with rotation9; the corrected signed
+basis/seam derivation is independently reviewed and now mutation-sensitive.
+One older retention test incorrectly applied the snapshot257 bound to general
+historical references; it now exercises the snapshot-specific path while larger
+byte-bounded histories retain explicit positive and negative boundaries.
+The remaining failure exposed a real stale serialization witness: an oversized
+snapshot list returned before revoking a previously successful decoded witness.
+Revocation now precedes every outer early return, without reviving invalid capture
+state, with repeated-refusal/rebind and actual archive-capacity regressions.
+A corrected full core run is still required.
+
+Food Detection's authored source is corrected to the agreed Rogue-style scroll
+(ordinary Read, positive-only discovery), not a potion. Stock and kits are unchanged;
+the independent tested Hallucination vectors remain unchanged. The integrated
+current source/process-helper/recorder/provenance cohort passes 147 pure tests.
+Actual process/native-window execution and genuine current artifacts remain pending.

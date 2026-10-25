@@ -587,3 +587,301 @@ fn paid_magic_history_encoder_rollback(exact_retry: bool) {
         "accepted receipt retry cannot acquire or consume twice"
     );
 }
+
+fn aggregate_history_source(root: &Path, streaming: bool) -> crate::Scenario {
+    let base = if streaming {
+        crate::scenario_package::load(
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/streaming-corridor"),
+            42,
+            None,
+            false,
+        )
+        .unwrap()
+    } else {
+        chart_source(&root.join("seed"), "detect_magic")
+    };
+    let package = base.package.as_ref().unwrap();
+    let mut manifest = serde_json::to_value(&package.manifest).unwrap();
+    manifest["archetypes"] = json!({
+        "magic_dose":{"class":"potion","name":"potion of magic detection","identity":"fixture.magic",
+            "magical":true,"stackable":true,"appearance_pool":"fixture.magic",
+            "consumable":{"discovery":"self_effect","effects":[{"kind":"detect_magic"}]}},
+        "food_scroll":{"class":"scroll","name":"scroll of food detection","identity":"fixture.food",
+            "magical":true,"stackable":true,"appearance_pool":"fixture.food",
+            "readable":{"discovery":"self_effect","effects":[{"kind":"detect_food"}]}},
+        "mapping_scroll":{"class":"scroll","name":"scroll of magic mapping","identity":"fixture.mapping",
+            "magical":true,"stackable":true,"appearance_pool":"fixture.mapping",
+            "readable":{"discovery":"on_use","effects":[{"kind":"map_topology"}]}},
+        "ration":{"class":"food","name":"ration"},
+        "sigil":{"class":"misc","name":"magic sigil","magical":true}
+    });
+    manifest["appearance_pools"] = json!({
+        "fixture.magic":{"appearances":["brass potion"]},
+        "fixture.food":{"appearances":["scroll titled FOOD"]},
+        "fixture.mapping":{"appearances":["scroll titled MAP"]}
+    });
+    let mut regions = package.region_defs().unwrap();
+    let mut scopes = serde_json::Map::new();
+    for region in &mut regions {
+        let mut value = serde_json::to_value(&*region).unwrap();
+        let id = value["id"].as_u64().unwrap();
+        value["actors"] = json!([]);
+        let carried_at = if streaming { [2, 1, 0] } else { [1, 2, 0] };
+        value["items"] = if id == 1 {
+            json!([
+                {"id":10,"at":carried_at,"archetype":"magic_dose","quantity":3,"carried_by":1},
+                {"id":11,"at":carried_at,"archetype":"food_scroll","quantity":4,"carried_by":1},
+                {"id":12,"at":carried_at,"archetype":"mapping_scroll","quantity":5,"carried_by":1}
+            ])
+        } else {
+            json!([])
+        };
+        if id == if streaming { 4 } else { 1 } {
+            value["items"].as_array_mut().unwrap().extend([
+                json!({"id":40,"at":[15,1,0],"archetype":"ration"}),
+                json!({"id":41,"at":[15,1,0],"archetype":"sigil"}),
+            ]);
+        }
+        let size = value["size"].as_array().unwrap();
+        let max: Vec<_> = size.iter().map(|v| v.as_i64().unwrap() - 1).collect();
+        scopes.insert(format!("hall-{id}"), json!({
+            "members":[id],"rooms":{(id.to_string()):[{"region":id,"min":[0,0,0],"max":max}]},
+            "passages":[],"doorways":[],"mapping":{"room_frames":[{"room":id,"region":id,"up":"up"}]}
+        }));
+        *region = serde_json::from_value(value).unwrap();
+    }
+    manifest["spatial_scopes"] = Value::Object(scopes);
+    let rules = &package.rules_source;
+    let checked =
+        Package::from_parts(serde_json::from_value(manifest).unwrap(), regions, rules).unwrap();
+    checked.check().unwrap();
+    checked.build(42, false).unwrap();
+    let destination = root.join("complete");
+    crate::scenario_package::write_package(
+        &destination,
+        &checked.manifest,
+        &checked.region_defs().unwrap(),
+        rules,
+    )
+    .unwrap();
+    crate::scenario_package::check(&destination).unwrap();
+    let mut result = crate::scenario_package::load(&destination, 42, None, true).unwrap();
+    if streaming {
+        result.streaming = Some(crate::Streaming {
+            active_radius: 0,
+            load_radius: 0,
+        });
+    }
+    result
+}
+
+fn aggregate_history_items(wire: &mut Wire) -> [ItemTarget; 3] {
+    let inventory = wire.snapshot(OWNER).state.observation.inventory.clone();
+    [3, 4, 5].map(|quantity| {
+        inventory
+            .iter()
+            .find(|i| i.quantity == quantity)
+            .unwrap()
+            .id
+    })
+}
+fn acquire_three_histories(wire: &mut Wire, items: [ItemTarget; 3]) {
+    wire.act("aggregate-food", Action::Read { item: items[1] });
+    wire.act("aggregate-magic", Action::Drink { item: items[0] });
+    wire.act("aggregate-mapping", Action::Read { item: items[2] });
+    let saved = wire.checkpoint();
+    let owners = saved["shared"]["chart_history"]["owners"]
+        [saved["game"]["chart_history"].as_u64().unwrap() as usize]
+        .as_array()
+        .unwrap();
+    let owner = owners.iter().find(|o| o["actor"] == 1).unwrap();
+    for kind in ["food", "magic", "mapping"] {
+        let slot = &owner["slots"][kind];
+        assert!(
+            slot["latest"].is_u64(),
+            "real paid {kind} producer must retain a positive root"
+        );
+        assert_eq!(slot["attempt"]["status"]["kind"], "positive");
+    }
+}
+
+#[test]
+fn paid_combined_food_magic_mapping_roots_use_whole_checkpoint_exact_ceiling() {
+    let temp = tempfile::tempdir().unwrap();
+    let scenario = aggregate_history_source(&temp.path().join("source"), false);
+    let mut wire = Wire::for_actors(
+        Engine::open_with_policy(
+            temp.path().join("combined.db"),
+            scenario,
+            crate::SavePolicy {
+                checkpoint_interval: 0,
+                ..Default::default()
+            },
+        )
+        .unwrap(),
+        [OWNER],
+    );
+    let items = aggregate_history_items(&mut wire);
+    acquire_three_histories(&mut wire, items);
+    wire.service.engine.flush().unwrap();
+    let old = wire.checkpoint();
+    let old_roots = old["shared"]["chart_history"]["roots"].as_array().unwrap();
+    assert!(old_roots.iter().any(|r| r["kind"] == "food"));
+    assert!(old_roots.iter().any(|r| r["kind"] == "magic"));
+    assert!(old_roots.iter().any(|r| r["kind"] == "mapping"));
+    let request = wire.request(OWNER, Action::Drink { item: items[0] });
+    ack(wire.send(OWNER, "aggregate-new-magic", request));
+    let before = wire.checkpoint();
+    let state = wire.service.engine.state(OWNER).unwrap();
+    let accepted = wire.service.engine.save_status().accepted_sequence;
+    let exact = {
+        let guard = crate::storage::HistoryAdmissionTestLimit::new(0);
+        assert_eq!(
+            wire.service
+                .engine
+                .execute_next_intention()
+                .unwrap_err()
+                .code,
+            ErrorCode::StorageFailure
+        );
+        guard.required_bytes().unwrap()
+    };
+    assert_eq!(wire.checkpoint(), before);
+    {
+        let guard = crate::storage::HistoryAdmissionTestLimit::new(exact - 1);
+        assert_eq!(
+            wire.service
+                .engine
+                .execute_next_intention()
+                .unwrap_err()
+                .code,
+            ErrorCode::StorageFailure
+        );
+        assert_eq!(guard.required_bytes(), Some(exact));
+    }
+    assert_eq!(wire.checkpoint(), before);
+    assert_eq!(wire.service.engine.state(OWNER).unwrap(), state);
+    assert_eq!(
+        wire.service.engine.save_status().accepted_sequence,
+        accepted
+    );
+    {
+        let guard = crate::storage::HistoryAdmissionTestLimit::new(exact);
+        assert!(matches!(wire.service.step(), Step::Progress));
+        assert_eq!(guard.required_bytes(), Some(exact));
+    }
+    assert_eq!(
+        wire.service.engine.save_status().accepted_sequence,
+        accepted + 1
+    );
+    let after = wire.checkpoint();
+    assert_eq!(nothing_items(&after)["10"]["quantity"], 1);
+    let roots = after["shared"]["chart_history"]["roots"]
+        .as_array()
+        .unwrap();
+    for old_root in old_roots {
+        assert!(roots.iter().any(|root| ["kind","acquired_tick","scope","components","points"]
+            .iter().all(|field| root[*field] == old_root[*field])),
+            "retained boundaries preserve the old acquisition; pool reference indices may be renumbered");
+    }
+    assert!(roots.iter().filter(|r| r["kind"] == "magic").count() >= 2);
+    assert!(
+        exact
+            > serde_json::to_vec(&after["shared"]["chart_history"])
+                .unwrap()
+                .len(),
+        "admission is the actual entire checkpoint, not a new standalone chart ceiling"
+    );
+}
+
+#[test]
+fn paid_history_guard_checks_every_unwritten_detached_row_before_publication() {
+    let temp = tempfile::tempdir().unwrap();
+    let scenario = aggregate_history_source(&temp.path().join("source"), true);
+    // Keep the real writer pending using its ordinary validated policy, without
+    // races against a blocked SQLite transaction or replacing the storage path.
+    let hour = std::time::Duration::from_secs(3600);
+    let mut wire = Wire::for_actors(
+        Engine::open_with_policy(
+            temp.path().join("pending.db"),
+            scenario,
+            crate::SavePolicy {
+                checkpoint_interval: 0,
+                target_interval: hour,
+                max_unsaved_age: hour,
+                idle_interval: hour,
+                ..Default::default()
+            },
+        )
+        .unwrap(),
+        [OWNER],
+    );
+    let items = aggregate_history_items(&mut wire);
+    for step in 0..76 {
+        wire.act(
+            &format!("pending-east-{step}"),
+            Action::Move {
+                direction: Direction::East,
+            },
+        );
+    }
+    assert_eq!(wire.service.engine.region_counts().unwrap().detached, 2);
+    acquire_three_histories(&mut wire, items);
+    let captured = crate::engine::Checkpoint::capture(&wire.service.engine);
+    assert_eq!(
+        captured.records.len(),
+        2,
+        "both detached records remain genuine unwritten rows"
+    );
+    let lengths: Vec<_> = captured
+        .records
+        .values()
+        .map(|r| serde_json::to_vec(&**r).unwrap().len())
+        .collect();
+    let exact = *lengths.iter().max().unwrap();
+    assert!(exact > 1);
+    assert_eq!(wire.service.engine.save_status().durable_sequence, 0);
+    let request = wire.request(OWNER, Action::Drink { item: items[0] });
+    ack(wire.send(OWNER, "pending-new-magic", request));
+    let before = wire.checkpoint();
+    let state = wire.service.engine.state(OWNER).unwrap();
+    let accepted = wire.service.engine.save_status().accepted_sequence;
+    {
+        let guard = crate::storage::RegionAdmissionTestLimit::new(exact - 1);
+        assert_eq!(
+            wire.service
+                .engine
+                .execute_next_intention()
+                .unwrap_err()
+                .code,
+            ErrorCode::StorageFailure
+        );
+        assert_eq!(guard.measurements().1, exact);
+    }
+    assert_eq!(
+        wire.checkpoint(),
+        before,
+        "cost, knowledge, attempts and roots are atomic with pending-row admission"
+    );
+    assert_eq!(wire.service.engine.state(OWNER).unwrap(), state);
+    assert_eq!(
+        wire.service.engine.save_status().accepted_sequence,
+        accepted
+    );
+    assert_eq!(nothing_items(&before)["10"]["quantity"], 2);
+    {
+        let guard = crate::storage::RegionAdmissionTestLimit::new(exact);
+        assert!(matches!(wire.service.step(), Step::Progress));
+        assert_eq!(
+            guard.measurements(),
+            (2, exact),
+            "every separate row passes its exact existing payload ceiling"
+        );
+    }
+    assert_eq!(
+        wire.service.engine.save_status().accepted_sequence,
+        accepted + 1
+    );
+    assert_eq!(nothing_items(&wire.checkpoint())["10"]["quantity"], 1);
+    wire.service.engine.flush().unwrap();
+}

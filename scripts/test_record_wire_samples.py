@@ -50,6 +50,7 @@ def recording_case(failure=None):
             self.artifact = copy.deepcopy(ESCAPE_SAMPLE)
             self.escape_sample = self.artifact
             self.server_samples = {"zz.amulet_escape": self.artifact}
+            self.recorded_client_samples = []
             step("body")
 
         def tearDown(self):
@@ -297,6 +298,187 @@ class CompleteRecordingContracts(unittest.TestCase):
                     record_wire_samples.record_samples(output=output)
             self.assertEqual(output.read_text(encoding="utf-8"), "prior validated samples")
             self.assertEqual(list(Path(directory).iterdir()), [output])
+
+
+def detection_recording_inputs():
+    """Synthetic validator inputs only, never published as process artifacts."""
+    from test_detection_process_package import public_pages
+
+    def exchange(kind, count, suffix):
+        query, pages = public_pages(count, kind)
+        query["context"]["stream"] += suffix
+        query["chart"] += suffix
+        requests, replies, cursor = [], [], None
+        for index, page in enumerate(pages):
+            page["context"] = copy.deepcopy(query["context"])
+            page["chart"] = query["chart"]
+            current = {**copy.deepcopy(query), "cursor": cursor}
+            request_id = kind + suffix + str(index)
+            requests.append({"type": "request", "request_id": request_id,
+                             "request": {"type": "chart", "query": current}})
+            replies.append({"type": "chart_page", "request_id": request_id,
+                            "context": copy.deepcopy(query["context"]), "page": page})
+            cursor = page["next"]
+        return {"queries": requests, "pages": replies}
+
+    original, restored = exchange("magic", 1, "-original"), exchange("magic", 1, "-restored")
+    slots, roots = {}, []
+    for index, kind in enumerate(("food", "magic", "mapping")):
+        slots[kind] = {"latest": index, "attempt": {"attempted_at": 200,
+            "status": {"kind": "positive" if kind == "mapping" else "empty"}}}
+        roots.append({"kind": kind, "points": [{"mapping": {"kind": "wall_face"}
+                                                      if kind == "mapping" else None}]})
+    book = {"game": {"chart_history": 0}, "shared": {"chart_history": {
+        "owners": [[{"actor": 1, "slots": slots}]], "roots": roots}}}
+    samples = {"query": original["queries"][0], "page": original["pages"][0],
+               "restored_query": restored["queries"][0], "restored_page": restored["pages"][0],
+               "mapping": exchange("mapping", 380, "-original"),
+               "restored_mapping": exchange("mapping", 380, "-restored"),
+               "checkpoint_payload": b"unit-only-decoder-input-not-a-save"}
+    return samples, book
+
+
+def detection_case(samples, failure=None):
+    case, trace = recording_case(failure)
+    original = type(case).runTest
+
+    def run(subject):
+        subject.detection_samples = copy.deepcopy(samples)
+        original(subject)
+
+    type(case).runTest = run
+    return case, trace
+
+
+class DetectionRecordingContracts(unittest.TestCase):
+    def test_factory_selects_real_source_free_paid_history_case(self):
+        case = record_wire_samples.detection_recording_case()
+        self.assertEqual(case.id(), "test_magic_items_process.MagicItemProcesses."
+                         "test_imported_detection_history_empty_retention_source_free_spectator")
+        self.assertFalse(is_graphical_test(case))
+
+    def test_raw_queries_pages_and_writer_payload_publish_only_after_cleanup(self):
+        samples, book = detection_recording_inputs()
+        case, trace = detection_case(samples)
+        recorder = record_wire_samples.Recorder()
+        published = {"existing": {"type": "palette"}}
+        with patch("record_wire_samples.detection_recording_case", return_value=case), \
+                patch("checkpoint_payload.decode_checkpoint_payload", return_value=json.dumps(book)) as decoder:
+            recorder.record_detection(published)
+        decoder.assert_called_once_with(samples["checkpoint_payload"])
+        self.assertEqual(trace[-1], "class_cleanup")
+        self.assertEqual(published["chart_page"], samples["page"])
+        self.assertEqual(published["zz.detection_restored"], samples["restored_page"])
+        self.assertEqual(published["zz.mapping.000"], samples["mapping"]["pages"][0])
+        self.assertEqual(recorder.recorded_client_samples,
+                         [samples["query"], samples["restored_query"],
+                          *samples["mapping"]["queries"], *samples["restored_mapping"]["queries"]])
+        self.assertEqual(recorder.detection_checkpoint_payload, samples["checkpoint_payload"])
+        self.assertIsNot(published["chart_page"], case.detection_samples["page"])
+
+    def test_every_lifecycle_failure_blocks_all_detection_publication(self):
+        for failure in ("class_setup", "setup", "body", "teardown", "cleanup", "class_teardown", "class_cleanup"):
+            with self.subTest(failure=failure):
+                samples, _ = detection_recording_inputs()
+                case, _ = detection_case(samples, failure)
+                published = {"old": {"type": "palette"}}
+                recorder = record_wire_samples.Recorder()
+                recorder.recorded_client_samples = [{"old": "query"}]
+                with patch("record_wire_samples.detection_recording_case", return_value=case):
+                    with self.assertRaises(AssertionError):
+                        recorder.record_detection(published)
+                self.assertEqual(published, {"old": {"type": "palette"}})
+                self.assertEqual(recorder.recorded_client_samples, [{"old": "query"}])
+                self.assertFalse(hasattr(recorder, "detection_checkpoint_payload"))
+
+    def test_corrupt_pages_correlation_or_saved_book_never_partially_publish(self):
+        mutations = (
+            lambda s, b: s["page"].update(request_id="wrong"),
+            lambda s, b: s["restored_page"]["page"].update(acquired_at="101"),
+            lambda s, b: s["mapping"]["queries"][0]["request"]["query"].update(cursor="0"),
+            lambda s, b: s["mapping"]["pages"][0]["page"].update(next="381"),
+            lambda s, b: s["mapping"]["pages"].clear(),
+            lambda s, b: s["mapping"]["pages"][0]["page"]["records"][1]["mark"].update(fact={"kind": "wall_face", "normal": [0, 0, 1]}),
+            lambda s, b: s["restored_page"]["page"]["records"][1].update(item="private"),
+            lambda s, b: b["shared"]["chart_history"]["owners"][0][0]["slots"]["food"].update(latest=None),
+            lambda s, b: b["shared"]["chart_history"]["owners"][0][0]["slots"]["magic"]["attempt"].update(status={"kind": "positive"}),
+            lambda s, b: b["shared"]["chart_history"]["roots"][2]["points"][0].update(mapping=None),
+            lambda s, b: s.update(checkpoint_payload="not production bytes"),
+        )
+        for mutation in mutations:
+            with self.subTest(mutation=mutation):
+                samples, book = detection_recording_inputs()
+                mutation(samples, book)
+                case, _ = detection_case(samples)
+                recorder = record_wire_samples.Recorder()
+                published = {"old": {"type": "palette"}}
+                with patch("record_wire_samples.detection_recording_case", return_value=case), \
+                        patch("checkpoint_payload.decode_checkpoint_payload", return_value=json.dumps(book)):
+                    with self.assertRaises(AssertionError):
+                        recorder.record_detection(published)
+                self.assertEqual(published, {"old": {"type": "palette"}})
+                self.assertFalse(hasattr(recorder, "recorded_client_samples"))
+                self.assertFalse(hasattr(recorder, "detection_checkpoint_payload"))
+
+    def test_atomic_wire_publication_includes_actual_client_queries_unchanged(self):
+        samples, _ = detection_recording_inputs()
+        case, trace = recording_case()
+        original = type(case).runTest
+
+        def run(subject):
+            original(subject)
+            subject.recorded_client_samples = [copy.deepcopy(samples["query"])]
+
+        type(case).runTest = run
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "wire-unit-only.json"
+            with patch("record_wire_samples.Recorder", return_value=case), patch("builtins.print"):
+                record_wire_samples.record_samples(output=output)
+            document = json.loads(output.read_text())
+        self.assertEqual(trace[-1], "class_cleanup")
+        self.assertEqual(document["client"], [*record_wire_samples.CLIENT, samples["query"]])
+
+
+    def test_checkpoint_export_preserves_decoded_raw_and_hash_provenance_after_cleanup(self):
+        import hashlib
+        raw, decoded = b"unit-only-raw-envelope", b'{"unit":"decoded writer bytes"}'
+        case, trace = recording_case()
+        original = type(case).runTest
+
+        def run(subject):
+            original(subject)
+            subject.detection_checkpoint_payload = raw
+
+        type(case).runTest = run
+        with tempfile.TemporaryDirectory() as directory:
+            target, output = Path(directory) / "current-save.json", Path(directory) / "wire.json"
+            with patch("record_wire_samples.Recorder", return_value=case), patch("builtins.print"), \
+                    patch("checkpoint_payload.decode_checkpoint_payload", return_value=decoded) as decoder:
+                record_wire_samples.record_samples(output=output, detection_checkpoint=target)
+            decoder.assert_called_once_with(raw)
+            self.assertEqual(trace[-1], "class_cleanup")
+            self.assertEqual(target.read_bytes(), decoded)
+            self.assertEqual(Path(str(target) + ".torc").read_bytes(), raw)
+            provenance = json.loads(Path(str(target) + ".provenance.json").read_bytes())
+            self.assertEqual(provenance["raw_sha256"], hashlib.sha256(raw).hexdigest())
+            self.assertEqual(provenance["decoded_sha256"], hashlib.sha256(decoded).hexdigest())
+            self.assertEqual((provenance["raw_bytes"], provenance["decoded_bytes"]), (len(raw), len(decoded)))
+
+    def test_checkpoint_export_lifecycle_or_decode_failure_preserves_every_prior_file(self):
+        for failure in ("cleanup", "class_cleanup", "decode"):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
+                case, _ = recording_case(None if failure == "decode" else failure)
+                case.detection_checkpoint_payload = b"unit-only-raw-envelope"
+                target, output = Path(directory) / "current-save.json", Path(directory) / "wire.json"
+                outputs = [target, Path(str(target) + ".torc"), Path(str(target) + ".provenance.json"), output]
+                for path in outputs:
+                    path.write_bytes(b"prior validated artifact")
+                with patch("record_wire_samples.Recorder", return_value=case), \
+                        patch("checkpoint_payload.decode_checkpoint_payload", side_effect=ValueError("invalid actual envelope")):
+                    with self.assertRaises((AssertionError, ValueError)):
+                        record_wire_samples.record_samples(output=output, detection_checkpoint=target)
+                for path in outputs:
+                    self.assertEqual(path.read_bytes(), b"prior validated artifact")
 
 
 ANONYMOUS_SAMPLE = {

@@ -104,6 +104,13 @@ impl PoolState {
     }
 }
 impl PoolState {
+    /// Outer admission checks must revoke earlier serialization authority too.
+    /// Failure may occur before the codec receives a replacement root iterator.
+    pub(crate) fn clear_serialization_witness(&mut self) {
+        if let Self::Decoded { serialization, .. } = self {
+            *serialization = None;
+        }
+    }
     pub(crate) fn prepare_serialization(
         &mut self,
         roots: impl ExactSizeIterator<Item = usize>,

@@ -48,10 +48,10 @@ class RogueHallucinationContent(unittest.TestCase):
         self.assertEqual(catalog["appearance_pools"]["rogue.potions"]["appearances"], [
             "amber potion", "smoky potion", "violet potion", "azure potion", "crimson potion",
             "silver potion", "pearl potion", "teal potion", "ochre potion", "indigo potion", "copper potion",
-            "chartreuse potion", "saffron potion", "cerulean potion", "magenta potion"])
+            "chartreuse potion", "saffron potion", "cerulean potion"])
         identities = [name for name, item in catalog["items"].items()
                       if item.get("appearance_pool") == "rogue.potions"]
-        self.assertEqual(len(identities), 15)
+        self.assertEqual(len(identities), 14)
 
     def test_live_stock_and_starter_kits_remain_unchanged(self):
         manifest = source("scenario.toml")

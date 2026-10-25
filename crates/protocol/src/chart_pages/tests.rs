@@ -612,7 +612,7 @@ fn conservative_envelope_and_records_cover_actual_serde_at_all_scalar_extremes()
         serde_json::to_vec(&value).unwrap().len() <= value.page.encoded_reply_size_bound().unwrap()
     );
     assert_eq!(value.page.records[0].encoded_size_bound(), Ok(2372));
-    assert!(CHART_ENVELOPE_BYTES + 2372 + 1 <= MAX_CHART_PAGE_BYTES);
+    const { assert!(CHART_ENVELOPE_BYTES + 2372 < MAX_CHART_PAGE_BYTES) };
     for record in [
         component(u64::MAX, ChartAlignment::Inconsistent),
         value.page.records[0].clone(),
@@ -634,7 +634,7 @@ fn conservative_envelope_and_records_cover_actual_serde_at_all_scalar_extremes()
         "total_components":max,"total_records":max,"start":max,"records":[],"next":max}});
     assert_eq!(serde_json::to_vec(&skeleton).unwrap().len(), 744);
     assert_eq!(744 + 5 * (6 * 128) + 128, 4712);
-    assert!(4712 <= CHART_ENVELOPE_BYTES);
+    const { assert!(4712 <= CHART_ENVELOPE_BYTES) };
     let keys: Vec<_> = serde_json::to_value(&value).unwrap()["page"]
         .as_object()
         .unwrap()
@@ -1076,7 +1076,7 @@ fn mapping_wall_orientation_tracks_component_alignment_and_delivery_bound_withou
     }
     assert_eq!(MAX_CHART_TRANSFER_RECORDS, MAX_CHART_TRANSFER_BYTES / 97);
     assert_eq!(CHART_ROW_BYTES + CHART_MAPPING_MARK_BYTES, 352);
-    assert!(CHART_ROW_BYTES + CHART_MAPPING_MARK_BYTES < 2372);
+    const { assert!(CHART_ROW_BYTES + CHART_MAPPING_MARK_BYTES < 2372) };
 }
 
 #[test]

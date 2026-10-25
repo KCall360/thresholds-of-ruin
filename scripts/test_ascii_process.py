@@ -304,5 +304,172 @@ class AsciiHudPickupProcesses(ProcessTestCase):
                          {"type": "take", "item": 10, "quantity": None})
 
 
+class DetectionChartAsciiProcesses(ProcessTestCase):
+    """Actual native presentation; automation input is not an OS-key claim."""
+    graphical = True
+
+    def chart_snapshot(self, owner):
+        frame = self.request(owner, {"type": "snapshot"})
+        self.assertIsNone(frame["error"])
+        return frame
+
+    def chart_settle(self, owner, peer):
+        for _ in range(24):
+            current = self.chart_snapshot(owner)
+            observed = current["state"]["observation"]
+            combat = observed["combat"]
+            if (observed["ready"] and not current["intentions"]
+                    and combat["preparation_remaining"] is None
+                    and int(combat["recovery_remaining"]) == 0):
+                return current
+            partner = self.chart_snapshot(peer)
+            if partner["readiness"]["admission"] and partner["state"]["observation"]["ready"]:
+                self.assertIsNone(self.act(peer, {"type": "wait"})["error"])
+        self.fail("Paid detection did not settle at the fixture decision boundary: " + repr(current))
+
+    def chart_completed_frame(self, window, frame, phrase):
+        def complete(value):
+            return (value["window_open"] and not value["busy"]
+                    and value["screen"]["charts"]
+                    and phrase in "\n".join(value.get("chart_rows") or [])
+                    and "Loading the complete chart" not in "\n".join(value.get("chart_rows") or []))
+        return frame if complete(frame) else self.ascii_frame(window, complete)
+
+    def chart_capture(self, path):
+        from process_harness import read_capture
+        data = read_capture(path)
+        magic, dimensions, maximum, pixels = data.split(b"\n", 3)
+        self.assertEqual((magic, maximum), (b"P6", b"255"))
+        width, height = map(int, dimensions.split())
+        self.assertGreater(width, 0)
+        self.assertGreater(height, 0)
+        self.assertEqual(len(pixels), width * height * 3)
+        self.assertGreater(len(set(pixels)), 8, "capture must contain rendered native content")
+        return data
+
+    def chart_wire_pages(self, relay, kind):
+        import detection_process_package as detection
+        with relay.chart_lock:
+            requests = [json.loads(json.dumps(value)) for value in relay.chart_requests]
+            replies = [json.loads(json.dumps(value)) for value in relay.chart_replies
+                       if value["page"]["kind"] == kind]
+        self.assertFalse(relay.errors, relay.errors)
+        self.assertGreaterEqual(len(replies), 2, "complete native UI must hydrate genuine wire continuations")
+        identities = {reply["request_id"] for reply in replies}
+        requests = [request for request in requests if request["request_id"] in identities]
+        self.assertEqual(len(requests), len(replies))
+        requested = next(request["request"]["query"] for request in requests
+                         if request["request"]["query"]["cursor"] is None)
+        pages = [reply["page"] for reply in replies]
+        records = detection.validate_pages(pages, requested)
+        by_id = {request["request_id"]: request["request"]["query"] for request in requests}
+        for reply in replies:
+            query = by_id[reply["request_id"]]
+            page = reply["page"]
+            self.assertEqual(query["cursor"], None if page["start"] == "0" else page["start"])
+            for key in ("context", "branch", "base", "chart"):
+                self.assertEqual(query[key], page[key])
+        return [record for record in records if record["record"] == "row"]
+
+    def test_source_free_food_and_mapping_chart_modal_pages_capture_and_never_submit_actions(self):
+        import detection_process_package as detection
+        package = detection.prepare(self, paging=True, mapping=True)
+        server = self.server("--checkpoint-interval", 1, scenario=package)
+        owner, initial = self.client(actor=1)
+        peer, _ = self.client(actor=2)
+        doses = detection.initial_doses(self, initial)
+        before = self.chart_snapshot(owner)
+        self.assertIsNone(self.act(owner, {"type": "read", "item": doses["food"]})["error"])
+        detected = self.chart_settle(owner, peer)
+        self.assertEqual(int(detected["state"]["observation"]["tick"])
+                         - int(before["state"]["observation"]["tick"]), 100)
+        self.assertEqual(detected["state"]["observation"]["ground_items"], [],
+                         "513 distinct food cells must be genuinely outside ordinary sight")
+        food_scroll, = [item for item in detected["state"]["observation"]["inventory"]
+                        if item["id"] == doses["food"]]
+        self.assertEqual((food_scroll["class"], food_scroll["quantity"], food_scroll["identified"]),
+                         ("scroll", "4", True), "Food detection is an ordinary paid Read")
+        scroll, = [item for item in detected["state"]["observation"]["inventory"]
+                   if item["class"] == "scroll" and item["quantity"] == "2"]
+        self.assertFalse(scroll["identified"])
+        self.assertIsNone(self.act(owner, {"type": "read", "item": scroll["id"]})["error"])
+        mapped = self.chart_settle(owner, peer)
+        self.assertEqual(int(mapped["state"]["observation"]["tick"])
+                         - int(detected["state"]["observation"]["tick"]), 100)
+        remaining, = [item for item in mapped["state"]["observation"]["inventory"]
+                      if item["id"] == scroll["id"]]
+        self.assertEqual((remaining["quantity"], remaining["identified"]), ("1", True))
+        for kind in ("food", "mapping"):
+            summary = detection.summary(mapped, kind)
+            self.assertEqual((summary["status"], summary["mode"]), ("available", "historical"))
+        saved = detection.raw_checkpoint(self, owner)
+        owner.stop()
+        peer.stop()
+        server.stop(save=False)
+        shutil.rmtree(package)
+        self.assertFalse(package.exists(), "native witness must reopen without authored package")
+        self.server("--checkpoint-interval", 1, scenario=ROOT / "scenarios/two-room", seed=None)
+
+        relay = detection.ChartCaptureRelay(self.address)
+        self.addCleanup(relay.close)
+        capture = self.directory / "detection-chart-modal.ppm"
+        window = self.launch("tor-client-ascii", ["--connect", relay.address, "--actor", "1",
+                             "--automation", "--capture", capture], token=SPECTATOR_TOKEN)
+        initial = self.ascii_frame(window, lambda frame: frame.get("state") and not frame["busy"])
+        self.assertTrue(initial["window_open"])
+        self.assertEqual(initial["role"], "spectator")
+        self.assertFalse(initial["has_control"])
+        baseline = self.chart_capture(capture)
+        opened = self.key(window, "charts")
+        self.assertTrue(opened["screen"]["charts"])
+        self.assertEqual(opened["state"], initial["state"])
+        self.key(window, "down")  # canonical Monsters, Food, Magic, Mapping order
+        food = self.chart_completed_frame(window, self.key(window, "enter"), "Occurrences 1–20 of 513")
+        self.assertIn("Food detection: historical, available", "\n".join(food["chart_rows"]))
+        self.assertEqual(sum(line.startswith("Panel 1 at") for line in food["chart_rows"]), 20)
+        self.assertNotEqual(self.chart_capture(capture), baseline, "native modal must change actual pixels")
+        food_rows = self.chart_wire_pages(relay, "food")
+        self.assertEqual(len(food_rows), 513)
+        self.assertEqual(len({tuple(row["position"]) for row in food_rows}), 513)
+        later = self.key(window, "recent_history")
+        self.assertIn("Occurrences 21–40 of 513", "\n".join(later["chart_rows"]))
+        previous = self.key(window, "older_history")
+        self.assertIn("Occurrences 1–20 of 513", "\n".join(previous["chart_rows"]))
+        for key in ("descend", "ascend", "attack", "pickup", "wait", "right"):
+            ignored = self.key(window, key)
+            self.assertTrue(ignored["screen"]["charts"])
+            self.assertEqual(ignored["state"], initial["state"])
+            self.assertEqual(ignored["history"], initial["history"])
+            self.assertEqual(ignored["map_tiles"], initial["map_tiles"])
+
+        self.key(window, "tab")
+        for _ in range(3):
+            self.key(window, "up")
+        for _ in range(3):
+            self.key(window, "down")
+        mapping = self.chart_completed_frame(window, self.key(window, "enter"), "Occurrences 1–20 of 556")
+        text = "\n".join(mapping["chart_rows"])
+        self.assertIn("Mapping: historical, available", text)
+        self.assertIn("wall face (normal", text)
+        self.assertEqual(mapping["state"], initial["state"])
+        self.assertEqual(mapping["map_tiles"], initial["map_tiles"], "Mapping cannot discover ordinary map cells")
+        self.assertNotEqual(self.chart_capture(capture), baseline)
+        mapping_rows = self.chart_wire_pages(relay, "mapping")
+        self.assertEqual(len(mapping_rows), 556, "130x9 room: both heights of four side walls only")
+        self.assertTrue(all(row["mark"]["fact"]["kind"] == "wall_face"
+                            and row["mark"]["fact"]["normal"][2] == 0 for row in mapping_rows))
+        closed = self.key(window, "escape")
+        self.assertFalse(closed["screen"]["charts"])
+        self.assertIsNone(closed["chart_rows"])
+        self.assertTrue(closed["connected"] and closed["window_open"])
+        self.assertEqual(closed["state"], initial["state"])
+        inventory = self.key(window, "inventory")
+        self.assertTrue(inventory["screen"]["inventory"], "ordinary local controls return after chart cancellation")
+        self.assertEqual(inventory["state"], initial["state"])
+        self.assertEqual(detection.raw_checkpoint(self), saved,
+                         "native chart requests, paging, blocked action keys and closing are pure reads")
+
+
+
 if __name__ == "__main__":
     unittest.main()

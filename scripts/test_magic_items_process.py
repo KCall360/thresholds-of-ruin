@@ -22,6 +22,7 @@ from torch_catalog_package import prepare as prepare_imported_torch
 from haste_catalog_package import prepare as prepare_imported_haste
 from growth_catalog_package import prepare as prepare_imported_growth
 from hallucination_catalog_package import prepare as prepare_imported_hallucination
+import detection_process_package as detection
 from hallucination_package import assert_sample as assert_hallucination_sample, initial_items as hallucination_initial_items
 from utility_potions_package import condition as hallucination_condition, deadline as hallucination_deadline, inventory_item as hallucination_item
 
@@ -1095,6 +1096,299 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
                 self.assertEqual(actor_creature(saved)["earned_progress"]["held_xp"], policy["threshold_base"])
             self.growth_samples[kind] = sample
         self.assertNotIn('"type":"combat_diagnostics"', "".join(owner.transcript).replace(" ", ""))
+
+    def detection_client(self, token=None, *, observe=False):
+        relay = detection.ChartCaptureRelay(self.address)
+        self.addCleanup(relay.close)
+        upstream, self.address = self.address, relay.address
+        try:
+            client, frame = self.client(*(() if token is None else (token,)), observe=observe, actor=1)
+        finally:
+            self.address = upstream
+        return client, frame, relay
+
+    def detection_pages(self, client, kind):
+        frame = self.snapshot(client)
+        requested = detection.query(frame, kind)
+        start = len(client.transcript)
+        ready = self.request(client, {"type": "chart", "query": requested})
+        self.assertIsNone(ready["error"])
+        while True:
+            messages = [json.loads(line).get("message") for line in client.transcript[start:]
+                        if line.startswith("{")]
+            errors = [message for message in messages if message and message["type"] == "error"]
+            self.assertEqual(errors, [])
+            pages = [message["page"] for message in messages if message and message["type"] == "chart_page"
+                     and message["page"]["chart"] == requested["chart"]]
+            if pages and pages[-1]["next"] is None:
+                detection.validate_pages(pages, requested)
+                return frame, requested, pages
+            # Connection owns every continuation. Never issue a competing manual
+            # next query through the same managed client transport.
+            self.frame(client, lambda value: (value.get("message") or {}).get("type")
+                       in ("chart_page", "error"))
+
+    def detection_memory(self, client, frame):
+        if not frame["map_hydration"]["complete"]:
+            frame = self.frame(client, lambda value: any(value.get("map_hydration", {}).get(key)
+                for key in ("complete", "failed", "limited")))
+        self.assertTrue(frame["map_hydration"]["complete"], frame["map_hydration"])
+        self.assertFalse(frame["map_hydration"]["failed"] or frame["map_hydration"]["limited"])
+        return sorted(json.dumps({key: value for key, value in cell.items()
+                                  if key not in ("last_seen_tick", "last_seen_revision")}, sort_keys=True)
+                      for cell in frame["memory"])
+
+    def detection_use(self, owner, peer, identity):
+        before = self.snapshot(owner)
+        selected = hallucination_item(before, identity)
+        action = "read" if selected["class"] == "scroll" else "drink"
+        self.assertIsNone(self.act(owner, {"type": action, "item": identity})["error"])
+        after = self.advance(owner, [peer])
+        self.assertEqual(int(observation(after)["tick"]) - int(observation(before)["tick"]), 100)
+        return after
+
+    @non_graphical
+    def test_imported_detection_monsters_adventure_hallucination_channel_and_refresh(self):
+        package = detection.prepare(self)
+        self.server("--checkpoint-interval", 1, scenario=package)
+        owner, initial = self.client(actor=1)
+        peer, _ = self.client(actor=2)
+        text, _ = self.adventure(SPECTATOR_TOKEN)
+        ids = detection.initial_doses(self, initial)
+        actual = {row["id"] for row in observation(initial)["visible_actors"]
+                  if row["name"] == "PRIVATE detection peer"}
+        self.assertEqual(len(actual), 1)
+        # The external peer holds the first real paid completion at tick0.
+        pending = self.act(owner, {"type": "drink", "item": ids["monsters"]})
+        self.assertIsNone(pending["error"])
+        self.assertIsNone(hallucination_condition(pending, "rogue.detecting_monsters"))
+        before = detection.raw_checkpoint(self, owner)
+        first = self.advance(owner, [peer])
+        self.assertEqual(observation(first)["tick"], "100")
+        self.assertEqual(hallucination_condition(first, "rogue.detecting_monsters")["remaining_ticks"], "2000")
+        self.assertEqual(hallucination_item(first, ids["monsters"])["name"], "potion of monster detection")
+        self.assertTrue(hallucination_item(first, ids["monsters"])["identified"])
+        first_saved = detection.raw_checkpoint(self, owner)
+        self.assertEqual(first_saved["game"]["rules_rng"], before["game"]["rules_rng"])
+        _, _, factual = self.detection_pages(owner, "monsters")
+        self.assertEqual(detection.rows(factual)[0]["mark"],
+                         {"kind": "monster", "name": "human", "asset": "creature.humanoid.human"})
+        hallucinating = self.detection_use(owner, peer, ids["hallucination"])
+        phase0, _, first_chart = self.detection_pages(owner, "monsters")
+        detection.assert_monster_sample(self, phase0, first_chart, 0)
+        saved = detection.raw_checkpoint(self, owner)
+        self.assertIn("Monster detection: live, available", self.say(text, "charts"))
+        shown = self.say(text, "chart monsters")
+        self.assertIn("snake", shown)
+        self.assertNotIn("PRIVATE detection peer", shown)
+        self.assertNotIn("emu", shown)
+        self.say(text, "chart cancel")
+        for _ in range(2):
+            _, _, repeat = self.detection_pages(owner, "monsters")
+            self.assertEqual(detection.historical_payload(repeat), detection.historical_payload(first_chart))
+        self.assertEqual(detection.raw_checkpoint(self, owner), saved, "chart reads create no paid/save mutation")
+        self.assertIsNone(self.act(owner, {"type": "wait"})["error"])
+        shifted = self.advance(owner, [peer])
+        self.assertEqual(int(observation(shifted)["tick"]) - int(observation(hallucinating)["tick"]), 100)
+        phase1, _, next_chart = self.detection_pages(owner, "monsters")
+        detection.assert_monster_sample(self, phase1, next_chart, 1)
+        self.assertEqual({row["id"] for row in observation(phase1)["visible_actors"]
+                          if row["id"] != observation(phase1)["self_target"]}, actual)
+        # A subsequent ordinary paid no-draw Wait materializes a fresh writer
+        # checkpoint, catching illicit chart-read RNG consumption as well.
+        shifted_saved = detection.raw_checkpoint(self, owner)
+        self.assertEqual(shifted_saved["game"]["rules_rng"], saved["game"]["rules_rng"])
+        refreshed = self.detection_use(owner, peer, ids["monsters"])
+        self.assertEqual(hallucination_condition(refreshed, "rogue.detecting_monsters")["remaining_ticks"], "2000")
+        self.assertEqual(detection.raw_checkpoint(self, owner)["game"]["rules_rng"], saved["game"]["rules_rng"])
+        self.assertFalse(refreshed["state"]["wizard_game"])
+        cured = self.detection_use(owner, peer, ids["extra"])
+        self.assertIsNone(hallucination_condition(cured, "rogue.hallucinating"))
+        self.assertIsNotNone(hallucination_condition(cured, "rogue.detecting_monsters"))
+        _, _, factual_after_cure = self.detection_pages(owner, "monsters")
+        self.assertEqual(detection.rows(factual_after_cure)[0]["mark"],
+                         {"kind": "monster", "name": "human", "asset": "creature.humanoid.human"})
+        self.assertEqual({row["id"] for row in observation(cured)["visible_actors"]
+                          if row["id"] != observation(cured)["self_target"]}, actual)
+
+    @non_graphical
+    def test_imported_detection_history_empty_retention_source_free_spectator(self):
+        package = detection.prepare(self, mapping=True)
+        server = self.server("--checkpoint-interval", 1, scenario=package)
+        owner, initial, relay = self.detection_client()
+        peer, _ = self.client(actor=2)
+        ids = detection.initial_doses(self, initial)
+        ground = {row["item"]["class"]: row["item"]["id"] for row in observation(initial)["ground_items"]}
+        positive = {}
+        for kind in ("food", "magic"):
+            frame = self.detection_use(owner, peer, ids[kind])
+            self.assertTrue(hallucination_item(frame, ids[kind])["identified"])
+            if kind == "food":
+                self.assertEqual((hallucination_item(frame, ids[kind])["class"],
+                                  hallucination_item(frame, ids[kind])["name"]),
+                                 ("scroll", "scroll of food detection"))
+            self.assertEqual(detection.summary(frame, kind)["mode"], "historical")
+            _, requested, pages = self.detection_pages(owner, kind)
+            self.assertEqual(len(detection.rows(pages)), 1)
+            positive[kind] = detection.historical_payload(pages)
+            if kind == "magic":
+                original_query, original_page = relay.pair(requested)
+        before_mapping = self.snapshot(owner)
+        ordinary_memory = self.detection_memory(owner, before_mapping)
+        scroll, = [row for row in items(before_mapping, "scroll") if row["quantity"] == "2"]
+        self.assertFalse(scroll["identified"])
+        self.assertIsNone(self.act(owner, {"type": "read", "item": scroll["id"]})["error"])
+        mapped = self.advance(owner, [peer])
+        self.assertEqual(int(observation(mapped)["tick"]) - int(observation(before_mapping)["tick"]), 100)
+        remaining = hallucination_item(mapped, scroll["id"])
+        self.assertEqual((remaining["quantity"], remaining["name"], remaining["identified"]),
+                         ("1", "scroll of magic mapping", True))
+        self.assertEqual(self.detection_memory(owner, mapped), ordinary_memory,
+                         "paid Mapping does not acquire ordinary map cells or action keys")
+        _, mapping_requested, mapping_pages = self.detection_pages(owner, "mapping")
+        mapping_rows = detection.rows(mapping_pages)
+        self.assertEqual(len(mapping_rows), 380, "90x5 room: both heights of four wall faces, no floor/ceiling")
+        self.assertTrue(all(row["mark"]["fact"]["kind"] == "wall_face"
+                            and row["mark"]["fact"]["normal"][2] == 0 for row in mapping_rows))
+        self.assertTrue(any(int(row["position"][0]) > 60 for row in mapping_rows),
+                        "chart genuinely includes remote walls not ordinarily observed")
+        positive["mapping"] = detection.historical_payload(mapping_pages)
+        mapping_exchange = relay.stream(mapping_requested)
+        for item in (ground["food"], ground["wand"]):
+            self.assertIsNone(self.act(owner, {"type": "take", "item": item, "quantity": None})["error"])
+            self.advance(owner, [peer])
+        self.assertIsNone(self.act(owner, {"type": "move", "direction": "east"})["error"])
+        self.advance(owner, [peer])
+        for kind in ("food", "magic"):
+            frame = self.detection_use(owner, peer, ids[kind])
+            status = detection.summary(frame, kind)
+            self.assertEqual((status["mode"], status["status"]), ("historical", "available"))
+            self.assertEqual(status["latest_attempt"], {"attempted_at": observation(frame)["tick"], "status": "empty"})
+            _, _, pages = self.detection_pages(owner, kind)
+            self.assertEqual(detection.historical_payload(pages), positive[kind],
+                             "empty attempts and owner movement retain the complete acquired positive")
+        text, _ = self.adventure(SPECTATOR_TOKEN)
+        for kind, title in (("food", "Food"), ("magic", "Magic"), ("mapping", "Mapping")):
+            rendered = self.say(text, "chart " + kind)
+            self.assertIn((title + " detection" if kind != "mapping" else title) + ": historical, available", rendered)
+            self.assertIn("Latest attempt at tick", rendered)
+            if kind != "mapping":
+                self.assertIn(": empty.", rendered)
+            self.assertIn("Panel 1 at", rendered)
+            self.say(text, "chart cancel")
+        saved = detection.raw_checkpoint(self, owner)
+        pool = saved["shared"]["chart_history"]
+        current = pool["owners"][saved["game"]["chart_history"]]
+        binding, = [row for row in current if str(row["actor"]) == "1"]
+        for kind in ("food", "magic"):
+            slot = binding["slots"][kind]
+            self.assertIsNotNone(slot["latest"])
+            self.assertEqual(slot["attempt"]["status"], {"kind": "empty"})
+            self.assertEqual(pool["roots"][slot["latest"]]["kind"], kind)
+        mapped_slot = binding["slots"]["mapping"]
+        self.assertIsNotNone(mapped_slot["latest"])
+        self.assertEqual(mapped_slot["attempt"]["status"], {"kind": "positive"})
+        self.assertEqual(pool["roots"][mapped_slot["latest"]]["kind"], "mapping")
+        self.assertTrue(all(point["mapping"] is not None
+                            for point in pool["roots"][mapped_slot["latest"]]["points"]))
+        payload = detection.checkpoint_payload(self)
+        self.assertEqual(detection.raw_checkpoint(self, owner), saved)
+        text.stop(save=False)
+        owner.stop(save=False)
+        peer.stop(save=False)
+        relay.close()
+        server.stop(save=False)
+        shutil.rmtree(package)
+        self.assertFalse(package.exists())
+        self.server("--checkpoint-interval", 1, scenario=ROOT / "scenarios/two-room", seed=None)
+        spectator, restored, replay = self.detection_client(SPECTATOR_TOKEN, observe=True)
+        self.assertEqual(spectator is owner, False)
+        self.assertEqual(detection.raw_checkpoint(self), saved)
+        self.assertEqual(restored["role"], "spectator")
+        self.assertFalse(restored["has_control"])
+        text, _ = self.adventure(SPECTATOR_TOKEN)
+        for kind in ("food", "magic", "mapping"):
+            _, requested, pages = self.detection_pages(spectator, kind)
+            self.assertEqual(detection.historical_payload(pages), positive[kind])
+            shown = self.say(text, "chart " + kind)
+            self.assertIn("historical, available", shown)
+            self.assertIn("Latest attempt at tick", shown)
+            if kind != "mapping":
+                self.assertIn(": empty.", shown)
+            self.say(text, "chart cancel")
+            if kind == "magic":
+                restored_query, restored_page = replay.pair(requested)
+            if kind == "mapping":
+                restored_mapping_exchange = replay.stream(requested)
+        self.assertEqual(detection.raw_checkpoint(self), saved)
+        self.assertFalse(self.snapshot(spectator)["state"]["wizard_game"])
+        # Published by recorder only after this case AND all cleanup succeeds.
+        # Payload bytes are the real production writer's source-free book, not
+        # hand-authored save DTOs or a copied previous-epoch artifact.
+        self.detection_samples = {"query": original_query, "page": original_page,
+            "restored_query": restored_query, "restored_page": restored_page,
+            "mapping": mapping_exchange, "restored_mapping": restored_mapping_exchange,
+            "checkpoint_payload": payload}
+
+    @non_graphical
+    def test_imported_mapping_uncertified_rejects_before_payment_or_identification(self):
+        package = detection.prepare(self, mapping=True, certified=False)
+        self.server("--checkpoint-interval", 1, scenario=package)
+        owner, _ = self.client(actor=1)
+        peer, _ = self.client(actor=2)
+        self.assertIsNone(self.act(owner, {"type": "wait"})["error"])
+        self.advance(owner, [peer])
+        before = self.snapshot(owner)
+        saved = detection.raw_checkpoint(self, owner)
+        self.assertFalse(detection.summary(before, "mapping")["supported"])
+        scroll, = [row for row in items(before, "scroll") if row["quantity"] == "2"]
+        self.assertFalse(scroll["identified"])
+        refused = self.act(owner, {"type": "read", "item": scroll["id"]})
+        after = self.snapshot(owner)
+        self.assertEqual(observation(after)["tick"], observation(before)["tick"])
+        self.assertEqual(detection.summary(after, "mapping"), detection.summary(before, "mapping"))
+        self.assertEqual(observation(after)["combat"]["own_stats"], observation(before)["combat"]["own_stats"])
+        self.assertEqual(hallucination_item(after, scroll["id"]), scroll)
+        self.assertFalse(any(status["phase"] in ("queued", "started", "paused", "suspended")
+                             for status in after["intentions"]), "unsupported read cannot remain paid pending work")
+        rejected_save = detection.raw_checkpoint(self, owner)
+        self.assertEqual(rejected_save["game"]["tick"], saved["game"]["tick"])
+        self.assertEqual(rejected_save["game"]["rules_rng"], saved["game"]["rules_rng"])
+        # Ordinary refusal may journal its failed admission/receipt; that is not
+        # payment, item loss, learning, or a chart acquisition attempt.
+
+    @non_graphical
+    def test_imported_detection_food_complete_multipage_adventure_and_pure_reads(self):
+        package = detection.prepare(self, paging=True)
+        self.server("--checkpoint-interval", 1, scenario=package)
+        owner, initial = self.client(actor=1)
+        peer, _ = self.client(actor=2)
+        ids = detection.initial_doses(self, initial)
+        frame = self.detection_use(owner, peer, ids["food"])
+        self.assertEqual(observation(frame)["ground_items"], [], "513 food instances are genuinely out of view")
+        saved = detection.raw_checkpoint(self, owner)
+        _, _, pages = self.detection_pages(owner, "food")
+        self.assertGreaterEqual(len(pages), 2, "actual wire continuation, not only UI pagination")
+        found = detection.rows(pages)
+        self.assertEqual(len(found), 513)
+        self.assertEqual(len({tuple(row["position"]) for row in found}), 513,
+                         "513 distinct true cells produce513 presence rows")
+        text, _ = self.adventure(SPECTATOR_TOKEN)
+        shown = self.say(text, "chart food")
+        self.assertIn("Occurrences 1–20 of 513", shown)
+        self.assertEqual(shown.count("Panel 1 at"), 20)
+        next_page = self.say(text, "chart next")
+        self.assertIn("Occurrences 21–40 of 513", next_page)
+        self.assertEqual(next_page.count("Panel 1 at"), 20)
+        previous = self.say(text, "chart previous")
+        self.assertIn("Occurrences 1–20 of 513", previous)
+        self.say(text, "chart cancel")
+        self.assertEqual(detection.raw_checkpoint(self, owner), saved)
+        self.assertIsNone(self.act(owner, {"type": "wait"})["error"])
+        self.advance(owner, [peer])
+        self.assertEqual(detection.raw_checkpoint(self, owner)["game"]["rules_rng"], saved["game"]["rules_rng"])
+        _, _, again = self.detection_pages(owner, "food")
+        self.assertEqual(detection.historical_payload(again), detection.historical_payload(pages))
 
     def hallucination_drink(self, owner, peer, identity):
         self.assertIsNone(self.act(owner, {"type": "drink", "item": identity})["error"])

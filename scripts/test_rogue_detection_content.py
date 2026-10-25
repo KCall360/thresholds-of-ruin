@@ -21,11 +21,13 @@ class RogueDetectionContent(unittest.TestCase):
                 {"kind": "detect_monsters", "condition": "rogue.detecting_monsters"},
                 {"kind": "detect_food"}, {"kind": "detect_magic"}), strict=True):
             with self.subTest(kind=kind):
+                item_class = "scroll" if kind == "food_detection" else "potion"
+                delivery = "readable" if item_class == "scroll" else "consumable"
                 self.assertEqual(items.get("rogue." + kind), {
-                    "name": "potion of " + kind.replace("_", " "), "identity": "rogue." + kind,
-                    "asset": "item.potion", "magical": True, "class": "potion", "stackable": True,
-                    "appearance_pool": "rogue.potions",
-                    "consumable": {"discovery": "self_effect", "effects": [effect]}})
+                    "name": item_class + " of " + kind.replace("_", " "), "identity": "rogue." + kind,
+                    "asset": "item." + item_class, "magical": True, "class": item_class, "stackable": True,
+                    "appearance_pool": "rogue." + item_class + "s",
+                    delivery: {"discovery": "self_effect", "effects": [effect]}})
 
     def test_single_marker_is_pure_target_wide_refresh_without_authored_duration(self):
         conditions = {row["path"][1]: row["value"] for row in source("rules.toml")["overrides"]
@@ -51,12 +53,12 @@ class RogueDetectionContent(unittest.TestCase):
         self.assertEqual({key: value.get("detection_appearance") for key, value in species.items()}, expected)
         self.assertFalse({"Warrior", "Mage"} & {value["name"] for value in expected.values()})
 
-    def test_three_new_labels_preserve_all_old_appearances_and_exact_identity_capacity(self):
+    def test_two_potion_labels_preserve_old_appearances_and_exact_identity_capacity(self):
         catalog = source("catalog/items.toml")
         labels = catalog["appearance_pools"]["rogue.potions"]["appearances"]
-        self.assertEqual(labels, OLD_LABELS + ["saffron potion", "cerulean potion", "magenta potion"])
+        self.assertEqual(labels, OLD_LABELS + ["saffron potion", "cerulean potion"])
         identities = [name for name, item in catalog["items"].items() if item.get("appearance_pool") == "rogue.potions"]
-        self.assertEqual(len(identities), 15)
+        self.assertEqual(len(identities), 14)
         self.assertEqual(len(labels), len(set(labels)))
 
     def test_generated_stock_and_starter_kits_do_not_enable_opt_in_detection(self):

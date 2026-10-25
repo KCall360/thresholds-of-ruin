@@ -8,7 +8,9 @@ Rerun this when the protocol version changes and review the diff:
 
     python scripts/record_wire_samples.py
 """
+import argparse
 import copy
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -87,6 +89,12 @@ def hallucination_recording_case():
     """Reuse the genuine Text/cadence/source-free case and its raw snapshots."""
     from test_magic_items_process import MagicItemProcesses
     return MagicItemProcesses("test_imported_hallucination_text_visual_cadence_and_source_free_reopen")
+
+
+def detection_recording_case():
+    """Genuine paid Detection/Mapping and source-deleted spectator recovery."""
+    from test_magic_items_process import MagicItemProcesses
+    return MagicItemProcesses("test_imported_detection_history_empty_retention_source_free_spectator")
 
 
 def growth_recording_case():
@@ -368,6 +376,76 @@ class Recorder(ProcessTestCase):
         # Every source-positive frame and cleanup must succeed before publishing
         # any member. Preserve raw messages byte-semantically, never synthesize.
         server_samples.update({"zz.hallucination_" + stage: sample for stage, sample in samples.items()})
+
+    def record_detection(self, server_samples):
+        from checkpoint_payload import decode_checkpoint_payload
+        from detection_process_package import historical_payload, validate_pages
+        samples = run_recording_case(detection_recording_case(), "detection_samples")
+        self.assertEqual(set(samples), {"query", "page", "restored_query", "restored_page",
+                                      "mapping", "restored_mapping", "checkpoint_payload"})
+        clients, captured = [], {}
+        for prefix in ("", "restored_"):
+            request, reply = samples[prefix + "query"], samples[prefix + "page"]
+            self.assertEqual(request["type"], "request")
+            self.assertEqual(request["request"]["type"], "chart")
+            self.assertEqual(reply["type"], "chart_page")
+            self.assertEqual(reply["request_id"], request["request_id"])
+            query = request["request"]["query"]
+            self.assertIsNone(query["cursor"])
+            validate_pages([reply["page"]], query)
+            self.assertEqual((reply["page"]["kind"], reply["page"]["mode"]), ("magic", "historical"))
+            self.assertEqual(len([row for row in reply["page"]["records"] if row["record"] == "row"]), 1)
+            clients.append(request)
+            captured["chart_page" if not prefix else "zz.detection_restored"] = reply
+        self.assertEqual(historical_payload([samples["page"]["page"]]),
+                         historical_payload([samples["restored_page"]["page"]]))
+        mapping_payloads = []
+        for stage in ("mapping", "restored_mapping"):
+            exchange = samples[stage]
+            self.assertEqual(set(exchange), {"queries", "pages"})
+            self.assertEqual(len(exchange["queries"]), len(exchange["pages"]))
+            self.assertTrue(exchange["queries"])
+            cursor = None
+            boundary = exchange["queries"][0]["request"]["query"]
+            for index, (request, reply) in enumerate(zip(exchange["queries"], exchange["pages"], strict=True)):
+                self.assertEqual((request["type"], request["request"]["type"], reply["type"]),
+                                 ("request", "chart", "chart_page"))
+                self.assertEqual(reply["request_id"], request["request_id"])
+                actual_query = request["request"]["query"]
+                self.assertEqual(actual_query["cursor"], cursor)
+                self.assertEqual({key: actual_query[key] for key in ("context", "branch", "base", "chart")},
+                                 {key: boundary[key] for key in ("context", "branch", "base", "chart")})
+                self.assertEqual(reply["page"]["kind"], "mapping")
+                cursor = reply["page"]["next"]
+                clients.append(request)
+                captured[f"zz.{stage}.{index:03}"] = reply
+            self.assertIsNone(cursor)
+            pages = [reply["page"] for reply in exchange["pages"]]
+            validate_pages(pages, exchange["queries"][0]["request"]["query"])
+            mapping_payloads.append(historical_payload(pages))
+        self.assertEqual(mapping_payloads[0], mapping_payloads[1])
+        mapping_rows = [row for row in mapping_payloads[0]["records"] if row["record"] == "row"]
+        self.assertEqual(len(mapping_rows), 380)
+        self.assertTrue(all(row["mark"]["fact"]["kind"] == "wall_face"
+                            and row["mark"]["fact"]["normal"][2] == 0 for row in mapping_rows))
+        self.assertIsInstance(samples["checkpoint_payload"], bytes)
+        saved = json.loads(decode_checkpoint_payload(samples["checkpoint_payload"]))
+        pool = saved["shared"]["chart_history"]
+        bindings = pool["owners"][saved["game"]["chart_history"]]
+        owner, = [row for row in bindings if str(row["actor"]) == "1"]
+        for kind in ("food", "magic", "mapping"):
+            slot = owner["slots"][kind]
+            self.assertIsNotNone(slot["latest"])
+            self.assertEqual(slot["attempt"]["status"], {"kind": "positive" if kind == "mapping" else "empty"})
+            root = pool["roots"][slot["latest"]]
+            self.assertEqual(root["kind"], kind)
+            self.assertTrue(root["points"])
+            self.assertTrue(all((point["mapping"] is not None) == (kind == "mapping") for point in root["points"]))
+        # No partial publication on case/cleanup, page correlation, source-free
+        # equality or genuine production-writer book validation failure.
+        server_samples.update(captured)
+        self.recorded_client_samples = [*getattr(self, "recorded_client_samples", []), *clients]
+        self.detection_checkpoint_payload = samples["checkpoint_payload"]
 
     def record_growth(self, server_samples):
         samples = run_recording_case(growth_recording_case(), "growth_samples")
@@ -833,6 +911,7 @@ class Recorder(ProcessTestCase):
         self.record_haste(server_samples)
         self.record_growth(server_samples)
         self.record_hallucination(server_samples)
+        self.record_detection(server_samples)
         self.record_personal_conditions(server_samples)
         self.record_persistent_conditions(server_samples)
         self.record_amulet_escape(server_samples)
@@ -841,30 +920,61 @@ class Recorder(ProcessTestCase):
         self.server_samples = server_samples
 
 
-def record_samples(*, output=None):
-    """Publish only complete recordings, including successful process cleanup."""
-    server_samples = run_recording_case(Recorder(), "server_samples")
-    document = json.dumps({
-        "protocol": PROTOCOL, "client": CLIENT,
-        "server": [server_samples[k] for k in sorted(server_samples)],
-    }, indent=1, sort_keys=True) + "\n"
-    output = Path(output) if output is not None else ROOT / f"crates/protocol/tests/fixtures/wire-v{PROTOCOL}.json"
+def publish_bytes(output, payload):
+    """Replace one artifact atomically, only after complete recording validation."""
+    output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
     staged = None
     try:
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="\n",
-                                         dir=output.parent, prefix="." + output.name + ".",
-                                         suffix=".pending", delete=False) as stream:
+        with tempfile.NamedTemporaryFile(mode="wb", dir=output.parent,
+                                         prefix="." + output.name + ".", suffix=".pending",
+                                         delete=False) as stream:
             staged = Path(stream.name)
-            stream.write(document)
+            stream.write(payload)
         os.replace(staged, output)
     finally:
         if staged is not None:
             staged.unlink(missing_ok=True)
+
+
+def record_samples(*, output=None, detection_checkpoint=None):
+    """Publish only complete recordings, including successful process cleanup."""
+    case = Recorder()
+    server_samples = run_recording_case(case, "server_samples")
+    client_samples = [*CLIENT, *copy.deepcopy(case.recorded_client_samples)]
+    document = json.dumps({
+        "protocol": PROTOCOL, "client": client_samples,
+        "server": [server_samples[k] for k in sorted(server_samples)],
+    }, indent=1, sort_keys=True) + "\n"
+    output = Path(output) if output is not None else ROOT / f"crates/protocol/tests/fixtures/wire-v{PROTOCOL}.json"
+    exports = []
+    if detection_checkpoint is not None:
+        from checkpoint_payload import decode_checkpoint_payload
+        # These are the unchanged bytes captured from the production writer in
+        # the successful source-deleted reopen case. Never manufacture save DTOs.
+        raw = case.detection_checkpoint_payload
+        decoded = decode_checkpoint_payload(raw)
+        json.loads(decoded)  # Validate before publishing any output member.
+        target = Path(detection_checkpoint)
+        provenance = {"producer": "MagicItemProcesses.test_imported_detection_history_empty_retention_source_free_spectator",
+                      "raw_bytes": len(raw), "raw_sha256": hashlib.sha256(raw).hexdigest(),
+                      "decoded_bytes": len(decoded), "decoded_sha256": hashlib.sha256(decoded).hexdigest()}
+        exports = [(target, decoded), (Path(str(target) + ".torc"), raw),
+                   (Path(str(target) + ".provenance.json"),
+                    (json.dumps(provenance, indent=2, sort_keys=True) + "\n").encode())]
+    # Each file is atomically replaced. Every case and class cleanup, all book
+    # checks and export decoding precede publication; no partial lifecycle earns
+    # a fixture. A filesystem failure is reported, never called a recording pass.
+    for target, payload in [*exports, (output, document.encode("utf-8"))]:
+        publish_bytes(target, payload)
     shown = output.relative_to(ROOT) if output.is_relative_to(ROOT) else output
-    print(f"{shown}: {len(CLIENT)} client schema examples and {len(server_samples)} captured server samples: "
+    print(f"{shown}: {len(CLIENT)} client schema examples, {len(case.recorded_client_samples)} captured client queries and {len(server_samples)} captured server samples: "
           + ", ".join(sorted(server_samples)))
 
 
 if __name__ == "__main__":
-    record_samples()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--detection-checkpoint", type=Path,
+                        help="also export the genuine decoded Detection/Mapping save plus .torc and SHA256 provenance")
+    arguments = parser.parse_args()
+    record_samples(detection_checkpoint=arguments.detection_checkpoint)

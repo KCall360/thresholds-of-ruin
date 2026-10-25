@@ -103,23 +103,79 @@ fn admit_history_checkpoint(checkpoint: &DiskCheckpoint) -> Result<(), Failure> 
         .map(|_| ())
         .map_err(|_| storage_failure())
 }
+#[cfg(test)]
+thread_local! {
+    static REGION_ADMISSION_TEST_LIMIT: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+    static REGION_ADMISSION_TEST_MEASUREMENTS: std::cell::Cell<(usize,usize)> = const { std::cell::Cell::new((0,0)) };
+}
+#[cfg(test)]
+pub(crate) struct RegionAdmissionTestLimit {
+    previous: Option<usize>,
+    measurements: (usize, usize),
+    _thread: std::marker::PhantomData<std::rc::Rc<()>>,
+}
+#[cfg(test)]
+impl RegionAdmissionTestLimit {
+    pub(crate) fn new(limit: usize) -> Self {
+        Self {
+            previous: REGION_ADMISSION_TEST_LIMIT.with(|v| v.replace(Some(limit))),
+            measurements: REGION_ADMISSION_TEST_MEASUREMENTS.with(|v| v.replace((0, 0))),
+            _thread: std::marker::PhantomData,
+        }
+    }
+    pub(crate) fn measurements(&self) -> (usize, usize) {
+        REGION_ADMISSION_TEST_MEASUREMENTS.with(std::cell::Cell::get)
+    }
+}
+#[cfg(test)]
+impl Drop for RegionAdmissionTestLimit {
+    fn drop(&mut self) {
+        REGION_ADMISSION_TEST_LIMIT.with(|v| v.set(self.previous));
+        REGION_ADMISSION_TEST_MEASUREMENTS.with(|v| v.set(self.measurements));
+    }
+}
 /// Actual detached-row JSON ceiling, without allocating a payload copy.
 fn admit_region_record(record: &tor_simulation::RegionRecord) -> Result<(), Failure> {
-    struct Counter(usize);
+    struct Counter {
+        bytes: usize,
+        limit: usize,
+    }
     impl std::io::Write for Counter {
         fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-            if bytes.len() > codec::MAX_REGION.saturating_sub(self.0) {
+            if bytes.len() > self.limit.saturating_sub(self.bytes) {
                 return Err(std::io::Error::other("region record exceeds capacity"));
             }
-            self.0 += bytes.len();
+            self.bytes += bytes.len();
             Ok(bytes.len())
         }
         fn flush(&mut self) -> std::io::Result<()> {
             Ok(())
         }
     }
-    serde_json::to_writer(&mut Counter(0), record).map_err(|_| storage_failure())
+    #[cfg(test)]
+    if let Some(limit) = REGION_ADMISSION_TEST_LIMIT.with(std::cell::Cell::get) {
+        let mut measured = Counter {
+            bytes: 0,
+            limit: codec::MAX_REGION,
+        };
+        serde_json::to_writer(&mut measured, record).map_err(|_| storage_failure())?;
+        REGION_ADMISSION_TEST_MEASUREMENTS.with(|v| {
+            let (count, max) = v.get();
+            v.set((count + 1, max.max(measured.bytes)));
+        });
+        return serde_json::to_writer(&mut Counter { bytes: 0, limit }, record)
+            .map_err(|_| storage_failure());
+    }
+    serde_json::to_writer(
+        &mut Counter {
+            bytes: 0,
+            limit: codec::MAX_REGION,
+        },
+        record,
+    )
+    .map_err(|_| storage_failure())
 }
+
 pub use codec::MAX_PAYLOAD;
 use codec::{crc32c, decode, decode_region, strict};
 

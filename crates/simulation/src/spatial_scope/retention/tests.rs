@@ -253,17 +253,17 @@ fn append_to_decoded_capture_poison_blocks_the_complete_archive() {
     assert!(serde_json::to_vec(&(repeated, &decoded)).is_err());
 }
 #[test]
-fn over_envelope_capture_poison_does_not_retain_more_root_references() {
+fn over_snapshot_envelope_capture_poison_does_not_retain_more_root_references() {
     let mut state = super::PoolState::default();
     let root = tor_world::Shared::new(crate::spatial_scope::registry::Registry::default());
-    for _ in 0..257 {
-        assert_eq!(state.capture(&root), 0);
+    for _ in 0..crate::checkpoint::MAX_CHECKPOINT_ROOTS {
+        assert_eq!(state.capture_snapshot(&root), 0);
     }
     assert!(serde_json::to_vec(&state).is_ok());
-    state.capture(&root);
+    state.capture_snapshot(&root);
     assert!(matches!(&state, super::PoolState::InvalidCapture));
     for _ in 0..1000 {
-        state.capture(&root);
+        state.capture_snapshot(&root);
     }
     assert!(matches!(&state, super::PoolState::InvalidCapture));
     assert!(serde_json::to_vec(&state).is_err());
@@ -354,4 +354,44 @@ fn historical_authority_references_exceed_snapshot_count_without_relaxing_snapsh
         snapshots.capture_snapshot(&registry);
     }
     assert!(serde_json::to_vec(&snapshots).is_err());
+}
+
+#[test]
+fn outer_snapshot_limit_failure_revokes_previous_serialization_proof_but_allows_explicit_rebind() {
+    let game = fixture();
+    let mut captured = SharedState::default();
+    let snapshot = game.checkpoint(&mut captured);
+    let canonical = serde_json::to_value(&captured).unwrap();
+    let mut decoded: SharedState = serde_json::from_value(canonical.clone()).unwrap();
+    decoded.prepare_spatial_serialization(&[&snapshot]).unwrap();
+    assert_eq!(serde_json::to_value(&decoded).unwrap(), canonical);
+    let excess = vec![&snapshot; crate::checkpoint::MAX_CHECKPOINT_ROOTS + 1];
+    assert!(decoded.prepare_spatial_serialization(&excess).is_err());
+    assert!(serde_json::to_value(&decoded).is_err());
+    // Repeated outer failures cannot resurrect the old canonical witness.
+    assert!(decoded.prepare_spatial_serialization(&excess).is_err());
+    assert!(serde_json::to_value(&decoded).is_err());
+    decoded.prepare_spatial_serialization(&[&snapshot]).unwrap();
+    assert_eq!(serde_json::to_value(&decoded).unwrap(), canonical);
+    let mut unbound = RestoreContext::new(&decoded, game.content().clone());
+    assert!(unbound.restore(snapshot).is_err());
+}
+
+#[test]
+fn historical_reference_admission_still_obeys_archive_meter_not_snapshot_count() {
+    let root = tor_world::Shared::new(crate::spatial_scope::registry::Registry::default());
+    let directories = [root];
+    // No large allocation: the exact-size iterator is rejected by its declared
+    // count before reference materialization. Equality also exceeds the actual
+    // meter after its mandatory envelope/directory bytes are charged.
+    for count in [
+        super::codec::MAX_ROOT_REFERENCES,
+        super::codec::MAX_ROOT_REFERENCES + 1,
+    ] {
+        assert!(matches!(
+            super::codec::capture_pool(&directories, std::iter::repeat_n(0, count)),
+            Err(super::codec::PoolError::Capacity)
+        ));
+    }
+    assert!(super::codec::capture_pool(&directories, std::iter::repeat_n(0, 300)).is_ok());
 }

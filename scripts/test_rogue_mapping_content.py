@@ -15,15 +15,15 @@ class RogueMappingContent(unittest.TestCase):
             "magical": True, "class": "scroll", "stackable": True, "appearance_pool": "rogue.scrolls",
             "readable": {"discovery": "on_use", "effects": [{"kind": "map_topology"}]}})
 
-    def test_one_new_scroll_label_extends_exact_existing_capacity(self):
+    def test_mapping_and_food_scroll_labels_extend_exact_existing_capacity(self):
         catalog = source("catalog/items.toml")
         self.assertEqual(catalog["appearance_pools"]["rogue.scrolls"]["appearances"], [
             "scroll titled VEL MOR", "scroll titled ELAM TOR", "scroll titled NAR SHEN", "scroll titled HETH ARA",
             "scroll titled TAL ION", "scroll titled UR SEK", "scroll titled KEL RAN", "scroll titled AN DOR",
             "scroll titled IV MEM", "scroll titled OS THAL", "scroll titled VEL TOR", "scroll titled SAH REN",
             "scroll titled OR VETH", "scroll titled NEM AL", "scroll titled TIR OS", "scroll titled KHA MER",
-            "scroll titled LOR NEV"])
-        self.assertEqual(sum(item.get("appearance_pool") == "rogue.scrolls" for item in catalog["items"].values()), 17)
+            "scroll titled LOR NEV", "scroll titled MIR VEL"])
+        self.assertEqual(sum(item.get("appearance_pool") == "rogue.scrolls" for item in catalog["items"].values()), 18)
 
     def test_live_stock_and_starter_kit_are_unchanged(self):
         manifest = source("scenario.toml")

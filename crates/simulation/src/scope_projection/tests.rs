@@ -514,7 +514,6 @@ fn detached_external_destination_is_not_required_for_local_projection() {
     );
 }
 
-// Staged additions only. Append to scope_projection/tests.rs after source freeze.
 #[test]
 fn noncommuting_crossings_compose_in_physical_path_order() {
     let mut w = world();
@@ -539,12 +538,12 @@ fn noncommuting_crossings_compose_in_physical_path_order() {
     let p = project(
         &w,
         &members(),
-        &[at(2, 0, 0), at(3, 0, 0), at(3, 0, 1)],
+        &[at(2, 0, 0), at(3, 0, 0), at(3, 0, 1), at(3, 1, 0)],
         budget(),
     )
     .unwrap();
-    // Crossing 1: (x,y,z)->(-y,x,z); crossing 8: (x,y,z)->(x,z,-y).
-    // Inverse 8 followed by inverse 1 maps C +y to A +z.
+    // Independent declared AXES: R1=(-y,x,z), R8=(x,-z,y), not R9.
+    // Inverse R8 then inverse R1 maps C +y to A -z and C +x to A -y.
     // The two one-cell seam anchors place B origin at (2,0,0), C at (2,-2,0).
     // Swapping composition order instead maps C +y to A +x.
     assert_eq!(
@@ -566,7 +565,11 @@ fn noncommuting_crossings_compose_in_physical_path_order() {
             },
             Sample {
                 component: 0,
-                position: Some([2, -2, 1])
+                position: Some([2, -2, -1])
+            },
+            Sample {
+                component: 0,
+                position: Some([2, -3, 0])
             },
         ]
     );

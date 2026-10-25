@@ -278,6 +278,8 @@ impl SharedState {
         &mut self,
         snapshots: &[&Snapshot],
     ) -> Result<(), PersistError> {
+        // Even rejection before the codec sees roots must revoke prior proof.
+        self.spatial.clear_serialization_witness();
         if snapshots.len() > MAX_CHECKPOINT_ROOTS {
             return Err(PersistError::Spatial);
         }
