@@ -1439,3 +1439,52 @@ replaced before publication by actual checked credit. Positive one, beyond-u32
 and u64-maximum transport controls remain; zero is now a negative, not evidence
 of a paid no-op policy. This reviewed correction precedes runtime and application
 builds in the same cohort; gameplay and new diagnostic tests are still unrun.
+
+### Growth first runtime and lawful historical fixture correction
+
+Both selected paid first-red witnesses failed at the intended disabled mutation:
+Strength retained acquisition zero instead of one, and Raise retained held XP
+zero instead of the first threshold's 100. The second witness reused the exact
+first-red executable. Their paid/knowledge prerequisites were reached without a
+setup failure, and the exact protected green implementation was restored before
+full core testing.
+
+The restored full core run passed 1,895 tests and failed one new historical
+Intellect fixture at its initial talent purchase (`IneligibleTalent`), before the
+intended acquisition-history assertion. The correction is test-only: apply a
+lawful post-birth Strength template to purchase the talent, prove it adds no prior
+historical Intellect receipt, remove it to make the talent dormant, then exercise
+the unchanged permanent-potion activation/history/refund assertions. Explicit
+birth-template, effective Strength, capacity and acquisition-count controls guard
+that prerequisite. No production admission, cap or historical validator is
+relaxed. The corrected fixture has static review but its runtime rerun, server
+Service collection, applications and genuine artifacts remain pending.
+
+### Next Hallucination condition/cadence design (not implemented)
+
+The next approved design uses one explicit pure Hallucination-marked condition per
+ruleset. Its lifetime remains ordinary ActorActive/Extend, with the existing
+condition generation and harmful-condition classification. Separate saved
+presentation cadence runs on that same actor-active clock: first application and
+reapplication begin at phase zero, and cure clears cadence. Unmarked authored
+conditions and content keep their existing behavior. Extra healing removes the
+exact configured Hallucination condition ID rather than using a global visual
+modifier purge. These are source/runtime design requirements, not current API,
+schema or execution claims.
+
+Presentation must remain observer-specific and deterministic between bounded
+active-clock shifts without consuming query RNG or changing world identities.
+Sight-derived object and creature appearances may shift; ordinary terrain stays
+unchanged, including floors, walls, passages, doors and traps. Cosmetic false
+stairs may come only from object appearances; known stairs remain fixed.
+Nonvisual Awareness remains factual or anonymous according to its actual evidence.
+Authoritative stairs, target handles,
+capabilities, known facts and navigation are not randomized. Retained map and
+public-plan observations keep their acquired presentation samples rather than
+being rewritten by a later phase; the borrowed ASCII map path remains required.
+Frozen actors do not accrue presentation time. The future MonsterSense exception
+remains an obligation for its later actual sensing consumer, not a claim that such
+a consumer already exists. Ordinary healing and see-invisible do not gain a cure;
+extra healing's exact-ID cure must work even while blind. Potion identification
+remains OnUse. No Hallucination gameplay code or runtime qualification is included
+in the preceding Growth outcome.

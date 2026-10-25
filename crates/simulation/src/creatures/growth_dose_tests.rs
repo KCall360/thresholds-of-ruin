@@ -1,7 +1,7 @@
 //! Nonrefundable consumable provenance versus ordinary HD ownership.
 use super::*;
 use crate::attributes::{Attribute, Attributes, ByAttribute};
-use crate::content_ids::{PointPoolId, TalentId};
+use crate::content_ids::{PointPoolId, TalentId, TemplateId};
 use crate::rules::{Requirement, Ruleset, Stat};
 fn fixture(strength: u16, innate: i64) -> CreatureBuild {
     let mut species = crate::test_creatures::species();
@@ -34,11 +34,15 @@ fn fixture(strength: u16, innate: i64) -> CreatureBuild {
     };
     document.talents.push(talent);
     let id = species.id.clone();
+    // Authored but not part of birth. It grants lawful purchase eligibility
+    // without becoming an eligible historical Intellect source.
+    let mut admission = Template::new(TemplateId::new("fixture_strength_admission").unwrap(), 0);
+    admission.adjustments.strength = 1;
     let content = Content::new(
         Ruleset::validate(document).unwrap(),
         ScenarioCatalog {
             species: [(id.clone(), species)].into(),
-            templates: Default::default(),
+            templates: [(admission.id.clone(), admission)].into(),
         },
     )
     .unwrap();
@@ -128,6 +132,24 @@ fn strength_innate_folds_after_magic_and_baseline_rewrite_cannot_rebase_birth() 
 fn strength_acquisition_receipts_preserve_history_and_refund_only_owned_purchase() {
     let mut build = fixture(4, 0);
     let talent = TalentId::new("fixture_strength_intellect").unwrap();
+    assert!(build
+        .intellect_learning
+        .as_ref()
+        .unwrap()
+        .birth
+        .templates
+        .is_empty());
+    assert_eq!(
+        build.derive().unwrap().attributes.get(Attribute::Strength),
+        4
+    );
+    build
+        .set_templates(vec![TemplateId::new("fixture_strength_admission").unwrap()])
+        .unwrap();
+    assert_eq!(
+        build.derive().unwrap().attributes.get(Attribute::Strength),
+        5
+    );
     build
         .purchase(
             crate::HdIndex(0),
@@ -135,9 +157,44 @@ fn strength_acquisition_receipts_preserve_history_and_refund_only_owned_purchase
             PurchaseSelection::Talent(talent.clone()),
         )
         .unwrap();
+    assert!(build.derive().unwrap().active_talents.contains(&talent));
+    assert_eq!(build.derive().unwrap().intellect_capacity, 1);
+    assert!(build
+        .intellect_learning
+        .as_ref()
+        .unwrap()
+        .acquisitions
+        .is_empty());
+    assert!(build
+        .intellect_learning
+        .as_ref()
+        .unwrap()
+        .birth
+        .templates
+        .is_empty());
+    build.set_templates(vec![]).unwrap();
+    assert_eq!(
+        build.derive().unwrap().attributes.get(Attribute::Strength),
+        4
+    );
     assert!(!build.derive().unwrap().active_talents.contains(&talent));
     assert_eq!(build.derive().unwrap().intellect_capacity, 1);
+    assert!(build
+        .intellect_learning
+        .as_ref()
+        .unwrap()
+        .acquisitions
+        .is_empty());
     assert!(build.acquire_strength().unwrap());
+    assert_eq!(
+        build
+            .intellect_learning
+            .as_ref()
+            .unwrap()
+            .acquisitions
+            .len(),
+        1
+    );
     assert!(build.derive().unwrap().active_talents.contains(&talent));
     assert_eq!(build.derive().unwrap().intellect_capacity, 2);
     assert_eq!(restore(&build), build);
