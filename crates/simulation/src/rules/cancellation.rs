@@ -117,7 +117,7 @@ mod tests {
             },
         }
     }
-    fn fixture() -> Ruleset {
+    fn fixture() -> std::sync::Arc<Ruleset> {
         let mut document = crate::test_creatures::ruleset().document().clone();
         document.flags.extend([
             FlagDef {

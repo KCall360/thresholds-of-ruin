@@ -164,8 +164,8 @@ impl Sources<'_> {
                     .map_err(|_| fail("Invalid reachable cancellation condition"))?;
                 if shape == r::CancellationInvisibilityShape::Mixed {
                     return Err(fail(format!(
-                    "Cancellation source closure: conditions.{id} mixes invisibility with unrelated behavior"
-                )));
+                        "Cancellation source closure: conditions.{id} mixes invisibility with unrelated behavior"
+                    )));
                 }
             }
         }
@@ -810,10 +810,11 @@ mod cancellation_source_tests {
                 tor_simulation::content_ids::ConditionId::new("fixture.unused_mixed").unwrap();
             document.conditions.push(condition);
         } else {
+            let condition_id = condition.id.clone();
             *document
                 .conditions
                 .iter_mut()
-                .find(|c| c.id == condition.id)
+                .find(|c| c.id == condition_id)
                 .unwrap() = condition;
         }
         r::Ruleset::validate(document.clone()).unwrap();
@@ -887,11 +888,13 @@ mod cancellation_source_tests {
         });
         let rules = r::Ruleset::validate(document.clone()).unwrap();
         let grants = document.constants.racial_point_grants.clone();
-        assert!(grants.iter().any(|g| g.points > 0
-            && document
-                .point_pools
-                .iter()
-                .any(|p| p.id == g.pool && p.allowed.contains(&r::PurchaseKind::Talent))));
+        assert!(grants.iter().any(|g| {
+            g.points > 0
+                && document
+                    .point_pools
+                    .iter()
+                    .any(|p| p.id == g.pool && p.allowed.contains(&r::PurchaseKind::Talent))
+        }));
         let mut graph = Sources {
             package: &package,
             rules: &document,
