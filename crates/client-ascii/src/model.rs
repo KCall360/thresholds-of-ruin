@@ -33,6 +33,8 @@ pub enum Key {
     Eat,
     Read,
     Zap,
+    Ignite,
+    Extinguish,
     OpenDoor,
     CloseDoor,
     Control,
@@ -273,7 +275,7 @@ impl App {
         self.identification_selected = 0;
         if matches!(
             self.item_operation,
-            Some(ItemOperation::Read | ItemOperation::Zap)
+            Some(ItemOperation::Read | ItemOperation::Zap | ItemOperation::Ignite | ItemOperation::Extinguish)
         ) {
             self.item_operation = None;
             self.pickup.clear();
@@ -315,7 +317,7 @@ impl App {
         if observed || control_changed {
             if matches!(
                 self.item_operation,
-                Some(ItemOperation::Read | ItemOperation::Zap)
+                Some(ItemOperation::Read | ItemOperation::Zap | ItemOperation::Ignite | ItemOperation::Extinguish)
             ) {
                 self.item_operation = None;
                 self.pickup.clear();
@@ -2750,19 +2752,21 @@ impl App {
                     }
                 }
             }
-            Key::Equip | Key::Unequip | Key::Drink | Key::Eat | Key::Read | Key::Zap => {
+            Key::Equip | Key::Unequip | Key::Drink | Key::Eat | Key::Read | Key::Zap | Key::Ignite | Key::Extinguish => {
                 let operation = match key {
                     Key::Equip => ItemOperation::Equip,
                     Key::Unequip => ItemOperation::Unequip,
                     Key::Eat => ItemOperation::Eat,
                     Key::Read => ItemOperation::Read,
                     Key::Zap => ItemOperation::Zap,
+                    Key::Ignite => ItemOperation::Ignite,
+                    Key::Extinguish => ItemOperation::Extinguish,
                     _ => ItemOperation::Drink,
                 };
                 let Some(state) = &self.state else {
                     return Effect::None;
                 };
-                if matches!(operation, ItemOperation::Read | ItemOperation::Zap)
+                if matches!(operation, ItemOperation::Read | ItemOperation::Zap | ItemOperation::Ignite | ItemOperation::Extinguish)
                     && !state.has_control()
                 {
                     self.status = "You are observing. Press F3 to request control.".into();
@@ -3331,6 +3335,8 @@ pub fn history_text(entry: &HistoryEntry) -> String {
             Event::ItemStarted { action } => match action {
                 tor_protocol::Action::Equip { .. } => "Began equipping an item.".into(),
                 tor_protocol::Action::Unequip { .. } => "Began removing an item.".into(),
+                tor_protocol::Action::Ignite { .. } => "Began igniting an item.".into(),
+                tor_protocol::Action::Extinguish { .. } => "Began extinguishing an item.".into(),
                 tor_protocol::Action::Drink { .. } => "Began drinking an item.".into(),
                 tor_protocol::Action::Eat { .. } => "Began eating an item.".into(),
                 _ => "Began preparation.".into(),
@@ -3943,7 +3949,7 @@ pub const HELP: &[&str] = &[
     "w t q e equip/remove/drink/eat F2     game history",
     "o c     open / close a door     F5     remembered places",
     "F11     escape a hold           F4     write a note",
-    "F6 read; F12 zap, then direction; identify: letter/Enter, Esc aborts",
+    "F6 read; F12 zap, then direction; X ignite; V extinguish; Esc cancels",
     "                                F7     wizard command editor",
     "                                F10    advancement / respec",
     "F3 R    take / release control  [ ]    slower / faster journeys",

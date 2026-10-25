@@ -186,6 +186,8 @@ impl StateView {
                             | crate::Action::Drink { .. }
                             | crate::Action::Eat { .. }
                             | crate::Action::Read { .. }
+                            | crate::Action::Ignite { .. }
+                            | crate::Action::Extinguish { .. }
                             | crate::Action::Zap { .. }
                     )
                 })
@@ -208,6 +210,9 @@ impl StateView {
                         return true;
                     };
                     (interaction.zappable != interaction.device_activation.is_some())
+                        || interaction.portable_light.as_ref().is_some_and(|light|
+                            !light.valid() || ((light.ignitable || light.extinguishable)
+                                && interaction.equipped_slot.is_none()))
                         || (!item.identified
                             && interaction.device_activation
                                 == Some(crate::DeviceActivation::SelfTarget))
@@ -263,6 +268,8 @@ impl StateView {
                         | crate::Action::Drink { item }
                         | crate::Action::Eat { item }
                         | crate::Action::Read { item }
+                        | crate::Action::Ignite { item }
+                        | crate::Action::Extinguish { item }
                         | crate::Action::Zap { item, .. } => !inventory.contains_key(item),
                         _ => true,
                     }

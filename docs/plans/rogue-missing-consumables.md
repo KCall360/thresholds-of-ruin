@@ -803,3 +803,48 @@ verified applications, preserving the helper's default encounter behavior.
 The player and source guides now describe these opt-in devices. Live weighted
 stock and starting kits are unchanged. Final batch quick/push/full, independent
 native, release and hosted gates remain pending; no PR or merge is implied.
+
+### Next coherent batch: portable torch (implementation in progress)
+
+This batch reconstructs portable light separately from permanent Room Light.
+The agreed source policy is optional `held_light { radius, fuel_ticks }`, with
+the production torch initially unlit, radius four and 100,000 ticks of fuel.
+An instance retains remaining fuel and lit state; it is a single nonstackable
+Tool. A dedicated held-light equipment slot consumes one existing shared grip,
+without a dummy attack or changes to weapon-slot requirements. Equip does not
+ignite. Ignite and Extinguish use ordinary paid item work, claims, interruption
+and completion. Successful stow, including pickup into unequipped inventory,
+extinguishes without refilling;
+ground drop retains the flame. Failed removal must leave ownership and fuel
+unchanged, including lethal equipment-removal rollback and ordinary death drops.
+
+Light is a physical optical overlay, not a mutation of ambient room lighting.
+Visual disclosure, nonvisual partitioning, map light and load-only dependencies
+must use the same authority. Fuel advances only while lit at an active location;
+frozen or detached intervals never catch up. Exact expiry is a scheduler boundary.
+Managed and resident host execution retain event ownership while only managed
+execution requests residency handoffs; loading light dependencies must not wake
+remote creatures. Public item interactions expose only a strict optional
+`portable_light { remaining, lit, ignitable, extinguishable }` view, not hidden
+source radius or item identity.
+
+The grouped acceptance includes actual paid controls, grip conflicts, curse and
+transfer rollback, multiple emitters, opaque/rotated geometry, exact expiry,
+frozen fuel, interval-one source-free reopening and ordinary client use. Map
+invalidation must compare resolved emitter geometry even when another carrier
+moves at zero time with unchanged item storage. A narrowly proved fuel-only
+comparison may avoid repeated map acquisition, but must retain ordinary fuel
+publication and match conservative reacquisition state/output. Performance
+measurement is separate and remains fresh work, not credit from the lost batch.
+
+Core, source/save, protocol/client and fixture changes form one coherent feature
+cohort. Back up the reviewed source before long validation, use a meaningful
+paid-light first-red seam, then restore that exact implementation for grouped
+acceptance. This paragraph records the agreed design, not completed code, runtime
+qualification or a change to live weighted item pools.
+
+The initial source checkpoint captures held-light specification/fuel fields and
+strict public DTO, existing-literal and initial client-control migrations only.
+Constructor, work admission, clock/optical lifecycle integration and the new
+behavioral fixtures remain incomplete. This snapshot is uncompiled and has no
+portable-light runtime qualification.

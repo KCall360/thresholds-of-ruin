@@ -326,7 +326,7 @@ pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
     }
     match (verb.as_str(), rest) {
         (
-            "equip" | "wear" | "wield" | "remove" | "unequip" | "drink" | "quaff" | "eat" | "read",
+            "equip" | "wear" | "wield" | "remove" | "unequip" | "drink" | "quaff" | "eat" | "read" | "ignite" | "light" | "extinguish",
             noun,
         ) if !noun.is_empty() => {
             let operation = match verb.as_str() {
@@ -334,6 +334,8 @@ pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
                 "drink" | "quaff" => tor_client_common::items::ItemOperation::Drink,
                 "eat" => tor_client_common::items::ItemOperation::Eat,
                 "read" => tor_client_common::items::ItemOperation::Read,
+                "ignite" | "light" => tor_client_common::items::ItemOperation::Ignite,
+                "extinguish" => tor_client_common::items::ItemOperation::Extinguish,
                 _ => tor_client_common::items::ItemOperation::Equip,
             };
             let noun = noun.to_lowercase();

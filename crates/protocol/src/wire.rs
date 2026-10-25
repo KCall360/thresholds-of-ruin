@@ -300,6 +300,8 @@ pub enum Action {
     Read {
         item: ItemTarget,
     },
+    Ignite { item: ItemTarget },
+    Extinguish { item: ItemTarget },
     Zap {
         item: ItemTarget,
         aim: DeviceAim,
@@ -376,6 +378,8 @@ impl<'de> Deserialize<'de> for Action {
             Read {
                 item: ItemTarget,
             },
+            Ignite { item: ItemTarget },
+            Extinguish { item: ItemTarget },
             Zap {
                 item: ItemTarget,
                 aim: DeviceAim,
@@ -446,6 +450,8 @@ impl<'de> Deserialize<'de> for Action {
             Fields::Drink { item } => Self::Drink { item },
             Fields::Eat { item } => Self::Eat { item },
             Fields::Read { item } => Self::Read { item },
+            Fields::Ignite { item } => Self::Ignite { item },
+            Fields::Extinguish { item } => Self::Extinguish { item },
             Fields::Zap { item, aim } => Self::Zap { item, aim },
             Fields::Identify { choice, item } => Self::Identify { choice, item },
             Fields::ExamineTrap { trap } => Self::ExamineTrap { trap },
@@ -775,6 +781,42 @@ impl<'de> Deserialize<'de> for ProjectileBonusView {
         Ok(value)
     }
 }
+/// Disclosed physical fuel state and current authoritative action eligibility.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PortableLightView {
+    #[serde(with = "crate::integers::unsigned")]
+    pub remaining: u64,
+    pub lit: bool,
+    pub ignitable: bool,
+    pub extinguishable: bool,
+}
+impl PortableLightView {
+    pub fn valid(&self) -> bool {
+        self.remaining <= 1_000_000
+            && (!self.lit || self.remaining > 0)
+            && (!self.ignitable || (!self.lit && self.remaining > 0))
+            && (!self.extinguishable || self.lit)
+    }
+}
+impl<'de> Deserialize<'de> for PortableLightView {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            #[serde(with = "crate::integers::unsigned")]
+            remaining: u64,
+            lit: bool,
+            ignitable: bool,
+            extinguishable: bool,
+        }
+        let f: Fields = crate::bounded::named_map(d)?;
+        let value = Self { remaining: f.remaining, lit: f.lit,
+            ignitable: f.ignitable, extinguishable: f.extinguishable };
+        if !value.valid() { return Err(serde::de::Error::custom("invalid portable light")); }
+        Ok(value)
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ItemInteractionView {
@@ -790,6 +832,7 @@ pub struct ItemInteractionView {
     pub readable: bool,
     pub zappable: bool,
     pub device_activation: Option<DeviceActivation>,
+    pub portable_light: Option<PortableLightView>,
     pub charges: Option<u16>,
 }
 impl<'de> Deserialize<'de> for ItemInteractionView {
@@ -814,6 +857,8 @@ impl<'de> Deserialize<'de> for ItemInteractionView {
             #[serde(deserialize_with = "required_nullable")]
             device_activation: Option<DeviceActivation>,
             #[serde(deserialize_with = "required_nullable")]
+            portable_light: Option<PortableLightView>,
+            #[serde(deserialize_with = "required_nullable")]
             charges: Option<u16>,
         }
         let fields: Fields = crate::bounded::named_map(d)?;
@@ -830,6 +875,7 @@ impl<'de> Deserialize<'de> for ItemInteractionView {
             readable: fields.readable,
             zappable: fields.zappable,
             device_activation: fields.device_activation,
+            portable_light: fields.portable_light,
             charges: fields.charges,
         })
     }

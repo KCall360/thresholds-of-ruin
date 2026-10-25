@@ -115,6 +115,7 @@ pub use explored_map::{
 mod navigation_map;
 mod observation;
 mod periodic_relocation;
+mod portable_light;
 mod places;
 pub mod progression;
 pub mod public_plan;
@@ -126,6 +127,7 @@ pub mod resources;
 pub mod survival_diagnostics;
 pub mod theft;
 pub use periodic_relocation::PeriodicRelocation;
+pub use portable_light::{HeldLightSpec, PortableLightView};
 pub use places::{NameOrigin, PlaceName};
 mod streaming;
 pub use streaming::{
@@ -535,6 +537,8 @@ struct Item {
     charges: Option<u16>,
     #[serde(deserialize_with = "crate::bounded::required_option")]
     relocation_elapsed: Option<u64>,
+    #[serde(deserialize_with = "crate::bounded::required_option")]
+    fuel: Option<portable_light::FuelState>,
     motion: MotionState,
     orientation: u8,
     spec: Shared<ItemSpec>,
@@ -555,6 +559,8 @@ impl<'de> serde::Deserialize<'de> for Item {
             charges: Option<u16>,
             #[serde(deserialize_with = "crate::bounded::required_option")]
             relocation_elapsed: Option<u64>,
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            fuel: Option<portable_light::FuelState>,
             motion: MotionState,
             orientation: u8,
             spec: Shared<ItemSpec>,
@@ -569,6 +575,7 @@ impl<'de> serde::Deserialize<'de> for Item {
             condition: fields.condition,
             charges: fields.charges,
             relocation_elapsed: fields.relocation_elapsed,
+            fuel: fields.fuel,
             motion: fields.motion,
             orientation: fields.orientation,
             spec: fields.spec,

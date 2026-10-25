@@ -62,6 +62,8 @@ fn request_kind(request: &Request) -> &'static str {
                 Action::Unequip { .. } => "act.unequip",
                 Action::Drink { .. } => "act.drink",
                 Action::Read { .. } => "act.read",
+                Action::Ignite { .. } => "act.ignite",
+                Action::Extinguish { .. } => "act.extinguish",
                 Action::Zap { .. } => "act.zap",
                 Action::Identify { .. } => "act.identify",
                 Action::ExamineTrap { .. } => "act.examine_trap",

@@ -9,6 +9,8 @@ pub enum ItemOperation {
     Eat,
     Read,
     Zap,
+    Ignite,
+    Extinguish,
 }
 
 /// Potential choices in disclosed inventory order. A choice may still be blocked
@@ -33,6 +35,8 @@ pub fn item_choices(
             ItemOperation::Eat => affordance.edible,
             ItemOperation::Read => affordance.readable,
             ItemOperation::Zap => affordance.zappable,
+            ItemOperation::Ignite => affordance.portable_light.as_ref().is_some_and(|light| light.ignitable),
+            ItemOperation::Extinguish => affordance.portable_light.as_ref().is_some_and(|light| light.extinguishable),
         }
     })
 }
@@ -45,6 +49,8 @@ impl ItemOperation {
             Self::Eat => "eat",
             Self::Read => "read",
             Self::Zap => "zap",
+            Self::Ignite => "ignite",
+            Self::Extinguish => "extinguish",
         }
     }
 }
@@ -69,6 +75,10 @@ pub fn item_action(
         .find(|candidate| candidate.item == item)
         .ok_or("That item has no usable interaction.")?;
     match operation {
+        ItemOperation::Ignite if affordance.portable_light.as_ref().is_some_and(|light| light.ignitable) => Ok(Action::Ignite { item }),
+        ItemOperation::Ignite => Err("You can't ignite that item now.".into()),
+        ItemOperation::Extinguish if affordance.portable_light.as_ref().is_some_and(|light| light.extinguishable) => Ok(Action::Extinguish { item }),
+        ItemOperation::Extinguish => Err("You can't extinguish that item now.".into()),
         ItemOperation::Drink if affordance.drinkable && view.combat.is_some() => {
             Ok(Action::Drink { item })
         }

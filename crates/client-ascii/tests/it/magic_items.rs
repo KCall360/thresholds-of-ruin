@@ -56,6 +56,7 @@ fn snapshot(identify: bool) -> Snapshot {
                 edible: false,
                 readable: item.class == ItemClass::Scroll,
                 zappable: item.class == ItemClass::Wand,
+                portable_light: None,
                 device_activation: (item.class == ItemClass::Wand)
                     .then_some(tor_protocol::DeviceActivation::Direction),
                 charges: None,

@@ -298,6 +298,7 @@ fn carried_rings() -> Snapshot {
                 edible: false,
                 readable: false,
                 zappable: false,
+                portable_light: None,
                 device_activation: None,
                 charges: None,
             })
@@ -2259,6 +2260,7 @@ fn eat_picker_and_hunger_status_use_only_disclosed_nutrition() {
             edible: true,
             readable: false,
             zappable: false,
+            portable_light: None,
             device_activation: None,
             charges: None,
         }],

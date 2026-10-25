@@ -112,6 +112,8 @@ fn native_key(key: NativeKey) -> Option<Key> {
         NativeKey::E => Key::Eat,
         NativeKey::F6 => Key::Read,
         NativeKey::F12 => Key::Zap,
+        NativeKey::X => Key::Ignite,
+        NativeKey::V => Key::Extinguish,
         NativeKey::O => Key::OpenDoor,
         NativeKey::C => Key::CloseDoor,
         NativeKey::F3 => Key::Control,
@@ -659,6 +661,8 @@ mod tests {
         assert_eq!(native_key(NativeKey::P), None);
         assert_eq!(native_key(NativeKey::F6), Some(Key::Read));
         assert_eq!(native_key(NativeKey::F12), Some(Key::Zap));
+        assert_eq!(native_key(NativeKey::X), Some(Key::Ignite));
+        assert_eq!(native_key(NativeKey::V), Some(Key::Extinguish));
         assert_eq!(native_key(NativeKey::R), Some(Key::Release));
         assert_eq!(native_key(NativeKey::Z), Some(Key::Abilities));
         assert_eq!(native_key(NativeKey::F7), Some(Key::Wizard));

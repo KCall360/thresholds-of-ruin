@@ -140,6 +140,8 @@ pub fn completed_items(before: &Observation, after: &Observation) -> Vec<String>
                 tor_protocol::Action::Drink { item } => ("drinking", item),
                 tor_protocol::Action::Eat { item } => ("eating", item),
                 tor_protocol::Action::Read { item } => ("reading", item),
+                tor_protocol::Action::Ignite { item } => ("igniting", item),
+                tor_protocol::Action::Extinguish { item } => ("extinguishing", item),
                 tor_protocol::Action::Zap { item, .. } => ("zapping", item),
                 _ => return None,
             };
@@ -557,6 +559,8 @@ pub fn action(event: &Event, view: &Observation) -> String {
                 tor_protocol::Action::Drink { item } => ("drink", item),
                 tor_protocol::Action::Eat { item } => ("eat", item),
                 tor_protocol::Action::Read { item } => ("read", item),
+                tor_protocol::Action::Ignite { item } => ("ignite", item),
+                tor_protocol::Action::Extinguish { item } => ("extinguish", item),
                 tor_protocol::Action::Zap { item, .. } => ("zap", item),
                 _ => return "You begin preparing.".into(),
             };

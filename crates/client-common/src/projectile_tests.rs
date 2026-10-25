@@ -56,6 +56,7 @@ fn state() -> ClientState {
                 edible: false,
                 readable: false,
                 zappable: false,
+                portable_light: None,
                 device_activation: None,
                 charges: None,
             })

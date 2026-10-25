@@ -37,7 +37,7 @@ fn magic_commands_round_trip_only_current_named_opaque_operands() {
     assert!(serde_json::from_str::<Action>(&raw).is_err());
 }
 fn affordance() -> Value {
-    json!({"item":item(),"slot":null,"equipped_slot":null,"known_equipment":null,"known_projectile_bonus":null,"known_cursed":null,"known_protected":null,"drinkable":false,"edible":false,"readable":false,"zappable":true,"device_activation":"direction","charges":null})
+    json!({"item":item(),"slot":null,"equipped_slot":null,"known_equipment":null,"known_projectile_bonus":null,"known_cursed":null,"known_protected":null,"drinkable":false,"edible":false,"readable":false,"zappable":true,"device_activation":"direction","portable_light":null,"charges":null})
 }
 #[test]
 fn magic_affordances_require_explicit_flags_and_instance_count_and_reject_private_fields() {
@@ -51,6 +51,7 @@ fn magic_affordances_require_explicit_flags_and_instance_count_and_reject_privat
         "readable",
         "zappable",
         "device_activation",
+        "portable_light",
         "charges",
         "known_cursed",
         "known_protected",
