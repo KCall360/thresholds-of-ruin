@@ -561,7 +561,8 @@ impl Work {
             | Self::Respec { .. }
             | Self::Equip { .. }
             | Self::Unequip { .. }
-            | Self::Ignite { .. } | Self::Extinguish { .. }
+            | Self::Ignite { .. }
+            | Self::Extinguish { .. }
             | Self::Read { .. }
             | Self::Zap { .. }
             | Self::Drink { .. }
@@ -573,7 +574,8 @@ impl Work {
             Self::Escape { .. } | Self::UseAbility { .. } | Self::Respec { .. } => None,
             Self::Equip { item, .. }
             | Self::Unequip { item }
-            | Self::Ignite { item } | Self::Extinguish { item }
+            | Self::Ignite { item }
+            | Self::Extinguish { item }
             | Self::Read { item }
             | Self::Zap { item, .. }
             | Self::Drink { item }
@@ -610,7 +612,8 @@ impl Work {
                 item.0 > 0 && usize::from(slot.0) < crate::limits::EQUIPMENT_SOCKETS
             }
             Self::Unequip { item }
-            | Self::Ignite { item } | Self::Extinguish { item }
+            | Self::Ignite { item }
+            | Self::Extinguish { item }
             | Self::Read { item }
             | Self::Zap { item, .. }
             | Self::Drink { item }
@@ -1002,8 +1005,16 @@ impl Game {
                     allocation,
                 }
             }
-            Work::Ignite { item } => crate::abilities::Plan::Ignite { actor, item, preparation },
-            Work::Extinguish { item } => crate::abilities::Plan::Extinguish { actor, item, preparation },
+            Work::Ignite { item } => crate::abilities::Plan::Ignite {
+                actor,
+                item,
+                preparation,
+            },
+            Work::Extinguish { item } => crate::abilities::Plan::Extinguish {
+                actor,
+                item,
+                preparation,
+            },
             Work::Unequip { item } => crate::abilities::Plan::Unequip {
                 actor,
                 item,
@@ -1464,16 +1475,30 @@ impl Game {
                     .clone();
                 equipment.retain(|_, equipped| *equipped != item);
                 let outcome = self.equipment_candidate(actor, equipment)?;
-                if self.items.get(&item).is_some_and(|item| item.fuel.is_some()) {
-                    ItemChange::PortableLight { item, lit: false, actor: outcome }
+                if self
+                    .items
+                    .get(&item)
+                    .is_some_and(|item| item.fuel.is_some())
+                {
+                    ItemChange::PortableLight {
+                        item,
+                        lit: false,
+                        actor: outcome,
+                    }
                 } else {
                     ItemChange::Equipment(outcome)
                 }
             }
             Work::Ignite { .. } | Work::Extinguish { .. } => {
                 let lit = matches!(work, Work::Ignite { .. });
-                if !self.light_work_available(actor, item, lit) { return Err(GameError::ItemUnavailable); }
-                ItemChange::PortableLight { item, lit, actor: self.actor_outcome(actor)? }
+                if !self.light_work_available(actor, item, lit) {
+                    return Err(GameError::ItemUnavailable);
+                }
+                ItemChange::PortableLight {
+                    item,
+                    lit,
+                    actor: self.actor_outcome(actor)?,
+                }
             }
             Work::Drink { .. } | Work::Eat { .. } | Work::Read { .. } | Work::Zap { .. } => {
                 let mut outcome = self.actor_outcome(actor)?;

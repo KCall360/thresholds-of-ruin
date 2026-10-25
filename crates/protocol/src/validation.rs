@@ -210,11 +210,17 @@ impl StateView {
                         return true;
                     };
                     (interaction.zappable != interaction.device_activation.is_some())
-                        || interaction.portable_light.as_ref().is_some_and(|light|
-                            !light.valid() || item.class != crate::ItemClass::Tool || item.quantity != 1
-                                || interaction.slot.as_ref().is_none_or(|slot| slot.id != "held_light")
-                                || ((light.ignitable || light.extinguishable)
-                                    && interaction.equipped_slot.is_none()))
+                        || interaction.portable_light.as_ref().is_some_and(|light| {
+                            !light.valid()
+                                || item.class != crate::ItemClass::Tool
+                                || item.quantity != 1
+                                || interaction
+                                    .slot
+                                    .as_ref()
+                                    .is_none_or(|slot| slot.id != "held_light")
+                                || ((light.lit || light.ignitable || light.extinguishable)
+                                    && interaction.equipped_slot.is_none())
+                        })
                         || (!item.identified
                             && interaction.device_activation
                                 == Some(crate::DeviceActivation::SelfTarget))

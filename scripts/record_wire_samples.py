@@ -83,6 +83,12 @@ def first_contact_recording_case():
     return MagicItemProcesses("test_imported_cancellation_privileged_capture_records_actual_reach_and_effect")
 
 
+def torch_recording_case():
+    """Actual adventure control and fuel states, not synthetic server frames."""
+    from test_magic_items_process import MagicItemProcesses
+    return MagicItemProcesses("test_imported_torch_text_explicit_control_fuel_drop_and_source_free_reopen")
+
+
 def discovery_recording_case():
     """Reuse Text examination/opening and source-free checkpoint acceptance."""
     from test_discovery_process import DiscoveryProcesses
@@ -141,6 +147,7 @@ SAMPLE_ADVANCEMENT_COMMANDS = [
 ]
 
 
+# Maintained schema examples, not captured outbound client transcripts.
 CLIENT = [
     {"type": "hello", "protocol": PROTOCOL, "token": "a-sample-credential", "frontend": "headless"},
     *({"type": "request", "request_id": f"sample-{i}", "request": request} for i, request in enumerate([
@@ -180,6 +187,8 @@ CLIENT = [
                 {"type": "unequip", "item": "i_" + "04" * 32},
                 {"type": "drink", "item": "i_" + "04" * 32},
                 {"type": "read", "item": "i_" + "04" * 32},
+                {"type": "ignite", "item": "i_" + "04" * 32},
+                {"type": "extinguish", "item": "i_" + "04" * 32},
                 {"type": "zap", "item": "i_" + "04" * 32, "aim": {"kind": "direction", "direction": "east"}},
                 {"type": "identify", "choice": "choice-sample", "item": "i_" + "04" * 32},
                 {"type": "identify", "choice": "choice-sample", "item": None},
@@ -276,6 +285,19 @@ class Recorder(ProcessTestCase):
                             for effect in record["outcome"]["effects"]))
         # Publish both only after cleanup and both source-positive validations.
         server_samples.update({"zz.first_contact_" + key: value for key, value in samples.items()})
+
+    def record_torch(self, server_samples):
+        samples = run_recording_case(torch_recording_case(), "torch_samples")
+        self.assertEqual(set(samples), {"lit", "off"})
+        for name, lit, remaining in (("lit", True, "100000"), ("off", False, "99800")):
+            sample = samples[name]
+            self.assertEqual(sample["type"], "snapshot")
+            state = sample["snapshot"]["state"]
+            self.assertFalse(state["wizard_game"])
+            row, = state["observation"]["interactions"]["inventory"]
+            self.assertEqual(row["portable_light"], {"remaining": remaining, "lit": lit,
+                                                    "ignitable": not lit, "extinguishable": lit})
+        server_samples.update({"zz.torch_" + key: value for key, value in samples.items()})
 
     def record_scare_crumble(self, server_samples):
         sample = run_recording_case(scare_pickup_recording_case(), "crumble_sample")
@@ -683,6 +705,7 @@ class Recorder(ProcessTestCase):
         self.record_self_device(server_samples)
         self.record_drain_refusal(server_samples)
         self.record_first_contact(server_samples)
+        self.record_torch(server_samples)
         self.record_personal_conditions(server_samples)
         self.record_persistent_conditions(server_samples)
         self.record_amulet_escape(server_samples)
@@ -712,7 +735,7 @@ def record_samples(*, output=None):
         if staged is not None:
             staged.unlink(missing_ok=True)
     shown = output.relative_to(ROOT) if output.is_relative_to(ROOT) else output
-    print(f"{shown}: {len(CLIENT)} client and {len(server_samples)} server samples: "
+    print(f"{shown}: {len(CLIENT)} client schema examples and {len(server_samples)} captured server samples: "
           + ", ".join(sorted(server_samples)))
 
 

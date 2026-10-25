@@ -521,7 +521,8 @@ impl Plan {
             Self::Respec(plan) => plan.basis.actor,
             Self::Equip { actor, .. }
             | Self::Unequip { actor, .. }
-            | Self::Ignite { actor, .. } | Self::Extinguish { actor, .. }
+            | Self::Ignite { actor, .. }
+            | Self::Extinguish { actor, .. }
             | Self::Read { actor, .. }
             | Self::Drink { actor, .. }
             | Self::Eat { actor, .. } => *actor,
@@ -538,7 +539,8 @@ impl Plan {
             Self::Respec(plan) => plan.basis.actor,
             Self::Equip { actor, .. }
             | Self::Unequip { actor, .. }
-            | Self::Ignite { actor, .. } | Self::Extinguish { actor, .. }
+            | Self::Ignite { actor, .. }
+            | Self::Extinguish { actor, .. }
             | Self::Read { actor, .. }
             | Self::Drink { actor, .. }
             | Self::Eat { actor, .. } => *actor,
@@ -596,7 +598,8 @@ impl Plan {
             Self::Respec(plan) => plan.preparation,
             Self::Equip { preparation, .. }
             | Self::Unequip { preparation, .. }
-            | Self::Ignite { preparation, .. } | Self::Extinguish { preparation, .. }
+            | Self::Ignite { preparation, .. }
+            | Self::Extinguish { preparation, .. }
             | Self::Read { preparation, .. }
             | Self::Drink { preparation, .. }
             | Self::Eat { preparation, .. } => *preparation,
@@ -612,7 +615,8 @@ impl Plan {
             Self::Respec(plan) => plan.recovery,
             Self::Equip { .. }
             | Self::Unequip { .. }
-            | Self::Ignite { .. } | Self::Extinguish { .. }
+            | Self::Ignite { .. }
+            | Self::Extinguish { .. }
             | Self::Read { .. }
             | Self::Drink { .. }
             | Self::Eat { .. } => 0,
@@ -627,7 +631,8 @@ impl Plan {
             Self::Escape(_) | Self::Respec(_) => None,
             Self::Equip { .. }
             | Self::Unequip { .. }
-            | Self::Ignite { .. } | Self::Extinguish { .. }
+            | Self::Ignite { .. }
+            | Self::Extinguish { .. }
             | Self::Read { .. }
             | Self::Drink { .. }
             | Self::Eat { .. } => None,
@@ -653,7 +658,8 @@ impl Plan {
             | Self::Respec(_)
             | Self::Equip { .. }
             | Self::Unequip { .. }
-            | Self::Ignite { .. } | Self::Extinguish { .. } => &[],
+            | Self::Ignite { .. }
+            | Self::Extinguish { .. } => &[],
         }
     }
     pub fn as_ability(&self) -> Option<&AbilityPlan> {
@@ -666,7 +672,8 @@ impl Plan {
             | Self::Respec(_) => None,
             Self::Equip { .. }
             | Self::Unequip { .. }
-            | Self::Ignite { .. } | Self::Extinguish { .. }
+            | Self::Ignite { .. }
+            | Self::Extinguish { .. }
             | Self::Read { .. }
             | Self::Drink { .. }
             | Self::Eat { .. } => None,
@@ -746,7 +753,8 @@ impl Plan {
             | Self::Respec(_)
             | Self::Equip { .. }
             | Self::Unequip { .. }
-            | Self::Ignite { .. } | Self::Extinguish { .. } => None,
+            | Self::Ignite { .. }
+            | Self::Extinguish { .. } => None,
         }
     }
     pub fn valid(&self, rules: &crate::rules::Ruleset) -> bool {
@@ -794,7 +802,9 @@ impl Plan {
                         && allocation.valid_shape(rules, *item, *slot)
                         && allocation.quickdraw(rules) == (self.preparation() == 0)
                 }
-                Self::Unequip { item, .. } | Self::Ignite { item, .. } | Self::Extinguish { item, .. } => valid_item(*item),
+                Self::Unequip { item, .. }
+                | Self::Ignite { item, .. }
+                | Self::Extinguish { item, .. } => valid_item(*item),
                 Self::Read {
                     control,
                     item,

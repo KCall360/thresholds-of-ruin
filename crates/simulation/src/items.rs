@@ -358,12 +358,18 @@ impl ItemSpec {
     pub(crate) fn valid(&self) -> bool {
         self.magic_shape_valid()
             && self.held_light.is_none_or(|policy| {
-                policy.valid() && self.class == ItemClass::Tool && !self.stackable
-                    && self.equipment.as_ref().is_some_and(|equipment|
-                        equipment.slot.as_str() == "held_light" && equipment.attack.is_none())
-                    && self.device.is_none() && self.consumable.is_none()
-                    && self.readable.is_none() && self.edible.is_none()
-                    && self.projectile.is_none() && self.supply.is_none()
+                policy.valid()
+                    && self.class == ItemClass::Tool
+                    && !self.stackable
+                    && self.equipment.as_ref().is_some_and(|equipment| {
+                        equipment.slot.as_str() == "held_light" && equipment.attack.is_none()
+                    })
+                    && self.device.is_none()
+                    && self.consumable.is_none()
+                    && self.readable.is_none()
+                    && self.edible.is_none()
+                    && self.projectile.is_none()
+                    && self.supply.is_none()
             })
             && self.equipment_generation.is_none_or(|policy| {
                 policy.valid_for(
@@ -427,14 +433,24 @@ impl Game {
     }
     /// Only the explicit held-light grip supports a direct lit Drop. Ordinary
     /// equipment keeps its existing remove-first contract.
-    fn held_light_drop(&self, source: ItemId, destination: ItemLocation)
-        -> Result<Option<(ActorId, BTreeMap<crate::EquipmentSlotId, ItemId>)>, GameError>
-    {
-        if !self.item_is_equipped(source) { return Ok(None); }
+    fn held_light_drop(
+        &self,
+        source: ItemId,
+        destination: ItemLocation,
+    ) -> Result<Option<(ActorId, BTreeMap<crate::EquipmentSlotId, ItemId>)>, GameError> {
+        if !self.item_is_equipped(source) {
+            return Ok(None);
+        }
         let item = self.items.get(&source).ok_or(GameError::ItemUnavailable)?;
-        let ItemLocation::Carried(owner) = item.location else { return Err(GameError::ItemUnavailable); };
-        if item.spec.held_light.is_none() || item.condition.cursed
-            || !matches!(destination, ItemLocation::Ground(_)) { return Err(GameError::ItemUnavailable); }
+        let ItemLocation::Carried(owner) = item.location else {
+            return Err(GameError::ItemUnavailable);
+        };
+        if item.spec.held_light.is_none()
+            || item.condition.cursed
+            || !matches!(destination, ItemLocation::Ground(_))
+        {
+            return Err(GameError::ItemUnavailable);
+        }
         let mut equipment = self.actors[&owner].equipment.clone();
         equipment.retain(|_, item| *item != source);
         let mut outcome = self.settled_actor_outcome(owner)?;
@@ -1018,7 +1034,9 @@ impl Game {
                     item.location = location;
                     item.condition = condition;
                     if matches!(location, ItemLocation::Carried(_)) {
-                        if let Some(fuel) = item.fuel.as_mut() { fuel.lit = false; }
+                        if let Some(fuel) = item.fuel.as_mut() {
+                            fuel.lit = false;
+                        }
                     }
                 })
                 .ok_or(GameError::ItemUnavailable)?;
@@ -1029,10 +1047,17 @@ impl Game {
             .get(&source)
             .ok_or(GameError::ItemUnavailable)?
             .charges;
-        let fuel = self.items.get(&source).ok_or(GameError::ItemUnavailable)?.fuel.map(|mut fuel| {
-            if matches!(location, ItemLocation::Carried(_)) { fuel.lit = false; }
-            fuel
-        });
+        let fuel = self
+            .items
+            .get(&source)
+            .ok_or(GameError::ItemUnavailable)?
+            .fuel
+            .map(|mut fuel| {
+                if matches!(location, ItemLocation::Carried(_)) {
+                    fuel.lit = false;
+                }
+                fuel
+            });
         let relocation_elapsed = self
             .items
             .get(&source)

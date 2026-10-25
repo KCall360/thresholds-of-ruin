@@ -970,8 +970,12 @@ pub struct HeldLightSpec {
 }
 impl<'de> Deserialize<'de> for HeldLightSpec {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        fn radius() -> u8 { 4 }
-        fn fuel_ticks() -> u64 { 100_000 }
+        fn radius() -> u8 {
+            4
+        }
+        fn fuel_ticks() -> u64 {
+            100_000
+        }
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Fields {
@@ -981,14 +985,20 @@ impl<'de> Deserialize<'de> for HeldLightSpec {
             fuel_ticks: u64,
         }
         let fields: Fields = crate::creature_authoring::named_map(d)?;
-        let value = Self { radius: fields.radius, fuel_ticks: fields.fuel_ticks };
+        let value = Self {
+            radius: fields.radius,
+            fuel_ticks: fields.fuel_ticks,
+        };
         value.compile().map_err(serde::de::Error::custom)?;
         Ok(value)
     }
 }
 impl HeldLightSpec {
     pub(crate) fn compile(self) -> Result<tor_simulation::HeldLightSpec, crate::Failure> {
-        let value = tor_simulation::HeldLightSpec { radius: self.radius, fuel_ticks: self.fuel_ticks };
+        let value = tor_simulation::HeldLightSpec {
+            radius: self.radius,
+            fuel_ticks: self.fuel_ticks,
+        };
         super::require(value.valid(), "Invalid held light policy")?;
         Ok(value)
     }
@@ -2300,17 +2310,31 @@ mod held_light_tests {
         let default: HeldLightSpec = serde_json::from_str("{}").unwrap();
         assert_eq!((default.radius, default.fuel_ticks), (4, 100_000));
         assert!(default.compile().unwrap().valid());
-        let explicit: HeldLightSpec = serde_json::from_str(r#"{"radius":1,"fuel_ticks":1}"#).unwrap();
+        let explicit: HeldLightSpec =
+            serde_json::from_str(r#"{"radius":1,"fuel_ticks":1}"#).unwrap();
         assert_eq!((explicit.radius, explicit.fuel_ticks), (1, 1));
         let limit = serde_json::json!({"radius": tor_simulation::limits::SIGHT_RANGE,
             "fuel_ticks": tor_simulation::limits::NUMERIC});
-        assert!(serde_json::from_value::<HeldLightSpec>(limit).unwrap().compile().unwrap().valid());
+        assert!(serde_json::from_value::<HeldLightSpec>(limit)
+            .unwrap()
+            .compile()
+            .unwrap()
+            .valid());
         for malformed in [
-            r#"{"radius":0}"#, r#"{"radius":17}"#, r#"{"fuel_ticks":0}"#,
-            r#"{"fuel_ticks":1000001}"#, r#"{"radius":null}"#, r#"{"fuel_ticks":null}"#,
-            r#"{"extra":1}"#, r#"{"radius":4,"radius":4}"#, r#"[4,100000]"#,
+            r#"{"radius":0}"#,
+            r#"{"radius":17}"#,
+            r#"{"fuel_ticks":0}"#,
+            r#"{"fuel_ticks":1000001}"#,
+            r#"{"radius":null}"#,
+            r#"{"fuel_ticks":null}"#,
+            r#"{"extra":1}"#,
+            r#"{"radius":4,"radius":4}"#,
+            r#"[4,100000]"#,
         ] {
-            assert!(serde_json::from_str::<HeldLightSpec>(malformed).is_err(), "{malformed}");
+            assert!(
+                serde_json::from_str::<HeldLightSpec>(malformed).is_err(),
+                "{malformed}"
+            );
         }
     }
 }

@@ -505,7 +505,7 @@ mod tests {
             condition: ItemCondition::default(),
             charges: None,
             relocation_elapsed: None,
-                fuel: None,
+            fuel: None,
             motion: Default::default(),
             orientation: 0,
             spec: tor_world::Shared::new(spec),

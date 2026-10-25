@@ -1581,15 +1581,23 @@ impl Candidate {
         &mut self,
         before: &Game,
         terrain: adapt::Terrain<'_>,
+        profile: Option<&mut CommandProfile>,
+    ) -> Result<(), Failure> {
+        let changed = self.game.map_disclosure_changed_actors_since(
+            before,
+            self.actors().into_iter().map(|actor| SimActor(actor.0)),
+        );
+        self.record_explored_for_actors(changed, terrain, profile)
+    }
+
+    fn record_explored_for_actors(
+        &mut self,
+        actors: Vec<SimActor>,
+        terrain: adapt::Terrain<'_>,
         mut profile: Option<&mut CommandProfile>,
     ) -> Result<(), Failure> {
-        for actor in self.actors() {
-            if !self
-                .game
-                .map_disclosure_changed_since(before, SimActor(actor.0))
-            {
-                continue;
-            }
+        for actor in actors {
+            let actor = ActorId(actor.0);
             let view = match self.observations.get(&actor) {
                 Some(view) => view.clone(),
                 None => {

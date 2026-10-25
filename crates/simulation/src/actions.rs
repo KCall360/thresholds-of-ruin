@@ -606,7 +606,9 @@ impl Game {
             | Action::Respec { .. }
             | Action::UseAbility { .. }
             | Action::Equip { .. }
-            | Action::Unequip { .. } | Action::Ignite { .. } | Action::Extinguish { .. }
+            | Action::Unequip { .. }
+            | Action::Ignite { .. }
+            | Action::Extinguish { .. }
             | Action::Read { .. }
             | Action::Zap { .. }
             | Action::Drink { .. }

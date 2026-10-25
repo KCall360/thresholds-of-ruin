@@ -3467,6 +3467,7 @@ mod tests {
                 items: vec![item],
             }),
             inventory: vec![ItemInteractionView {
+                portable_light: None,
                 item,
                 slot: None,
                 equipped_slot: None,
@@ -3608,6 +3609,7 @@ mod tests {
             preparation: None,
             identification: None,
             inventory: vec![ItemInteractionView {
+                portable_light: None,
                 item,
                 slot: Some(EquipmentSlot {
                     id: "fixture_ring".into(),

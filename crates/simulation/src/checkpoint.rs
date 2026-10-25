@@ -832,6 +832,7 @@ impl Game {
             preparation_region_boundary: None,
             trap_region_boundary: None,
             light_region_boundary: None,
+            light_settled_witness: None,
             trap_resolution: None,
             host_region_continuation: false,
             lifecycle: match snapshot.lifecycle {
@@ -1155,7 +1156,10 @@ impl Game {
             && item.orientation < 24
             && match item.location {
                 ItemLocation::Ground(location) => self.world.contains(location),
-                ItemLocation::Carried(actor) => self.actors.contains_key(&actor),
+                ItemLocation::Carried(actor) => self.actors.get(&actor).is_some_and(|owner| {
+                    !item.fuel.is_some_and(|fuel| fuel.lit)
+                        || (owner.alive() && owner.equipment.values().any(|held| *held == id))
+                }),
             }
     }
 

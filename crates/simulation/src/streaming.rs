@@ -1124,7 +1124,7 @@ impl Game {
 
     /// Where an observing point's view starts, with any stair landings it
     /// discloses.
-    fn observer_eye(
+    pub(crate) fn observer_eye(
         &self,
         target: ReferenceTarget,
         can_prepare: &dyn Fn(RegionId) -> bool,

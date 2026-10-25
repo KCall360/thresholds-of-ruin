@@ -35,8 +35,14 @@ pub fn item_choices(
             ItemOperation::Eat => affordance.edible,
             ItemOperation::Read => affordance.readable,
             ItemOperation::Zap => affordance.zappable,
-            ItemOperation::Ignite => affordance.portable_light.as_ref().is_some_and(|light| light.ignitable),
-            ItemOperation::Extinguish => affordance.portable_light.as_ref().is_some_and(|light| light.extinguishable),
+            ItemOperation::Ignite => affordance
+                .portable_light
+                .as_ref()
+                .is_some_and(|light| light.ignitable),
+            ItemOperation::Extinguish => affordance
+                .portable_light
+                .as_ref()
+                .is_some_and(|light| light.extinguishable),
         }
     })
 }
@@ -75,9 +81,23 @@ pub fn item_action(
         .find(|candidate| candidate.item == item)
         .ok_or("That item has no usable interaction.")?;
     match operation {
-        ItemOperation::Ignite if affordance.portable_light.as_ref().is_some_and(|light| light.ignitable) => Ok(Action::Ignite { item }),
+        ItemOperation::Ignite
+            if affordance
+                .portable_light
+                .as_ref()
+                .is_some_and(|light| light.ignitable) =>
+        {
+            Ok(Action::Ignite { item })
+        }
         ItemOperation::Ignite => Err("You can't ignite that item now.".into()),
-        ItemOperation::Extinguish if affordance.portable_light.as_ref().is_some_and(|light| light.extinguishable) => Ok(Action::Extinguish { item }),
+        ItemOperation::Extinguish
+            if affordance
+                .portable_light
+                .as_ref()
+                .is_some_and(|light| light.extinguishable) =>
+        {
+            Ok(Action::Extinguish { item })
+        }
         ItemOperation::Extinguish => Err("You can't extinguish that item now.".into()),
         ItemOperation::Drink if affordance.drinkable && view.combat.is_some() => {
             Ok(Action::Drink { item })
@@ -211,9 +231,19 @@ pub fn charges(view: &Observation, item: ItemTarget) -> Option<u16> {
 
 /// Physical fuel facts come only from the controlled carried-item disclosure.
 pub fn portable_light_details(view: &Observation, item: ItemTarget) -> Option<String> {
-    let light = view.interactions.as_ref()?.inventory.iter()
-        .find(|offer| offer.item == item)?.portable_light.as_ref()?;
-    Some(format!("{}; fuel: {} ticks", if light.lit { "lit" } else { "unlit" }, light.remaining))
+    let light = view
+        .interactions
+        .as_ref()?
+        .inventory
+        .iter()
+        .find(|offer| offer.item == item)?
+        .portable_light
+        .as_ref()?;
+    Some(format!(
+        "{}; fuel: {} ticks",
+        if light.lit { "lit" } else { "unlit" },
+        light.remaining
+    ))
 }
 
 /// Display only the owner's remembered instance facts, never inferred bonuses.
@@ -225,7 +255,9 @@ pub fn equipment_details(view: &Observation, item: ItemTarget) -> Option<String>
         .iter()
         .find(|offer| offer.item == item)?;
     let mut parts = Vec::new();
-    if let Some(light) = portable_light_details(view, item) { parts.push(light); }
+    if let Some(light) = portable_light_details(view, item) {
+        parts.push(light);
+    }
     if let Some(known) = &offer.known_equipment {
         if let Some(attack) = &known.attack {
             parts.push(format!(

@@ -275,7 +275,12 @@ impl App {
         self.identification_selected = 0;
         if matches!(
             self.item_operation,
-            Some(ItemOperation::Read | ItemOperation::Zap | ItemOperation::Ignite | ItemOperation::Extinguish)
+            Some(
+                ItemOperation::Read
+                    | ItemOperation::Zap
+                    | ItemOperation::Ignite
+                    | ItemOperation::Extinguish
+            )
         ) {
             self.item_operation = None;
             self.pickup.clear();
@@ -317,7 +322,12 @@ impl App {
         if observed || control_changed {
             if matches!(
                 self.item_operation,
-                Some(ItemOperation::Read | ItemOperation::Zap | ItemOperation::Ignite | ItemOperation::Extinguish)
+                Some(
+                    ItemOperation::Read
+                        | ItemOperation::Zap
+                        | ItemOperation::Ignite
+                        | ItemOperation::Extinguish
+                )
             ) {
                 self.item_operation = None;
                 self.pickup.clear();
@@ -2752,7 +2762,14 @@ impl App {
                     }
                 }
             }
-            Key::Equip | Key::Unequip | Key::Drink | Key::Eat | Key::Read | Key::Zap | Key::Ignite | Key::Extinguish => {
+            Key::Equip
+            | Key::Unequip
+            | Key::Drink
+            | Key::Eat
+            | Key::Read
+            | Key::Zap
+            | Key::Ignite
+            | Key::Extinguish => {
                 let operation = match key {
                     Key::Equip => ItemOperation::Equip,
                     Key::Unequip => ItemOperation::Unequip,
@@ -2766,8 +2783,13 @@ impl App {
                 let Some(state) = &self.state else {
                     return Effect::None;
                 };
-                if matches!(operation, ItemOperation::Read | ItemOperation::Zap | ItemOperation::Ignite | ItemOperation::Extinguish)
-                    && !state.has_control()
+                if matches!(
+                    operation,
+                    ItemOperation::Read
+                        | ItemOperation::Zap
+                        | ItemOperation::Ignite
+                        | ItemOperation::Extinguish
+                ) && !state.has_control()
                 {
                     self.status = "You are observing. Press F3 to request control.".into();
                     return Effect::None;
@@ -3494,7 +3516,9 @@ pub fn inventory_entries(app: &App, o: &Observation) -> Vec<InventoryEntry> {
                 })
                 .filter(|text| !text.is_empty());
             let mut parts: Vec<String> = stats.into_iter().collect();
-            if let Some(light) = tor_client_common::items::portable_light_details(o, item.id) { parts.push(light); }
+            if let Some(light) = tor_client_common::items::portable_light_details(o, item.id) {
+                parts.push(light);
+            }
             if let Some(cursed) = affordance.and_then(|value| value.known_cursed) {
                 parts.push(if cursed { "cursed" } else { "uncursed" }.into());
             }

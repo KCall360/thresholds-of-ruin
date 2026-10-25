@@ -7,6 +7,12 @@ use crate::{ActorId, Game, GameError, ItemId, ItemLocation};
 pub(crate) struct SceneWitness {
     world: tor_world::PerceptionSnapshot,
     emitters: crate::portable_light::EmitterSignature,
+    actor: ActorSceneWitness,
+}
+
+/// Actor-local part of the shared scene dependency proof. No emitter copies.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ActorSceneWitness {
     location: Location,
     orientation: u8,
     body: tor_world::Shared<crate::BodySpec>,
@@ -568,7 +574,8 @@ impl Game {
             visible_cells: occurrences
                 .iter()
                 .map(|&(location, frame)| CellView {
-                    lit: self.world.is_lit(location) == Some(true) || portable_lit.contains(&location),
+                    lit: self.world.is_lit(location) == Some(true)
+                        || portable_lit.contains(&location),
                     frame,
                     door: self.disclosed_door(id, location),
                     door_secret: self.disclosed_door(id, location).is_some()
@@ -869,10 +876,15 @@ impl Game {
     }
 
     pub(crate) fn scene_witness(&self, id: ActorId) -> Result<SceneWitness, GameError> {
-        let actor = self.actors.get(&id).ok_or(GameError::UnknownActor)?;
         Ok(SceneWitness {
             world: self.world.perception_snapshot(),
             emitters: self.emitter_signature(),
+            actor: self.actor_scene_witness(id)?,
+        })
+    }
+    pub(crate) fn actor_scene_witness(&self, id: ActorId) -> Result<ActorSceneWitness, GameError> {
+        let actor = self.actors.get(&id).ok_or(GameError::UnknownActor)?;
+        Ok(ActorSceneWitness {
             location: actor.location,
             orientation: actor.orientation,
             body: actor.body.clone(),
@@ -1151,7 +1163,10 @@ impl Game {
             for mut cell in self.world.eye_scene(at, frame, range) {
                 // Usable illuminated sight retains its normal eye-origin gate.
                 // Blindness uses this same range, not a second reduced layer.
-                if sight && (self.world.is_lit(cell.location) == Some(true) || portable_lit.contains(&cell.location)) {
+                if sight
+                    && (self.world.is_lit(cell.location) == Some(true)
+                        || portable_lit.contains(&cell.location))
+                {
                     continue;
                 }
                 cell.offset.x += offset[0];
@@ -1180,7 +1195,11 @@ impl Game {
         if !self.emitter_signature().0.is_empty() {
             regions.extend(self.light_required_regions());
             if let Some((eye, frame)) = self.eye(id) {
-                regions.extend(self.world.eye_scene_regions(eye, frame, SIGHT_RANGE).unwrap_or_default());
+                regions.extend(
+                    self.world
+                        .eye_scene_regions(eye, frame, SIGHT_RANGE)
+                        .unwrap_or_default(),
+                );
             }
         }
         let range = actor.nonvisual_range();

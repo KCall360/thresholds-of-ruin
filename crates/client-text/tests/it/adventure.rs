@@ -2190,15 +2190,43 @@ fn portable_light_adventure_verbs_use_explicit_current_item_goals() {
     s.observation = tor_client_common::test_support::portable_light_observation(false);
     let item = s.observation.inventory[0].id;
     for command in ["ignite torch", "light torch", "kindle torch"] {
-        assert_eq!(goals(command, &s), [Goal::UseItem { item,
-            operation: tor_client_common::items::ItemOperation::Ignite }]);
+        assert_eq!(
+            goals(command, &s),
+            [Goal::UseItem {
+                item,
+                operation: tor_client_common::items::ItemOperation::Ignite
+            }]
+        );
     }
-    assert_eq!(said("extinguish torch", &s), "You can't extinguish that item now.");
+    assert_eq!(
+        said("extinguish torch", &s),
+        "You can't extinguish that item now."
+    );
     s.observation = tor_client_common::test_support::portable_light_observation(true);
-    assert_eq!(goals("extinguish torch", &s), [Goal::UseItem { item,
-        operation: tor_client_common::items::ItemOperation::Extinguish }]);
+    assert_eq!(
+        goals("extinguish torch", &s),
+        [Goal::UseItem {
+            item,
+            operation: tor_client_common::items::ItemOperation::Extinguish
+        }]
+    );
     assert_eq!(said("ignite torch", &s), "You can't ignite that item now.");
+    assert_eq!(
+        goals("drop torch", &s),
+        [Goal::Drop {
+            item,
+            quantity: None
+        }],
+        "held-light drop is explicit and never becomes extinguish/remove"
+    );
     s.observation.interactions.as_mut().unwrap().inventory[0].portable_light = None;
-    assert_eq!(said("ignite torch", &s), "You can't ignite that item now.",
-               "a matching noun is not permission to operate an ordinary item");
+    assert!(
+        said("drop torch", &s).contains("remove"),
+        "ordinary equipped item rule is preserved"
+    );
+    assert_eq!(
+        said("ignite torch", &s),
+        "You can't ignite that item now.",
+        "a matching noun is not permission to operate an ordinary item"
+    );
 }

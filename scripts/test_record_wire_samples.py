@@ -808,5 +808,52 @@ class FirstContactRecordingContracts(unittest.TestCase):
                 self.assertEqual(samples, {"existing": {"type": "palette"}})
 
 
+class TorchRecordingContracts(unittest.TestCase):
+    def case(self, failure=None, malformed=False):
+        source = {name: {"type": "snapshot", "snapshot": {"state": {"wizard_game": False,
+            "observation": {"interactions": {"inventory": [{"portable_light": {
+                "remaining": remaining, "lit": lit, "ignitable": not lit, "extinguishable": lit}}]}}}}}
+            for name, lit, remaining in (("lit", True, "100000"), ("off", False, "99800"))}
+        if malformed:
+            source["off"]["snapshot"]["state"]["observation"]["interactions"]["inventory"][0]["portable_light"]["lit"] = True
+        case, trace = recording_case(failure)
+        original = type(case).runTest
+        def record(subject):
+            subject.torch_samples = copy.deepcopy(source)
+            original(subject)
+        type(case).runTest = record
+        return case, trace, source
+
+    def test_factory_selects_non_graphical_actual_adventure_source_free_case(self):
+        case = record_wire_samples.torch_recording_case()
+        self.assertEqual(case.id(), "test_magic_items_process.MagicItemProcesses."
+                         "test_imported_torch_text_explicit_control_fuel_drop_and_source_free_reopen")
+        self.assertFalse(is_graphical_test(case))
+        actions = [row["request"]["command"]["action"] for row in record_wire_samples.CLIENT
+                   if row["type"] == "request" and row["request"]["type"] == "command"
+                   and row["request"]["command"]["type"] == "act"]
+        self.assertEqual([row["type"] for row in actions if row["type"] in ("ignite", "extinguish")],
+                         ["ignite", "extinguish"])
+
+    def test_both_server_states_publish_after_successful_cleanup_only(self):
+        case, trace, source = self.case()
+        samples = {}
+        with patch("record_wire_samples.torch_recording_case", return_value=case):
+            record_wire_samples.Recorder().record_torch(samples)
+        self.assertEqual(samples, {"zz.torch_" + key: value for key, value in source.items()})
+        self.assertEqual(trace[-1], "class_cleanup")
+        self.assertIsNot(samples["zz.torch_lit"], case.torch_samples["lit"])
+
+    def test_failed_cleanup_or_invalid_off_state_never_partially_publishes(self):
+        for failure, malformed in (("cleanup", False), ("class_cleanup", False), (None, True)):
+            with self.subTest(failure=failure, malformed=malformed):
+                case, _, _ = self.case(failure, malformed)
+                samples = {"existing": {"type": "palette"}}
+                with patch("record_wire_samples.torch_recording_case", return_value=case):
+                    with self.assertRaises(AssertionError):
+                        record_wire_samples.Recorder().record_torch(samples)
+                self.assertEqual(samples, {"existing": {"type": "palette"}})
+
+
 if __name__ == "__main__":
     unittest.main()

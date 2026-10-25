@@ -450,7 +450,9 @@ impl Preparation {
                         delivery: crate::abilities::DeviceDeliveryPlan::SelfEffect { .. },
                         ..
                     } | Plan::Equip { .. }
-                        | Plan::Unequip { .. } | Plan::Ignite { .. } | Plan::Extinguish { .. }
+                        | Plan::Unequip { .. }
+                        | Plan::Ignite { .. }
+                        | Plan::Extinguish { .. }
                         | Plan::Read { .. }
                         | Plan::Drink { .. }
                         | Plan::Eat { .. },

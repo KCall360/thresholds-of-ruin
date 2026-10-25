@@ -237,7 +237,7 @@ fn portable_light_is_required_nullable_named_and_physically_consistent() {
         }
     }
     for bad in [
-        json!(["100",false,true,false]),
+        json!(["100", false, true, false]),
         json!({"remaining":100,"lit":false,"ignitable":true,"extinguishable":false}),
         json!({"remaining":"1000001","lit":false,"ignitable":true,"extinguishable":false}),
         json!({"remaining":"0","lit":true,"ignitable":false,"extinguishable":true}),
@@ -245,13 +245,18 @@ fn portable_light_is_required_nullable_named_and_physically_consistent() {
         json!({"remaining":"10","lit":true,"ignitable":true,"extinguishable":true}),
         json!({"remaining":"10","lit":false,"ignitable":false,"extinguishable":true}),
         json!({"remaining":"10","lit":false,"ignitable":true,"extinguishable":false,"radius":4}),
-    ] { assert!(serde_json::from_value::<PortableLightView>(bad).is_err()); }
+    ] {
+        assert!(serde_json::from_value::<PortableLightView>(bad).is_err());
+    }
     for kind in ["ignite", "extinguish"] {
         let valid = json!({"type":kind,"item":item()});
         let action: Action = serde_json::from_value(valid.clone()).unwrap();
         assert_eq!(serde_json::to_value(action).unwrap(), valid);
-        for invalid in [json!([kind,item()]), json!({"type":kind}),
-                        json!({"type":kind,"item":item(),"fuel":100})] {
+        for invalid in [
+            json!([kind, item()]),
+            json!({"type":kind}),
+            json!({"type":kind,"item":item(),"fuel":100}),
+        ] {
             assert!(serde_json::from_value::<Action>(invalid).is_err());
         }
     }

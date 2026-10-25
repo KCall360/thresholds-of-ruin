@@ -610,10 +610,32 @@ impl Game {
     /// Dependency identities only skip work. A changed identity conservatively
     /// rebuilds ordinary disclosure; identities never enter saved knowledge.
     pub fn map_disclosure_changed_since(&self, before: &Game, id: ActorId) -> bool {
-        if !self.explored_maps.contains_key(&id)
-            || !self.world.shares_storage(&before.world)
-            || !self.items.shares_storage(&before.items)
-        {
+        !self
+            .map_disclosure_changed_actors_since(before, [id])
+            .is_empty()
+    }
+
+    /// Compute shared optical dependencies once, preserving caller actor order.
+    /// This is not caller-supplied authority: all skip proofs use the two Games.
+    pub fn map_disclosure_changed_actors_since(
+        &self,
+        before: &Game,
+        actors: impl IntoIterator<Item = ActorId>,
+    ) -> Vec<ActorId> {
+        let now = self.emitter_signature();
+        let prior = before.emitter_signature();
+        let shared_changed = !self.world.shares_storage(&before.world)
+            || now != prior
+            || (!self.items.shares_storage(&before.items)
+                && (now.0.is_empty() || !self.map_items_equal_except_burning_fuel(before)));
+        actors
+            .into_iter()
+            .filter(|id| self.map_actor_changed_since(before, *id, shared_changed))
+            .collect()
+    }
+
+    fn map_actor_changed_since(&self, before: &Game, id: ActorId, shared_changed: bool) -> bool {
+        if !self.explored_maps.contains_key(&id) || shared_changed {
             return true;
         }
         let (Some(a), Some(b)) = (self.actors.get(&id), before.actors.get(&id)) else {
@@ -625,6 +647,50 @@ impl Game {
             || a.alive() != b.alive()
             || !a.knowledge.shares_storage(&b.knowledge)
             || (self.combat.selected == Some(id)) != (before.combat.selected == Some(id))
+    }
+
+    fn map_items_equal_except_burning_fuel(&self, before: &Game) -> bool {
+        if self.items.len() != before.items.len() {
+            return false;
+        }
+        self.items
+            .iter()
+            .zip(before.items.iter())
+            .all(|((id, item), (prior_id, old))| {
+                if id != prior_id {
+                    return false;
+                }
+                // Exhaustive field inventory: a new item field must be classified,
+                // rather than silently inheriting this narrowly optical exception.
+                let crate::Item {
+                    corpse,
+                    condition,
+                    charges,
+                    relocation_elapsed,
+                    fuel,
+                    motion,
+                    orientation,
+                    spec,
+                    quantity,
+                    holds,
+                    location,
+                } = item;
+                corpse == &old.corpse
+                    && condition == &old.condition
+                    && charges == &old.charges
+                    && relocation_elapsed == &old.relocation_elapsed
+                    && motion == &old.motion
+                    && orientation == &old.orientation
+                    && spec == &old.spec
+                    && quantity == &old.quantity
+                    && holds == &old.holds
+                    && location == &old.location
+                    && (fuel == &old.fuel
+                        || matches!((fuel, old.fuel),
+                    (Some(crate::portable_light::FuelState { remaining, lit: true }),
+                     Some(crate::portable_light::FuelState { remaining: previous, lit: true }))
+                        if *remaining > 0 && *remaining <= previous))
+            })
     }
 
     pub fn map_knowledge_root(&self, actor: ActorId) -> MapKnowledgeRoot {

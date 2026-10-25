@@ -469,10 +469,18 @@ fn portable_light_keys_choose_explicit_actions_cancel_and_show_fuel() {
         assert_eq!(app.state.as_ref().unwrap().snapshot(), before);
         assert_eq!(key(&mut app, input), Effect::None);
         let emitted = action(key(&mut app, Key::Enter));
-        assert_eq!(emitted, if expected { Action::Extinguish { item } } else { Action::Ignite { item } });
+        assert_eq!(
+            emitted,
+            if expected {
+                Action::Extinguish { item }
+            } else {
+                Action::Ignite { item }
+            }
+        );
     }
     for (text, expected) in [("ignite", Key::Ignite), ("extinguish", Key::Extinguish)] {
-        let input: Input = serde_json::from_value(serde_json::json!({"type":"key","key":text})).unwrap();
+        let input: Input =
+            serde_json::from_value(serde_json::json!({"type":"key","key":text})).unwrap();
         assert!(matches!(input, Input::Key { key } if key == expected));
     }
 }

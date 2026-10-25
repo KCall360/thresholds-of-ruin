@@ -899,6 +899,7 @@ fn equipped_weapon_selection_keeps_item_scope_socket_and_contact_authority_indep
         }],
         preparation: None,
         inventory: vec![s::ItemInteractionView {
+            portable_light: None,
             item,
             slot: None,
             equipped_slot: Some(socket),
@@ -1040,6 +1041,7 @@ fn projectile_delivery_preserves_exact_owned_operands_without_hidden_profile_aut
                 asset: None,
             });
             s::ItemInteractionView {
+                portable_light: None,
                 item,
                 slot: None,
                 equipped_slot: (item == launcher).then_some(s::EquipmentSlotId(0)),

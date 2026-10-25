@@ -218,7 +218,10 @@ impl PreparedArchetype {
                 .as_ref()
                 .map(|device| device.compile(catalog.content().rules()))
                 .transpose()?,
-            held_light: author.held_light.map(super::HeldLightSpec::compile).transpose()?,
+            held_light: author
+                .held_light
+                .map(super::HeldLightSpec::compile)
+                .transpose()?,
             edible: author.edible.clone(),
             supply: author
                 .supply

@@ -49,10 +49,10 @@ pub use authoring::{
     AiProfile, AmountExpr, AnatomySpec, ArmorMaterial, ArmorSpec, BodySpec, ChargeRange,
     ConsumableSpec, CurrencyKind, DamageComponentExpr, DamageExpr, DamageType, DeviceSpec,
     DiceExpr, Effect, EquipmentAlteration, EquipmentGeneration, EquipmentSlot, EquipmentSpec,
-    EquippedSelection, HealingOverflow, HeldLightSpec, HitRecovery, HoldPolicy, ItemClass, ItemDiscovery,
-    LauncherProfile, PeriodicRelocation, PrimaryAttackSocket, ProjectileSpec, PushDirection,
-    ReadableSpec, RelocationGate, RelocationPolicy, TheftSelection, WeaponProfileSpec,
-    WeaponRangeBands, WeaponTrait, WeaponTraitChanges, WeaponTraitKind,
+    EquippedSelection, HealingOverflow, HeldLightSpec, HitRecovery, HoldPolicy, ItemClass,
+    ItemDiscovery, LauncherProfile, PeriodicRelocation, PrimaryAttackSocket, ProjectileSpec,
+    PushDirection, ReadableSpec, RelocationGate, RelocationPolicy, TheftSelection,
+    WeaponProfileSpec, WeaponRangeBands, WeaponTrait, WeaponTraitChanges, WeaponTraitKind,
 };
 use compiler::PreparedDefinitions;
 use diagnostics::{Origin, PathSegment, ReferenceValue};
@@ -5063,6 +5063,7 @@ mod tests {
             "readable",
             "ground_scare",
             "device",
+            "held_light",
             "edible",
             "supply",
             "magical",

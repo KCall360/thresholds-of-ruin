@@ -106,6 +106,8 @@ const CLIENT_KINDS: &[&str] = &[
     "act.unequip",
     "act.drink",
     "act.read",
+    "act.ignite",
+    "act.extinguish",
     "act.zap",
     "act.identify",
     "act.examine_trap",

@@ -4296,3 +4296,58 @@ async fn examining_distant_trap_does_not_approach_or_query_a_hidden_family() {
         .contains("within reach"));
     assert!(link.sent.is_empty());
 }
+
+#[tokio::test]
+async fn portable_light_engine_sends_one_current_action_and_narrates_paid_completion() {
+    let mut initial = state();
+    initial.observation = tor_client_common::test_support::portable_light_observation(false);
+    let item = initial.observation.inventory[0].id;
+    let mut link = Scripted::new(initial, move |request, now| {
+        let lit = now.observation.interactions.as_ref().unwrap().inventory[0]
+            .portable_light
+            .as_ref()
+            .unwrap()
+            .lit;
+        let action = if lit {
+            Action::Extinguish { item }
+        } else {
+            Action::Ignite { item }
+        };
+        assert!(is_act(request, &action));
+        let mut after = now.clone();
+        after.observation.tick += 100;
+        let interactions = after.observation.interactions.as_mut().unwrap();
+        interactions.inventory[0].portable_light = Some(PortableLightView {
+            remaining: if lit { 99_900 } else { 100_000 },
+            lit: !lit,
+            ignitable: lit,
+            extinguishable: !lit,
+        });
+        interactions.completed = vec![action.clone()];
+        vec![
+            Frame::View(after, Some(Event::ItemStarted { action })),
+            Frame::Ack,
+        ]
+    });
+    let mut engine = Engine::default();
+    let ignited = play(&mut link, &mut engine, "ignite torch").await;
+    assert!(
+        ignited.contains("You finish igniting the torch."),
+        "{ignited}"
+    );
+    assert_eq!(link.sent.len(), 1);
+    assert!(play(&mut link, &mut engine, "ignite torch")
+        .await
+        .contains("can't ignite"));
+    assert_eq!(
+        link.sent.len(),
+        1,
+        "stale eligibility does not send another paid action"
+    );
+    let off = play(&mut link, &mut engine, "extinguish torch").await;
+    assert!(off.contains("You finish extinguishing the torch."), "{off}");
+    assert_eq!(link.sent.len(), 2);
+    assert!(play(&mut link, &mut engine, "inventory")
+        .await
+        .contains("fuel: 99900 ticks"));
+}

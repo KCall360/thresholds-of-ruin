@@ -164,3 +164,6 @@ mod payload_resistance_tests;
 
 #[cfg(test)]
 mod cancellation_missile_tests;
+
+#[cfg(test)]
+mod portable_light_tests;

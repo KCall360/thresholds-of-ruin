@@ -115,8 +115,8 @@ pub use explored_map::{
 mod navigation_map;
 mod observation;
 mod periodic_relocation;
-mod portable_light;
 mod places;
+mod portable_light;
 pub mod progression;
 pub mod public_plan;
 pub mod quantity;
@@ -127,8 +127,10 @@ pub mod resources;
 pub mod survival_diagnostics;
 pub mod theft;
 pub use periodic_relocation::PeriodicRelocation;
-pub use portable_light::{HeldLightSpec, LightRegionBoundary, PortableLightView};
 pub use places::{NameOrigin, PlaceName};
+pub use portable_light::{
+    HeldLightSpec, LightOpticalWitness, LightRegionBoundary, PortableLightView,
+};
 mod streaming;
 pub use streaming::{
     MemoryRecords, PinWork, RecordId, RecordStore, ReferencePoint, ReferencePointId,
@@ -641,6 +643,7 @@ pub struct Game {
     preparation_region_boundary: Option<theft::PreparationRegionBoundary>,
     trap_region_boundary: Option<traps::TrapRegionBoundary>,
     light_region_boundary: Option<portable_light::LightRegionBoundary>,
+    light_settled_witness: Option<portable_light::LightOpticalWitness>,
     trap_resolution: Option<traps::TrapResolution>,
     host_region_continuation: bool,
 }
@@ -679,6 +682,7 @@ impl Clone for Game {
             preparation_region_boundary: self.preparation_region_boundary.clone(),
             trap_region_boundary: self.trap_region_boundary.clone(),
             light_region_boundary: self.light_region_boundary.clone(),
+            light_settled_witness: self.light_settled_witness.clone(),
             trap_resolution: self.trap_resolution.clone(),
             host_region_continuation: self.host_region_continuation,
         }
@@ -853,6 +857,7 @@ impl Game {
             preparation_region_boundary: None,
             trap_region_boundary: None,
             light_region_boundary: None,
+            light_settled_witness: None,
             trap_resolution: None,
             host_region_continuation: false,
         }

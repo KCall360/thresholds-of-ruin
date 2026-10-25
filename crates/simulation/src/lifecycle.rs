@@ -202,10 +202,16 @@ pub(crate) struct ItemOutcome {
     pub change: ItemChange,
 }
 pub(crate) enum ItemChange {
-    PortableLight { item: crate::ItemId, lit: bool, actor: ActorOutcome },
+    PortableLight {
+        item: crate::ItemId,
+        lit: bool,
+        actor: ActorOutcome,
+    },
     CurseBlocked(ActorOutcome),
     Equipment(ActorOutcome),
-    Consumed { actor: ActorOutcome },
+    Consumed {
+        actor: ActorOutcome,
+    },
 }
 
 /// Valid only inside the caller's uninterrupted transaction or discarded preview.
@@ -1529,7 +1535,7 @@ impl Game {
         actor.motion.active_fall = None;
         let body = Item {
             relocation_elapsed: None,
-                fuel: None,
+            fuel: None,
             condition: crate::armor::ItemCondition::default(),
             charges: None,
             corpse: Some(crate::CorpseAppearance {

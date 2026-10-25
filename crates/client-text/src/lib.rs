@@ -326,7 +326,8 @@ pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
     }
     match (verb.as_str(), rest) {
         (
-            "equip" | "wear" | "wield" | "remove" | "unequip" | "drink" | "quaff" | "eat" | "read" | "ignite" | "light" | "extinguish",
+            "equip" | "wear" | "wield" | "remove" | "unequip" | "drink" | "quaff" | "eat" | "read"
+            | "ignite" | "light" | "extinguish",
             noun,
         ) if !noun.is_empty() => {
             let operation = match verb.as_str() {

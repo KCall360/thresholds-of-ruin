@@ -9880,17 +9880,29 @@ mod held_light_schema_tests {
         let bytes = serde_json::to_vec(&original).unwrap();
         let restored: Owned<source::Archetype> = crate::storage::codec::strict(&bytes).unwrap();
         assert_eq!(restored.0.held_light.unwrap().fuel_ticks, 100_000);
-        assert_eq!(serde_json::to_value(Borrowed(&restored.0)).unwrap(), original);
+        assert_eq!(
+            serde_json::to_value(Borrowed(&restored.0)).unwrap(),
+            original
+        );
         for field in ["radius", "fuel_ticks"] {
             let mut missing = original.clone();
             missing["held_light"].as_object_mut().unwrap().remove(field);
-            assert!(crate::storage::codec::strict::<Owned<source::Archetype>>(&serde_json::to_vec(&missing).unwrap()).is_err());
+            assert!(crate::storage::codec::strict::<Owned<source::Archetype>>(
+                &serde_json::to_vec(&missing).unwrap()
+            )
+            .is_err());
         }
         let plain = source::Archetype::default();
         let mut plain = serde_json::to_value(Borrowed(&plain)).unwrap();
         assert_eq!(plain["held_light"], serde_json::Value::Null);
-        assert!(crate::storage::codec::strict::<Owned<source::Archetype>>(&serde_json::to_vec(&plain).unwrap()).is_ok());
+        assert!(crate::storage::codec::strict::<Owned<source::Archetype>>(
+            &serde_json::to_vec(&plain).unwrap()
+        )
+        .is_ok());
         plain.as_object_mut().unwrap().remove("held_light");
-        assert!(crate::storage::codec::strict::<Owned<source::Archetype>>(&serde_json::to_vec(&plain).unwrap()).is_err());
+        assert!(crate::storage::codec::strict::<Owned<source::Archetype>>(
+            &serde_json::to_vec(&plain).unwrap()
+        )
+        .is_err());
     }
 }

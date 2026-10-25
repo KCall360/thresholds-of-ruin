@@ -389,7 +389,10 @@ impl Game {
                         )?;
                         self.finish_combat_diagnostic(diagnostic, outcome);
                     }
-                    Work::Equip { .. } | Work::Unequip { .. } => {
+                    Work::Equip { .. }
+                    | Work::Unequip { .. }
+                    | Work::Ignite { .. }
+                    | Work::Extinguish { .. } => {
                         self.finish_item_work(
                             id,
                             &resolved.plan,

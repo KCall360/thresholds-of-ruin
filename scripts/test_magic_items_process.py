@@ -11,7 +11,7 @@ import tomllib
 
 from arena_matrix import toml_source
 
-from process_harness import ProcessTestCase, ROOT, SPECTATOR_TOKEN, WIZARD_TOKEN, non_graphical
+from process_harness import ProcessTestCase, ROOT, SPECTATOR_TOKEN, WIZARD_TOKEN, non_graphical, read_capture
 from status_condition_package import checkpoint, actor_creature
 from self_device_package import prepare as prepare_self_device
 from nothing_catalog_package import prepare as prepare_imported_nothing
@@ -992,6 +992,10 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         self.assertTrue(light(burning)["lit"])
         self.assertEqual(int(light(burning)["remaining"]), 100000)
         self.assertTrue(lit_cell(burning))
+        def snapshot_message():
+            messages = [json.loads(line).get("message") for line in probe.transcript if line.startswith("{")]
+            return next(message for message in reversed(messages) if message and message["type"] == "snapshot")
+        lit_sample = snapshot_message()
         self.assertIn("fuel:", self.say(text, "inventory").lower())
         self.say(text, "wait")
         elapsed = self.snapshot(probe)
@@ -1003,6 +1007,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         self.assertFalse(light(off)["lit"])
         self.assertEqual(int(light(off)["remaining"]), 99800)
         self.assertFalse(lit_cell(off))
+        self.torch_samples = {"lit": lit_sample, "off": snapshot_message()}
         self.say(text, "ignite #" + target)
         relit = self.snapshot(probe)
         self.say(text, "remove #" + target)
@@ -1031,6 +1036,51 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         reopened, restored = self.client(observe=True)
         self.assertEqual(checkpoint(self, reopened), saved)
         self.assertTrue(lit_cell(restored))
+
+
+    def test_native_ascii_torch_choices_explicit_ignite_extinguish_and_cancel(self):
+        package = prepare_imported_torch(self)
+        self.server(scenario=package)
+        capture = self.directory / "torch.ppm"
+        window = self.launch("tor-client-ascii", ["--connect", self.address, "--report-frames", "--capture", capture])
+        initial = self.ascii_frame(window, lambda frame: frame.get("state") and not frame["busy"]
+                                   and frame["can_admit_intention"])
+        self.assertTrue(initial["window_open"])
+        native = self.native_keys(window)
+        def press(name, action, **completion):
+            return self.native_press(window, native, name, action, **completion)
+        press("g", "pickup")
+        carried = press("Return", "enter", wait_for_ready=True, wait_for_admission=True)
+        torch, = observation(carried)["inventory"]
+        def light(frame):
+            return next(row for row in interactions(frame)["inventory"]
+                        if row["item"] == torch["id"])["portable_light"]
+        self.assertFalse(light(carried)["lit"])
+        self.assertFalse(light(carried)["ignitable"])
+        press("w", "equip")
+        held = press("Return", "enter", wait_for_ready=True, wait_for_admission=True)
+        self.assertFalse(light(held)["lit"])
+        self.assertTrue(light(held)["ignitable"])
+        asking = press("x", "ignite")
+        self.assertEqual(observation(asking), observation(held), "opening chooser is free")
+        cancelled = press("Escape", "escape")
+        self.assertEqual(observation(cancelled), observation(held))
+        press("x", "ignite")
+        lit = press("Return", "enter", wait_for_ready=True, wait_for_admission=True)
+        self.assertTrue(light(lit)["lit"])
+        self.assertTrue(light(lit)["extinguishable"])
+        self.assertEqual(int(observation(lit)["tick"]), int(observation(held)["tick"]) + 100)
+        self.assertTrue(any(cell["position"] == {"x": 3, "y": 0, "z": 0} and cell["lit"]
+                            for cell in observation(lit)["visible_cells"]))
+        self.assertIn("You finish igniting the torch.", lit["narration"])
+        press("v", "extinguish")
+        off = press("Return", "enter", wait_for_ready=True, wait_for_admission=True)
+        self.assertFalse(light(off)["lit"])
+        self.assertEqual(int(light(off)["remaining"]), 99900)
+        self.assertIn("You finish extinguishing the torch.", off["narration"])
+        pixels = read_capture(capture).split(b"\n", 3)[3]
+        self.assertEqual(len(pixels), 1200 * 800 * 3)
+        self.assertGreater(len(set(pixels)), 8)
 
 
 

@@ -152,7 +152,7 @@ pub struct Choice {
 
 pub const HELP: &str = "\
 Look and ask: look, examine <thing>, look <direction>, exits, where am i, what now, inventory, stats, status.
-Handle things: take <thing>, take all, drop <thing>, wear or wield <item>, remove <item>, drink <potion>, eat <food>, read <scroll>, zap <device> <direction>, identify <item> or identify cancel, open or close <door>.
+Handle things: take <thing>, take all, drop <thing>, wear or wield <item>, remove <item>, ignite <torch>, extinguish <torch>, drink <potion>, eat <food>, read <scroll>, zap <device> <direction>, identify <item> or identify cancel, open or close <door>.
 Fight: attack <creature> [with <equipped weapon>], fight <creature> to keep attacking, follow <creature>, flee, back.
 Move: a direction (north, ne, up...) walks until there's something to see; go to <thing or place>, go to exit, go to start, places, name room <name>.
 Time: wait, resume, cancel [direction], escape [hold <number|#token|name>], escape <direction>, advancement.
@@ -1299,10 +1299,19 @@ fn transitive_meaning(
         }
         (Verb::Drop, None | Some((Preposition::On | Preposition::In, _))) => {
             bind(direct, scene, referents, Domain::Carried, &|r| {
-                drop(r, quantity)
+                drop(r, quantity, scene)
             })
         }
-        (Verb::Wear | Verb::Wield | Verb::Remove | Verb::Drink | Verb::Eat | Verb::Light | Verb::Extinguish, _) => {
+        (
+            Verb::Wear
+            | Verb::Wield
+            | Verb::Remove
+            | Verb::Drink
+            | Verb::Eat
+            | Verb::Light
+            | Verb::Extinguish,
+            _,
+        ) => {
             let operation = match verb {
                 Verb::Remove => ItemOperation::Unequip,
                 Verb::Drink => ItemOperation::Drink,
@@ -1351,7 +1360,7 @@ fn transitive_meaning(
                 .is_some_and(|h| matches!(h, "floor" | "ground")) =>
         {
             bind(direct, scene, referents, Domain::Carried, &|r| {
-                drop(r, quantity)
+                drop(r, quantity, scene)
             })
         }
         (Verb::Put, _) => bind(direct, scene, referents, Domain::Carried, &|_| {
@@ -1499,8 +1508,21 @@ fn take(r: &Referent, quantity: Option<u64>) -> Interpretation {
     }
 }
 
-fn drop(r: &Referent, quantity: Option<u64>) -> Interpretation {
-    if let Some(how) = &r.equipped {
+fn drop(r: &Referent, quantity: Option<u64>, scene: &Scene) -> Interpretation {
+    let held_light = match r.key {
+        Key::Item(item) => scene
+            .state
+            .observation
+            .interactions
+            .as_ref()
+            .is_some_and(|view| {
+                view.inventory
+                    .iter()
+                    .any(|row| row.item == item && row.portable_light.is_some())
+            }),
+        _ => false,
+    };
+    if let Some(how) = r.equipped.as_ref().filter(|_| !held_light) {
         return refuse(format!("You'll have to remove {} first ({how}).", r.the()));
     }
     match r.key {

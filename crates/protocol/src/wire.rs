@@ -300,8 +300,12 @@ pub enum Action {
     Read {
         item: ItemTarget,
     },
-    Ignite { item: ItemTarget },
-    Extinguish { item: ItemTarget },
+    Ignite {
+        item: ItemTarget,
+    },
+    Extinguish {
+        item: ItemTarget,
+    },
     Zap {
         item: ItemTarget,
         aim: DeviceAim,
@@ -378,8 +382,12 @@ impl<'de> Deserialize<'de> for Action {
             Read {
                 item: ItemTarget,
             },
-            Ignite { item: ItemTarget },
-            Extinguish { item: ItemTarget },
+            Ignite {
+                item: ItemTarget,
+            },
+            Extinguish {
+                item: ItemTarget,
+            },
             Zap {
                 item: ItemTarget,
                 aim: DeviceAim,
@@ -811,9 +819,15 @@ impl<'de> Deserialize<'de> for PortableLightView {
             extinguishable: bool,
         }
         let f: Fields = crate::bounded::named_map(d)?;
-        let value = Self { remaining: f.remaining, lit: f.lit,
-            ignitable: f.ignitable, extinguishable: f.extinguishable };
-        if !value.valid() { return Err(serde::de::Error::custom("invalid portable light")); }
+        let value = Self {
+            remaining: f.remaining,
+            lit: f.lit,
+            ignitable: f.ignitable,
+            extinguishable: f.extinguishable,
+        };
+        if !value.valid() {
+            return Err(serde::de::Error::custom("invalid portable light"));
+        }
         Ok(value)
     }
 }

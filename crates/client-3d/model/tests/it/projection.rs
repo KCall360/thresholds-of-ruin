@@ -259,13 +259,37 @@ fn portable_light_projection_and_real_commands_follow_disclosed_eligibility() {
         let state = ClientState::from_snapshot(snapshot).unwrap();
         let projected = view(&state, &Palette::default());
         let light = projected.inventory[0].portable_light.as_ref().unwrap();
-        assert_eq!((light.lit, light.ignitable, light.extinguishable), (lit, !lit, lit));
+        assert_eq!(
+            (light.lit, light.ignitable, light.extinguishable),
+            (lit, !lit, lit)
+        );
         assert_eq!(light.remaining, 100_000);
-        let operation = if lit { ItemOperation::Extinguish } else { ItemOperation::Ignite };
+        let operation = if lit {
+            ItemOperation::Extinguish
+        } else {
+            ItemOperation::Ignite
+        };
         let request = request_from(&state, &projected.shown, Cmd::Use(item, operation)).unwrap();
-        let Request::Command { command: Command::Act { action, .. }, .. } = request else { panic!("ordinary action") };
-        assert_eq!(action, if lit { Action::Extinguish { item } } else { Action::Ignite { item } });
-        let wrong = if lit { ItemOperation::Ignite } else { ItemOperation::Extinguish };
+        let Request::Command {
+            command: Command::Act { action, .. },
+            ..
+        } = request
+        else {
+            panic!("ordinary action")
+        };
+        assert_eq!(
+            action,
+            if lit {
+                Action::Extinguish { item }
+            } else {
+                Action::Ignite { item }
+            }
+        );
+        let wrong = if lit {
+            ItemOperation::Ignite
+        } else {
+            ItemOperation::Extinguish
+        };
         assert!(request_from(&state, &projected.shown, Cmd::Use(item, wrong)).is_err());
     }
 }
