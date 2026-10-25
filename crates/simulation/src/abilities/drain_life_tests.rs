@@ -47,6 +47,12 @@ fn fixture_with_options(
                 condition.family = crate::content_ids::ConditionFamilyId::new(id.clone()).unwrap();
                 condition.name = id;
                 condition.source_scoped = false;
+                // `distracted` is a NextCheck token: Health modifiers require
+                // an ordinary timed source, not token-only edge semantics.
+                condition.lifecycle = crate::rules::ConditionLifecycle::Timed;
+                assert_eq!(condition.timing, crate::rules::ConditionTiming::expiring());
+                assert_eq!(condition.stacking, crate::rules::Stacking::Longest);
+                assert!(!condition.protected_lifecycle());
                 condition.modifiers = vec![
                     crate::rules::Modifier {
                         scope: crate::rules::Scope::Always,

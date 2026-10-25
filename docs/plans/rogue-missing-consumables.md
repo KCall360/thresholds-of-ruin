@@ -534,3 +534,13 @@ unchanged. One coherent acceptance batch covers odd/wide Health, empty/multiple
 recipients, exact doorway asymmetry, frozen actors, three-or-more activity resets,
 paid refusal, observer privacy, retry and real compressed source-free reopening.
 These are implementation requirements, not completed or qualified behavior.
+
+The first grouped core run uses an explicit no-op area-publication seam, with
+its complete reviewed implementation retained in the preceding source checkpoint.
+Four controls pass and seven cases reach the intended missing Health/contact/
+activity/death effects after valid prerequisites. The wide-Health case instead
+finds a fixture error: it copied a NextCheck token condition, whose lifecycle
+forbids Health modifiers. The correction explicitly authors a Timed condition,
+retaining the same wide operands and unchanged admission limits. It is not a
+capacity increase. Restoring the protected area implementation and this fixture
+correction form one green cohort; gameplay acceptance is still pending.
