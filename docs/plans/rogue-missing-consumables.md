@@ -898,3 +898,14 @@ next preflight, the map dependency guard also gained an actual observer scene
 witness, with independent sight removal/expiry and strict cross-record negative
 controls. Eighteen core cases are now registered. These additions and corrections
 have not yet run; no portable-torch runtime qualification is implied.
+
+The corrected all-target compile preflight passes. Four selected temporary-red
+controls fail at their intended paid-light/map behavior when the reviewed seams
+are disabled. The same linked test executable's full eighteen-case torch filter
+passes six independent controls, fails eleven disabled-behavior assertions, and
+exposes one grip-fixture setup error: it tried to replace already-derived anatomy.
+That fixture now authors its sockets before creature construction and explicitly
+proves two real grip units, three candidate slots, two successful equips and an
+atomic third refusal. The four selected red test bodies are unchanged. The exact
+green implementation is restored; its fresh full-library runtime is still
+pending. These red receipts are not successful portable-torch acceptance.

@@ -610,17 +610,33 @@ fn torch_burnout_during_paid_extinguish_interrupts_exact_item_without_resurrecti
 }
 #[test]
 fn torch_consumes_one_real_grip_and_failed_third_grip_is_atomic() {
-    let (mut game, first, slot) = fixture(1000, 4);
-    let mut anatomy = game.anatomy(OWNER).unwrap().clone();
-    let second_slot = EquipmentSlotId(anatomy.slots.len() as u16);
-    anatomy
+    // Creature anatomy must be authored before construction; configure_anatomy
+    // intentionally cannot replace an already-derived creature's anatomy.
+    let mut game = super::ray_tests::fixture_with(|_, _, species| {
+        species.anatomy.slots.extend([
+            crate::content_ids::EquipmentSlot::new("held_light").unwrap(),
+            crate::content_ids::EquipmentSlot::new("held_light").unwrap(),
+        ]);
+    });
+    let anatomy = game.anatomy(OWNER).unwrap();
+    assert_eq!(
+        anatomy
+            .capacities
+            .get(&crate::content_ids::EquipmentCapacityId::new("grip").unwrap()),
+        Some(2)
+    );
+    let slots: Vec<_> = anatomy
         .slots
-        .push(crate::content_ids::EquipmentSlot::new("held_light").unwrap());
-    let third_slot = EquipmentSlotId(anatomy.slots.len() as u16);
-    anatomy
-        .slots
-        .push(crate::content_ids::EquipmentSlot::new("held_light").unwrap());
-    game.configure_anatomy(OWNER, anatomy).unwrap();
+        .iter()
+        .enumerate()
+        .filter(|(_, slot)| slot.as_str() == "held_light")
+        .map(|(index, _)| EquipmentSlotId(index as u16))
+        .collect();
+    assert_eq!(slots.len(), 3);
+    let (slot, second_slot, third_slot) = (slots[0], slots[1], slots[2]);
+    let first = game
+        .place_item_stack(30, at(1), Some(OWNER), 1, spec(1000, 4))
+        .unwrap();
     let second = game
         .place_item_stack(31, at(1), Some(OWNER), 1, spec(1000, 4))
         .unwrap();
