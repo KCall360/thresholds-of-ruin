@@ -29,7 +29,7 @@ struct SavedBoundary {
     revisions: Revisions,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct DiskCheckpoint {
     pub save_id: String,
@@ -45,6 +45,42 @@ pub(crate) struct DiskCheckpoint {
     revisions: Revisions,
     #[serde(deserialize_with = "saved_boundaries::deserialize")]
     boundaries: Vec<SavedBoundary>,
+}
+
+// Decode the exact saved fields first, including the bounded history reader.
+// Canonical-shape serialization requires the enclosing roots' actual count;
+// this is not gameplay/source authority and restore binds them independently.
+#[derive(Deserialize)]
+#[serde(remote = "DiskCheckpoint", deny_unknown_fields)]
+struct DiskCheckpointFields {
+    pub save_id: String,
+    pub sequence: u64,
+    pub record_count: usize,
+    version: u32,
+    ruleset: String,
+    #[serde(with = "crate::storage::schema::BranchId")]
+    current_branch: BranchId,
+    wizard_game: bool,
+    shared: SharedState,
+    game: Snapshot,
+    revisions: Revisions,
+    #[serde(deserialize_with = "saved_boundaries::deserialize")]
+    boundaries: Vec<SavedBoundary>,
+}
+impl<'de> Deserialize<'de> for DiskCheckpoint {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut checkpoint = DiskCheckpointFields::deserialize(deserializer)?;
+        let roots: Vec<_> = std::iter::once(&checkpoint.game)
+            .chain(checkpoint.boundaries.iter().map(|boundary| &boundary.game))
+            .collect();
+        checkpoint
+            .shared
+            .prepare_spatial_serialization(&roots)
+            .map_err(serde::de::Error::custom)?;
+        // The private root fields remain unchanged through strict SameJson's
+        // immediate serialization. A later restore never trusts this cache.
+        Ok(checkpoint)
+    }
 }
 
 impl Checkpoint {
@@ -660,6 +696,55 @@ impl DiskCheckpoint {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compressed_checkpoint_strict_roundtrip_binds_actual_roots_and_rejects_stale_indices() {
+        for spatial in [false, true] {
+            for historical in [false, true] {
+                let scenario = if spatial {
+                    Scenario {
+                        actors: vec![],
+                        regions: 1,
+                        package: Some(Arc::new(
+                            crate::scenario_package::spatial_audit_test_package(),
+                        )),
+                        ..Scenario::two_room(42)
+                    }
+                } else {
+                    Scenario::two_room(42)
+                };
+                let engine = Engine::memory(scenario).unwrap();
+                assert_eq!(
+                    engine.game.spatial_registry().scopes().next().is_some(),
+                    spatial
+                );
+                let captured = Checkpoint::capture(&engine).encode("strict-rooted", 0);
+                let compressed =
+                    crate::storage::checkpoint_codec::write_json(&captured, Vec::new()).unwrap();
+                let bytes = crate::storage::checkpoint_codec::decode(&compressed).unwrap();
+                let valid: DiskCheckpoint = crate::storage::codec::strict(&bytes).unwrap();
+                assert!(!valid.boundaries.is_empty());
+                valid.restore(engine.archive.clone()).unwrap();
+                let mut stale: DiskCheckpoint = crate::storage::codec::strict(&bytes).unwrap();
+                let snapshot = if historical {
+                    &mut stale.boundaries[0].game
+                } else {
+                    &mut stale.game
+                };
+                let mut altered = serde_json::to_value(&*snapshot).unwrap();
+                altered["spatial"] = serde_json::json!(u32::MAX);
+                *snapshot = serde_json::from_value(altered).unwrap();
+                // Deliberate private-field mutation: raw internal serialization is
+                // not acceptance authority. Both real boundaries check ACTUAL roots.
+                let stale_bytes = serde_json::to_vec(&stale).unwrap();
+                assert!(crate::storage::codec::strict::<DiskCheckpoint>(&stale_bytes).is_err());
+                assert_eq!(
+                    stale.restore(engine.archive.clone()).unwrap_err().code,
+                    ErrorCode::InvalidArchive
+                );
+            }
+        }
+    }
 
     #[test]
     fn canonical_scope_omission_in_current_or_historical_root_is_rejected() {

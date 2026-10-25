@@ -30,7 +30,12 @@ pub(crate) enum PoolState {
         directories: Vec<Shared<Registry>>,
         references: Vec<usize>,
     },
-    Decoded(codec::DeferredPool),
+    Decoded {
+        pool: codec::DeferredPool,
+        // Only canonical serialization may use this witness. Restoration always
+        // revalidates its actual root references against the original meter.
+        serialization: Option<ValidatedPool>,
+    },
     InvalidCapture,
 }
 impl Default for PoolState {
@@ -74,9 +79,27 @@ impl PoolState {
     ) -> Result<ValidatedPool, PoolError> {
         match self {
             Self::Captured { directories, .. } => codec::capture_pool(directories, roots),
-            Self::Decoded(pool) => pool.candidate().finalize(roots),
+            Self::Decoded { pool, .. } => pool.candidate().finalize(roots),
             Self::InvalidCapture => Err(PoolError::Structure),
         }
+    }
+}
+impl PoolState {
+    pub(crate) fn prepare_serialization(
+        &mut self,
+        roots: impl ExactSizeIterator<Item = usize>,
+    ) -> Result<(), PoolError> {
+        let Self::Decoded {
+            pool,
+            serialization,
+        } = self
+        else {
+            return Err(PoolError::Structure);
+        };
+        // A failed rebind must never leave a previous serialization witness.
+        *serialization = None;
+        *serialization = Some(pool.candidate().finalize(roots)?);
+        Ok(())
     }
 }
 impl Serialize for PoolState {
@@ -90,7 +113,15 @@ impl Serialize for PoolState {
                     .map_err(|_| serde::ser::Error::custom("invalid spatial capture pool"))?;
                 EncodedPool(&validated).serialize(s)
             }
-            Self::Decoded(_) | Self::InvalidCapture => Err(serde::ser::Error::custom(
+            Self::Decoded {
+                serialization: Some(pool),
+                ..
+            } => EncodedPool(pool).serialize(s),
+            Self::Decoded {
+                serialization: None,
+                ..
+            }
+            | Self::InvalidCapture => Err(serde::ser::Error::custom(
                 "spatial root binding required before complete capture",
             )),
         }
@@ -98,7 +129,12 @@ impl Serialize for PoolState {
 }
 impl<'de> Deserialize<'de> for PoolState {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        codec::DeferredSeed.deserialize(d).map(Self::Decoded)
+        codec::DeferredSeed
+            .deserialize(d)
+            .map(|pool| Self::Decoded {
+                pool,
+                serialization: None,
+            })
     }
 }
 pub(crate) mod root_index {

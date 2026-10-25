@@ -1198,12 +1198,18 @@ fn room_light_world(saved: &Value) -> tor_world::World {
     let worlds: Worlds = serde_json::from_value(saved["shared"]["worlds"].clone()).unwrap();
     worlds.0[saved["game"]["world"].as_u64().unwrap() as usize].clone()
 }
-fn paid_authored_room_light(passage: bool) {
+fn paid_authored_room_light(passage: bool, stored_checkpoint: bool) {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path().join("source");
     let path = directory.path().join("light.db");
-    let mut wire =
-        Wire::new(Engine::open(&path, authored_room_light_source(&root, passage)).unwrap());
+    let policy = crate::SavePolicy {
+        checkpoint_interval: if stored_checkpoint { 1 } else { 4096 },
+        ..Default::default()
+    };
+    let mut wire = Wire::new(
+        Engine::open_with_policy(&path, authored_room_light_source(&root, passage), policy)
+            .unwrap(),
+    );
     let snapshot = wire.snapshot(OWNER);
     let wand = snapshot
         .state
@@ -1270,6 +1276,9 @@ fn paid_authored_room_light(passage: bool) {
     assert_eq!(repeated["game"]["rules_rng"], after["game"]["rules_rng"]);
     assert_eq!(room_light_world(&repeated).is_lit(at), Some(!passage));
     wire.service.engine.flush().unwrap();
+    if stored_checkpoint {
+        assert_real_stored_checkpoint(&path, true);
+    }
     drop(wire);
     std::fs::remove_dir_all(&root).unwrap();
     let reopened = Engine::open(&path, crate::Scenario::two_room(999)).unwrap();
@@ -1277,11 +1286,64 @@ fn paid_authored_room_light(passage: bool) {
 }
 #[test]
 fn actual_paid_room_light_uses_canonical_room_and_survives_source_deleted_reopen() {
-    paid_authored_room_light(false);
+    paid_authored_room_light(false, false);
 }
 #[test]
 fn actual_paid_room_light_in_explicit_passage_is_identified_paid_noop() {
-    paid_authored_room_light(true);
+    paid_authored_room_light(true, false);
+}
+
+fn assert_real_stored_checkpoint(path: &Path, spatial: bool) {
+    let database =
+        rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .unwrap();
+    let (sequence, payload): (u64, Vec<u8>) = database
+        .query_row(
+            "SELECT sequence,payload FROM checkpoint WHERE slot=1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert!(sequence > 0);
+    let decoded = crate::storage::checkpoint_codec::decode(&payload).unwrap();
+    let _: crate::engine::DiskCheckpoint = crate::storage::codec::strict(&decoded).unwrap();
+    let value: Value = serde_json::from_slice(&decoded).unwrap();
+    assert_eq!(
+        !value["shared"]["spatial"]["scopes"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        spatial
+    );
+    assert!(!value["boundaries"].as_array().unwrap().is_empty());
+}
+#[test]
+fn actual_room_light_compressed_interval_one_checkpoint_reopens_without_sources() {
+    paid_authored_room_light(false, true);
+}
+#[test]
+fn actual_passage_light_compressed_interval_one_checkpoint_reopens_without_sources() {
+    paid_authored_room_light(true, true);
+}
+#[test]
+fn ordinary_empty_spatial_compressed_interval_one_checkpoint_reopens_without_sources() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("source");
+    let path = directory.path().join("ordinary.db");
+    let scenario = nothing_source(&root, false);
+    let policy = crate::SavePolicy {
+        checkpoint_interval: 1,
+        ..Default::default()
+    };
+    let mut wire = Wire::new(Engine::open_with_policy(&path, scenario, policy).unwrap());
+    wire.act("ordinary-wait", Action::Wait);
+    let expected = wire.checkpoint();
+    wire.service.engine.flush().unwrap();
+    assert_real_stored_checkpoint(&path, false);
+    drop(wire);
+    std::fs::remove_dir_all(root).unwrap();
+    let reopened = Engine::open(&path, crate::Scenario::two_room(999)).unwrap();
+    assert_eq!(checkpoint(&reopened), expected);
 }
 
 #[test]

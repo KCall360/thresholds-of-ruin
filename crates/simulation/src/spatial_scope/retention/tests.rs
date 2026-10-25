@@ -267,3 +267,70 @@ fn over_envelope_capture_poison_does_not_retain_more_root_references() {
     assert!(matches!(&state, super::PoolState::InvalidCapture));
     assert!(serde_json::to_vec(&state).is_err());
 }
+
+#[test]
+fn decoded_canonical_serialization_requires_actual_roots_without_granting_restore_or_capture() {
+    for populated in [false, true] {
+        let mut game = fixture();
+        if populated {
+            game.register_spatial_scope(scope(1), &budget()).unwrap();
+        }
+        let mut captured = SharedState::default();
+        let snapshot = game.checkpoint(&mut captured);
+        let canonical = serde_json::to_value(&captured).unwrap();
+        let named = serde_json::to_value(&snapshot).unwrap();
+        let mut decoded: SharedState = serde_json::from_value(canonical.clone()).unwrap();
+        assert!(serde_json::to_value(&decoded).is_err());
+        decoded.prepare_spatial_serialization(&[&snapshot]).unwrap();
+        assert_eq!(serde_json::to_value(&decoded).unwrap(), canonical);
+        let mut unbound = RestoreContext::new(&decoded, game.content().clone());
+        assert!(unbound
+            .restore(serde_json::from_value(named.clone()).unwrap())
+            .is_err());
+        let mut bound = RestoreContext::new(&decoded, game.content().clone());
+        bound.bind_spatial_roots(&[&snapshot]).unwrap();
+        assert_eq!(
+            bound
+                .restore(serde_json::from_value(named.clone()).unwrap())
+                .unwrap(),
+            game
+        );
+        drop(bound);
+        drop(unbound);
+
+        let mut bad = named;
+        bad["spatial"] = serde_json::json!(u32::MAX);
+        let bad: crate::checkpoint::Snapshot = serde_json::from_value(bad).unwrap();
+        assert!(decoded.prepare_spatial_serialization(&[&bad]).is_err());
+        assert!(serde_json::to_value(&decoded).is_err());
+        decoded.prepare_spatial_serialization(&[&snapshot]).unwrap();
+        let excess = vec![&snapshot; crate::checkpoint::MAX_CHECKPOINT_ROOTS + 1];
+        assert!(decoded.prepare_spatial_serialization(&excess).is_err());
+        assert!(serde_json::to_value(&decoded).is_err());
+        decoded.prepare_spatial_serialization(&[&snapshot]).unwrap();
+        let _unsupported_append = game.checkpoint(&mut decoded);
+        assert!(serde_json::to_value(&decoded).is_err());
+        assert!(decoded.prepare_spatial_serialization(&[&snapshot]).is_err());
+    }
+}
+
+#[test]
+fn canonical_serialization_reprepare_rejects_omitted_history_directory() {
+    let mut game = fixture();
+    let mut shared = SharedState::default();
+    let earlier = game.checkpoint(&mut shared);
+    game.register_spatial_scope(scope(1), &budget()).unwrap();
+    let current = game.checkpoint(&mut shared);
+    let canonical = serde_json::to_value(&shared).unwrap();
+    let mut decoded: SharedState = serde_json::from_value(canonical.clone()).unwrap();
+    decoded
+        .prepare_spatial_serialization(&[&current, &earlier])
+        .unwrap();
+    assert_eq!(serde_json::to_value(&decoded).unwrap(), canonical);
+    assert!(decoded.prepare_spatial_serialization(&[&current]).is_err());
+    assert!(serde_json::to_value(&decoded).is_err());
+    decoded
+        .prepare_spatial_serialization(&[&current, &earlier])
+        .unwrap();
+    assert_eq!(serde_json::to_value(&decoded).unwrap(), canonical);
+}

@@ -53,8 +53,11 @@ A bounded row-run registry, pooled Game/history retention and canonical authored
 generated source verification now support the opt-in Room Light device. Focused
 Service coverage includes paid room illumination, passage/maze no-ops, connected
 cross-region loading, frozen foreign surfaces and source-deleted reopening.
-Live distributions remain unchanged. Final core result-projection, actual Text
-process, certificate and broader qualification work is still in progress.
+Live distributions remain unchanged. Core result-projection and package certificate
+checks now pass. Actual Text use lights rooms and preserves paid passage no-ops,
+but compressed-checkpoint reopening exposes a strict spatial-pool decode defect.
+That persistence correction and broader qualification remain in progress; the
+earlier journal-replay Service checks did not cover this checkpoint path.
 The [spatial integration plan](plans/rogue-spatial-registry-reconstruction.md) owns
 exact acceptance scope and remaining qualification.
 Existing live item distributions remain unchanged and polymorph remains separate.

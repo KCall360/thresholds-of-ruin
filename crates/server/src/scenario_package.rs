@@ -7880,7 +7880,9 @@ mod region_lifecycle_tests {
                     let mut loaded = BTreeSet::new();
                     for region in order.iter() {
                         loaded.insert(*region);
-                        if package.manifest.procedural_worlds.is_empty() {
+                        if package.manifest.procedural_worlds.is_empty()
+                            && package.manifest.generation_groups.is_empty()
+                        {
                             game.transition_regions(
                                 &RegionTransition {
                                     active: loaded.clone(),
@@ -7889,6 +7891,7 @@ mod region_lifecycle_tests {
                                 &mut individual,
                             )
                             .unwrap_or_else(|error| panic!("{context}: {error:?}"));
+                            package.install_authored_spatial(&mut game).unwrap();
                         } else {
                             publish_selection(&mut game, &mut groups, &loaded);
                         }
@@ -7900,7 +7903,9 @@ mod region_lifecycle_tests {
                     package.initialize_selected_character(&mut game).unwrap();
                     package.configure_loaded_arena(&mut game).unwrap();
                     game.initialize_discovery().unwrap();
-                    if package.manifest.procedural_worlds.is_empty() {
+                    if package.manifest.procedural_worlds.is_empty()
+                        && package.manifest.generation_groups.is_empty()
+                    {
                         assert_same_game(&game, &whole, &context);
                     } else {
                         assert_same_procedural_game(

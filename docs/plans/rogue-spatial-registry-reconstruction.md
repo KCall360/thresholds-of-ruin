@@ -592,3 +592,23 @@ Fifty-four affected saved-adapter tests pass against that fixture using the same
 qualified server executable, without recompilation. Actual imported Text/process
 and package certificate qualification remain pending; no verification gate is
 claimed by these focused results.
+
+
+The final result-projection cohort passes all 1,813 simulation library tests and
+all ten focused Room Light Service tests. Ordinary application binaries build,
+and the real compiler validates/checks the production Rogue certificate. Both
+imported Text process cases pass illumination or passage no-op, exact payment,
+identification and repeat-use assertions, then fail source-deleted reopening
+with a real compressed checkpoint. These failures are not successful persistence
+acceptance.
+
+Reusing the same server executable for its full library reveals 1,017 passes
+and 46 failures. Strict checkpoint decoding deserializes the spatial pool into
+an intentionally unbound state, then its canonical JSON comparison attempts
+serialization before actual current/history roots are bound. The correction
+must prepare that exact bounded root set before canonical comparison while
+retaining independent restore validation; permissive unbound serialization is
+not acceptable. A separate region-lifecycle reference comparison lacks expected
+spatial directories and is being diagnosed independently. The next combined
+correction includes actual compressed-checkpoint roundtrips and interval-one
+source-deleted reopen, not journal replay alone. No verification gate is claimed.

@@ -265,6 +265,21 @@ mod explored_map_owners {
 }
 
 impl SharedState {
+    /// Prepare a decoded pool for strict canonical-shape serialization using the
+    /// current snapshot and every retained history snapshot. This is not restore
+    /// authority: each RestoreContext must still bind its actual roots. Callers
+    /// must reprepare if the enclosing snapshot/root list changes; a failed
+    /// preparation clears the prior serialization witness. Capture into decoded
+    /// state remains unsupported and poisons complete serialization.
+    pub fn prepare_spatial_serialization(
+        &mut self,
+        snapshots: &[&Snapshot],
+    ) -> Result<(), PersistError> {
+        self.spatial
+            .prepare_serialization(snapshots.iter().map(|snapshot| snapshot.spatial))
+            .map_err(|_| PersistError::Spatial)
+    }
+
     pub fn valid_world_count(&self, maximum: usize) -> bool {
         !self.worlds.is_empty() && self.worlds.len() <= maximum
     }
