@@ -1047,3 +1047,28 @@ not carried, rather than not visible. Its one-line fixture correction preserves
 the refusal and all independent real torch verb/state controls. This corrected
 Text case and the final server quantity-stage fixture still await reruns; no
 additional gameplay or validation policy is introduced by these two corrections.
+The corrected full server library passes all 1,094 tests, including all seven
+portable-torch Service cases, and corrected Text integration passes all 190 tests.
+Together with the previously recorded unchanged-source core 1,868, protocol
+library 35/integration 283, common 145, Text library 76, ASCII integration 150
+and World integration 82 results, these close the identified fixture failures.
+They remain affected-owner reconstruction evidence, not final verification gates.
+
+Artifact identity is tracked independently from successful tests: integration
+Cargo rebuilt the ordinary Text and ASCII executable paths, so the old five-app
+receipt no longer matched all five files. The preservation check stopped before
+reuse. A separately labeled snapshot retains the three matching original
+executables and two test-built replacements; it is not evidence that the original
+Text/ASCII artifacts were preserved. Fresh five-app build and hash verification
+must precede further actual-process claims against that generation.
+
+The final five-application build now passes and its exact executable hashes are
+recorded independently. The actual Text Adventure torch case passes again against
+that generation, including its source-deleted checkpoint reopen. The same final
+compiler checks all 44 current scenario certificates successfully without changing
+them. The earlier genuine 52-example/55-frame wire recording and saved-scenario
+writer remain separately identified artifacts. These final results apply to the
+protected source checkpoint; this subsequent prose update does not claim a new
+binary build. Local native ASCII and independent 3D acceptance, final debug/release
+and hosted gates, and performance qualification remain pending. No gameplay or
+qualification tooling is changed by this outcome checkpoint.

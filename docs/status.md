@@ -78,9 +78,23 @@ libraries pass 1,850/1,084 tests, protocol integration 282 and client-common 145
 the selected World ray owner passes 18. Three imported-device processes cover
 paid use and source-deleted interval-one reopening; a separate production-catalog
 process passes three Ice Monster, Phantom and Xeroc contrasts. Genuine recording
-contains 50 client/53 server samples, and all 44 live scenario certificates were
+contains 50 generated client examples/53 captured server samples, and all 44 live
+scenario certificates were
 regenerated. These are internal reconstruction results, not final quick/push/full,
 native, release or hosted verification. Live weighted stock and kits are unchanged.
+The opt-in portable torch now supports explicit paid ignition/extinguishing,
+one-grip equipment, lit dropping, extinguishing on stow, active-location fuel and
+exact expiry. Dynamic illumination and dependency-only load preparation preserve
+ordinary visible-region activation policy. Fresh core/server libraries pass
+1,868/1,094 tests, including seven torch Service cases; affected protocol, common,
+Text, ASCII and World owners also pass. Current-state map-work controls prove
+steady-fuel updates avoid reacquisition while preserving exact state; they are not
+whole-pipeline performance measurements. A final hash-verified application build
+passes actual Text Adventure use and source-deleted reopening, and its compiler
+checks all 44 live certificates. Genuine wire recording contains 52 generated
+client examples and 55 captured server frames, including torch lit/off states.
+Native ASCII, independent 3D, final verification/release/hosted gates and broader
+performance qualification remain pending. No live weighted stock or kit changes.
 Existing live item distributions remain unchanged and polymorph remains separate.
 
 Characters retain last-seen terrain, doors, stairs and item appearances in the
