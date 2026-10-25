@@ -409,6 +409,10 @@ fn effects(values: &[Effect], rules: &s::rules::Ruleset) -> Result<Vec<s::rules:
                         .map_err(|_| invalid("Invalid condition ID"))?,
                     duration: amount(duration),
                 },
+                Effect::HasteDose { condition, rest } => s::rules::Effect::HasteDose {
+                    condition: ConditionId::new(condition).map_err(|_| invalid("Invalid condition ID"))?,
+                    rest: ConditionId::new(rest).map_err(|_| invalid("Invalid rest condition ID"))?,
+                },
                 Effect::ApplyPersistentCondition { condition, cancels } => s::rules::Effect::ApplyPersistentCondition {
                     condition: ConditionId::new(condition).map_err(|_| invalid("Invalid condition ID"))?,
                     cancels: cancels.as_ref().map(|id| ConditionId::new(id).map_err(|_| invalid("Invalid condition ID"))).transpose()?,

@@ -99,9 +99,60 @@ impl<'de> Deserialize<'de> for DiagnosticCostBundle {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum HasteDoseOutcome {
+    Hasted {
+        #[serde(with = "crate::integers::unsigned")]
+        duration: u64,
+    },
+    Overdose {
+        #[serde(with = "crate::integers::unsigned")]
+        rest: u64,
+    },
+}
+impl HasteDoseOutcome {
+    fn valid(&self) -> bool {
+        match self {
+            Self::Hasted { duration } => (1..=1_000_000).contains(duration),
+            Self::Overdose { rest } => *rest <= 1_000_000,
+        }
+    }
+}
+impl<'de> Deserialize<'de> for HasteDoseOutcome {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            Hasted {
+                #[serde(with = "crate::integers::unsigned")]
+                duration: u64,
+            },
+            Overdose {
+                #[serde(with = "crate::integers::unsigned")]
+                rest: u64,
+            },
+        }
+        let value = match crate::bounded::named_map(deserializer)? {
+            Fields::Hasted { duration } => Self::Hasted { duration },
+            Fields::Overdose { rest } => Self::Overdose { rest },
+        };
+        if !value.valid() {
+            return Err(serde::de::Error::custom("invalid haste dose duration"));
+        }
+        Ok(value)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum DiagnosticEffect {
+    HasteDose {
+        target: ActorId,
+        condition: ContentRef,
+        rest: ContentRef,
+        outcome: HasteDoseOutcome,
+    },
     CancelSpecials {
         target: ActorId,
         changed: bool,
@@ -318,6 +369,18 @@ impl CombatDiagnosticRecord {
             && self.charge.as_ref().is_none_or(DiagnosticCostBundle::valid)
             && self.outcome.effects.len() <= 128
             && self.outcome.effects.iter().all(|effect| match effect {
+                DiagnosticEffect::HasteDose {
+                    target,
+                    condition,
+                    rest,
+                    outcome,
+                } => {
+                    *target == self.target
+                        && condition.valid()
+                        && rest.valid()
+                        && condition.id != rest.id
+                        && outcome.valid()
+                }
                 DiagnosticEffect::ConditionRemoved { target, condition } => {
                     *target == self.target && condition.valid()
                 }
@@ -427,6 +490,14 @@ impl<'de> Deserialize<'de> for DiagnosticEffect {
         #[derive(Deserialize)]
         #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
+            HasteDose {
+                target: ActorId,
+                #[serde(deserialize_with = "crate::bounded::named_map")]
+                condition: ContentRef,
+                #[serde(deserialize_with = "crate::bounded::named_map")]
+                rest: ContentRef,
+                outcome: HasteDoseOutcome,
+            },
             CancelSpecials {
                 target: ActorId,
                 changed: bool,
@@ -532,6 +603,17 @@ impl<'de> Deserialize<'de> for DiagnosticEffect {
             },
         }
         Ok(match crate::bounded::named_map(deserializer)? {
+            Fields::HasteDose {
+                target,
+                condition,
+                rest,
+                outcome,
+            } => Self::HasteDose {
+                target,
+                condition,
+                rest,
+                outcome,
+            },
             Fields::CancelSpecials { target, changed } => Self::CancelSpecials { target, changed },
             Fields::DrainLife { target, changed } => Self::DrainLife { target, changed },
             Fields::DirectHealthLoss { target, amount } => {

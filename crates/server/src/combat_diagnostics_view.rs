@@ -240,6 +240,23 @@ fn record(
                                 amount: *amount,
                             }
                         }
+                        s::abilities::ResolvedEffect::HasteDose { id, rest, outcome } => {
+                            p::DiagnosticEffect::HasteDose {
+                                target,
+                                condition: condition(id, rules),
+                                rest: condition(rest, rules),
+                                outcome: match outcome {
+                                    s::abilities::HasteDoseOutcome::Hasted { duration } => {
+                                        p::HasteDoseOutcome::Hasted {
+                                            duration: *duration,
+                                        }
+                                    }
+                                    s::abilities::HasteDoseOutcome::Overdose { rest } => {
+                                        p::HasteDoseOutcome::Overdose { rest: *rest }
+                                    }
+                                },
+                            }
+                        }
                         s::abilities::ResolvedEffect::CancelSpecials { changed } => {
                             p::DiagnosticEffect::CancelSpecials {
                                 target,

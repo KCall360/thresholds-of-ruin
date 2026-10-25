@@ -691,6 +691,10 @@ pub enum Effect {
         condition: String,
         duration: u64,
     },
+    HasteDose {
+        condition: String,
+        rest: String,
+    },
     ApplyPersistentCondition {
         condition: String,
         cancels: Option<String>,
@@ -1224,6 +1228,10 @@ impl<'de> Deserialize<'de> for Effect {
                 condition: String,
                 duration: u64,
             },
+            HasteDose {
+                condition: String,
+                rest: String,
+            },
             ApplyPersistentCondition {
                 condition: String,
                 // Authored absence means no opposite; canonical and stored
@@ -1321,6 +1329,7 @@ impl<'de> Deserialize<'de> for Effect {
                 condition,
                 duration,
             },
+            Fields::HasteDose { condition, rest } => Self::HasteDose { condition, rest },
             Fields::ApplyPersistentCondition { condition, cancels } => {
                 Self::ApplyPersistentCondition { condition, cancels }
             }

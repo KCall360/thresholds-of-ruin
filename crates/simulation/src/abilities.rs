@@ -1,5 +1,7 @@
 //! Validated action plans, pure effect resolution, and runtime orchestration.
 mod compile;
+mod haste_dose;
+pub use haste_dose::HasteDoseOutcome;
 mod execution;
 mod invocation;
 mod projectile;

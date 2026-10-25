@@ -1068,6 +1068,10 @@ pub enum Effect {
     DrainLife,
     /// Target-only permanent special suppression and current concealment cleanup.
     CancelSpecials,
+    HasteDose {
+        condition: ConditionId,
+        rest: ConditionId,
+    },
     ArrestDescent,
     StepSelfOneCell,
     PushTargetOneCell {
@@ -1179,6 +1183,10 @@ impl<'de> Deserialize<'de> for Effect {
             RoomLight {},
             DrainLife {},
             CancelSpecials {},
+            HasteDose {
+                condition: ConditionId,
+                rest: ConditionId,
+            },
             ArrestDescent {},
             StepSelfOneCell {},
             PushTargetOneCell {
@@ -1271,6 +1279,7 @@ impl<'de> Deserialize<'de> for Effect {
             Fields::RoomLight {} => Self::RoomLight,
             Fields::DrainLife {} => Self::DrainLife,
             Fields::CancelSpecials {} => Self::CancelSpecials,
+            Fields::HasteDose { condition, rest } => Self::HasteDose { condition, rest },
             Fields::ArrestDescent {} => Self::ArrestDescent,
             Fields::StepSelfOneCell {} => Self::StepSelfOneCell,
             Fields::PushTargetOneCell { direction } => Self::PushTargetOneCell { direction },
@@ -1427,6 +1436,8 @@ impl<'de> Deserialize<'de> for ConditionTicks {
 pub enum ConditionTiming {
     /// No clock advances this condition; only an explicit ending removes it.
     UntilRemoved,
+    /// Explicit Timed+Keep opt-in: finite actor-active removal or no expiry.
+    ActorActiveOrUntilRemoved,
     ActorActive {
         on_expiry: ConditionExpiry,
     },
@@ -1437,9 +1448,16 @@ impl ConditionTiming {
             on_expiry: ConditionExpiry::Remove,
         }
     }
+    pub const fn permits_finite(self) -> bool {
+        !matches!(self, Self::UntilRemoved)
+    }
+    pub const fn permits_persistent(self) -> bool {
+        matches!(self, Self::UntilRemoved | Self::ActorActiveOrUntilRemoved)
+    }
     pub(crate) fn protection(self) -> Option<ConditionTicks> {
         match self {
             Self::UntilRemoved
+            | Self::ActorActiveOrUntilRemoved
             | Self::ActorActive {
                 on_expiry: ConditionExpiry::Remove,
             } => None,
@@ -1455,10 +1473,12 @@ impl<'de> Deserialize<'de> for ConditionTiming {
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
             UntilRemoved {},
+            ActorActiveOrUntilRemoved {},
             ActorActive { on_expiry: ConditionExpiry },
         }
         Ok(match crate::bounded::named_map(deserializer)? {
             Fields::UntilRemoved {} => Self::UntilRemoved,
+            Fields::ActorActiveOrUntilRemoved {} => Self::ActorActiveOrUntilRemoved,
             Fields::ActorActive { on_expiry } => Self::ActorActive { on_expiry },
         })
     }
@@ -2035,7 +2055,7 @@ impl Ruleset {
         for d in &mut document.conditions {
             d.family.intern(&mut pool);
             bound(
-                d.timing != ConditionTiming::UntilRemoved
+                !d.timing.permits_persistent()
                     || (d.lifecycle == ConditionLifecycle::Timed && d.stacking == Stacking::Keep),
                 "persistent_condition_shape",
             )?;

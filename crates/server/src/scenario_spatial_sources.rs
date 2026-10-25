@@ -124,6 +124,10 @@ impl Sources<'_> {
             match value {
                 Effect::RoomLight | Effect::DrainLife => self.light = true,
                 Effect::CancelSpecials => self.cancellation = true,
+                Effect::HasteDose { condition, rest } => {
+                    self.add(Source::Condition(condition.clone()));
+                    self.add(Source::Condition(rest.clone()));
+                }
                 Effect::ApplyCondition { condition, .. }
                 | Effect::ApplyPersistentCondition { condition, .. }
                 | Effect::ApplyConditionForTurns { condition, .. }
@@ -139,6 +143,10 @@ impl Sources<'_> {
             match value {
                 r::Effect::RoomLight | r::Effect::DrainLife => self.light = true,
                 r::Effect::CancelSpecials => self.cancellation = true,
+                r::Effect::HasteDose { condition, rest } => {
+                    self.add(Source::Condition(condition.to_string()));
+                    self.add(Source::Condition(rest.to_string()));
+                }
                 r::Effect::ApplyCondition { condition, .. }
                 | r::Effect::ApplyPersistentCondition { condition, .. }
                 | r::Effect::ApplyConditionForTurns { condition, .. }

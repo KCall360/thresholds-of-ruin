@@ -296,6 +296,16 @@ fn effect_view(value: &s::rules::Effect, rules: &Ruleset) -> p::CombatTraceStep 
                 text("duration_turns", amount_text(duration)),
             ],
         ),
+        s::rules::Effect::HasteDose {
+            condition: id,
+            rest,
+        } => (
+            "haste_dose",
+            vec![
+                content("condition", condition(id, rules)),
+                content("rest", condition(rest, rules)),
+            ],
+        ),
         s::rules::Effect::ApplyPersistentCondition {
             condition: id,
             cancels,

@@ -1419,6 +1419,10 @@ enum Effect {
         condition: String,
         duration: u64,
     },
+    HasteDose {
+        condition: String,
+        rest: String,
+    },
     ApplyPersistentCondition {
         condition: String,
         #[serde(deserialize_with = "required_option")]
@@ -2887,6 +2891,7 @@ enum ConditionLifecycle {
 )]
 enum ConditionTiming {
     UntilRemoved,
+    ActorActiveOrUntilRemoved,
     ActorActive {
         #[serde(with = "mapped")]
         on_expiry: tor_simulation::rules::ConditionExpiry,
@@ -2901,6 +2906,7 @@ impl ConditionTiming {
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
             UntilRemoved {},
+            ActorActiveOrUntilRemoved {},
             ActorActive {
                 #[serde(with = "mapped")]
                 on_expiry: tor_simulation::rules::ConditionExpiry,
@@ -2908,6 +2914,9 @@ impl ConditionTiming {
         }
         Ok(match super::named_map(deserializer)? {
             Fields::UntilRemoved {} => tor_simulation::rules::ConditionTiming::UntilRemoved,
+            Fields::ActorActiveOrUntilRemoved {} => {
+                tor_simulation::rules::ConditionTiming::ActorActiveOrUntilRemoved
+            }
             Fields::ActorActive { on_expiry } => {
                 tor_simulation::rules::ConditionTiming::ActorActive { on_expiry }
             }
@@ -6788,6 +6797,10 @@ impl Effect {
                 condition: String,
                 duration: u64,
             },
+            HasteDose {
+                condition: String,
+                rest: String,
+            },
             ApplyPersistentCondition {
                 condition: String,
                 #[serde(deserialize_with = "required_option")]
@@ -6879,6 +6892,7 @@ impl Effect {
                 condition,
                 duration,
             },
+            Fields::HasteDose { condition, rest } => source::Effect::HasteDose { condition, rest },
             Fields::ApplyPersistentCondition { condition, cancels } => {
                 source::Effect::ApplyPersistentCondition { condition, cancels }
             }
@@ -9904,5 +9918,73 @@ mod held_light_schema_tests {
             &serde_json::to_vec(&plain).unwrap()
         )
         .is_err());
+    }
+}
+
+#[cfg(test)]
+mod haste_dose_effect_tests {
+    use super::*;
+
+    #[test]
+    fn haste_dose_source_and_independent_save_require_exact_condition_ids() {
+        let raw = br#"{"kind":"haste_dose","condition":"rogue.hasted","rest":"fixture.rest"}"#;
+        let authored: source::Effect = serde_json::from_slice(raw).unwrap();
+        assert_eq!(
+            authored,
+            source::Effect::HasteDose {
+                condition: "rogue.hasted".into(),
+                rest: "fixture.rest".into(),
+            }
+        );
+        let restored: Owned<source::Effect> = crate::storage::codec::strict(raw).unwrap();
+        assert_eq!(restored.0, authored);
+        assert_eq!(serde_json::to_vec(&Borrowed(&authored)).unwrap(), raw);
+        for malformed in [
+            r#"{"kind":"haste_dose","condition":"rogue.hasted"}"#,
+            r#"{"kind":"haste_dose","rest":"fixture.rest"}"#,
+            r#"{"kind":"haste_dose","condition":null,"rest":"fixture.rest"}"#,
+            r#"{"kind":"haste_dose","condition":"rogue.hasted","rest":"fixture.rest","turn_ticks":100}"#,
+            r#"{"kind":"haste_dose","condition":"rogue.hasted","rest":"fixture.rest","rest":"fixture.rest"}"#,
+            r#"["haste_dose","rogue.hasted","fixture.rest"]"#,
+        ] {
+            assert!(
+                serde_json::from_str::<source::Effect>(malformed).is_err(),
+                "{malformed}"
+            );
+            assert!(
+                crate::storage::codec::strict::<Owned<source::Effect>>(malformed.as_bytes())
+                    .is_err(),
+                "{malformed}"
+            );
+        }
+    }
+
+    #[test]
+    fn mixed_haste_timing_save_is_operand_free_and_old_timing_stays_strict() {
+        let raw = br#"{"kind":"actor_active_or_until_removed"}"#;
+        let timing: Owned<tor_simulation::rules::ConditionTiming> =
+            crate::storage::codec::strict(raw).unwrap();
+        assert_eq!(
+            timing.0,
+            tor_simulation::rules::ConditionTiming::ActorActiveOrUntilRemoved
+        );
+        assert_eq!(serde_json::to_vec(&Borrowed(&timing.0)).unwrap(), raw);
+        for malformed in [
+            r#"{"kind":"actor_active_or_until_removed","on_expiry":{"kind":"remove"}}"#,
+            r#"{"kind":"actor_active_or_until_removed","duration":100}"#,
+            r#"["actor_active_or_until_removed"]"#,
+            r#""actor_active_or_until_removed""#,
+            r#"{"actor_active_or_until_removed":null}"#,
+            r#"{"kind":"actor_active"}"#,
+            r#"{"kind":"until_removed","on_expiry":{"kind":"remove"}}"#,
+        ] {
+            assert!(
+                crate::storage::codec::strict::<Owned<tor_simulation::rules::ConditionTiming>>(
+                    malformed.as_bytes()
+                )
+                .is_err(),
+                "{malformed}"
+            );
+        }
     }
 }

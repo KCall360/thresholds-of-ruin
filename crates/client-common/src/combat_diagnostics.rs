@@ -112,6 +112,10 @@ pub fn lines(report: &CombatDiagnosticsView) -> Result<Vec<String>, InvalidComba
                     result,
                 } => format!("  Actor {}: {:?} movement, {:?}", target.0, mode, result),
                 DiagnosticEffect::Relocate { target, mode, result } => format!("  Actor {}: {:?} relocation, {:?}", target.0, mode, result),
+                DiagnosticEffect::HasteDose { target, condition, rest, outcome } => match outcome {
+                    HasteDoseOutcome::Hasted { duration } => format!("  Actor {}: {} for {duration} active ticks", target.0, condition.name),
+                    HasteDoseOutcome::Overdose { rest: duration } => format!("  Actor {}: haste overdose; {} for {duration} active ticks", target.0, rest.name),
+                },
                 DiagnosticEffect::DrainLife { target, changed } => format!("  Actor {}: drain life {}", target.0, if *changed { "changed" } else { "unchanged" }),
                 DiagnosticEffect::DirectHealthLoss { target, amount } => format!("  Actor {}: {amount} direct health loss", target.0),
                 DiagnosticEffect::CancelSpecials { target, changed } => format!("  Actor {}: special capabilities {}", target.0, if *changed { "cancelled" } else { "unchanged" }),

@@ -1157,3 +1157,47 @@ all 150 integration tests with checked inputs unchanged. This closes the causal
 original-storage regression while retaining the independent materialized-output
 oracle. The result proves the exercised borrowing and rendering contracts, not
 historical timing, broad performance parity, native presentation or final gates.
+
+### Next coherent batch: Haste dose
+
+The accepted dose refers to one authored shared haste condition and one forced-rest
+condition. At paid completion it checks active applications of that named haste
+condition, including applications currently masked by Slow. Without one, a single
+draw grants four through seven base actor turns of finite haste. With one, it
+removes that condition's active applications and a single draw selects zero
+through seven base turns of forced rest. Zero rest is a valid overdose result,
+not a zero-length condition. It does not strip innate/equipment Haste, generic
+speed modifiers or unrelated ownership. Ordinary consumption and identification
+remain the shared item ledger; live distributions remain unchanged.
+
+One explicit timed Keep condition may opt into mixed actor-active/until-removed
+lifetimes. This lets the existing persistent wand and finite potion use the same
+condition: potion then wand keeps the finite application, while wand then potion
+triggers overdose. Other condition definitions and their strict lifetime rules
+remain unchanged. The proposed source is `HasteDose { condition, rest }`; planning
+captures those IDs and base `turn_ticks`, and the closed resolved outcome records
+positive finite Hasted duration or nonnegative Overdose rest in ticks. The timing
+wire follows existing strict named objects,
+`{ "kind": "actor_active_or_until_removed" }`, not a new string representation.
+
+Actual caller prerequisites must prove materialized caster Lore and target
+Agility rather than relying on an ungranted ability-specific bonus. Persistent
+haste uses the existing lawful Timed/Keep source. Two-owner tests must drive actual
+readiness, and Adventure timing must inspect paid release and captured phases
+rather than assuming haste recovery or forced rest remains at the next prompt.
+The cohort includes ordinary applications of the named condition, Slow masking,
+both potion/wand orders, pending interval-one source-deleted reopen and retries,
+and strict source/save/diagnostic controls. Implementation and qualification are
+in progress; no Haste-dose runtime or new gate result is claimed here. Strength's
+cap-basis and Raise's blocked-funding decisions remain separately pending.
+
+The initial Haste-dose source checkpoint contains the authored parser, explicit
+mixed timing and closed result scaffolds, server/save mirrors, privileged
+protocol/common diagnostic adapters and pure catalog tests. It is deliberately
+incomplete and uncompiled: planned/resolved execution, full reference validation,
+exhaustive consumers and actual Service/process acceptance remain in progress.
+The pure catalog first-red run passes the unchanged-stock/kit control and fails
+at the intended missing dose definition and ninth potion identity. No dose
+content is installed in this checkpoint. Adding its later opt-in appearance
+identity may change seeded appearance assignments even though live item weights
+and kits stay unchanged. No Rust, native or actual-dose runtime is qualified.
