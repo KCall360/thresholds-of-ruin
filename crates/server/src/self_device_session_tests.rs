@@ -2856,6 +2856,11 @@ fn paid_first_contact_chain(noncombat: bool, ordinary: bool) {
     let scenario = first_contact_chain_source(&root, noncombat, ordinary);
     // Decoder catalog only: never passed to the source-free Engine reopen.
     let content = scenario.package.as_ref().unwrap().content().unwrap();
+    let owners = if noncombat {
+        vec![OWNER, OTHER, ActorId(4)]
+    } else {
+        vec![OWNER, OTHER]
+    };
     let mut wire = Wire::for_actors(
         Engine::open_with_policy(
             &path,
@@ -2866,7 +2871,7 @@ fn paid_first_contact_chain(noncombat: bool, ordinary: bool) {
             },
         )
         .unwrap(),
-        [OWNER, OTHER],
+        owners.iter().copied(),
     );
     assert_eq!(wire.service.engine.next_actor(), Some(OWNER));
     let initial = wire.checkpoint();
@@ -2880,7 +2885,10 @@ fn paid_first_contact_chain(noncombat: bool, ordinary: bool) {
         (2, 2, 0)
     );
     assert!(nothing_actor(&initial, ActorId(3)).is_null());
-    for region in 3..=5 {
+    // A declared external actor is itself an initial observing root. The
+    // noncombat branch deliberately tests an ACTIVE blocker, not cold residency.
+    let cold_regions = if noncombat { 5..=5 } else { 3..=5 };
+    for region in cold_regions {
         assert_eq!(
             room_light_world(&initial).is_lit(tor_world::Location {
                 region: tor_world::RegionId(region),
@@ -2888,6 +2896,18 @@ fn paid_first_contact_chain(noncombat: bool, ordinary: bool) {
             }),
             None
         );
+    }
+    if noncombat {
+        let body = nothing_actor(&initial, ActorId(4));
+        assert!(body.is_object() && body["combat"].is_null() && body["body"].is_object());
+        assert_eq!(body["location"]["position"], json!({"x":10,"y":2,"z":0}));
+        let lifecycle = initial["game"]["lifecycle"].as_u64().unwrap() as usize;
+        assert!(!initial["shared"]["lifecycles"][lifecycle]["frozen"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(3)));
+        assert!(initial["shared"]["lifecycles"][lifecycle]["stamps"]["4"].is_null());
+        assert_eq!(wire.clients.keys().copied().collect::<Vec<_>>(), owners);
     }
     let wand = wire
         .snapshot(OWNER)
@@ -2939,7 +2959,7 @@ fn paid_first_contact_chain(noncombat: bool, ordinary: bool) {
     let request = wire.request(OWNER, action);
     ack(wire.send(OWNER, "physical-first-body", request.clone()));
     wire.service.run_until_blocked();
-    for actor in [OWNER, OTHER] {
+    for actor in owners.iter().copied() {
         let messages = wire.drain(actor);
         assert!(
             !messages
@@ -3024,8 +3044,8 @@ fn paid_first_contact_chain(noncombat: bool, ordinary: bool) {
             json!({"x":10,"y":2,"z":0})
         );
         let lifecycle = paused["game"]["lifecycle"].as_u64().unwrap() as usize;
-        assert_eq!(paused["shared"]["lifecycles"][lifecycle]["stamps"]["4"], 0);
-        assert!(paused["shared"]["lifecycles"][lifecycle]["frozen"]
+        assert!(paused["shared"]["lifecycles"][lifecycle]["stamps"]["4"].is_null());
+        assert!(!paused["shared"]["lifecycles"][lifecycle]["frozen"]
             .as_array()
             .unwrap()
             .contains(&json!(3)));
@@ -3039,16 +3059,40 @@ fn paid_first_contact_chain(noncombat: bool, ordinary: bool) {
     let serial = wire.serial;
     drop(wire);
     std::fs::remove_dir_all(&root).unwrap();
-    let mut wire = Wire::for_actors(
-        Engine::open(&path, crate::Scenario::two_room(999)).unwrap(),
-        [OWNER, OTHER],
-    );
-    wire.serial = serial;
+    let engine = Engine::open(&path, crate::Scenario::two_room(999)).unwrap();
     assert_eq!(
-        wire.checkpoint(),
+        checkpoint(&engine),
         paused,
-        "actual pending plan survives source deletion"
+        "source-free Engine restore preserves full pending checkpoint before Service pause"
     );
+    let mut wire = Wire::for_actors(engine, owners.iter().copied());
+    wire.serial = serial;
+    assert!(wire.serial.checked_add(1).unwrap() > serial);
+    let service_paused = wire.checkpoint();
+    assert_eq!(
+        nothing_actor(&service_paused, OWNER)["pending"]["active"],
+        false,
+        "Service reconnect deliberately pauses human work"
+    );
+    assert_eq!(
+        nothing_actor(&service_paused, OWNER)["pending"]["plan"],
+        nothing_actor(&paused, OWNER)["pending"]["plan"]
+    );
+    assert_eq!(
+        nothing_actor(&service_paused, OWNER)["pending"]["remaining"],
+        nothing_actor(&paused, OWNER)["pending"]["remaining"]
+    );
+    let snapshot = wire.snapshot(OWNER);
+    assert_eq!(snapshot.readiness.resume.len(), 1);
+    let resume = Request::Command {
+        context: snapshot.reply_context().input,
+        branch: snapshot.branch.clone(),
+        command: Command::ResumeIntention {
+            expected_revision: snapshot.state.revision,
+            intention: snapshot.readiness.resume[0].clone(),
+        },
+    };
+    ack(wire.send(OWNER, "resume-physical-first-body", resume));
     let terminal = wire.finish(OWNER, "physical-first-body", &request);
     let after = wire.checkpoint();
     let after_stamina = first_contact_stamina(&mut wire);
@@ -3083,6 +3127,24 @@ fn paid_first_contact_chain(noncombat: bool, ordinary: bool) {
                 "frozen {field}"
             );
         }
+    }
+    if noncombat {
+        assert!(
+            nothing_actor(&after, ActorId(3)).is_null(),
+            "active physical blocker did not touch later unbuilt recipient"
+        );
+        assert_eq!(
+            room_light_world(&after).is_lit(tor_world::Location {
+                region: tor_world::RegionId(5),
+                position: tor_world::Position { x: 20, y: 2, z: 0 }
+            }),
+            None
+        );
+        assert!(nothing_actor(&after, ActorId(4))["combat"].is_null());
+        assert_eq!(
+            nothing_actor(&after, ActorId(4))["location"],
+            nothing_actor(&paused, ActorId(4))["location"]
+        );
     }
     let public = serde_json::to_string(&wire.snapshot(OWNER)).unwrap();
     for private in [
@@ -3156,7 +3218,7 @@ fn cancellation_first_body_closes_multiple_cold_frontiers_and_reopens_pending_wi
     paid_first_contact_chain(false, false);
 }
 #[test]
-fn cancellation_first_noncombat_body_blocks_later_cold_recipient() {
+fn cancellation_first_active_noncombat_body_blocks_later_cold_recipient() {
     paid_first_contact_chain(true, false);
 }
 #[test]

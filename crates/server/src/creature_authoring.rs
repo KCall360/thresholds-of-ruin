@@ -1293,12 +1293,15 @@ mod ordered_strike_authoring_tests {
     }
     #[test]
     fn ordered_strike_content_authoring_accepts_checkless_natural_source_and_retains_identity() {
-        let value = source();
+        let mut value = source();
         let catalog: Catalog =
             serde_json::from_value(value.clone()).expect("natural strike syntax must decode");
         catalog
             .compile(rules())
             .expect("a no-damage natural source is valid");
+        assert!(!catalog.species["sequence_test"].melee.strikes[0].cancellable);
+        value["species"]["sequence_test"]["melee"]["strikes"][0]["cancellable"] =
+            serde_json::json!(false);
         let decoded = serde_json::to_value(&catalog).unwrap();
         assert_eq!(
             decoded["species"]["sequence_test"]["melee"],
@@ -1459,11 +1462,16 @@ mod action_duration_authoring_tests {
             let value = json!(rate);
             let decoded: ActionDuration = serde_json::from_value(value.clone()).unwrap();
             assert_eq!(serde_json::to_value(decoded).unwrap(), value);
-            let modifier = json!({
+            let mut modifier = json!({
                 "scope":"always", "op":{"kind":"action_duration","value":rate}
             });
             let decoded: Modifier = serde_json::from_value(modifier.clone()).unwrap();
             assert!(decoded.compile().is_ok());
+            assert!(
+                !decoded.cancellable,
+                "omitted source metadata defaults false"
+            );
+            modifier["cancellable"] = json!(false);
             assert_eq!(serde_json::to_value(decoded).unwrap(), modifier);
             let authored: Modifier = toml::from_str(&format!(
                 "scope = 'always'\nop = {{ kind = 'action_duration', value = '{rate}' }}"
@@ -1607,8 +1615,13 @@ mod awareness_authoring_tests {
             json!({"kind":"continual_stealth","edge":1}),
             json!({"kind":"aggravation","interval":500,"chance_denominator":3,"stealth_disadvantage":1}),
         ] {
-            let modifier = json!({"scope":"always","op":{"kind":"perception","value":good}});
+            let mut modifier = json!({"scope":"always","op":{"kind":"perception","value":good}});
             let authored: Modifier = serde_json::from_value(modifier.clone()).unwrap();
+            assert!(
+                !authored.cancellable,
+                "omitted source metadata defaults false"
+            );
+            modifier["cancellable"] = json!(false);
             assert_eq!(serde_json::to_value(&authored).unwrap(), modifier);
             assert!(authored.compile().is_ok());
             for field in good.as_object().unwrap().keys() {

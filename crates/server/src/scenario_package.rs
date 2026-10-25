@@ -5440,7 +5440,7 @@ mod tests {
         let mut package = read_package(&root).unwrap();
         // Device capability is class-independent, but every concealed alternative
         // in one appearance group must retain the same physical class.
-        for id in [
+        let ids = [
             "rogue.wand_fire",
             "rogue.wand_cold",
             "rogue.wand_lightning",
@@ -5452,7 +5452,27 @@ mod tests {
             "rogue.wand_nothing",
             "rogue.wand_light",
             "rogue.wand_drain_life",
-        ] {
+            "rogue.wand_cancellation",
+            "rogue.wand_magic_missile",
+        ];
+        assert_eq!(ids.len(), 13);
+        let pool = package.manifest.archetypes["rogue.wand_fire"]
+            .appearance_pool
+            .clone();
+        assert!(pool.is_some());
+        let actual: BTreeSet<_> = package
+            .manifest
+            .archetypes
+            .iter()
+            .filter(|(_, item)| item.appearance_pool == pool)
+            .map(|(id, _)| id.as_str())
+            .collect();
+        assert_eq!(
+            actual,
+            ids.iter().copied().collect(),
+            "class conversion must cover the exact complete appearance group"
+        );
+        for id in ids {
             package.manifest.archetypes.get_mut(id).unwrap().class = ItemClass::Tool;
         }
         package.appearance_mapping(42).unwrap();

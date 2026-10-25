@@ -4405,8 +4405,7 @@ mod tests {
     fn stored_action_duration_modifier_roundtrips_exact_named_vocabulary() {
         use super::{Borrowed, Owned};
         for rate in ["normal", "haste", "slow"] {
-            let value =
-                serde_json::json!({"scope":"always","op":{"kind":"action_duration","value":rate}});
+            let value = serde_json::json!({"cancellable":false,"scope":"always","op":{"kind":"action_duration","value":rate}});
             let decoded: Owned<crate::creature_authoring::Modifier> =
                 serde_json::from_value(value.clone()).unwrap();
             assert_eq!(serde_json::to_value(Borrowed(&decoded.0)).unwrap(), value);
@@ -4509,7 +4508,7 @@ mod tests {
     fn sequence_rider_stored_source_and_rules_require_independent_bounded_conditions() {
         use super::{Borrowed, Owned};
         use serde_json::json;
-        let good = json!({"trigger":"success",
+        let good = json!({"cancellable":false,"trigger":"success",
             "condition":{"kind":"sequence_successful_hits","minimum":2},
             "check":null,"effects":[],"descriptors":[]});
         for value in [good.clone(), {
@@ -4561,7 +4560,9 @@ mod tests {
     #[test]
     fn sequence_rider_stored_conditions_reject_duplicate_and_positional_records() {
         use super::Owned;
-        let good = r#"{"trigger":"success","condition":{"kind":"sequence_successful_hits","minimum":2},"check":null,"effects":[],"descriptors":[]}"#;
+        let good = r#"{"cancellable":false,"trigger":"success","condition":{"kind":"sequence_successful_hits","minimum":2},"check":null,"effects":[],"descriptors":[]}"#;
+        assert!(serde_json::from_str::<Owned<crate::creature_authoring::Rider>>(good).is_ok());
+        assert!(serde_json::from_str::<Owned<tor_simulation::rules::RiderDef>>(good).is_ok());
         let duplicates = [
             good.replacen("\"condition\":", "\"condition\":null,\"condition\":", 1),
             good.replace("\"minimum\":2", "\"minimum\":2,\"minimum\":3"),
@@ -4575,7 +4576,7 @@ mod tests {
             assert!(serde_json::from_str::<Owned<tor_simulation::rules::RiderDef>>(&bad).is_err());
         }
         let positional =
-            r#"["success",{"kind":"sequence_successful_hits","minimum":2},null,[],[]]"#;
+            r#"[false,"success",{"kind":"sequence_successful_hits","minimum":2},null,[],[]]"#;
         assert!(
             serde_json::from_str::<Owned<crate::creature_authoring::Rider>>(positional).is_err()
         );
@@ -4870,7 +4871,7 @@ mod tests {
             .find(|ability| ability["basic_attack"] == true)
             .unwrap();
         source["strikes"]["additional_riders"][0] =
-            serde_json::json!(["success", null, null, [], []]);
+            serde_json::json!([false, "success", null, null, [], []]);
         assert!(decode_rules_document(&serde_json::to_string(&value).unwrap()).is_err());
         let mut obsolete: serde_json::Value = serde_json::from_str(&encoded).unwrap();
         obsolete["format"] = serde_json::json!(11);
@@ -6361,7 +6362,7 @@ mod ordered_strike_save_tests {
     #[test]
     fn ordered_strikes_stored_rider_trigger_has_an_independent_required_current_shape() {
         for trigger in ["success", "failure"] {
-            let value = json!({"trigger":trigger,"condition":null,"check":null,"effects":[],"descriptors":[]});
+            let value = json!({"cancellable":false,"trigger":trigger,"condition":null,"check":null,"effects":[],"descriptors":[]});
             let decoded: Owned<crate::creature_authoring::Rider> =
                 crate::storage::codec::strict(&serde_json::to_vec(&value).unwrap())
                     .expect("save-owned rider trigger must decode");
@@ -6383,7 +6384,15 @@ mod ordered_strike_save_tests {
             )
             .is_ok()
         );
-        value["melee"]["strikes"][0]["riders"] = json!([{"trigger":"failure","condition":null,"check":null,"effects":[],"descriptors":[]}]);
+        value["melee"]["strikes"][0]["riders"] = json!([{"cancellable":false,"trigger":"success","condition":null,"check":null,"effects":[],"descriptors":[]}]);
+        assert!(
+            crate::storage::codec::strict::<Owned<crate::creature_authoring::Species>>(
+                &serde_json::to_vec(&value).unwrap()
+            )
+            .is_ok(),
+            "complete stored success rider is a valid baseline"
+        );
+        value["melee"]["strikes"][0]["riders"][0]["trigger"] = json!("failure");
         assert!(
             crate::storage::codec::strict::<Owned<crate::creature_authoring::Species>>(
                 &serde_json::to_vec(&value).unwrap()

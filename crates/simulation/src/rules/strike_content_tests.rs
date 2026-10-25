@@ -254,7 +254,10 @@ fn ordered_strike_content_validates_unlocks_without_reordering_authored_rows() {
     let serialized = serde_json::to_value(rules.document()).unwrap();
     let mut expected = second.clone();
     expected["cancellable"] = json!(false);
-    assert_eq!(serialized["abilities"][0]["strikes"]["strikes"][1], expected);
+    assert_eq!(
+        serialized["abilities"][0]["strikes"]["strikes"][1],
+        expected
+    );
     let mut unknown = second;
     unknown["unlock"] = json!("missing_talent");
     assert!(decode(document_with(vec![strike(0), unknown])).is_err());

@@ -756,3 +756,24 @@ results do not replace the pending managed cold-frontier Service/pending-plan
 cases, strict saved-scenario writer checks, corrected core rerun, or final batch
 verification/native/hosted requirements. The opt-in catalog leaves live weighted
 stock and starting kits unchanged.
+
+The first managed Service collection passed twenty-five cases and failed three
+new fixture expectations. The cold-chain saves restored correctly before
+session construction; the test had compared after `Service::new` deliberately
+paused human work. The corrected witness retains exact full checkpoint equality
+at `Engine::open`, then separately proves the pause, legal resume and durable
+retry. An authored external noncombat actor is an observing root, so its Service
+interception witness is now explicitly active; it does not claim frozen or
+initially-unloaded noncombat residency. Separate 147-step cold combat/granted-
+ability cases retain their frozen-target obligations, and core tests retain
+frozen physical-body interception.
+
+The genuine saved-scenario writer succeeded using the same server test binary.
+Its full-library collection yielded 1,072 passes and twelve failures: the three
+Service fixtures above plus nine metadata/pool fixture expectations. Corrections
+retain valid baselines, complete positional field order, source omission defaults
+and required saved fields; no decoder or runtime policy is relaxed. The class-
+independence fixture now accounts for every member of the enlarged opt-in
+appearance pool. Protocol integration passes 282 cases and client-common passes
+145. The corrected core/server fixture cohort still requires its fresh rerun;
+these counts are not final verification gates.
