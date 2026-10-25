@@ -395,6 +395,11 @@ pub enum ResolvedEffect {
     CancelSpecials {
         changed: bool,
     },
+    HasteDose {
+        id: ConditionId,
+        rest: ConditionId,
+        outcome: super::HasteDoseOutcome,
+    },
     DirectHealthLoss {
         amount: u64,
     },
@@ -505,6 +510,7 @@ impl ResolvedEffect {
             Self::RoomLight { changed }
             | Self::DrainLife { changed }
             | Self::CancelSpecials { changed } => *changed,
+            Self::HasteDose { .. } => true,
             Self::DirectHealthLoss { amount } => *amount > 0,
             Self::ArrestDescent => false,
             Self::CorrodeArmor { amount, .. }
@@ -549,6 +555,40 @@ impl ResolvedEffect {
             Self::CancelSpecials { .. } => Self::CancelSpecials {
                 changed: creature.cancel_specials()?,
             },
+            Self::HasteDose { id, rest, outcome } => {
+                if !outcome.valid()
+                    || !creature
+                        .build()
+                        .ruleset()
+                        .condition(id)
+                        .zip(creature.build().ruleset().condition(rest))
+                        .is_some_and(|(haste, rest)| {
+                            super::haste_dose_conditions_valid(haste, rest)
+                        })
+                {
+                    return Err(crate::conditions::ConditionError::InvalidDuration.into());
+                }
+                let mut candidate = creature.clone();
+                let apply = |creature: &mut crate::creatures::CreatureState| -> Result<(), crate::conditions::ConditionError> {
+                    match outcome {
+                        super::HasteDoseOutcome::Hasted { duration } => {
+                            creature.apply_condition(id, source, *duration)?;
+                        }
+                        super::HasteDoseOutcome::Overdose { rest: duration } => {
+                            creature.remove_condition(id)?;
+                            if *duration > 0 { creature.apply_condition(rest, source, *duration)?; }
+                        }
+                    }
+                    Ok(())
+                };
+                if let Some(context) = state.recovery_context {
+                    candidate.with_recovery_context(context, apply)?;
+                } else {
+                    apply(&mut candidate)?;
+                }
+                *creature = candidate;
+                self.clone()
+            }
             Self::DirectHealthLoss { amount } => Self::DirectHealthLoss {
                 amount: creature.direct_loss_without_reset(*amount),
             },
@@ -1328,6 +1368,35 @@ pub(super) fn resolve_batch<'a>(
             PlannedEffect::RoomLight => ResolvedEffect::RoomLight { changed: false },
             PlannedEffect::DrainLife => ResolvedEffect::DrainLife { changed: false },
             PlannedEffect::CancelSpecials => ResolvedEffect::CancelSpecials { changed: false },
+            PlannedEffect::HasteDose {
+                id,
+                rest,
+                turn_ticks,
+            } => {
+                if !super::valid_haste_turn_ticks(*turn_ticks) {
+                    return Err(crate::conditions::ConditionError::InvalidDuration.into());
+                }
+                let overdose = application.creature.conditions().has_active(id);
+                let dice = if overdose {
+                    crate::dice::DicePool::new(1, 8, -1)
+                } else {
+                    crate::dice::DicePool::new(1, 4, 3)
+                }
+                .expect("fixed Haste dose pool");
+                let ticks = u64::from(dice.roll(rng, Edge::default()).total)
+                    .checked_mul(*turn_ticks)
+                    .ok_or(crate::conditions::ConditionError::InvalidDuration)?;
+                let outcome = if overdose {
+                    super::HasteDoseOutcome::Overdose { rest: ticks }
+                } else {
+                    super::HasteDoseOutcome::Hasted { duration: ticks }
+                };
+                ResolvedEffect::HasteDose {
+                    id: id.clone(),
+                    rest: rest.clone(),
+                    outcome,
+                }
+            }
             PlannedEffect::ArrestDescent => {
                 // A rejected extension must not turn a failed paid drink into
                 // an emergency brake. Checked item resolution rejects it atomically.
@@ -1637,6 +1706,11 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
             CancelSpecials {
                 changed: bool,
             },
+            HasteDose {
+                id: ConditionId,
+                rest: ConditionId,
+                outcome: super::HasteDoseOutcome,
+            },
             DirectHealthLoss {
                 amount: u64,
             },
@@ -1718,6 +1792,7 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
             Fields::RoomLight { changed } => Self::RoomLight { changed },
             Fields::DrainLife { changed } => Self::DrainLife { changed },
             Fields::CancelSpecials { changed } => Self::CancelSpecials { changed },
+            Fields::HasteDose { id, rest, outcome } => Self::HasteDose { id, rest, outcome },
             Fields::DirectHealthLoss { amount } => Self::DirectHealthLoss { amount },
             Fields::ArrestDescent {} => Self::ArrestDescent,
             Fields::Damage { amount } => Self::Damage { amount },
@@ -1758,6 +1833,10 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
                 qualification,
             },
         };
+        if matches!(&effect, Self::HasteDose { id, rest, outcome } if id == rest || !outcome.valid())
+        {
+            return Err(serde::de::Error::custom("invalid Haste dose operands"));
+        }
         let valid_amount = match effect {
             Self::SearchAdjacentGuises { roll } => roll.valid(),
             Self::Theft { quantity, .. } => quantity > 0,

@@ -205,6 +205,15 @@ impl Entry<'_> {
                             return Err(invalid());
                         }
                     }
+                    s::rules::Effect::HasteDose { condition, rest } => {
+                        for id in [condition, rest] {
+                            if !rules.condition(id).is_some_and(|definition| {
+                                reference_valid(definition.id.as_str(), &definition.name)
+                            }) {
+                                return Err(invalid());
+                            }
+                        }
+                    }
                     s::rules::Effect::ApplyPersistentCondition { condition, cancels } => {
                         for id in std::iter::once(condition).chain(cancels.iter()) {
                             if !rules.condition(id).is_some_and(|definition| {
@@ -905,6 +914,17 @@ mod persistent_effect_budget_tests {
             document.conditions.push(definition);
         }
         let rules = s::rules::Ruleset::validate(document).unwrap();
+        let dose = s::rules::Effect::HasteDose {
+            condition: incoming.clone(),
+            rest: opposite.clone(),
+        };
+        assert_eq!(effect_fields(&dose), 2);
+        let entry = Entry::Effect(0, None, 0, true, &dose);
+        assert_eq!(entry.preflight(&rules).unwrap(), 2);
+        let projected = entry.project(&rules);
+        assert!(projected.valid());
+        assert_eq!(projected.fields(), 2);
+        assert_eq!(effect_view(&dose, &rules).id, "haste_dose");
         for cancels in [None, Some(opposite.clone())] {
             let expected = 1 + usize::from(cancels.is_some());
             let effect = s::rules::Effect::ApplyPersistentCondition {
@@ -935,6 +955,15 @@ mod persistent_effect_budget_tests {
             }
         }
         let missing = s::content_ids::ConditionId::new("missing").unwrap();
+        for (condition, rest) in [
+            (missing.clone(), opposite.clone()),
+            (incoming.clone(), missing.clone()),
+        ] {
+            let effect = s::rules::Effect::HasteDose { condition, rest };
+            assert!(Entry::Effect(0, None, 0, true, &effect)
+                .preflight(&rules)
+                .is_err());
+        }
         for (condition, cancels) in [(missing.clone(), None), (incoming, Some(missing))] {
             let effect = s::rules::Effect::ApplyPersistentCondition { condition, cancels };
             assert!(Entry::Effect(0, None, 0, true, &effect)

@@ -59,7 +59,7 @@ consumable = { discovery = "self_effect", effects = [{ kind = "restore_attribute
 
 [appearance_pools."rogue.potions"]
 asset = "item.potion"
-appearances = ["amber potion", "smoky potion", "violet potion", "azure potion", "crimson potion", "silver potion", "pearl potion", "teal potion"]
+appearances = ["amber potion", "smoky potion", "violet potion", "azure potion", "crimson potion", "silver potion", "pearl potion", "teal potion", "ochre potion"]
 
 # Ordinary recoverable stacks; neither a purse abstraction nor a supply item.
 [items."rogue.gold"]
@@ -761,3 +761,14 @@ class = "tool"
 stackable = false
 held_light = { radius = 4, fuel_ticks = 100000 }
 equipment = { slot = "held_light", modifiers = [] }
+
+# Opt-in Haste dose shares the exact wand condition; no live stock expansion.
+[items."rogue.haste"]
+asset = "item.potion"
+name = "potion of haste"
+identity = "rogue.haste"
+magical = true
+class = "potion"
+stackable = true
+appearance_pool = "rogue.potions"
+consumable = { discovery = "on_use", effects = [{ kind = "haste_dose", condition = "rogue.hasted", rest = "rogue.haste_exhaustion" }] }

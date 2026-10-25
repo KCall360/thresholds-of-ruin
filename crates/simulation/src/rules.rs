@@ -1847,10 +1847,11 @@ impl Ruleset {
         let subtypes = catalog!(subtypes);
         let classes = catalog!(classes);
         let conditions = catalog!(conditions);
+        let condition_definitions = document.conditions.clone();
         let persistent_conditions = document
             .conditions
             .iter()
-            .filter(|condition| condition.timing == ConditionTiming::UntilRemoved)
+            .filter(|condition| condition.timing.permits_persistent())
             .map(|condition| condition.id.clone())
             .collect();
         let qualified_conditions = document
@@ -1883,6 +1884,7 @@ impl Ruleset {
             talents: &talents,
             classes: &classes,
             conditions: &conditions,
+            condition_definitions: &condition_definitions,
             qualified_conditions: &qualified_conditions,
             persistent_conditions: &persistent_conditions,
             descriptors: &descriptors,
@@ -2212,6 +2214,35 @@ impl Ruleset {
                     if matches!(strikes.as_slice(), [StrikeDef { offset:0, unlock:None, check:None, on_success, on_failure, riders, .. }]
                         if matches!(on_success.as_slice(), [Effect::DrainLife]) && on_failure.is_empty() && riders.is_empty()))),
                 "drain_life_self_only",
+            )?;
+            // Haste overdose is a self-consumption consequence, not a route
+            // around direct-harm validation for targeted restrictions. Keep the
+            // dose in the existing ordered checkless authored self payload.
+            let haste_dose = match &d.strikes {
+                StrikeSource::Authored { strikes } => strikes
+                    .iter()
+                    .flat_map(|s| {
+                        s.on_success
+                            .iter()
+                            .chain(&s.on_failure)
+                            .chain(s.riders.iter().flat_map(|r| &r.effects))
+                    })
+                    .any(|effect| matches!(effect, Effect::HasteDose { .. })),
+                StrikeSource::NaturalMelee { additional_riders } => additional_riders
+                    .iter()
+                    .flat_map(|r| &r.effects)
+                    .any(|effect| matches!(effect, Effect::HasteDose { .. })),
+                StrikeSource::SelectedMelee | StrikeSource::Projectile { .. } => false,
+            };
+            bound(
+                !haste_dose
+                    || (d.invocation == crate::abilities::InvocationKind::ActorTarget
+                        && d.reach == Reach::SelfOnly
+                        && d.interaction == Interaction::NonHostile
+                        && matches!(&d.strikes, StrikeSource::Authored { strikes }
+                    if matches!(strikes.as_slice(), [StrikeDef { offset:0, unlock:None, check:None, on_success, on_failure, riders, .. }]
+                        if on_success.iter().any(|effect| matches!(effect, Effect::HasteDose { .. })) && on_failure.is_empty() && riders.is_empty()))),
+                "haste_dose_self_only",
             )?;
             let searches = match &d.strikes {
                 StrikeSource::Authored { strikes } => strikes.iter().any(|strike| {
@@ -2583,6 +2614,7 @@ struct References<'a> {
     talents: &'a BTreeSet<TalentId>,
     classes: &'a BTreeSet<ClassId>,
     conditions: &'a BTreeSet<ConditionId>,
+    condition_definitions: &'a [ConditionDef],
     qualified_conditions: &'a BTreeSet<ConditionId>,
     persistent_conditions: &'a BTreeSet<ConditionId>,
     descriptors: &'a BTreeSet<DescriptorId>,
@@ -2861,6 +2893,26 @@ impl References<'_> {
                         field: "heal_per_hit_die".into(),
                     })?;
                 }
+                Effect::HasteDose { condition, rest } => {
+                    reference(self.conditions, condition, "haste_condition")?;
+                    reference(self.conditions, rest, "rest_condition")?;
+                    bound(
+                        self.condition_definitions
+                            .iter()
+                            .find(|definition| &definition.id == condition)
+                            .zip(
+                                self.condition_definitions
+                                    .iter()
+                                    .find(|definition| &definition.id == rest),
+                            )
+                            .is_some_and(|(haste, rest)| {
+                                crate::abilities::haste_dose_conditions_valid(haste, rest)
+                            }),
+                        "haste_dose_conditions",
+                    )?;
+                    condition.intern(pool);
+                    rest.intern(pool);
+                }
                 Effect::ApplyConditionForTurns {
                     condition,
                     duration,
@@ -2868,7 +2920,9 @@ impl References<'_> {
                     reference(self.conditions, condition, "condition")?;
                     condition.intern(pool);
                     bound(
-                        !self.persistent_conditions.contains(condition),
+                        self.condition_definitions.iter().any(|definition| {
+                            &definition.id == condition && definition.timing.permits_finite()
+                        }),
                         "condition_timing",
                     )?;
                     bound(positive_duration_shape(duration), "condition_duration")?;
@@ -2914,7 +2968,9 @@ impl References<'_> {
                     reference(self.conditions, condition, "condition")?;
                     condition.intern(pool);
                     bound(
-                        !self.persistent_conditions.contains(condition),
+                        self.condition_definitions.iter().any(|definition| {
+                            &definition.id == condition && definition.timing.permits_finite()
+                        }),
                         "condition_timing",
                     )?;
                     bound(
@@ -3261,7 +3317,7 @@ impl Ruleset {
             .document
             .conditions
             .iter()
-            .filter(|condition| condition.timing == ConditionTiming::UntilRemoved)
+            .filter(|condition| condition.timing.permits_persistent())
             .map(|condition| condition.id.clone())
             .collect();
         let qualified_conditions = self
@@ -3292,6 +3348,7 @@ impl Ruleset {
             talents: &talents,
             classes: &classes,
             conditions: &conditions,
+            condition_definitions: &self.document.conditions,
             qualified_conditions: &qualified_conditions,
             persistent_conditions: &persistent_conditions,
             descriptors: &descriptors,
@@ -3419,7 +3476,7 @@ impl Ruleset {
             .document
             .conditions
             .iter()
-            .filter(|condition| condition.timing == ConditionTiming::UntilRemoved)
+            .filter(|condition| condition.timing.permits_persistent())
             .map(|condition| condition.id.clone())
             .collect();
         let qualified_conditions = self
@@ -3450,6 +3507,7 @@ impl Ruleset {
             talents: &talents,
             classes: &classes,
             conditions: &conditions,
+            condition_definitions: &self.document.conditions,
             qualified_conditions: &qualified_conditions,
             persistent_conditions: &persistent_conditions,
             descriptors: &descriptors,
@@ -3470,7 +3528,7 @@ impl Ruleset {
             .document
             .conditions
             .iter()
-            .filter(|condition| condition.timing == ConditionTiming::UntilRemoved)
+            .filter(|condition| condition.timing.permits_persistent())
             .map(|condition| condition.id.clone())
             .collect();
         let qualified_conditions = self
@@ -3501,6 +3559,7 @@ impl Ruleset {
             talents: &talents,
             classes: &classes,
             conditions: &conditions,
+            condition_definitions: &self.document.conditions,
             qualified_conditions: &qualified_conditions,
             persistent_conditions: &persistent_conditions,
             descriptors: &descriptors,
@@ -3560,6 +3619,7 @@ impl Effect {
             Self::CorrodeArmor { amount, .. } => {
                 (1..=crate::limits::NUMERIC as u32).contains(amount)
             }
+            Self::HasteDose { condition, rest } => condition != rest,
             Self::ApplyLinkedHold { policy } => policy.valid(),
             Self::HoldDamage { .. } => true,
             Self::StepSelfOneCell

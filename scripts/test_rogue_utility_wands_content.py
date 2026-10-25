@@ -48,7 +48,7 @@ class RogueUtilityWandsContent(unittest.TestCase):
                 "id": identity, "family": identity, "lifecycle": "timed", "name": name,
                 "modifiers": [{"scope": "always", "op": op}], "stacking": {"kind": "keep"},
                 "source_scoped": False, "descriptors": [], "capacity": "reject",
-                "timing": {"kind": "until_removed"}, "restrictions": [], "preparation": "preserve"})
+                "timing": {"kind": "actor_active_or_until_removed" if kind == "haste" else "until_removed"}, "restrictions": [], "preparation": "preserve"})
 
     def test_appearance_and_stock_pools_keep_distinctness_and_one_device_attempt(self):
         catalog = source("catalog/items.toml")

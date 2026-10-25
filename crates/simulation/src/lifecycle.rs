@@ -750,6 +750,7 @@ impl Game {
                 effect,
                 ResolvedEffect::ApplyCondition { .. }
                     | ResolvedEffect::ApplyPersistentCondition { .. }
+                    | ResolvedEffect::HasteDose { .. }
             ) && !self.actors.contains_key(&outcome.actor)
                 && !self.detached_actor(outcome.actor)
             {

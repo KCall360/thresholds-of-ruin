@@ -39,7 +39,10 @@ impl NaturalAttack {
                         effect.spatial()
                             || matches!(
                                 effect,
-                                Effect::RoomLight | Effect::DrainLife | Effect::CancelSpecials
+                                Effect::RoomLight
+                                    | Effect::DrainLife
+                                    | Effect::CancelSpecials
+                                    | Effect::HasteDose { .. }
                             )
                     })
             })

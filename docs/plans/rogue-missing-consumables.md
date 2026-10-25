@@ -1201,3 +1201,23 @@ at the intended missing dose definition and ninth potion identity. No dose
 content is installed in this checkpoint. Adding its later opt-in appearance
 identity may change seeded appearance assignments even though live item weights
 and kits stay unchanged. No Rust, native or actual-dose runtime is qualified.
+
+Haste-dose source admission retains ordered self on-success composition rather
+than imposing a singleton payload: it remains checkless, self-only and
+non-hostile, with targeted, hostile, natural and rider uses rejected. A preceding
+ordered haste addition/removal must affect the dose's live completion-time branch
+and share ordinary atomic rollback. Generic Drink exposure does not start a
+combat diagnostic record. Actual potion acceptance therefore stays on its ordinary
+caller path; genuine diagnostic samples use a separately granted valid self
+ability, explicitly not a potion diagnostic-emission claim.
+
+The next protected Haste checkpoint contains the live mixed-lifetime/dose path,
+eight initial core controls, five registered Service/source cases, strict mirrors
+and diagnostic tests, opt-in ninth-potion content, ordinary Adventure acceptance
+and the separate real self-ability diagnostic recorder fixture. The grouped pure
+catalog/recorder collection passes 65 tests with all eleven recorded inputs
+unchanged. This does not qualify the source compiler or gameplay. Rust remains
+uncompiled and unrun; final whole-fixture review, source/forged-plan negatives and
+exhaustive consumer audit are still in progress. Certificates and captured wire
+samples remain pending genuine current applications. No live weighted pool or
+starting kit changes accompany the opt-in content.

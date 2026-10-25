@@ -391,6 +391,58 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn haste_dose_diagnostics_render_both_branches_and_reject_forged_recipients() {
+        let condition = ContentRef {
+            id: "rogue.hasted".into(),
+            name: "Hasted".into(),
+        };
+        let rest = ContentRef {
+            id: "rogue.haste_exhaustion".into(),
+            name: "Exhausted".into(),
+        };
+        for (outcome, expected) in [
+            (
+                HasteDoseOutcome::Hasted { duration: 400 },
+                "  Actor 2: Hasted for 400 active ticks",
+            ),
+            (
+                HasteDoseOutcome::Overdose { rest: 0 },
+                "  Actor 2: haste overdose; Exhausted for 0 active ticks",
+            ),
+            (
+                HasteDoseOutcome::Overdose { rest: 700 },
+                "  Actor 2: haste overdose; Exhausted for 700 active ticks",
+            ),
+        ] {
+            let report = report_with_effects(vec![DiagnosticEffect::HasteDose {
+                target: ActorId(2),
+                condition: condition.clone(),
+                rest: rest.clone(),
+                outcome,
+            }]);
+            assert!(lines(&report).unwrap().contains(&expected.to_string()));
+            for invalid in 0..3 {
+                let mut forged = report.clone();
+                let DiagnosticEffect::HasteDose {
+                    target,
+                    condition,
+                    rest,
+                    outcome,
+                } = &mut forged.records[0].outcome.effects[0]
+                else {
+                    unreachable!()
+                };
+                match invalid {
+                    0 => *target = ActorId(1),
+                    1 => *rest = condition.clone(),
+                    _ => *outcome = HasteDoseOutcome::Hasted { duration: 0 },
+                }
+                assert!(lines(&forged).is_err());
+            }
+        }
+    }
+
+    #[test]
     fn room_light_diagnostics_distinguish_changed_from_paid_noop() {
         for (changed, expected) in [(true, "changed"), (false, "unchanged")] {
             let report = report_with_effects(vec![DiagnosticEffect::RoomLight {

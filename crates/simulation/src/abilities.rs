@@ -2,6 +2,7 @@
 mod compile;
 mod haste_dose;
 pub use haste_dose::HasteDoseOutcome;
+pub(crate) use haste_dose::{haste_dose_conditions_valid, valid_haste_turn_ticks};
 mod execution;
 mod invocation;
 mod projectile;
@@ -167,5 +168,7 @@ mod payload_resistance_tests;
 #[cfg(test)]
 mod cancellation_missile_tests;
 
+#[cfg(test)]
+mod haste_dose_tests;
 #[cfg(test)]
 mod portable_light_tests;

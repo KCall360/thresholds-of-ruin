@@ -855,5 +855,51 @@ class TorchRecordingContracts(unittest.TestCase):
                 self.assertEqual(samples, {"existing": {"type": "palette"}})
 
 
+
+
+class HasteRecordingContracts(unittest.TestCase):
+    def case(self, failure=None, malformed=False):
+        case, trace = recording_case(failure)
+        source = {branch: {"type": "combat_diagnostics", "report": {"enabled": True, "records": [
+            {"ability": {"id": "fixture.haste_dose", "name": "Haste dose witness"}, "outcome": {"effects": [{"type": "haste_dose", "target": "1",
+                "condition": {"id": "rogue.hasted", "name": "Hasted"},
+                "rest": {"id": "rogue.haste_exhaustion", "name": "Exhausted"},
+                "outcome": {"type": branch, "duration" if branch == "hasted" else "rest": ticks}}]}}]}}
+            for branch, ticks in (("hasted", "400"), ("overdose", "0"))}
+        if malformed:
+            source["overdose"]["report"]["records"][0]["outcome"]["effects"][0]["outcome"]["rest"] = "800"
+        original = type(case).runTest
+        def record(subject):
+            subject.haste_samples = copy.deepcopy(source)
+            original(subject)
+        type(case).runTest = record
+        return case, trace, source
+
+    def test_factory_selects_actual_non_graphical_privileged_paid_doses(self):
+        case = record_wire_samples.haste_recording_case()
+        self.assertEqual(case.id(), "test_magic_items_process.MagicItemProcesses."
+                         "test_haste_self_ability_privileged_capture_records_both_real_branches")
+        self.assertFalse(is_graphical_test(case))
+
+    def test_both_real_branches_publish_only_after_successful_cleanup(self):
+        case, trace, source = self.case()
+        samples = {}
+        with patch("record_wire_samples.haste_recording_case", return_value=case):
+            record_wire_samples.Recorder().record_haste(samples)
+        self.assertEqual(samples, {"zz.haste_" + key: value for key, value in source.items()})
+        self.assertEqual(trace[-1], "class_cleanup")
+        self.assertIsNot(samples["zz.haste_hasted"], case.haste_samples["hasted"])
+
+    def test_cleanup_or_invalid_branch_retains_prior_samples_atomically(self):
+        for failure, malformed in (("cleanup", False), ("class_cleanup", False), (None, True)):
+            with self.subTest(failure=failure, malformed=malformed):
+                case, _, _ = self.case(failure, malformed)
+                samples = {"existing": {"type": "palette"}}
+                with patch("record_wire_samples.haste_recording_case", return_value=case):
+                    with self.assertRaises(AssertionError):
+                        record_wire_samples.Recorder().record_haste(samples)
+                self.assertEqual(samples, {"existing": {"type": "palette"}})
+
+
 if __name__ == "__main__":
     unittest.main()

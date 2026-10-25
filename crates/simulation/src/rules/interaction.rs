@@ -171,6 +171,7 @@ impl Ruleset {
                     | PlannedEffect::RoomLight
                     | PlannedEffect::DrainLife
                     | PlannedEffect::CancelSpecials
+                    | PlannedEffect::HasteDose { .. }
                     | PlannedEffect::ArrestDescent
                     | PlannedEffect::RestoreHitDie
                     | PlannedEffect::Heal { .. }
@@ -246,6 +247,7 @@ impl Ruleset {
             | Effect::RoomLight
             | Effect::DrainLife
             | Effect::CancelSpecials
+            | Effect::HasteDose { .. }
             | Effect::ArrestDescent
             | Effect::RestoreHitDie
             | Effect::Heal { .. }

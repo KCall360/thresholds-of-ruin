@@ -71,3 +71,45 @@ mod tests {
         }
     }
 }
+
+pub(crate) fn valid_haste_turn_ticks(ticks: u64) -> bool {
+    ticks > 0
+        && ticks
+            .checked_mul(7)
+            .is_some_and(|maximum| maximum <= crate::limits::NUMERIC as u64)
+}
+
+pub(crate) fn haste_dose_conditions_valid(
+    haste: &crate::rules::ConditionDef,
+    rest: &crate::rules::ConditionDef,
+) -> bool {
+    use crate::rules::{
+        ConditionLifecycle, ConditionPreparation, ConditionRestriction, ConditionTiming,
+        ModifierOp, Scope, Stacking,
+    };
+    haste.id != rest.id
+        && haste.lifecycle == ConditionLifecycle::Timed
+        && haste.timing == ConditionTiming::ActorActiveOrUntilRemoved
+        && haste.stacking == Stacking::Keep
+        && haste.restrictions.is_empty()
+        && haste.preparation == ConditionPreparation::Preserve
+        && haste.descriptors.is_empty()
+        && haste.modifiers.len() == 1
+        && haste.modifiers.iter().all(|modifier| {
+            modifier.scope == Scope::Always
+                && matches!(
+                    modifier.op,
+                    ModifierOp::ActionDuration {
+                        value: crate::action_duration::ActionDuration::Haste
+                    }
+                )
+        })
+        && rest.lifecycle == ConditionLifecycle::Timed
+        && rest.timing == ConditionTiming::expiring()
+        && rest.stacking == Stacking::Keep
+        && !rest.source_scoped
+        && rest.restrictions == [ConditionRestriction::VoluntaryActions]
+        && rest.preparation == ConditionPreparation::Pause
+        && rest.modifiers.is_empty()
+        && rest.descriptors.is_empty()
+}

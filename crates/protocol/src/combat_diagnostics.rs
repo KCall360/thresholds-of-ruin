@@ -765,3 +765,47 @@ mod direct_health_diagnostic_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod haste_dose_diagnostic_tests {
+    use super::*;
+    #[test]
+    fn haste_dose_outcomes_are_named_closed_and_have_branch_specific_tick_bounds() {
+        for outcome in [
+            serde_json::json!({"type":"hasted","duration":"1"}),
+            serde_json::json!({"type":"hasted","duration":"1000000"}),
+            serde_json::json!({"type":"overdose","rest":"0"}),
+            serde_json::json!({"type":"overdose","rest":"1000000"}),
+        ] {
+            let value = serde_json::json!({"type":"haste_dose","target":"2",
+                "condition":{"id":"rogue.hasted","name":"Hasted"},
+                "rest":{"id":"rogue.haste_exhaustion","name":"Exhausted"},"outcome":outcome});
+            let decoded: DiagnosticEffect = serde_json::from_value(value.clone()).unwrap();
+            assert_eq!(serde_json::to_value(decoded).unwrap(), value);
+            for field in ["condition", "rest", "outcome"] {
+                let mut missing = value.clone();
+                missing.as_object_mut().unwrap().remove(field);
+                assert!(serde_json::from_value::<DiagnosticEffect>(missing).is_err());
+            }
+            for field in ["condition", "rest"] {
+                let mut positional = value.clone();
+                positional[field] = serde_json::json!(["rogue.hasted", "Hasted"]);
+                assert!(serde_json::from_value::<DiagnosticEffect>(positional).is_err());
+            }
+        }
+        for value in [
+            serde_json::json!({"type":"hasted","duration":"0"}),
+            serde_json::json!({"type":"hasted","duration":"1000001"}),
+            serde_json::json!({"type":"overdose","rest":"1000001"}),
+            serde_json::json!({"type":"overdose","rest":0}),
+            serde_json::json!({"type":"hasted","duration":"01"}),
+            serde_json::json!({"type":"hasted","duration":"18446744073709551616"}),
+            serde_json::json!({"type":"hasted","duration":"1","rest":"0"}),
+            serde_json::json!({"type":"overdose"}),
+            serde_json::json!({"type":"other","duration":"1"}),
+            serde_json::json!(["hasted", "1"]),
+        ] {
+            assert!(serde_json::from_value::<HasteDoseOutcome>(value).is_err());
+        }
+    }
+}

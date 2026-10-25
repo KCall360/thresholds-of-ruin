@@ -19,6 +19,7 @@ from light_catalog_package import prepare as prepare_imported_light
 from drain_catalog_package import prepare as prepare_imported_drain
 from first_contact_catalog_package import prepare as prepare_imported_first_contact
 from torch_catalog_package import prepare as prepare_imported_torch
+from haste_catalog_package import prepare as prepare_imported_haste
 
 
 def observation(frame):
@@ -954,6 +955,111 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         self.assertEqual(str(effects[0]["target"]), "2")
         self.assertNotIn('"type":"combat_diagnostics"', "".join(owner.transcript).replace(" ", ""))
         self.first_contact_samples = {"reach": reach_sample, "effect": effect_sample}
+
+    @non_graphical
+    def test_imported_haste_adventure_paid_doses_and_source_free_reopen(self):
+        package = prepare_imported_haste(self)
+        server = self.server("--checkpoint-interval", 1, scenario=package)
+        probe, _ = self.client(observe=True)
+        text, _ = self.adventure()
+        self.say(text, "take all")
+        carried = self.snapshot(probe)
+        self.assertTrue(settled(carried))
+        potion, = items(carried, "potion")
+        self.assertEqual(int(potion["quantity"]), 2)
+        self.assertFalse(potion["identified"])
+        self.assertEqual(observation(carried)["combat"]["own_stats"]["attributes"]["speed"], 0)
+        def condition(frame, identity):
+            return [row for row in observation(frame)["combat"]["own_stats"]["conditions"]
+                    if row["condition"]["id"] == identity]
+        self.assertEqual(condition(carried, "rogue.hasted"), [])
+        before = checkpoint(self, probe)
+        self.assertEqual(before["actors"]["1"]["turn_ticks"], 100)
+        reply = self.say(text, "drink " + potion["name"])
+        self.assertIn("finish drinking", reply.lower())
+        hasted = self.snapshot(probe)
+        remaining_potion, = items(hasted, "potion")
+        self.assertEqual(int(remaining_potion["quantity"]), 1)
+        self.assertTrue(remaining_potion["identified"])
+        self.assertEqual(remaining_potion["name"], "potion of haste")
+        active, = condition(hasted, "rogue.hasted")
+        self.assertGreater(int(active["remaining_ticks"]), 0)
+        self.assertLessEqual(int(active["remaining_ticks"]), 700)
+        self.assertGreater(int(observation(hasted)["tick"]), int(observation(carried)["tick"]))
+        self.assertEqual(observation(hasted)["combat"]["own_stats"]["attributes"]["speed"], 0)
+        self.assertEqual(condition(hasted, "rogue.haste_exhaustion"), [])
+        saved = checkpoint(self, probe)
+        self.assertNotEqual(saved["rules_rng"], before["rules_rng"], "the real duration draw must be recorded")
+        text.stop(save=False)
+        probe.stop(save=False)
+        server.stop(save=False)
+        shutil.rmtree(package)
+        self.server("--checkpoint-interval", 1, scenario=ROOT / "scenarios/two-room", seed=None)
+        probe, restored = self.client(observe=True)
+        self.assertEqual(checkpoint(self, probe), saved)
+        self.assertEqual(condition(restored, "rogue.hasted"), condition(hasted, "rogue.hasted"))
+        text, _ = self.adventure()
+        # Re-resolve the new disclosed name after first-dose OnUse identification.
+        second, = items(restored, "potion")
+        reply = self.say(text, "drink " + second["name"])
+        self.assertIn("finish drinking", reply.lower())
+        overdosed = self.snapshot(probe)
+        self.assertEqual(items(overdosed, "potion"), [])
+        self.assertEqual(condition(overdosed, "rogue.hasted"), [])
+        self.assertGreater(int(observation(overdosed)["tick"]), int(observation(restored)["tick"]))
+        self.assertEqual(observation(overdosed)["combat"]["own_stats"]["attributes"]["speed"], 0)
+        self.assertNotEqual(checkpoint(self, probe)["rules_rng"], saved["rules_rng"])
+        self.assertFalse(overdosed["state"]["wizard_game"])
+        self.assertNotIn('"type":"combat_diagnostics"', "".join(probe.transcript).replace(" ", ""))
+
+    @non_graphical
+    def test_haste_self_ability_privileged_capture_records_both_real_branches(self):
+        package = prepare_imported_haste(self, diagnostic_ability=True)
+        self.server("--checkpoint-interval", 1, scenario=package, wizard=True)
+        owner, initial = self.client()
+        carried = self.collect(owner, initial)
+        self.assertTrue(settled(carried))
+        ability, = [row for row in observation(carried)["combat"]["own_stats"]["abilities"]
+                    if row["id"] == "fixture.haste_dose"]
+        self.assertEqual(ability["reach"], {"kind": "self_only"})
+        self.assertEqual(observation(carried)["combat"]["own_stats"]["attributes"]["speed"], 0)
+        self.assertEqual(checkpoint(self, owner)["actors"]["1"]["turn_ticks"], 100)
+        wizard, _ = self.client(WIZARD_TOKEN, observe=True)
+        def message(client, kind):
+            rows = [json.loads(line).get("message") for line in client.transcript if line.startswith("{")]
+            return next(row for row in reversed(rows) if row and row["type"] == kind)
+        enabled = self.command(wizard, {"type": "wizard", "command": "combat capture on"})
+        self.assertFalse(enabled.get("error"), enabled.get("error"))
+        self.assertTrue(message(wizard, "combat_diagnostics")["report"]["enabled"])
+        self.haste_samples = {}
+        for branch in ("hasted", "overdose"):
+            before = self.snapshot(owner)
+            self.assertTrue(settled(before))
+            result = self.act(owner, {"type": "use_ability", "id": "fixture.haste_dose",
+                "invocation": {"aim": {"kind": "actor_target", "target": observation(before)["self_target"]},
+                               "weapon": {"kind": "default"}}})
+            self.assertIsNone(result["error"])
+            after = self.advance(owner, [])
+            self.assertGreater(int(observation(after)["tick"]), int(observation(before)["tick"]))
+            self.assertEqual(items(after, "potion"), items(carried, "potion"), "ability capture never impersonates potion consumption")
+            queried = self.command(wizard, {"type": "wizard", "command": "combat inspect"})
+            self.assertFalse(queried.get("error"), queried.get("error"))
+            sample = message(wizard, "combat_diagnostics")
+            records = [record for record in sample["report"]["records"]
+                       if any(effect["type"] == "haste_dose" and effect["outcome"]["type"] == branch
+                              for effect in record["outcome"]["effects"])]
+            record, = records
+            self.assertEqual(record["ability"]["id"], "fixture.haste_dose")
+            effect, = [effect for effect in record["outcome"]["effects"] if effect["type"] == "haste_dose"]
+            self.assertEqual(str(effect["target"]), "1")
+            self.assertEqual(effect["condition"]["id"], "rogue.hasted")
+            self.assertEqual(effect["rest"]["id"], "rogue.haste_exhaustion")
+            ticks = int(effect["outcome"]["duration" if branch == "hasted" else "rest"])
+            self.assertIn(ticks, range(400, 701, 100) if branch == "hasted" else range(0, 701, 100))
+            conditions = observation(after)["combat"]["own_stats"]["conditions"]
+            self.assertEqual(any(row["condition"]["id"] == "rogue.hasted" for row in conditions), branch == "hasted")
+            self.haste_samples[branch] = sample
+        self.assertNotIn('"type":"combat_diagnostics"', "".join(owner.transcript).replace(" ", ""))
 
     @non_graphical
     def test_imported_torch_text_explicit_control_fuel_drop_and_source_free_reopen(self):

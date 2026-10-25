@@ -3228,3 +3228,6 @@ fn ordinary_cancellation_grant_retains_resource_ledger_across_cold_frontiers() {
 
 #[path = "portable_torch_session_tests.rs"]
 mod portable_torch;
+
+#[path = "haste_dose_session_tests.rs"]
+mod haste_dose;

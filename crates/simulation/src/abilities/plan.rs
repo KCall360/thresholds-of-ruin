@@ -108,6 +108,11 @@ pub enum PlannedEffect {
     RoomLight,
     DrainLife,
     CancelSpecials,
+    HasteDose {
+        id: ConditionId,
+        rest: ConditionId,
+        turn_ticks: u64,
+    },
     ArrestDescent,
     StepSelfOneCell,
     PushTargetOneCell {
@@ -961,6 +966,16 @@ pub(crate) fn effects_valid(effects: &[PlannedEffect], rules: &crate::rules::Rul
             | PlannedEffect::DrainLife
             | PlannedEffect::CancelSpecials
             | PlannedEffect::ArrestDescent => true,
+            PlannedEffect::HasteDose {
+                id,
+                rest,
+                turn_ticks,
+            } => {
+                super::valid_haste_turn_ticks(*turn_ticks)
+                    && rules.condition(id).zip(rules.condition(rest)).is_some_and(
+                        |(haste, rest)| super::haste_dose_conditions_valid(haste, rest),
+                    )
+            }
             PlannedEffect::ApplyLinkedHold { policy } => {
                 policy.valid() && rules.flag(&policy.sustaining).is_some()
             }
@@ -974,15 +989,16 @@ pub(crate) fn effects_valid(effects: &[PlannedEffect], rules: &crate::rules::Rul
                 duration,
                 turn_ticks,
             } => {
-                rules.condition(id).is_some_and(|definition| {
-                    definition.timing != crate::rules::ConditionTiming::UntilRemoved
-                }) && duration.valid_turn_duration(*turn_ticks)
+                rules
+                    .condition(id)
+                    .is_some_and(|definition| definition.timing.permits_finite())
+                    && duration.valid_turn_duration(*turn_ticks)
             }
             PlannedEffect::ApplyPersistentCondition { id, cancels } => {
                 let persistent = |condition: &ConditionId| {
-                    rules.condition(condition).is_some_and(|definition| {
-                        definition.timing == crate::rules::ConditionTiming::UntilRemoved
-                    })
+                    rules
+                        .condition(condition)
+                        .is_some_and(|definition| definition.timing.permits_persistent())
                 };
                 persistent(id)
                     && cancels
@@ -1001,9 +1017,10 @@ pub(crate) fn effects_valid(effects: &[PlannedEffect], rules: &crate::rules::Rul
                 PlannedAmount::Rolled { .. } => true,
             },
             PlannedEffect::ApplyCondition { id, duration } => {
-                rules.condition(id).is_some_and(|definition| {
-                    definition.timing != crate::rules::ConditionTiming::UntilRemoved
-                }) && (1..=crate::limits::NUMERIC as u64).contains(duration)
+                rules
+                    .condition(id)
+                    .is_some_and(|definition| definition.timing.permits_finite())
+                    && (1..=crate::limits::NUMERIC as u64).contains(duration)
             }
             PlannedEffect::SearchAdjacentGuises { check } => check.valid(),
             PlannedEffect::ObservePublicPlan => true,
@@ -1086,6 +1103,18 @@ pub(super) fn effects_match_definition_scoped(
             .zip(actual)
             .enumerate()
             .all(|(index, (expected, actual))| match (expected, actual) {
+                (
+                    Effect::HasteDose { condition, rest },
+                    PlannedEffect::HasteDose {
+                        id,
+                        rest: actual_rest,
+                        turn_ticks,
+                    },
+                ) => {
+                    condition == id
+                        && rest == actual_rest
+                        && super::valid_haste_turn_ticks(*turn_ticks)
+                }
                 (Effect::TeleportRandom, PlannedEffect::TeleportRandom)
                 | (Effect::TeleportToRayOrigin, PlannedEffect::TeleportToRayOrigin)
                 | (Effect::RoomLight, PlannedEffect::RoomLight)
@@ -1553,6 +1582,22 @@ impl Game {
                 Effect::RoomLight => Ok(PlannedEffect::RoomLight),
                 Effect::DrainLife => Ok(PlannedEffect::DrainLife),
                 Effect::CancelSpecials => Ok(PlannedEffect::CancelSpecials),
+                Effect::HasteDose { condition, rest } => {
+                    let turn_ticks = self
+                        .actors
+                        .get(&actor)
+                        .ok_or_else(invalid)?
+                        .turn_ticks
+                        .get();
+                    if !super::valid_haste_turn_ticks(turn_ticks) {
+                        return Err(invalid());
+                    }
+                    Ok(PlannedEffect::HasteDose {
+                        id: condition.clone(),
+                        rest: rest.clone(),
+                        turn_ticks,
+                    })
+                }
                 Effect::ArrestDescent => Ok(PlannedEffect::ArrestDescent),
                 Effect::StepSelfOneCell => Ok(PlannedEffect::StepSelfOneCell),
                 Effect::PushTargetOneCell { direction } => Ok(PlannedEffect::PushTargetOneCell {
@@ -1769,6 +1814,11 @@ impl<'de> Deserialize<'de> for PlannedEffect {
             RoomLight {},
             DrainLife {},
             CancelSpecials {},
+            HasteDose {
+                id: ConditionId,
+                rest: ConditionId,
+                turn_ticks: u64,
+            },
             ArrestDescent {},
             StepSelfOneCell {},
             PushTargetOneCell {
@@ -1853,6 +1903,15 @@ impl<'de> Deserialize<'de> for PlannedEffect {
             Fields::RoomLight {} => Self::RoomLight,
             Fields::DrainLife {} => Self::DrainLife,
             Fields::CancelSpecials {} => Self::CancelSpecials,
+            Fields::HasteDose {
+                id,
+                rest,
+                turn_ticks,
+            } => Self::HasteDose {
+                id,
+                rest,
+                turn_ticks,
+            },
             Fields::ArrestDescent {} => Self::ArrestDescent,
             Fields::StepSelfOneCell {} => Self::StepSelfOneCell,
             Fields::PushTargetOneCell { direction } => Self::PushTargetOneCell { direction },
@@ -1904,6 +1963,11 @@ impl<'de> Deserialize<'de> for PlannedEffect {
             },
         };
         let valid = match &effect {
+            Self::HasteDose {
+                id,
+                rest,
+                turn_ticks,
+            } => id != rest && super::valid_haste_turn_ticks(*turn_ticks),
             Self::ApplyPersistentCondition { id, cancels } => cancels.as_ref() != Some(id),
             Self::ApplyConditionForTurns {
                 duration,

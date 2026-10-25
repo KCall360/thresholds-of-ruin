@@ -884,9 +884,12 @@ fn validate(
         return Err(ConditionError::InvalidSource);
     }
     match (def.timing, duration) {
-        (ConditionTiming::UntilRemoved, None)
+        (ConditionTiming::UntilRemoved | ConditionTiming::ActorActiveOrUntilRemoved, None)
             if def.lifecycle == ConditionLifecycle::Timed && def.stacking == Stacking::Keep => {}
-        (ConditionTiming::ActorActive { .. }, Some(duration)) => {
+        (
+            ConditionTiming::ActorActive { .. } | ConditionTiming::ActorActiveOrUntilRemoved,
+            Some(duration),
+        ) => {
             ConditionTicks::new(duration)?;
         }
         _ => return Err(ConditionError::InvalidDuration),

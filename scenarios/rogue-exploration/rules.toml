@@ -271,7 +271,7 @@ value = { id = "rogue.invisible", family = "rogue.invisible", lifecycle = "timed
 [[overrides]]
 op = "add"
 path = ["conditions", "rogue.hasted"]
-value = { id = "rogue.hasted", family = "rogue.hasted", lifecycle = "timed", name = "Hasted", modifiers = [{ scope = "always", op = { kind = "action_duration", value = "haste" } }], stacking = { kind = "keep" }, source_scoped = false, descriptors = [], capacity = "reject", timing = { kind = "until_removed" }, restrictions = [], preparation = "preserve" }
+value = { id = "rogue.hasted", family = "rogue.hasted", lifecycle = "timed", name = "Hasted", modifiers = [{ scope = "always", op = { kind = "action_duration", value = "haste" } }], stacking = { kind = "keep" }, source_scoped = false, descriptors = [], capacity = "reject", timing = { kind = "actor_active_or_until_removed" }, restrictions = [], preparation = "preserve" }
 
 [[overrides]]
 op = "add"
@@ -368,3 +368,9 @@ value = true
 op = "add"
 path = ["abilities", "filch_charm", "cancellable"]
 value = true
+
+# Dedicated Haste overdose rest: no sleep/waking or cure semantics are borrowed.
+[[overrides]]
+op = "add"
+path = ["conditions", "rogue.haste_exhaustion"]
+value = { id = "rogue.haste_exhaustion", family = "rogue.haste_exhaustion", lifecycle = "timed", name = "Exhausted", modifiers = [], stacking = { kind = "keep" }, source_scoped = false, descriptors = [], capacity = "reject", timing = { kind = "actor_active", on_expiry = { kind = "remove" } }, restrictions = ["voluntary_actions"], preparation = "pause" }

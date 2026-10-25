@@ -29,6 +29,21 @@ class RogueHasteContent(unittest.TestCase):
             "amber potion", "smoky potion", "violet potion", "azure potion", "crimson potion",
             "silver potion", "pearl potion", "teal potion", "ochre potion"])
 
+    def test_only_shared_haste_opts_into_mixed_lifetime_and_rest_is_dedicated(self):
+        conditions = {row["path"][1]: row["value"] for row in source("rules.toml")["overrides"]
+                      if row["path"][0] == "conditions" and len(row["path"]) == 2}
+        self.assertEqual(conditions["rogue.hasted"]["timing"], {"kind": "actor_active_or_until_removed"})
+        self.assertEqual(conditions["rogue.hasted"]["stacking"], {"kind": "keep"})
+        self.assertEqual({key for key, value in conditions.items()
+                          if value["timing"]["kind"] == "actor_active_or_until_removed"}, {"rogue.hasted"})
+        for key in ("rogue.invisible", "rogue.slowed"):
+            self.assertEqual(conditions[key]["timing"], {"kind": "until_removed"})
+        self.assertEqual(conditions["rogue.haste_exhaustion"], {
+            "id": "rogue.haste_exhaustion", "family": "rogue.haste_exhaustion", "lifecycle": "timed",
+            "name": "Exhausted", "modifiers": [], "stacking": {"kind": "keep"}, "source_scoped": False,
+            "descriptors": [], "capacity": "reject", "timing": {"kind": "actor_active", "on_expiry": {"kind": "remove"}},
+            "restrictions": ["voluntary_actions"], "preparation": "pause"})
+
     def test_existing_live_stock_and_starter_kits_do_not_gain_haste_potion(self):
         manifest = source("scenario.toml")
         self.assertNotIn("rogue.haste'", repr(manifest["floor_activation"]))

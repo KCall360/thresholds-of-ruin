@@ -83,6 +83,12 @@ def first_contact_recording_case():
     return MagicItemProcesses("test_imported_cancellation_privileged_capture_records_actual_reach_and_effect")
 
 
+def haste_recording_case():
+    """Actual paid self-ability outcomes; production potion acceptance is separate."""
+    from test_magic_items_process import MagicItemProcesses
+    return MagicItemProcesses("test_haste_self_ability_privileged_capture_records_both_real_branches")
+
+
 def torch_recording_case():
     """Actual adventure control and fuel states, not synthetic server frames."""
     from test_magic_items_process import MagicItemProcesses
@@ -285,6 +291,26 @@ class Recorder(ProcessTestCase):
                             for effect in record["outcome"]["effects"]))
         # Publish both only after cleanup and both source-positive validations.
         server_samples.update({"zz.first_contact_" + key: value for key, value in samples.items()})
+
+    def record_haste(self, server_samples):
+        samples = run_recording_case(haste_recording_case(), "haste_samples")
+        self.assertEqual(set(samples), {"hasted", "overdose"})
+        for branch, sample in samples.items():
+            self.assertEqual(sample["type"], "combat_diagnostics")
+            self.assertTrue(sample["report"]["enabled"])
+            records = [record for record in sample["report"]["records"]
+                       if any(effect["type"] == "haste_dose" and effect["outcome"]["type"] == branch
+                              for effect in record["outcome"]["effects"])]
+            record, = records
+            self.assertEqual(record["ability"]["id"], "fixture.haste_dose")
+            effect, = [effect for effect in record["outcome"]["effects"] if effect["type"] == "haste_dose"]
+            self.assertEqual(str(effect["target"]), "1")
+            self.assertEqual(effect["condition"]["id"], "rogue.hasted")
+            self.assertEqual(effect["rest"]["id"], "rogue.haste_exhaustion")
+            duration = effect["outcome"]["duration" if branch == "hasted" else "rest"]
+            self.assertIsInstance(duration, str)
+            self.assertIn(int(duration), range(400, 701, 100) if branch == "hasted" else range(0, 701, 100))
+        server_samples.update({"zz.haste_" + key: value for key, value in samples.items()})
 
     def record_torch(self, server_samples):
         samples = run_recording_case(torch_recording_case(), "torch_samples")
@@ -706,6 +732,7 @@ class Recorder(ProcessTestCase):
         self.record_drain_refusal(server_samples)
         self.record_first_contact(server_samples)
         self.record_torch(server_samples)
+        self.record_haste(server_samples)
         self.record_personal_conditions(server_samples)
         self.record_persistent_conditions(server_samples)
         self.record_amulet_escape(server_samples)
