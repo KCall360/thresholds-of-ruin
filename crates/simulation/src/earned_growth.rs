@@ -257,19 +257,59 @@ impl EarnedProgress {
         }
         Ok(projected)
     }
+    pub(crate) fn next_unfunded_credit(
+        &self,
+        current: HdCount,
+        policy: &GrowthPolicy,
+    ) -> Result<u64, GrowthError> {
+        let lost = self.highest_applied_tier
+            .checked_sub(current)
+            .ok_or(GrowthError::InvalidRecord)?
+            .get();
+        let price = self.next_threshold(policy)?;
+        if price == 0 {
+            return Err(GrowthError::InvalidRecord);
+        }
+        if self.held_xp / price < lost {
+            // Earlier funded regrowth ordinals all have this same current price.
+            return Ok(price - self.held_xp % price);
+        }
+        let regrowth = lost.checked_mul(price).ok_or(GrowthError::Arithmetic)?;
+        let forward_xp = self.held_xp.checked_sub(regrowth)
+            .ok_or(GrowthError::InvalidRecord)?;
+        let funded = self.projected_tier(current, policy)?;
+        funded.checked_add(1).ok_or(GrowthError::Arithmetic)?;
+        let forward_cost = policy.threshold_sum(self.highest_applied_tier, funded)
+            .ok_or(GrowthError::Arithmetic)?;
+        let residual = forward_xp.checked_sub(forward_cost)
+            .ok_or(GrowthError::InvalidRecord)?;
+        let next = policy.threshold(funded).ok_or(GrowthError::Arithmetic)?;
+        next.checked_sub(residual).filter(|credit| *credit > 0)
+            .ok_or(GrowthError::InvalidRecord)
+    }
+
     pub(crate) fn award(
         &mut self,
         amount: u32,
         current: HdCount,
         policy: &GrowthPolicy,
     ) -> Result<(), GrowthError> {
+        self.award_wide(u64::from(amount), current, policy)
+    }
+
+    pub(crate) fn award_wide(
+        &mut self,
+        amount: u64,
+        current: HdCount,
+        policy: &GrowthPolicy,
+    ) -> Result<(), GrowthError> {
         let earned = self
             .earned_xp
-            .checked_add(u64::from(amount))
+            .checked_add(amount)
             .ok_or(GrowthError::Arithmetic)?;
         let held = self
             .held_xp
-            .checked_add(u64::from(amount))
+            .checked_add(amount)
             .ok_or(GrowthError::Arithmetic)?;
         let mut candidate = self.clone();
         candidate.earned_xp = earned;

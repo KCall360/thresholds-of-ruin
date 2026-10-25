@@ -15,6 +15,7 @@ use std::collections::{BTreeMap, BTreeSet};
 /// the exact retained/current choice receipts before accepting a historical row.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(super) struct IntellectSources {
+    pub(super) strength_acquired: u8,
     pub(super) attribute_increases: ByAttribute<u16>,
     /// Each owned class contributes its definition exactly once.
     pub(super) classes: BTreeSet<ClassId>,
@@ -54,7 +55,8 @@ fn baseline(
             return Err(BuildError::AttributeCap);
         }
     }
-    let mut attributes = Attributes::new(values).map_err(|_| BuildError::AttributeCap)?;
+    let ordinary = Attributes::new(values).map_err(|_| BuildError::AttributeCap)?;
+    let mut attributes = super::derive::with_acquired_strength(ordinary, witness.strength_acquired)?;
     let templates = birth_templates
         .iter()
         .map(|id| {
@@ -177,6 +179,7 @@ pub(super) fn current_sources_from_facts(
         build,
         build.initial_attributes(),
         birth_templates,
+        build.strength_acquired(),
         attributes,
         skills,
         selected,
@@ -188,12 +191,14 @@ fn sources_from_facts(
     build: &CreatureBuild,
     initial_attributes: Attributes,
     birth_templates: &[TemplateId],
+    strength_acquired: u8,
     attributes: Attributes,
     skills: &SkillRanks,
     selected: &BTreeSet<TalentId>,
     hit_dice: &HitDiceSummary,
 ) -> Result<IntellectSources, BuildError> {
     let mut witness = IntellectSources {
+        strength_acquired,
         classes: hit_dice.classes.keys().cloned().collect(),
         ..IntellectSources::default()
     };
@@ -274,6 +279,7 @@ pub(super) fn historical_sources(
         build,
         initial_attributes,
         birth_templates,
+        0,
         rows.iter().map(|(source, choices)| (source, choices)),
     )
 }
@@ -282,6 +288,7 @@ pub(super) fn historical_sources_refs<'a>(
     build: &CreatureBuild,
     initial_attributes: Attributes,
     birth_templates: &[TemplateId],
+    strength_acquired: u8,
     rows: impl ExactSizeIterator<Item = (&'a HdSource, &'a HdChoices)>,
 ) -> Result<IntellectSources, BuildError> {
     if rows.len() > crate::limits::HIT_DICE {
@@ -374,6 +381,7 @@ pub(super) fn historical_sources_refs<'a>(
         build,
         initial_attributes,
         birth_templates,
+        strength_acquired,
         attributes,
         &skills,
         &selected,

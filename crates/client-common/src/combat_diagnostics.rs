@@ -112,6 +112,12 @@ pub fn lines(report: &CombatDiagnosticsView) -> Result<Vec<String>, InvalidComba
                     result,
                 } => format!("  Actor {}: {:?} movement, {:?}", target.0, mode, result),
                 DiagnosticEffect::Relocate { target, mode, result } => format!("  Actor {}: {:?} relocation, {:?}", target.0, mode, result),
+                DiagnosticEffect::GainStrength { target, change } => format!("  Actor {}: Strength {}", target.0, match change {
+                    StrengthGain::Unchanged => "unchanged",
+                    StrengthGain::Restored => "restored by one",
+                    StrengthGain::Acquired => "permanently increased by one",
+                }),
+                DiagnosticEffect::RaiseLevel { target, amount } => format!("  Actor {}: credited {amount} growth XP", target.0),
                 DiagnosticEffect::HasteDose { target, condition, rest, outcome } => match outcome {
                     HasteDoseOutcome::Hasted { duration } => format!("  Actor {}: {} for {duration} active ticks", target.0, condition.name),
                     HasteDoseOutcome::Overdose { rest: duration } => format!("  Actor {}: haste overdose; {} for {duration} active ticks", target.0, rest.name),
@@ -388,6 +394,25 @@ pub(crate) mod tests {
             amount: 0,
         }];
         assert!(lines(&forged).is_err());
+    }
+
+    #[test]
+    fn growth_diagnostics_render_actual_results_and_reject_wrong_recipient() {
+        for (effect, expected) in [
+            (DiagnosticEffect::GainStrength { target: ActorId(2), change: StrengthGain::Unchanged }, "  Actor 2: Strength unchanged"),
+            (DiagnosticEffect::GainStrength { target: ActorId(2), change: StrengthGain::Restored }, "  Actor 2: Strength restored by one"),
+            (DiagnosticEffect::GainStrength { target: ActorId(2), change: StrengthGain::Acquired }, "  Actor 2: Strength permanently increased by one"),
+            (DiagnosticEffect::RaiseLevel { target: ActorId(2), amount: u64::MAX }, "  Actor 2: credited 18446744073709551615 growth XP"),
+        ] {
+            let report = report_with_effects(vec![effect]);
+            assert!(lines(&report).unwrap().contains(&expected.to_string()));
+            let mut forged = report.clone();
+            match &mut forged.records[0].outcome.effects[0] {
+                DiagnosticEffect::GainStrength { target, .. } | DiagnosticEffect::RaiseLevel { target, .. } => *target = ActorId(1),
+                _ => unreachable!(),
+            }
+            assert!(lines(&forged).is_err());
+        }
     }
 
     #[test]

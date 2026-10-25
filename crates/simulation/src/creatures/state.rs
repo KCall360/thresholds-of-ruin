@@ -961,6 +961,36 @@ impl CreatureState {
             .map_err(CreatureStateError::Growth)
     }
 
+    /// A dose restores one actual deficit OR acquires one permanent point.
+    pub(crate) fn stage_gain_strength(
+        &mut self,
+    ) -> Result<crate::abilities::StrengthGain, CreatureStateError> {
+        use crate::abilities::StrengthGain;
+        use crate::attributes::Attribute;
+        if self.restorable_losses.attributes.strength > 0 {
+            self.restore_attribute(Attribute::Strength, 1)?;
+            return Ok(StrengthGain::Restored);
+        }
+        let mut build = (*self.build).clone();
+        if !build.acquire_strength().map_err(CreatureStateError::Build)? {
+            return Ok(StrengthGain::Unchanged);
+        }
+        self.stage_rebuild(build)?;
+        Ok(StrengthGain::Acquired)
+    }
+
+    /// Fund one additional ordinary obligation beyond all currently banked XP.
+    /// Actual HD application remains the ordinary owning Game finalizer's job.
+    pub(crate) fn stage_raise_level(&mut self) -> Result<u64, CreatureStateError> {
+        let current = self.build.ledger().total_hd();
+        let policy = &self.build.ruleset().document().growth;
+        let amount = self.earned_progress.next_unfunded_credit(current, policy)
+            .map_err(CreatureStateError::Growth)?;
+        self.earned_progress.award_wide(amount, current, policy)
+            .map_err(CreatureStateError::Growth)?;
+        Ok(amount)
+    }
+
     fn growth_pending(&self) -> Result<bool, CreatureStateError> {
         // Temporary actual-row admission guard. Funded scalar projection is
         // independent of this limit; archive/disclosure widening will remove it.

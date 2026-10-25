@@ -240,6 +240,19 @@ fn record(
                                 amount: *amount,
                             }
                         }
+                        s::abilities::ResolvedEffect::GainStrength { change } => {
+                            p::DiagnosticEffect::GainStrength {
+                                target,
+                                change: match change {
+                                    s::abilities::StrengthGain::Unchanged => p::StrengthGain::Unchanged,
+                                    s::abilities::StrengthGain::Restored => p::StrengthGain::Restored,
+                                    s::abilities::StrengthGain::Acquired => p::StrengthGain::Acquired,
+                                },
+                            }
+                        }
+                        s::abilities::ResolvedEffect::RaiseLevel { amount } => {
+                            p::DiagnosticEffect::RaiseLevel { target, amount: *amount }
+                        }
                         s::abilities::ResolvedEffect::HasteDose { id, rest, outcome } => {
                             p::DiagnosticEffect::HasteDose {
                                 target,

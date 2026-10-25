@@ -1,3 +1,5 @@
+mod strength_gain;
+pub use strength_gain::StrengthGain;
 //! Validated action plans, pure effect resolution, and runtime orchestration.
 mod compile;
 mod haste_dose;

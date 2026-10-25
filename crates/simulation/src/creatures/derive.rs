@@ -20,6 +20,22 @@ thread_local! {
     static EDGE_SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
+/// Ordinary allocation/choice validation remains separate (normally <= 5).
+/// Consumable points raise only the pre-innate natural Strength subtotal to 7.
+pub(super) fn with_acquired_strength(
+    ordinary: Attributes,
+    acquired: u8,
+) -> Result<Attributes, BuildError> {
+    let mut values = ordinary.values();
+    let total = values.strength.checked_add(u16::from(acquired))
+        .ok_or(BuildError::Arithmetic)?;
+    if acquired > 7 || (acquired > 0 && total > 7) {
+        return Err(BuildError::AttributeCap);
+    }
+    values.strength = total;
+    Attributes::new(values).map_err(|_| BuildError::AttributeCap)
+}
+
 /// Thread-local deltas isolate deterministic work assertions from parallel tests.
 #[cfg(test)]
 pub(super) fn fold_count() -> usize {
@@ -1082,6 +1098,7 @@ fn compile_permanent(build: &CreatureBuild) -> Result<DerivedCreature, BuildErro
         .collect::<Result<_, _>>()?;
     let (mut attributes, skills, selected) = advancement_facts(build, build.initial_attributes())?;
     let advancement_attributes = attributes;
+    attributes = with_acquired_strength(attributes, build.strength_acquired())?;
     let mut kind = species.kind.clone();
     let mut subtypes = species.subtypes.clone();
     apply_templates(&templates, &mut kind, &mut subtypes, &mut attributes)?;

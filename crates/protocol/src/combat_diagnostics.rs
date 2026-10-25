@@ -100,6 +100,24 @@ impl<'de> Deserialize<'de> for DiagnosticCostBundle {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StrengthGain {
+    Unchanged,
+    Restored,
+    Acquired,
+}
+impl<'de> Deserialize<'de> for StrengthGain {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        match String::deserialize(deserializer)?.as_str() {
+            "unchanged" => Ok(Self::Unchanged),
+            "restored" => Ok(Self::Restored),
+            "acquired" => Ok(Self::Acquired),
+            _ => Err(serde::de::Error::custom("unknown strength gain result")),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum HasteDoseOutcome {
     Hasted {
@@ -147,6 +165,12 @@ impl<'de> Deserialize<'de> for HasteDoseOutcome {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum DiagnosticEffect {
+    GainStrength { target: ActorId, change: StrengthGain },
+    RaiseLevel {
+        target: ActorId,
+        #[serde(with = "crate::integers::unsigned")]
+        amount: u64,
+    },
     HasteDose {
         target: ActorId,
         condition: ContentRef,
@@ -386,7 +410,9 @@ impl CombatDiagnosticRecord {
                 }
                 DiagnosticEffect::RoomLight { target, .. }
                 | DiagnosticEffect::DrainLife { target, .. } => *target == self.actor,
-                DiagnosticEffect::DirectHealthLoss { target, .. } => *target == self.target,
+                DiagnosticEffect::DirectHealthLoss { target, .. }
+                | DiagnosticEffect::GainStrength { target, .. }
+                | DiagnosticEffect::RaiseLevel { target, .. } => *target == self.target,
                 DiagnosticEffect::CancelSpecials { target, .. }
                 | DiagnosticEffect::Translate { target, .. }
                 | DiagnosticEffect::Relocate { target, .. }
@@ -490,6 +516,12 @@ impl<'de> Deserialize<'de> for DiagnosticEffect {
         #[derive(Deserialize)]
         #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
+            GainStrength { target: ActorId, change: StrengthGain },
+            RaiseLevel {
+                target: ActorId,
+                #[serde(with = "crate::integers::unsigned")]
+                amount: u64,
+            },
             HasteDose {
                 target: ActorId,
                 #[serde(deserialize_with = "crate::bounded::named_map")]
@@ -603,6 +635,8 @@ impl<'de> Deserialize<'de> for DiagnosticEffect {
             },
         }
         Ok(match crate::bounded::named_map(deserializer)? {
+            Fields::GainStrength { target, change } => Self::GainStrength { target, change },
+            Fields::RaiseLevel { target, amount } => Self::RaiseLevel { target, amount },
             Fields::HasteDose {
                 target,
                 condition,
@@ -807,5 +841,37 @@ mod haste_dose_diagnostic_tests {
         ] {
             assert!(serde_json::from_value::<HasteDoseOutcome>(value).is_err());
         }
+    }
+}
+
+#[cfg(test)]
+mod growth_diagnostic_tests {
+    use super::*;
+    #[test]
+    fn growth_results_are_closed_named_and_preserve_full_width_credit() {
+        for change in ["unchanged", "restored", "acquired"] {
+            let value = serde_json::json!({"type":"gain_strength","target":"2","change":change});
+            let decoded: DiagnosticEffect = serde_json::from_value(value.clone()).unwrap();
+            assert_eq!(serde_json::to_value(decoded).unwrap(), value);
+        }
+        for amount in [0, u64::from(u32::MAX) + 1, u64::MAX] {
+            let value = serde_json::json!({"type":"raise_level","target":"2","amount":amount.to_string()});
+            let decoded: DiagnosticEffect = serde_json::from_value(value.clone()).unwrap();
+            assert_eq!(serde_json::to_value(decoded).unwrap(), value);
+        }
+        for value in [
+            serde_json::json!({"type":"gain_strength","target":"2","change":{"acquired":null}}),
+            serde_json::json!({"type":"gain_strength","target":"2","change":"other"}),
+            serde_json::json!({"type":"gain_strength","target":"2"}),
+            serde_json::json!({"type":"gain_strength","target":"2","change":"restored","amount":1}),
+            serde_json::json!({"type":"raise_level","target":"2","amount":1}),
+            serde_json::json!({"type":"raise_level","target":"2","amount":"01"}),
+            serde_json::json!({"type":"raise_level","target":"2","amount":"18446744073709551616"}),
+            serde_json::json!({"type":"raise_level","target":"2"}),
+            serde_json::json!(["raise_level","2","1"]),
+        ] {
+            assert!(serde_json::from_value::<DiagnosticEffect>(value).is_err());
+        }
+        assert!(serde_json::from_str::<DiagnosticEffect>(r#"{"type":"gain_strength","target":"2","change":"acquired","change":"restored"}"#).is_err());
     }
 }

@@ -1368,6 +1368,8 @@ enum Effect {
     },
     DrainLatestHitDie,
     RestoreHitDie,
+    GainStrength,
+    RaiseLevel,
     RoomLight,
     DrainLife,
     CancelSpecials,
@@ -6746,6 +6748,8 @@ impl Effect {
             },
             DrainLatestHitDie {},
             RestoreHitDie {},
+            GainStrength {},
+            RaiseLevel {},
             RoomLight {},
             DrainLife {},
             CancelSpecials {},
@@ -6853,6 +6857,8 @@ impl Effect {
             },
             Fields::DrainLatestHitDie {} => source::Effect::DrainLatestHitDie,
             Fields::RestoreHitDie {} => source::Effect::RestoreHitDie,
+            Fields::GainStrength {} => source::Effect::GainStrength,
+            Fields::RaiseLevel {} => source::Effect::RaiseLevel,
             Fields::RoomLight {} => source::Effect::RoomLight,
             Fields::DrainLife {} => source::Effect::DrainLife,
             Fields::CancelSpecials {} => source::Effect::CancelSpecials,
@@ -9985,6 +9991,58 @@ mod haste_dose_effect_tests {
                 .is_err(),
                 "{malformed}"
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod gain_strength_effect_tests {
+    use super::*;
+
+    #[test]
+    fn gain_strength_source_and_independent_save_are_strict_unit_effects() {
+        let raw = br#"{"kind":"gain_strength"}"#;
+        let authored: source::Effect = serde_json::from_slice(raw).unwrap();
+        assert_eq!(authored, source::Effect::GainStrength);
+        let saved: Owned<source::Effect> = crate::storage::codec::strict(raw).unwrap();
+        assert_eq!(saved.0, authored);
+        assert_eq!(serde_json::to_vec(&Borrowed(&authored)).unwrap(), raw);
+        for malformed in [
+            r#"["gain_strength"]"#,
+            r#"{"kind":"gain_strength","amount":1}"#,
+            r#"{"kind":"gain_strength","attribute":"strength"}"#,
+            r#"{"kind":"gain_strength","change":"acquired"}"#,
+            r#"{"kind":"gain_strength","kind":"gain_strength"}"#,
+            r#"{"kind":null}"#,
+        ] {
+            assert!(serde_json::from_str::<source::Effect>(malformed).is_err(), "{malformed}");
+            assert!(crate::storage::codec::strict::<Owned<source::Effect>>(malformed.as_bytes()).is_err(), "{malformed}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod raise_level_effect_tests {
+    use super::*;
+
+    #[test]
+    fn raise_level_source_and_independent_save_are_strict_unit_effects() {
+        let raw = br#"{"kind":"raise_level"}"#;
+        let authored: source::Effect = serde_json::from_slice(raw).unwrap();
+        assert_eq!(authored, source::Effect::RaiseLevel);
+        let saved: Owned<source::Effect> = crate::storage::codec::strict(raw).unwrap();
+        assert_eq!(saved.0, authored);
+        assert_eq!(serde_json::to_vec(&Borrowed(&authored)).unwrap(), raw);
+        for malformed in [
+            r#"["raise_level"]"#,
+            r#"{"kind":"raise_level","amount":1}"#,
+            r#"{"kind":"raise_level","attribute":"strength"}"#,
+            r#"{"kind":"raise_level","change":"acquired"}"#,
+            r#"{"kind":"raise_level","kind":"raise_level"}"#,
+            r#"{"kind":null}"#,
+        ] {
+            assert!(serde_json::from_str::<source::Effect>(malformed).is_err(), "{malformed}");
+            assert!(crate::storage::codec::strict::<Owned<source::Effect>>(malformed.as_bytes()).is_err(), "{malformed}");
         }
     }
 }

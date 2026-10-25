@@ -107,6 +107,8 @@ pub enum PlannedEffect {
     TeleportToRayOrigin,
     RoomLight,
     DrainLife,
+    GainStrength,
+    RaiseLevel,
     CancelSpecials,
     HasteDose {
         id: ConditionId,
@@ -964,6 +966,8 @@ pub(crate) fn effects_valid(effects: &[PlannedEffect], rules: &crate::rules::Rul
             | PlannedEffect::TeleportToRayOrigin
             | PlannedEffect::RoomLight
             | PlannedEffect::DrainLife
+            | PlannedEffect::GainStrength
+            | PlannedEffect::RaiseLevel
             | PlannedEffect::CancelSpecials
             | PlannedEffect::ArrestDescent => true,
             PlannedEffect::HasteDose {
@@ -1119,6 +1123,8 @@ pub(super) fn effects_match_definition_scoped(
                 | (Effect::TeleportToRayOrigin, PlannedEffect::TeleportToRayOrigin)
                 | (Effect::RoomLight, PlannedEffect::RoomLight)
                 | (Effect::DrainLife, PlannedEffect::DrainLife)
+                | (Effect::GainStrength, PlannedEffect::GainStrength)
+                | (Effect::RaiseLevel, PlannedEffect::RaiseLevel)
                 | (Effect::CancelSpecials, PlannedEffect::CancelSpecials)
                 | (Effect::ArrestDescent, PlannedEffect::ArrestDescent) => true,
                 (
@@ -1581,6 +1587,8 @@ impl Game {
                 Effect::TeleportToRayOrigin => Ok(PlannedEffect::TeleportToRayOrigin),
                 Effect::RoomLight => Ok(PlannedEffect::RoomLight),
                 Effect::DrainLife => Ok(PlannedEffect::DrainLife),
+                Effect::GainStrength => Ok(PlannedEffect::GainStrength),
+                Effect::RaiseLevel => Ok(PlannedEffect::RaiseLevel),
                 Effect::CancelSpecials => Ok(PlannedEffect::CancelSpecials),
                 Effect::HasteDose { condition, rest } => {
                     let turn_ticks = self
@@ -1813,6 +1821,8 @@ impl<'de> Deserialize<'de> for PlannedEffect {
             TeleportToRayOrigin {},
             RoomLight {},
             DrainLife {},
+            GainStrength {},
+            RaiseLevel {},
             CancelSpecials {},
             HasteDose {
                 id: ConditionId,
@@ -1902,6 +1912,8 @@ impl<'de> Deserialize<'de> for PlannedEffect {
             Fields::TeleportToRayOrigin {} => Self::TeleportToRayOrigin,
             Fields::RoomLight {} => Self::RoomLight,
             Fields::DrainLife {} => Self::DrainLife,
+            Fields::GainStrength {} => Self::GainStrength,
+            Fields::RaiseLevel {} => Self::RaiseLevel,
             Fields::CancelSpecials {} => Self::CancelSpecials,
             Fields::HasteDose {
                 id,

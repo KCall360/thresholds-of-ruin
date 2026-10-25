@@ -366,6 +366,7 @@ impl CreatureRecord {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BuildRecord {
+    strength_acquired: u8,
     species: SpeciesId,
     future_growth: crate::earned_growth::FutureGrowth,
     starting_skills: [Skill; 2],
@@ -656,6 +657,7 @@ impl ChoiceRecord {
 impl BuildRecord {
     pub fn capture(build: &CreatureBuild) -> Self {
         Self {
+            strength_acquired: build.strength_acquired(),
             species: build.species().id.clone(),
             future_growth: build.future_growth().clone(),
             starting_skills: *build.starting_skills(),
@@ -765,6 +767,7 @@ impl BuildRecord {
             },
             self.templates.0.clone(),
         )?;
+        build.strength_acquired = self.strength_acquired;
         build.intellect_learning = Some(Arc::new(self.intellect_learning.restore(&build)?));
         build.derive()?;
         build.set_future_growth(self.future_growth.clone())?;

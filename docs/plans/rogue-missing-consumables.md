@@ -1370,3 +1370,24 @@ prove the funded frontier, chosen next threshold, exact credit and unchanged
 blocked progression/choices, including repeated doses and wide values. Strength's
 ordinary-five/combined-seven policy is unchanged. No growth implementation or
 runtime qualification is claimed by this policy correction.
+
+### Growth initial source checkpoint (uncompiled)
+
+The first coherent Strength/Raise source snapshot adds the unit authored/planned
+and resolved effects, closed Strength result, dedicated saved acquisition input
+and historical Intellect source composition, natural-fold admission and checked
+next-unfunded XP credit seams. Server source/save/inspection mirrors and strict
+unit controls accompany target-bound privileged diagnostic DTOs and rendering.
+This is incomplete, uncompiled implementation: exhaustive caller migration,
+source-fold/history audit, owned advancement presentation, paid/strict/dual-cap
+and XP fixtures, Service and actual-process acceptance remain pending. No growth
+mechanics or caller runtime has been qualified.
+
+The cheap production-catalog first-red run passed its independent existing
+restoration/live-stock/kit control, failed both new definitions at their intended
+missing keys, and failed the missing two-identity family assertion. Its three
+inputs were unchanged. The two opt-in definitions have not yet been installed in
+this snapshot. They will extend the current nine-identity family with distinct
+cosmetics without changing live weights or kits; seeded appearance assignments
+need not remain unchanged. These source-only failures are not Rust/compiler or
+paid-gameplay evidence. Existing Restore Strength remains a separate effect.

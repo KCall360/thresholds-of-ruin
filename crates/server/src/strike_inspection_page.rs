@@ -66,6 +66,8 @@ fn effect_fields(effect: &s::rules::Effect) -> usize {
         | s::rules::Effect::ArrestDescent
         | s::rules::Effect::DrainLatestHitDie
         | s::rules::Effect::RestoreHitDie
+        | s::rules::Effect::GainStrength
+        | s::rules::Effect::RaiseLevel
         | s::rules::Effect::RoomLight
         | s::rules::Effect::DrainLife
         | s::rules::Effect::CancelSpecials => 0,

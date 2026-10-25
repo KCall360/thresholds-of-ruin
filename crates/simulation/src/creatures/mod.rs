@@ -111,6 +111,7 @@ pub struct CreatureBuild {
     content: Arc<Content>,
     species: SpeciesId,
     initial_attributes: Attributes,
+    strength_acquired: u8,
     ledger: HdLedger,
     binding: ManaBinding,
     advancement: BuildAdvancement,
@@ -125,6 +126,7 @@ impl Clone for CreatureBuild {
             content: self.content.clone(),
             species: self.species.clone(),
             initial_attributes: self.initial_attributes,
+            strength_acquired: self.strength_acquired,
             ledger: self.ledger.clone(),
             binding: self.binding,
             advancement: self.advancement.clone(),
@@ -224,6 +226,7 @@ impl CreatureBuild {
             content,
             species,
             initial_attributes,
+            strength_acquired: 0,
             ledger,
             binding,
             advancement,
@@ -302,6 +305,7 @@ impl CreatureBuild {
         (Arc::ptr_eq(&self.content, &other.content) || self.content == other.content)
             && self.species == other.species
             && self.initial_attributes == other.initial_attributes
+            && self.strength_acquired == other.strength_acquired
             && self.ledger == other.ledger
             && self.binding == other.binding
             && self.advancement.starting_skills == other.advancement.starting_skills
@@ -313,6 +317,25 @@ impl CreatureBuild {
                 _ => false,
             }
     }
+    /// Nonrefundable consumable contribution, separate from ordinary purchases.
+    pub fn strength_acquired(&self) -> u8 {
+        self.strength_acquired
+    }
+
+    pub(crate) fn acquire_strength(&mut self) -> Result<bool, BuildError> {
+        let (ordinary, _, _) = derive::advancement_facts(self, self.initial_attributes())?;
+        let natural = derive::with_acquired_strength(ordinary, self.strength_acquired)?;
+        if natural.get(crate::attributes::Attribute::Strength) == 7 {
+            return Ok(false);
+        }
+        self.edit_intellect_advancement(|candidate| {
+            candidate.strength_acquired = candidate.strength_acquired.checked_add(1)
+                .ok_or(BuildError::Arithmetic)?;
+            Ok(())
+        })?;
+        Ok(true)
+    }
+
     pub fn content(&self) -> &Arc<Content> {
         &self.content
     }

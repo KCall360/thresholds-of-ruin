@@ -395,6 +395,8 @@ pub enum ResolvedEffect {
     CancelSpecials {
         changed: bool,
     },
+    GainStrength { change: super::StrengthGain },
+    RaiseLevel { amount: u64 },
     HasteDose {
         id: ConditionId,
         rest: ConditionId,
@@ -510,6 +512,8 @@ impl ResolvedEffect {
             Self::RoomLight { changed }
             | Self::DrainLife { changed }
             | Self::CancelSpecials { changed } => *changed,
+            Self::GainStrength { change } => *change != super::StrengthGain::Unchanged,
+            Self::RaiseLevel { amount } => *amount > 0,
             Self::HasteDose { .. } => true,
             Self::DirectHealthLoss { amount } => *amount > 0,
             Self::ArrestDescent => false,
@@ -555,6 +559,15 @@ impl ResolvedEffect {
             Self::CancelSpecials { .. } => Self::CancelSpecials {
                 changed: creature.cancel_specials()?,
             },
+            Self::GainStrength { .. } => {
+                let change = if let Some(context) = state.recovery_context {
+                    creature.with_recovery_context(context, |creature| creature.stage_gain_strength())?
+                } else {
+                    creature.stage_gain_strength()?
+                };
+                Self::GainStrength { change }
+            }
+            Self::RaiseLevel { .. } => Self::RaiseLevel { amount: creature.stage_raise_level()? },
             Self::HasteDose { id, rest, outcome } => {
                 if !outcome.valid()
                     || !creature
@@ -1368,6 +1381,8 @@ pub(super) fn resolve_batch<'a>(
             PlannedEffect::RoomLight => ResolvedEffect::RoomLight { changed: false },
             PlannedEffect::DrainLife => ResolvedEffect::DrainLife { changed: false },
             PlannedEffect::CancelSpecials => ResolvedEffect::CancelSpecials { changed: false },
+            PlannedEffect::GainStrength => ResolvedEffect::GainStrength { change: super::StrengthGain::Unchanged },
+            PlannedEffect::RaiseLevel => ResolvedEffect::RaiseLevel { amount: 0 },
             PlannedEffect::HasteDose {
                 id,
                 rest,
@@ -1706,6 +1721,8 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
             CancelSpecials {
                 changed: bool,
             },
+            GainStrength { change: super::StrengthGain },
+            RaiseLevel { amount: u64 },
             HasteDose {
                 id: ConditionId,
                 rest: ConditionId,
@@ -1792,6 +1809,8 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
             Fields::RoomLight { changed } => Self::RoomLight { changed },
             Fields::DrainLife { changed } => Self::DrainLife { changed },
             Fields::CancelSpecials { changed } => Self::CancelSpecials { changed },
+            Fields::GainStrength { change } => Self::GainStrength { change },
+            Fields::RaiseLevel { amount } => Self::RaiseLevel { amount },
             Fields::HasteDose { id, rest, outcome } => Self::HasteDose { id, rest, outcome },
             Fields::DirectHealthLoss { amount } => Self::DirectHealthLoss { amount },
             Fields::ArrestDescent {} => Self::ArrestDescent,

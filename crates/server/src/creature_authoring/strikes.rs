@@ -426,6 +426,8 @@ fn effects(values: &[Effect], rules: &s::rules::Ruleset) -> Result<Vec<s::rules:
                 },
                 Effect::DrainLatestHitDie => s::rules::Effect::DrainLatestHitDie,
                 Effect::RestoreHitDie => s::rules::Effect::RestoreHitDie,
+                Effect::GainStrength => s::rules::Effect::GainStrength,
+                Effect::RaiseLevel => s::rules::Effect::RaiseLevel,
                 Effect::RoomLight => s::rules::Effect::RoomLight,
                 Effect::DrainLife => s::rules::Effect::DrainLife,
                 Effect::CancelSpecials => s::rules::Effect::CancelSpecials,

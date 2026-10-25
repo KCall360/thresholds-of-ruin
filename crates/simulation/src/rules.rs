@@ -1066,6 +1066,8 @@ pub enum Effect {
     TeleportToRayOrigin,
     RoomLight,
     DrainLife,
+    GainStrength,
+    RaiseLevel,
     /// Target-only permanent special suppression and current concealment cleanup.
     CancelSpecials,
     HasteDose {
@@ -1182,6 +1184,8 @@ impl<'de> Deserialize<'de> for Effect {
             TeleportToRayOrigin {},
             RoomLight {},
             DrainLife {},
+            GainStrength {},
+            RaiseLevel {},
             CancelSpecials {},
             HasteDose {
                 condition: ConditionId,
@@ -1278,6 +1282,8 @@ impl<'de> Deserialize<'de> for Effect {
             Fields::TeleportToRayOrigin {} => Self::TeleportToRayOrigin,
             Fields::RoomLight {} => Self::RoomLight,
             Fields::DrainLife {} => Self::DrainLife,
+            Fields::GainStrength {} => Self::GainStrength,
+            Fields::RaiseLevel {} => Self::RaiseLevel,
             Fields::CancelSpecials {} => Self::CancelSpecials,
             Fields::HasteDose { condition, rest } => Self::HasteDose { condition, rest },
             Fields::ArrestDescent {} => Self::ArrestDescent,
@@ -2986,6 +2992,8 @@ impl References<'_> {
                 | Effect::TeleportToRayOrigin
                 | Effect::RoomLight
                 | Effect::DrainLife
+                | Effect::GainStrength
+                | Effect::RaiseLevel
                 | Effect::CancelSpecials
                 | Effect::ArrestDescent => {}
             }
@@ -3630,6 +3638,8 @@ impl Effect {
             | Self::TeleportToRayOrigin
             | Self::RoomLight
             | Self::DrainLife
+            | Self::GainStrength
+            | Self::RaiseLevel
             | Self::CancelSpecials
             | Self::ArrestDescent => true,
             Self::HealPerHitDie { sides, bonus, .. } => DicePool::new(1, *sides, *bonus).is_ok(),

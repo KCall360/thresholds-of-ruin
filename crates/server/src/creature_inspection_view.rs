@@ -228,6 +228,8 @@ fn effect_view(value: &s::rules::Effect, rules: &Ruleset) -> p::CombatTraceStep 
         s::rules::Effect::Heal { amount } => ("heal", vec![text("amount", amount_text(amount))]),
         s::rules::Effect::DrainLatestHitDie => ("drain_latest_hit_die", vec![]),
         s::rules::Effect::RestoreHitDie => ("restore_hit_die", vec![]),
+        s::rules::Effect::GainStrength => ("gain_strength", vec![]),
+        s::rules::Effect::RaiseLevel => ("raise_level", vec![]),
         s::rules::Effect::RoomLight => ("room_light", vec![]),
         s::rules::Effect::DrainLife => ("drain_life", vec![]),
         s::rules::Effect::CancelSpecials => ("cancel_specials", vec![]),
