@@ -14,6 +14,7 @@ use tor_world::{Direction, Location, Position, RegionId, World};
 
 #[derive(Clone, Debug)]
 pub(super) struct CanonicalSpatialSource {
+    pub mapping: Option<Vec<tor_simulation::spatial_scope::mapping::MappingRoomFrame>>,
     pub id: String,
     pub members: Vec<RegionId>,
     pub rooms: BTreeMap<RoomId, Vec<Location>>,
@@ -82,6 +83,73 @@ fn push_run(runs: &mut Vec<CellRun>, p: Location, max: usize) -> Result<(), Fail
         last_x: p.position.x,
     });
     Ok(())
+}
+
+fn mapping_budget(
+    world: &World,
+    scope: &Scope,
+    frame_count: usize,
+    exterior_runs: usize,
+    source: &CompilerWorkBudget,
+) -> Result<tor_simulation::spatial_scope::mapping::CertificateBudget, Failure> {
+    use tor_simulation::spatial_scope::{codec, mapping};
+    let capacity = || spatial_capacity("Mapping certificate arithmetic capacity");
+    let shells = scope
+        .rooms
+        .iter()
+        .try_fold(0usize, |n, room| n.checked_add(room.runs.len()))
+        .ok_or_else(capacity)?;
+    let joins = scope
+        .members
+        .iter()
+        .try_fold(0usize, |n, region| {
+            n.checked_add(world.exits(*region).count())
+        })
+        .ok_or_else(capacity)?;
+    // Existing validated source/terrain envelopes remain unchanged. This is a
+    // conservative operation count for actual input, not a smaller geometry cap.
+    let cells = usize::try_from(source.source_entries).map_err(|_| capacity())?;
+    let factor = (usize::BITS as usize)
+        .checked_mul(8)
+        .and_then(|n| n.checked_add(32))
+        .ok_or_else(capacity)?;
+    let work = cells
+        .checked_mul(2)
+        .and_then(|n| n.checked_add(frame_count))
+        .and_then(|n| n.checked_add(shells))
+        .and_then(|n| n.checked_add(joins.checked_mul(shells.checked_add(2)?)?))
+        .and_then(|n| n.checked_mul(factor))
+        .ok_or_else(capacity)?;
+    // ShellRun's two fields plus one alignment allowance; no Vec size_hint or
+    // arbitrary retained floor cap. The constructor prepays its actual scratch.
+    let shell_bytes = std::mem::size_of::<CellRun>()
+        .checked_add(std::mem::size_of::<RoomId>())
+        .and_then(|n| n.checked_add(std::mem::align_of::<CellRun>()))
+        .ok_or_else(capacity)?;
+    let allocation_bytes =
+        shells
+            .checked_mul(shell_bytes)
+            .and_then(|n| {
+                n.checked_add(frame_count.checked_mul(
+                    std::mem::size_of::<mapping::MappingRoomFrame>().checked_add(1)?,
+                )?)
+            })
+            .and_then(|n| n.checked_add(exterior_runs.checked_mul(std::mem::size_of::<CellRun>())?))
+            .ok_or_else(capacity)?;
+    // One directory/root reserve is the existing codec's 30+21+3+11 charge.
+    // The fixed 75-byte mapping allowance is already in the base Scope charge.
+    let base = codec::scope_charge(scope)
+        .map_err(|_| capacity())?
+        .checked_sub(75)
+        .ok_or_else(capacity)?;
+    let cache_bytes = (tor_simulation::checkpoint::ARCHIVE_BYTE_LIMIT as u64)
+        .saturating_sub(65)
+        .saturating_sub(base);
+    Ok(mapping::CertificateBudget {
+        work,
+        allocation_bytes,
+        cache_bytes,
+    })
 }
 pub(super) fn compile(
     world: &World,
@@ -334,7 +402,8 @@ pub(super) fn compile(
             .ok_or_else(|| spatial_capacity("runs"))?;
         room_surfaces.push(RoomSurfaces { room: *room, runs });
     }
-    let scope = Scope {
+    let mut scope = Scope {
+        mapping: tor_simulation::spatial_scope::mapping::MappingCertification::Uncertified,
         id: s.id.clone(),
         members: s.members.clone(),
         primary: primary_runs,
@@ -346,6 +415,34 @@ pub(super) fn compile(
         }
         _ => spatial_invalid("scope structure"),
     })?;
+    if let Some(frames) = &s.mapping {
+        let mut exterior: Vec<_> = s
+            .doorways
+            .keys()
+            .filter(|p| !interiors.contains_key(&key(**p)))
+            .copied()
+            .map(key)
+            .collect();
+        exterior.sort_unstable();
+        let mut exterior_runs = Vec::new();
+        for k in exterior {
+            push_run(&mut exterior_runs, location(k), usize::MAX)?;
+        }
+        let cache = mapping_budget(world, &scope, frames.len(), exterior_runs.len(), work)?;
+        scope.mapping = tor_simulation::spatial_scope::mapping::certify(
+            world,
+            &scope,
+            frames,
+            &exterior_runs,
+            cache,
+        )
+        .map_err(|error| match error {
+            tor_simulation::spatial_scope::mapping::Error::InvalidSource => {
+                spatial_invalid("Invalid mapping construction certificate")
+            }
+            _ => spatial_capacity("Mapping certificate validation capacity"),
+        })?;
+    }
     Ok(scope)
 }
 
@@ -497,7 +594,22 @@ pub(super) fn source_from_generated(
     // Never reorder group.members: slot ordinal owns RoomId/geometry/RNG keys.
     let mut members: Vec<_> = group.members.iter().copied().map(RegionId).collect();
     members.sort();
+    let mut mapping = Vec::new();
+    for (room, cells) in &rooms {
+        let mut previous = None;
+        for cell in cells {
+            if previous != Some(cell.region) {
+                mapping.push(tor_simulation::spatial_scope::mapping::MappingRoomFrame {
+                    room: *room,
+                    region: cell.region,
+                    up: Direction::Up,
+                });
+                previous = Some(cell.region);
+            }
+        }
+    }
     Ok(CanonicalSpatialSource {
+        mapping: Some(mapping),
         id: identity.to_owned(),
         members,
         rooms,

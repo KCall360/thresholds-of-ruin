@@ -5,6 +5,7 @@ use serde_json::{json, Value};
 fn source_scope() -> Scope {
     // Typed structural >64-member witness, NOT a canonical authored package.
     Scope {
+        mapping: crate::spatial_scope::mapping::MappingCertification::Uncertified,
         id: "large-members".into(),
         members: (0..65).map(tor_world::RegionId).collect(),
         primary: vec![],
@@ -19,7 +20,7 @@ fn limits() -> DecodeLimits {
     }
 }
 fn source_json() -> Value {
-    json!({"scopes":[{"id":"large-members","members":(0..65).collect::<Vec<u64>>(),"primary":[],"rooms":[]}],"directories":[[0]]})
+    json!({"scopes":[{"id":"large-members","members":(0..65).collect::<Vec<u64>>(),"primary":[],"rooms":[],"mapping":{"status":"uncertified"}}],"directories":[[0]]})
 }
 fn decode(value: &Value) -> Result<DecodedPool, serde_json::Error> {
     let bytes = serde_json::to_vec(value).unwrap();
@@ -50,10 +51,10 @@ fn maximum_width_closed_shapes_match_independent_charge_skeletons() {
         29
     );
     assert_eq!(
-        serde_json::to_vec(&json!({"id":"","members":[],"primary":[],"rooms":[]}))
+        serde_json::to_vec(&json!({"id":"","members":[],"primary":[],"rooms":[],"mapping":{"status":"uncertified"}}))
             .unwrap()
             .len(),
-        46
+        81
     );
     assert_eq!(
         serde_json::to_vec(&json!({"scopes":[],"directories":[]}))
@@ -125,14 +126,14 @@ fn decode_with(value: &Value, limits: DecodeLimits) -> Result<DecodedPool, serde
 fn rich_json(label: &str) -> Value {
     let run =
         json!({"region":u64::MAX,"z":i32::MIN,"y":i32::MIN,"first_x":i32::MIN,"last_x":i32::MIN});
-    json!({"scopes":[{"id":label,"members":[u64::MAX],"primary":[{"cells":run.clone(),"membership":{"primary":{"kind":"room","id":u32::MAX},"doorway":u32::MAX}}],"rooms":[{"room":u32::MAX,"runs":[run]}]}],"directories":[[0]]})
+    json!({"scopes":[{"id":label,"members":[u64::MAX],"primary":[{"cells":run.clone(),"membership":{"primary":{"kind":"room","id":u32::MAX},"doorway":u32::MAX}}],"rooms":[{"room":u32::MAX,"runs":[run]}],"mapping":{"status":"uncertified"}}],"directories":[[0]]})
 }
 #[test]
 fn actual_writer_maximum_operands_fit_exact_conservative_charge() {
     let label = "\"\\é界";
     let value = rich_json(label);
-    // 30pool+21root+47scope+21member+195primary+30room+107run+3dir+11index.
-    let charge = 465 + 6 * label.len() as u64;
+    // 30pool+21root+47scope+21member+195primary+30room+107run+75mapping+3dir+11index.
+    let charge = 540 + 6 * label.len() as u64;
     let exact = DecodeLimits {
         charge_bytes: charge,
         root_references: 1,
@@ -370,8 +371,8 @@ fn sequence_size_hint_never_allocates_and_exhausted_seed_never_reads_scalar() {
 #[test]
 fn deferred_actual_root_charge_uses_remaining_allowance_before_authority() {
     let value = source_json();
-    // 30pool+47scope+6*13label+21*65members+3dir+11index =1534.
-    let body = 1534;
+    // 30pool+47scope+6*13label+21*65members+3dir+11index+75mapping =1609.
+    let body = 1609;
     for (ceiling, succeeds) in [(body + 21, true), (body + 20, false)] {
         let decoded = decode_with(
             &value,

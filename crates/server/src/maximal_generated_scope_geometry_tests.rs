@@ -144,6 +144,71 @@ fn maximal_generated_scope_has_exact_room_volume_and_physical_illumination() {
         "real corridor connections, not disconnected rectangles"
     );
     assert!(physical_open_floor >= 57_600);
+    let scope = package
+        .canonical_generated_spatial("dungeon/1", seed, &generated)
+        .unwrap();
+    let tor_simulation::spatial_scope::mapping::MappingCertification::Certified(frames) =
+        &scope.mapping
+    else {
+        panic!("maximal lawful geometry must retain its compact certificate")
+    };
+    assert_eq!(frames.room_frames.len(), 64);
+    assert!(frames
+        .room_frames
+        .iter()
+        .all(|frame| frame.up == tor_world::Direction::Up));
+    assert_eq!(
+        frames
+            .exterior_doorways
+            .iter()
+            .map(|run| run.expanded_len().unwrap())
+            .sum::<u64>(),
+        2 * mouth_floor_cells as u64
+    );
+    assert_eq!(
+        scope
+            .primary
+            .iter()
+            .map(|run| run.cells.expanded_len().unwrap())
+            .sum::<u64>(),
+        2 * physical_open_floor as u64
+    );
+    assert!(2 * physical_open_floor <= 131_072);
+    assert!(
+        tor_simulation::spatial_scope::codec::scope_charge(&scope).unwrap() + 65
+            <= tor_simulation::checkpoint::ARCHIVE_BYTE_LIMIT as u64
+    );
+    let bytes = crate::storage::schema::scenario::encode_content_package(&package).unwrap();
+    let restored = crate::storage::schema::scenario::decode_content_package(&bytes).unwrap();
+    assert!(restored.directory.is_none());
+    // Reconstruct through the same ordinary public generation recipe path as
+    // the original positive, from retained source only (no private test API).
+    let restored_family = &restored.manifest.procedural_worlds["dungeon"];
+    let restored_group = restored_family.group("dungeon", seed, 1).unwrap();
+    let definitions = restored_group
+        .members
+        .iter()
+        .map(|id| {
+            restored_family
+                .describe("dungeon", seed, *id)
+                .unwrap()
+                .unwrap()
+        })
+        .collect();
+    let repeated = crate::generation_recipe::materialize(
+        "dungeon/1",
+        &restored_group,
+        &restored.manifest.generation_recipes[&restored_group.recipe],
+        definitions,
+        seed,
+    )
+    .unwrap();
+    assert_eq!(
+        scope,
+        restored
+            .canonical_generated_spatial("dungeon/1", seed, &repeated)
+            .unwrap()
+    );
     // Ordinary host construction is a separate positive from point metadata;
     // it validates real portals/start support and only uses existing authority.
     let scenario = crate::Scenario {

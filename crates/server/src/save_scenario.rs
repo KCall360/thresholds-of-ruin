@@ -300,7 +300,55 @@ struct SpatialScopeSource {
     passages: Vec<source::spatial_authoring::SourceRun>,
     #[serde(with = "mapped")]
     doorways: Vec<source::spatial_authoring::OwnedRun>,
+    #[serde(with = "mapped")]
+    mapping: Option<source::spatial_authoring::MappingCertificate>,
 }
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "source::spatial_authoring::MappingCertificate",
+    deny_unknown_fields
+)]
+struct SpatialMappingCertificate {
+    #[serde(
+        serialize_with = "mapped::serialize",
+        deserialize_with = "bounded_mapping_frames"
+    )]
+    room_frames: Vec<source::spatial_authoring::MappingRoomFrame>,
+}
+fn bounded_mapping_frames<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Vec<source::spatial_authoring::MappingRoomFrame>, D::Error> {
+    // A complete minimal named record is 31 bytes. This follows the existing
+    // retained metadata byte envelope, not a new lower per-scope frame limit.
+    bounded_stored::<D, source::spatial_authoring::MappingRoomFrame, { MAX_SAVE_METADATA_BYTES / 31 }>(
+        d,
+    )
+}
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "source::spatial_authoring::MappingRoomFrame",
+    deny_unknown_fields
+)]
+struct SpatialMappingRoomFrame {
+    room: u32,
+    region: u64,
+    #[serde(with = "mapped")]
+    up: source::spatial_authoring::MappingUp,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "source::spatial_authoring::MappingUp",
+    rename_all = "snake_case"
+)]
+enum SpatialMappingUp {
+    North,
+    East,
+    South,
+    West,
+    Up,
+    Down,
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "source::spatial_authoring::RoomVolume", deny_unknown_fields)]
 struct SpatialRoomVolume {
@@ -1837,8 +1885,20 @@ fn stored_behavior_memory<'de, D: serde::Deserializer<'de>>(
 }
 
 #[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "crate::creature_authoring::DetectionAppearance",
+    deny_unknown_fields
+)]
+struct DetectionAppearance {
+    name: String,
+    #[serde(with = "mapped")]
+    asset: Option<String>,
+}
+#[derive(Serialize, Deserialize)]
 #[serde(remote = "crate::creature_authoring::Species", deny_unknown_fields)]
 struct Species {
+    #[serde(with = "mapped")]
+    detection_appearance: Option<crate::creature_authoring::DetectionAppearance>,
     #[serde(with = "mapped")]
     behavior: crate::creature_authoring::BehaviorPolicy,
     #[serde(with = "mapped")]
@@ -3990,6 +4050,8 @@ macro_rules! named_remote {
 }
 named_remote!(
     SpatialScopeSource => source::spatial_authoring::AuthoredSpatialScope,
+    SpatialMappingCertificate => source::spatial_authoring::MappingCertificate,
+    SpatialMappingRoomFrame => source::spatial_authoring::MappingRoomFrame,
     SpatialRoomVolume => source::spatial_authoring::RoomVolume,
     SpatialSourceRun => source::spatial_authoring::SourceRun,
     SpatialOwnedRun => source::spatial_authoring::OwnedRun,
@@ -4034,6 +4096,7 @@ named_remote!(
     UniqueRetrieval => source::UniqueRetrieval,
     BehaviorPolicy => crate::creature_authoring::BehaviorPolicy,
     AiProfile => source::AiProfile,
+    DetectionAppearance => crate::creature_authoring::DetectionAppearance,
     Species => crate::creature_authoring::Species,
     AbilityDefinition => tor_simulation::rules::AbilityDef,
     ConditionDefinition => tor_simulation::rules::ConditionDef,
@@ -4099,6 +4162,7 @@ macro_rules! string_remote {
     )+};
 }
 string_remote!(
+    SpatialMappingUp => source::spatial_authoring::MappingUp,
     ActionDuration => crate::creature_authoring::ActionDuration,
     WeaponTraitKind => source::WeaponTraitKind,
     ExpertiseCategory => tor_simulation::expertise::ExpertiseCategory,
@@ -10113,3 +10177,7 @@ mod raise_level_effect_tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "save_detection_species_tests.rs"]
+mod detection_species_tests;

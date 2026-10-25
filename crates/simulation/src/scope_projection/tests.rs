@@ -434,6 +434,10 @@ fn empty_single_member_and_explicit_cardinality_caps() {
     assert_eq!(
         project(&w, &[], &[], budget()).unwrap(),
         Projection {
+            usage: Usage {
+                work: 1,
+                allocation_bytes: std::mem::size_of::<usize>()
+            },
             components: vec![],
             samples: vec![]
         }

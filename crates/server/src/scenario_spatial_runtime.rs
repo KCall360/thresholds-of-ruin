@@ -247,7 +247,38 @@ impl Package {
                 }
             }
         }
+        let mapping = definition
+            .mapping
+            .as_ref()
+            .map(|certificate| {
+                require(
+                    certificate.room_frames.len() as u64 <= work().source_entries,
+                    "Mapping source entry capacity",
+                )?;
+                let mut frames = certificate
+                    .room_frames
+                    .iter()
+                    .map(|frame| {
+                        Ok(tor_simulation::spatial_scope::mapping::MappingRoomFrame {
+                            room: RoomId::new(frame.room)
+                                .ok_or_else(|| fail("Invalid mapping room identity"))?,
+                            region: RegionId(frame.region),
+                            up: frame.up.direction(),
+                        })
+                    })
+                    .collect::<Result<Vec<_>, Failure>>()?;
+                frames.sort_unstable_by_key(|frame| (frame.room, frame.region));
+                require(
+                    frames
+                        .windows(2)
+                        .all(|w| (w[0].room, w[0].region) != (w[1].room, w[1].region)),
+                    "Duplicate mapping construction frame",
+                )?;
+                Ok::<_, Failure>(frames)
+            })
+            .transpose()?;
         Ok(CanonicalSpatialSource {
+            mapping,
             id: id.into(),
             members,
             rooms,
@@ -496,3 +527,10 @@ impl<'a> SpatialAudit<'a> {
 #[cfg(test)]
 #[path = "scenario_spatial_runtime_tests.rs"]
 pub(crate) mod tests;
+
+#[cfg(test)]
+#[path = "scenario_mapping_certificate_tests.rs"]
+mod mapping_certificate_tests;
+#[cfg(test)]
+#[path = "scenario_mapping_runtime_tests.rs"]
+mod mapping_runtime_tests;

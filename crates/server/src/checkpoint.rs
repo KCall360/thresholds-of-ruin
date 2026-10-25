@@ -810,6 +810,7 @@ mod tests {
             label_bytes: 64,
         };
         let scope = Scope {
+            mapping: tor_simulation::spatial_scope::mapping::MappingCertification::Uncertified,
             id: "native-only".into(),
             members: vec![tor_world::RegionId(1)],
             primary: vec![],
@@ -951,6 +952,7 @@ mod tests {
             label_bytes: 64,
         };
         let scope = Scope {
+            mapping: tor_simulation::spatial_scope::mapping::MappingCertification::Uncertified,
             id: "native-only".into(),
             members: vec![tor_world::RegionId(1)],
             primary: vec![],

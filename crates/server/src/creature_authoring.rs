@@ -570,9 +570,36 @@ impl BehaviorPolicy {
     }
 }
 
+/// Optional explicit detection label. Omission never falls back to personal names.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DetectionAppearance {
+    pub name: String,
+    pub asset: Option<String>,
+}
+impl<'de> Deserialize<'de> for DetectionAppearance {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            name: String,
+            #[serde(default)]
+            asset: Option<String>,
+        }
+        let fields: Fields = named_map(d)?;
+        let value = Self {
+            name: fields.name,
+            asset: fields.asset,
+        };
+        // The shared immutable Content constructor owns the exact grammar.
+        Ok(value)
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Species {
+    #[serde(default)]
+    pub detection_appearance: Option<DetectionAppearance>,
     pub behavior: BehaviorPolicy,
     #[serde(default)]
     pub displacement: Option<DisplacementProfile>,
@@ -591,6 +618,8 @@ impl<'de> Deserialize<'de> for Species {
         #[serde(deny_unknown_fields)]
         struct Fields {
             #[serde(default)]
+            detection_appearance: Option<DetectionAppearance>,
+            #[serde(default)]
             behavior: BehaviorPolicy,
             #[serde(default)]
             displacement: Option<DisplacementProfile>,
@@ -605,6 +634,7 @@ impl<'de> Deserialize<'de> for Species {
         }
         let fields: Fields = named_map(d)?;
         Ok(Self {
+            detection_appearance: fields.detection_appearance,
             behavior: fields.behavior,
             displacement: fields.displacement,
             kind: fields.kind,
@@ -932,6 +962,21 @@ impl Catalog {
         }
         let content = s::creatures::Content::new(rules, catalog)
             .map_err(|error| invalid(format!("Invalid creature catalog: {error:?}")))?;
+        let mut appearances = BTreeMap::new();
+        for (id, species) in &self.species {
+            if let Some(label) = &species.detection_appearance {
+                let id = SpeciesId::new(id).map_err(|_| invalid("Invalid detection species"))?;
+                appearances.insert(
+                    id,
+                    s::appearance_catalog::CreatureAppearance {
+                        name: Arc::from(label.name.as_str()),
+                        asset: label.asset.as_deref().map(Arc::from),
+                    },
+                );
+            }
+        }
+        let content = s::creatures::Content::with_detection_appearances(&content, appearances)
+            .map_err(|error| invalid(format!("Invalid species detection appearance: {error:?}")))?;
         Ok(CompiledCatalog { content })
     }
 }
@@ -1206,14 +1251,14 @@ mod strict_stat_tests {
 mod ordered_strike_authoring_tests {
     use super::*;
     use serde_json::{json, Value};
-    fn source() -> Value {
+    pub(super) fn source() -> Value {
         json!({"species": {"sequence_test": {"kind": "humanoid", "behavior": {"disposition":"mean","idle":"explore","memory_ticks":1000},
             "attributes": {"strength": 1, "speed": 1, "intellect": 1, "willpower": 1, "awareness": 1, "presence": 1},
             "melee": {"skill": "heavy_weaponry", "bonus": 0, "wind_up": 10, "recovery": 20,
                 "strikes": [{"offset": 0, "unlock": null, "check": null, "on_success": [], "on_failure": [], "descriptors": [], "riders": []}]}
         }}, "templates": {}})
     }
-    fn rules() -> Arc<s::rules::Ruleset> {
+    pub(super) fn rules() -> Arc<s::rules::Ruleset> {
         s::rules::Ruleset::validate(toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap())
             .unwrap()
     }
@@ -1655,3 +1700,6 @@ mod awareness_authoring_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod detection_tests;

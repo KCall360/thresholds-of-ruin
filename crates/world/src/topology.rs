@@ -892,6 +892,28 @@ impl World {
         };
         self.contains(to).then_some((to, 0))
     }
+    /// Physical geometry only, independent of source/door opacity. Transport
+    /// stairs remain nonphysical: vertical fallback stays in this region.
+    /// Construction-face certification uses this, not movement availability.
+    pub fn physical_geometry_neighbor(
+        &self,
+        from: Location,
+        direction: Direction,
+    ) -> Option<(Location, u8)> {
+        if direction.components().is_some() || !self.contains(from) {
+            return None;
+        }
+        if !matches!(direction, Direction::Up | Direction::Down)
+            || self.physical_vertical.contains(&(from, direction))
+        {
+            return self.geometry_step(from, direction);
+        }
+        let to = Location {
+            position: direction.offset(from.position)?,
+            ..from
+        };
+        self.contains(to).then_some((to, 0))
+    }
     pub fn is_stair(&self, from: Location, direction: Direction) -> bool {
         matches!(direction, Direction::Up | Direction::Down)
             && (self.passage(from, direction).is_some()

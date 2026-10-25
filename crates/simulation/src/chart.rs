@@ -1,5 +1,6 @@
 //! Bounded immutable chart values. No census, selection, lifecycle or delivery authority.
 //! No serde decoder: bounded transport/restore adapters must call these constructors.
+pub mod delivery;
 use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

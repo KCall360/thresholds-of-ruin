@@ -25,6 +25,7 @@ fn at(region: u64, x: i32, z: i32) -> Location {
 }
 fn scope() -> Scope {
     Scope {
+        mapping: crate::spatial_scope::mapping::MappingCertification::Uncertified,
         id: "fixture/floor1".into(),
         members: vec![RegionId(1), RegionId(2)],
         primary: vec![run(1, 0, 0, 2), run(1, 1, 0, 2), run(2, 0, 0, 2)]
@@ -288,6 +289,7 @@ fn disjoint_scopes_reuse_local_ids_but_share_one_aggregate_budget() {
 fn doorway_only_scope() -> Scope {
     let passage = PassageId::new(1).unwrap();
     Scope {
+        mapping: crate::spatial_scope::mapping::MappingCertification::Uncertified,
         id: "doorways".into(),
         members: vec![RegionId(1), RegionId(2)],
         primary: vec![
@@ -355,6 +357,7 @@ fn doorway_only_component_has_one_derived_passage_and_no_primary_requirement() {
 #[test]
 fn primary_passage_and_empty_member_scope_are_structurally_independent() {
     let mut source = Scope {
+        mapping: crate::spatial_scope::mapping::MappingCertification::Uncertified,
         id: "passage".into(),
         members: vec![RegionId(0)],
         primary: vec![],
@@ -458,6 +461,7 @@ fn archive_checked_registration_rejects_combined_bytes_not_individual_type_limit
     let mut first = scope();
     first.id = "a".repeat(4_000_000);
     let second = Scope {
+        mapping: crate::spatial_scope::mapping::MappingCertification::Uncertified,
         id: "z".into(),
         members: vec![RegionId(3)],
         primary: (0..225_000)
@@ -497,6 +501,7 @@ fn archive_checked_registration_rejects_combined_bytes_not_individual_type_limit
 #[test]
 fn shared_foreign_surface_dependencies_never_grant_primary_membership() {
     let first = Scope {
+        mapping: crate::spatial_scope::mapping::MappingCertification::Uncertified,
         id: "first".into(),
         members: vec![RegionId(1)],
         primary: vec![PrimaryRun {

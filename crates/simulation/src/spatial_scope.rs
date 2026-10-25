@@ -6,6 +6,7 @@
 
 pub mod codec;
 mod drain_life;
+pub mod mapping;
 pub mod registry;
 pub(crate) mod retention;
 mod room_light;

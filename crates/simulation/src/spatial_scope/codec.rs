@@ -1,11 +1,12 @@
 //! Standalone strict spatial codec; no Game/save field or canonical source authority.
+use super::mapping::{self, MappingCertification, MappingFrames, MappingRoomFrame};
 use super::registry::{Budget, CellRun, PrimaryRun, RoomSurfaces, Scope};
 use super::{Membership, PassageId, PrimarySpace, RoomId};
 use serde::de::{DeserializeSeed, Error as _, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::BTreeSet;
 use std::{fmt, marker::PhantomData};
-use tor_world::{RegionId, Shared};
+use tor_world::{Direction, RegionId, Shared};
 
 #[derive(Clone, Copy, Debug)]
 pub struct DecodeLimits {
@@ -335,6 +336,175 @@ impl Entry for RoomSurfaces {
         d.deserialize_map(Fields(m))
     }
 }
+// Includes the new scope-field name, complete largest tagged-map skeleton,
+// and delimiter allowance. Per-record charges are prepaid before decoding.
+const MAPPING_HEADER_CHARGE: u64 = 75;
+const MAPPING_FRAME_CHARGE: u64 = 68;
+
+struct MappingUp(Direction);
+impl<'de> Deserialize<'de> for MappingUp {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct Up;
+        impl Visitor<'_> for Up {
+            type Value = MappingUp;
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("one lowercase cardinal construction direction")
+            }
+            fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Self::Value, E> {
+                Ok(MappingUp(match value {
+                    "north" => Direction::North,
+                    "east" => Direction::East,
+                    "south" => Direction::South,
+                    "west" => Direction::West,
+                    "up" => Direction::Up,
+                    "down" => Direction::Down,
+                    _ => return Err(E::custom("invalid mapping construction direction")),
+                }))
+            }
+        }
+        d.deserialize_str(Up)
+    }
+}
+impl Serialize for MappingUp {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        let value = match self.0 {
+            Direction::North => "north",
+            Direction::East => "east",
+            Direction::South => "south",
+            Direction::West => "west",
+            Direction::Up => "up",
+            Direction::Down => "down",
+            _ => {
+                return Err(serde::ser::Error::custom(
+                    "invalid mapping construction direction",
+                ))
+            }
+        };
+        s.serialize_str(value)
+    }
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MappingFrameFields {
+    room: u32,
+    region: u64,
+    up: MappingUp,
+}
+impl Entry for MappingRoomFrame {
+    fn read<'de, D: Deserializer<'de>>(d: D, m: &mut Meter) -> Result<Self, D::Error> {
+        m.charge::<D::Error>(MAPPING_FRAME_CHARGE)?;
+        let value: MappingFrameFields = crate::bounded::named_map(d)?;
+        Ok(Self {
+            room: RoomId::new(value.room).ok_or_else(|| D::Error::custom("zero mapping room"))?,
+            region: RegionId(value.region),
+            up: value.up.0,
+        })
+    }
+}
+enum MappingStatus {
+    Uncertified,
+    Certified,
+    CapacityUnavailable,
+}
+impl<'de> Deserialize<'de> for MappingStatus {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct Status;
+        impl Visitor<'_> for Status {
+            type Value = MappingStatus;
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("an explicit mapping certification status string")
+            }
+            fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Self::Value, E> {
+                match value {
+                    "uncertified" => Ok(MappingStatus::Uncertified),
+                    "certified" => Ok(MappingStatus::Certified),
+                    "capacity_unavailable" => Ok(MappingStatus::CapacityUnavailable),
+                    _ => Err(E::custom("unknown mapping certification status")),
+                }
+            }
+        }
+        d.deserialize_str(Status)
+    }
+}
+#[derive(Deserialize)]
+#[serde(field_identifier, rename_all = "snake_case")]
+enum MappingField {
+    Status,
+    RoomFrames,
+    ExteriorDoorways,
+}
+impl Entry for MappingCertification {
+    fn read<'de, D: Deserializer<'de>>(d: D, m: &mut Meter) -> Result<Self, D::Error> {
+        m.charge::<D::Error>(MAPPING_HEADER_CHARGE)?;
+        struct Fields<'a>(&'a mut Meter);
+        impl<'de> Visitor<'de> for Fields<'_> {
+            type Value = MappingCertification;
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("a strict tagged mapping certification record")
+            }
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                let (mut status, mut room_frames, mut exterior_doorways) = (None, None, None);
+                while let Some(field) = map.next_key::<MappingField>()? {
+                    match field {
+                        MappingField::Status => {
+                            if status.is_some() {
+                                return Err(A::Error::duplicate_field("status"));
+                            }
+                            status = Some(map.next_value::<MappingStatus>()?);
+                        }
+                        MappingField::RoomFrames => {
+                            if room_frames.is_some() {
+                                return Err(A::Error::duplicate_field("room_frames"));
+                            }
+                            room_frames =
+                                Some(map.next_value_seed(ListSeed::<MappingRoomFrame> {
+                                    meter: self.0,
+                                    maximum: None,
+                                    marker: PhantomData,
+                                })?);
+                        }
+                        MappingField::ExteriorDoorways => {
+                            if exterior_doorways.is_some() {
+                                return Err(A::Error::duplicate_field("exterior_doorways"));
+                            }
+                            exterior_doorways = Some(map.next_value_seed(ListSeed::<CellRun> {
+                                meter: self.0,
+                                maximum: None,
+                                marker: PhantomData,
+                            })?);
+                        }
+                    }
+                }
+                match status.ok_or_else(|| A::Error::missing_field("status"))? {
+                    MappingStatus::Certified => {
+                        Ok(MappingCertification::Certified(MappingFrames {
+                            room_frames: room_frames
+                                .ok_or_else(|| A::Error::missing_field("room_frames"))?,
+                            exterior_doorways: exterior_doorways
+                                .ok_or_else(|| A::Error::missing_field("exterior_doorways"))?,
+                        }))
+                    }
+                    status => {
+                        if room_frames.is_some() || exterior_doorways.is_some() {
+                            return Err(A::Error::custom(
+                                "unavailable mapping status has payload fields",
+                            ));
+                        }
+                        Ok(match status {
+                            MappingStatus::Uncertified => MappingCertification::Uncertified,
+                            MappingStatus::CapacityUnavailable => {
+                                MappingCertification::CapacityUnavailable
+                            }
+                            MappingStatus::Certified => unreachable!(),
+                        })
+                    }
+                }
+            }
+        }
+        d.deserialize_map(Fields(m))
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(field_identifier, rename_all = "snake_case")]
 enum ScopeField {
@@ -342,6 +512,7 @@ enum ScopeField {
     Members,
     Primary,
     Rooms,
+    Mapping,
 }
 impl Entry for Shared<Scope> {
     fn read<'de, D: Deserializer<'de>>(d: D, m: &mut Meter) -> Result<Self, D::Error> {
@@ -353,7 +524,8 @@ impl Entry for Shared<Scope> {
                 f.write_str("named spatial scope")
             }
             fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Scope, A::Error> {
-                let (mut id, mut members, mut primary, mut rooms) = (None, None, None, None);
+                let (mut id, mut members, mut primary, mut rooms, mut mapping) =
+                    (None, None, None, None, None);
                 while let Some(field) = map.next_key::<ScopeField>()? {
                     match field {
                         ScopeField::Id => {
@@ -392,6 +564,16 @@ impl Entry for Shared<Scope> {
                                 marker: PhantomData,
                             })?);
                         }
+                        ScopeField::Mapping => {
+                            if mapping.is_some() {
+                                return Err(A::Error::duplicate_field("mapping"));
+                            }
+                            mapping =
+                                Some(map.next_value_seed(EntrySeed::<MappingCertification> {
+                                    meter: self.0,
+                                    marker: PhantomData,
+                                })?);
+                        }
                     }
                 }
                 Ok(Scope {
@@ -399,6 +581,7 @@ impl Entry for Shared<Scope> {
                     members: members.ok_or_else(|| A::Error::missing_field("members"))?,
                     primary: primary.ok_or_else(|| A::Error::missing_field("primary"))?,
                     rooms: rooms.ok_or_else(|| A::Error::missing_field("rooms"))?,
+                    mapping: mapping.ok_or_else(|| A::Error::missing_field("mapping"))?,
                 })
             }
         }
@@ -611,11 +794,52 @@ impl Serialize for Rooms<'_> {
     }
 }
 #[derive(Serialize)]
+struct MappingFrameWire {
+    room: u32,
+    region: u64,
+    up: MappingUp,
+}
+struct MappingFrameList<'a>(&'a [MappingRoomFrame]);
+impl Serialize for MappingFrameList<'_> {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.collect_seq(self.0.iter().map(|frame| MappingFrameWire {
+            room: frame.room.0.get(),
+            region: frame.region.0,
+            up: MappingUp(frame.up),
+        }))
+    }
+}
+#[derive(Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+enum MappingRecord<'a> {
+    Uncertified,
+    Certified {
+        room_frames: MappingFrameList<'a>,
+        exterior_doorways: Runs<'a>,
+    },
+    CapacityUnavailable,
+}
+struct MappingWire<'a>(&'a MappingCertification);
+impl Serialize for MappingWire<'_> {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        match self.0 {
+            MappingCertification::Uncertified => MappingRecord::Uncertified,
+            MappingCertification::CapacityUnavailable => MappingRecord::CapacityUnavailable,
+            MappingCertification::Certified(frames) => MappingRecord::Certified {
+                room_frames: MappingFrameList(&frames.room_frames),
+                exterior_doorways: Runs(&frames.exterior_doorways),
+            },
+        }
+        .serialize(s)
+    }
+}
+#[derive(Serialize)]
 struct ScopeWire<'a> {
     id: &'a str,
     members: &'a [RegionId],
     primary: Primaries<'a>,
     rooms: Rooms<'a>,
+    mapping: MappingWire<'a>,
 }
 struct Scopes<'a>(&'a [Shared<Scope>]);
 impl Serialize for Scopes<'_> {
@@ -625,6 +849,7 @@ impl Serialize for Scopes<'_> {
             members: &r.members,
             primary: Primaries(&r.primary),
             rooms: Rooms(&r.rooms),
+            mapping: MappingWire(&r.mapping),
         }))
     }
 }
@@ -777,7 +1002,9 @@ pub(crate) fn capture_pool(
     }
     .validate_roots(&roots)
 }
-fn scope_charge(scope: &Scope) -> Result<u64, PoolError> {
+/// Complete conservative archive charge for one scope, including its mapping tag.
+/// Source compilation uses this same meter when assigning optional cache space.
+pub fn scope_charge(scope: &Scope) -> Result<u64, PoolError> {
     let mul = |n: usize, k: u64| {
         u64::try_from(n)
             .ok()
@@ -798,6 +1025,17 @@ fn scope_charge(scope: &Scope) -> Result<u64, PoolError> {
             .and_then(|c| c.checked_add(mul(room.runs.len(), 107).ok()?))
             .ok_or(PoolError::Capacity)?;
     }
+    let mapping_charge = match &scope.mapping {
+        MappingCertification::Certified(frames) => {
+            mapping::cache_charge(frames).map_err(|_| PoolError::Capacity)?
+        }
+        MappingCertification::Uncertified | MappingCertification::CapacityUnavailable => {
+            MAPPING_HEADER_CHARGE
+        }
+    };
+    charge = charge
+        .checked_add(mapping_charge)
+        .ok_or(PoolError::Capacity)?;
     Ok(charge)
 }
 
@@ -874,3 +1112,285 @@ impl ValidatedPool {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod mapping_codec_tests {
+    use super::*;
+    use serde_json::{json, Value};
+
+    fn decode_mapping(
+        raw: &str,
+        limit: u64,
+    ) -> Result<(MappingCertification, u64), serde_json::Error> {
+        let mut meter = Meter { used: 0, limit };
+        let mut de = serde_json::Deserializer::from_str(raw);
+        let mapping = MappingCertification::read(&mut de, &mut meter)?;
+        de.end()?;
+        Ok((mapping, meter.used))
+    }
+    fn positive() -> Value {
+        json!({"status":"certified","room_frames":[{"room":1,"region":1,"up":"up"}],
+            "exterior_doorways":[]})
+    }
+    fn max_frame() -> MappingRoomFrame {
+        MappingRoomFrame {
+            room: RoomId::new(u32::MAX).unwrap(),
+            region: RegionId(u64::MAX),
+            up: Direction::North,
+        }
+    }
+    fn max_run() -> CellRun {
+        CellRun {
+            region: RegionId(u64::MAX),
+            z: i32::MIN,
+            y: i32::MIN,
+            first_x: i32::MIN,
+            last_x: i32::MIN,
+        }
+    }
+    #[test]
+    fn mapping_maximum_operand_shapes_and_real_writer_fit_the_independent_precharge() {
+        let frame = json!({"room":u32::MAX,"region":u64::MAX,"up":"north"});
+        let run = json!({"region":u64::MAX,"z":i32::MIN,"y":i32::MIN,
+            "first_x":i32::MIN,"last_x":i32::MIN});
+        let empty = json!({"status":"certified","room_frames":[],"exterior_doorways":[]});
+        assert_eq!(serde_json::to_vec(&frame).unwrap().len(), 62);
+        assert_eq!(serde_json::to_vec(&run).unwrap().len(), 106);
+        assert_eq!(serde_json::to_vec(&empty).unwrap().len(), 62);
+        assert_eq!(",\"mapping\":".len(), 11);
+        assert_eq!(
+            serde_json::to_vec(&json!({"status":"uncertified"}))
+                .unwrap()
+                .len(),
+            24
+        );
+        assert_eq!(
+            serde_json::to_vec(&json!({"status":"capacity_unavailable"}))
+                .unwrap()
+                .len(),
+            33
+        );
+        let frames = MappingFrames {
+            room_frames: vec![max_frame()],
+            exterior_doorways: vec![max_run()],
+        };
+        let charged = mapping::cache_charge(&frames).unwrap();
+        assert_eq!(charged, 75 + 68 + 107);
+        let source = MappingCertification::Certified(frames);
+        let encoded = serde_json::to_vec(&MappingWire(&source)).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&encoded).unwrap(),
+            json!({
+            "status":"certified","room_frames":[frame],"exterior_doorways":[run]})
+        );
+        assert!(encoded.len() as u64 + 11 <= charged);
+        let raw = std::str::from_utf8(&encoded).unwrap();
+        let (decoded, used) = decode_mapping(raw, charged).unwrap();
+        assert_eq!(decoded, source);
+        assert_eq!(used, charged);
+        assert!(decode_mapping(raw, charged - 1).is_err());
+    }
+    #[test]
+    fn explicit_mapping_tags_roundtrip_without_absence_or_null_defaults() {
+        for (value, expected) in [
+            (
+                json!({"status":"uncertified"}),
+                MappingCertification::Uncertified,
+            ),
+            (
+                json!({"status":"capacity_unavailable"}),
+                MappingCertification::CapacityUnavailable,
+            ),
+            (
+                json!({"status":"certified","room_frames":[],"exterior_doorways":[]}),
+                MappingCertification::Certified(MappingFrames {
+                    room_frames: vec![],
+                    exterior_doorways: vec![],
+                }),
+            ),
+        ] {
+            let (decoded, used) = decode_mapping(&value.to_string(), 75).unwrap();
+            assert_eq!(decoded, expected);
+            assert_eq!(used, 75);
+            assert_eq!(serde_json::to_value(MappingWire(&decoded)).unwrap(), value);
+        }
+        for malformed in [
+            Value::Null,
+            json!([]),
+            json!("uncertified"),
+            json!({}),
+            json!({"status":null}),
+            json!({"status":{"uncertified":null}}),
+            json!({"status":"unknown"}),
+            json!({"status":"certified"}),
+            json!({"status":"uncertified","room_frames":[]}),
+            json!({"status":"capacity_unavailable","exterior_doorways":[]}),
+            json!({"status":"uncertified","extra":false}),
+        ] {
+            assert!(
+                decode_mapping(&malformed.to_string(), 1024).is_err(),
+                "{malformed}"
+            );
+        }
+    }
+    #[test]
+    fn certified_records_reject_missing_positional_unknown_duplicate_and_noncardinal_fields() {
+        let good = positive();
+        decode_mapping(&good.to_string(), 1024).expect("valid positive before mutations");
+        for pointer in ["", "/room_frames/0"] {
+            let fields = good.pointer(pointer).unwrap().as_object().unwrap();
+            for key in fields.keys() {
+                let mut bad = good.clone();
+                bad.pointer_mut(pointer)
+                    .unwrap()
+                    .as_object_mut()
+                    .unwrap()
+                    .remove(key);
+                assert!(
+                    decode_mapping(&bad.to_string(), 1024).is_err(),
+                    "missing {pointer}/{key}"
+                );
+            }
+            let mut bad = good.clone();
+            *bad.pointer_mut(pointer).unwrap() = Value::Array(fields.values().cloned().collect());
+            assert!(decode_mapping(&bad.to_string(), 1024).is_err());
+            let mut bad = good.clone();
+            bad.pointer_mut(pointer).unwrap()["unknown"] = json!(true);
+            assert!(decode_mapping(&bad.to_string(), 1024).is_err());
+        }
+        for value in [
+            json!("north_east"),
+            json!("North"),
+            json!(0),
+            json!({"up":null}),
+            Value::Null,
+        ] {
+            let mut bad = good.clone();
+            bad["room_frames"][0]["up"] = value;
+            assert!(decode_mapping(&bad.to_string(), 1024).is_err());
+        }
+        let raw = good.to_string();
+        for (needle, duplicate) in [
+            (
+                "\"status\":\"certified\"",
+                "\"status\":\"certified\",\"status\":\"certified\"",
+            ),
+            ("\"room\":1", "\"room\":1,\"room\":1"),
+            ("\"region\":1", "\"region\":1,\"region\":1"),
+            ("\"up\":\"up\"", "\"up\":\"up\",\"up\":\"up\""),
+            ("\"room_frames\":", "\"room_frames\":[],\"room_frames\":"),
+            (
+                "\"exterior_doorways\":[]",
+                "\"exterior_doorways\":[],\"exterior_doorways\":[]",
+            ),
+        ] {
+            assert!(raw.contains(needle));
+            assert!(decode_mapping(&raw.replacen(needle, duplicate, 1), 1024).is_err());
+        }
+    }
+    #[test]
+    fn mapping_sequence_precharge_rejects_next_record_before_reading_its_invalid_body() {
+        let good = positive();
+        let (decoded, used) = decode_mapping(&good.to_string(), 143).unwrap();
+        assert!(matches!(decoded, MappingCertification::Certified(_)));
+        assert_eq!(used, 143);
+        // The second frame body is deliberately not valid MappingRoomFrame.
+        // With no entry allowance the charge error must win before its decode.
+        let raw = r#"{"status":"certified","room_frames":[{"room":1,"region":1,"up":"up"},"invalid frame"],"exterior_doorways":[]}"#;
+        let error = decode_mapping(raw, 143).unwrap_err();
+        assert!(
+            error.to_string().contains("spatial charge exceeds limit"),
+            "{error}"
+        );
+    }
+    #[test]
+    fn real_scope_writer_and_required_mapping_field_share_the_capture_decoder_charge() {
+        let cells = max_run();
+        let scope = Scope {
+            id: "scope".into(),
+            members: vec![cells.region],
+            primary: vec![PrimaryRun {
+                cells,
+                membership: Membership::new(
+                    PrimarySpace::Room(RoomId::new(u32::MAX).unwrap()),
+                    None,
+                )
+                .unwrap(),
+            }],
+            rooms: vec![RoomSurfaces {
+                room: RoomId::new(u32::MAX).unwrap(),
+                runs: vec![cells],
+            }],
+            mapping: MappingCertification::Certified(MappingFrames {
+                room_frames: vec![max_frame()],
+                exterior_doorways: vec![],
+            }),
+        };
+        let encoded = serde_json::to_value(ScopeWire {
+            id: &scope.id,
+            members: &scope.members,
+            primary: Primaries(&scope.primary),
+            rooms: Rooms(&scope.rooms),
+            mapping: MappingWire(&scope.mapping),
+        })
+        .unwrap();
+        let charge = scope_charge(&scope).unwrap();
+        assert_eq!(charge, 47 + 6 * 5 + 21 + 195 + 30 + 107 + 75 + 68);
+        let read = |value: &Value, limit| {
+            let raw = value.to_string();
+            let mut meter = Meter { used: 0, limit };
+            let mut de = serde_json::Deserializer::from_str(&raw);
+            Shared::<Scope>::read(&mut de, &mut meter).map(|scope| (scope, meter.used))
+        };
+        let (restored, used) = read(&encoded, charge).unwrap();
+        assert_eq!(&*restored, &scope);
+        assert_eq!(used, charge);
+        assert!(read(&encoded, charge - 1).is_err());
+        let mut missing = encoded.clone();
+        missing.as_object_mut().unwrap().remove("mapping").unwrap();
+        assert!(read(&missing, charge).is_err());
+        let mut null = encoded;
+        null["mapping"] = Value::Null;
+        assert!(read(&null, charge).is_err());
+    }
+    #[test]
+    fn certified_maximum_width_intervals_validate_as_runs_without_cell_expansion() {
+        let mut cells = max_run();
+        cells.last_x = i32::MAX;
+        assert_eq!(cells.expanded_len(), Some(1_u64 << 32));
+        let room = RoomId::new(u32::MAX).unwrap();
+        let scope = Scope {
+            id: "wide".into(),
+            members: vec![cells.region],
+            primary: vec![PrimaryRun {
+                cells,
+                membership: Membership::new(PrimarySpace::Room(room), None).unwrap(),
+            }],
+            rooms: vec![RoomSurfaces {
+                room,
+                runs: vec![cells],
+            }],
+            mapping: MappingCertification::Certified(MappingFrames {
+                room_frames: vec![max_frame()],
+                exterior_doorways: vec![],
+            }),
+        };
+        let raw = serde_json::to_string(&ScopeWire {
+            id: &scope.id,
+            members: &scope.members,
+            primary: Primaries(&scope.primary),
+            rooms: Rooms(&scope.rooms),
+            mapping: MappingWire(&scope.mapping),
+        })
+        .unwrap();
+        let charge = scope_charge(&scope).unwrap();
+        let mut meter = Meter {
+            used: 0,
+            limit: charge,
+        };
+        let mut de = serde_json::Deserializer::from_str(&raw);
+        let restored = Shared::<Scope>::read(&mut de, &mut meter).unwrap();
+        assert_eq!(&*restored, &scope);
+        assert_eq!(meter.used, charge);
+    }
+}

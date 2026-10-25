@@ -40,8 +40,15 @@ pub struct Sample {
     /// No convenient placement survives an inconsistent connected component.
     pub position: Option<[i64; 3]>,
 }
+/// Logical primitive work/backing allocation consumed from the supplied budget.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Usage {
+    pub work: usize,
+    pub allocation_bytes: usize,
+}
 #[derive(Debug, PartialEq, Eq)]
 pub struct Projection {
+    pub usage: Usage,
     pub components: Vec<Component>,
     pub samples: Vec<Sample>,
 }
@@ -173,6 +180,7 @@ pub fn project(
     points: &[Location],
     mut b: Budget,
 ) -> Result<Projection, Error> {
+    let initial_budget = b;
     if members.len() > b.regions || points.len() > b.samples {
         return Err(Error::Budget);
     }
@@ -322,6 +330,10 @@ pub fn project(
         });
     }
     Ok(Projection {
+        usage: Usage {
+            work: initial_budget.work - b.work,
+            allocation_bytes: initial_budget.allocation_bytes - b.allocation_bytes,
+        },
         components,
         samples,
     })

@@ -15,6 +15,7 @@ fn scope(region: u64) -> Scope {
         last_x: 1,
     };
     Scope {
+        mapping: crate::spatial_scope::mapping::MappingCertification::Uncertified,
         id: format!("fixture/{region}"),
         members: vec![RegionId(region)],
         primary: vec![PrimaryRun {

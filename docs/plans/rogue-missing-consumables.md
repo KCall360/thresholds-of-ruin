@@ -1729,3 +1729,13 @@ These are infrastructure and implementation contracts, not completed consumables
 Paid census/refresh/history behavior, complete delivery admission, strict current
 save/protocol consumers and real-client acceptance remain unfinished. No feature
 completion or final verification gate follows from compilation alone.
+
+The mapping certificate compiler, compact retained classification and topology-only
+World accessor are now present, together with explicit species-owned detection
+labels independent of the Hallucination roster. The world, simulation and server
+all-target compilation preflight passes, including their new test bodies. Runtime
+qualification is still pending. The grouped consumer integration owns the required
+current-format bump and genuine certificate/save/wire refresh; existing artifacts
+are not evidence for these new shapes. Two neutral primitive assertion-sensitivity
+runs rejected deliberately swapped rotation composition and duplicate-occurrence
+loss; those mutations were removed, and this is not a historical first-red claim.

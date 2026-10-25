@@ -86,6 +86,7 @@ pub struct AuthoredSpatialScope {
     pub rooms: BTreeMap<u32, Vec<RoomVolume>>,
     pub passages: Vec<SourceRun>,
     pub doorways: Vec<OwnedRun>,
+    pub mapping: Option<MappingCertificate>,
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct RoomVolume {
@@ -121,6 +122,8 @@ struct ScopeFields {
     passages: Vec<SourceRun>,
     #[serde(deserialize_with = "bounded_vec")]
     doorways: Vec<OwnedRun>,
+    #[serde(default)]
+    mapping: Option<MappingCertificate>,
 }
 #[derive(Deserialize)]
 #[serde(remote = "RoomVolume", deny_unknown_fields)]
@@ -148,6 +151,81 @@ struct OwnedFields {
     first_x: i32,
     last_x: i32,
 }
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct MappingCertificate {
+    pub room_frames: Vec<MappingRoomFrame>,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct MappingRoomFrame {
+    pub room: u32,
+    pub region: u64,
+    pub up: MappingUp,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MappingUp {
+    North,
+    East,
+    South,
+    West,
+    Up,
+    Down,
+}
+
+impl<'de> serde::Deserialize<'de> for MappingUp {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct Cardinal;
+        impl serde::de::Visitor<'_> for Cardinal {
+            type Value = MappingUp;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("a lowercase cardinal construction axis")
+            }
+            fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<MappingUp, E> {
+                match value {
+                    "north" => Ok(MappingUp::North),
+                    "east" => Ok(MappingUp::East),
+                    "south" => Ok(MappingUp::South),
+                    "west" => Ok(MappingUp::West),
+                    "up" => Ok(MappingUp::Up),
+                    "down" => Ok(MappingUp::Down),
+                    _ => Err(E::custom("invalid mapping construction axis")),
+                }
+            }
+        }
+        d.deserialize_str(Cardinal)
+    }
+}
+impl MappingUp {
+    pub(super) fn direction(self) -> tor_world::Direction {
+        use tor_world::Direction;
+        match self {
+            Self::North => Direction::North,
+            Self::East => Direction::East,
+            Self::South => Direction::South,
+            Self::West => Direction::West,
+            Self::Up => Direction::Up,
+            Self::Down => Direction::Down,
+        }
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(remote = "MappingCertificate", deny_unknown_fields)]
+struct MappingCertificateFields {
+    #[serde(deserialize_with = "bounded_vec")]
+    room_frames: Vec<MappingRoomFrame>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(remote = "MappingRoomFrame", deny_unknown_fields)]
+struct MappingRoomFrameFields {
+    room: u32,
+    region: u64,
+    up: MappingUp,
+}
+
 macro_rules! named {
     ($value:ty,$fields:ident) => {
         impl<'de> Deserialize<'de> for $value {
@@ -171,6 +249,8 @@ macro_rules! named {
     };
 }
 named!(AuthoredSpatialScope, ScopeFields);
+named!(MappingCertificate, MappingCertificateFields);
+named!(MappingRoomFrame, MappingRoomFrameFields);
 named!(RoomVolume, VolumeFields);
 named!(SourceRun, RunFields);
 named!(OwnedRun, OwnedFields);
@@ -180,7 +260,7 @@ mod tests {
     use super::*;
     #[test]
     fn spatial_source_records_are_named_closed_and_duplicate_safe() {
-        let valid = serde_json::json!({"members":[1],"rooms":{"1":[{"region":1,"min":[0,0,0],"max":[2,2,1]}]},"passages":[],"doorways":[]});
+        let valid = serde_json::json!({"members":[1],"rooms":{"1":[{"region":1,"min":[0,0,0],"max":[2,2,1]}]},"passages":[],"doorways":[],"mapping":null});
         let parsed: AuthoredSpatialScope = serde_json::from_value(valid.clone()).unwrap();
         assert_eq!(parsed.members, vec![1]);
         let encoded = toml::to_string(&parsed).unwrap();

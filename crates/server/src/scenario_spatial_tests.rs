@@ -79,6 +79,7 @@ fn explicit_geometry_compiles_exact_volume_doorway_and_six_face_surfaces() {
     );
     assert!(world.is_wall(at(0, 1, 0)));
     let source = CanonicalSpatialSource {
+        mapping: None,
         id: "explicit-control".into(),
         members: vec![RegionId(1)],
         rooms: BTreeMap::from([(room, room_cells)]),
@@ -269,6 +270,7 @@ fn doorway_junction_joins_passage_arms_but_ordinary_room_interior_does_not() {
     );
     let room = RoomId::new(1).unwrap();
     let mut source = CanonicalSpatialSource {
+        mapping: None,
         id: "junction".into(),
         members: vec![RegionId(1)],
         rooms: BTreeMap::from([(room, vec![doorway])]),
@@ -334,6 +336,7 @@ fn exterior_fixture() -> (World, CanonicalSpatialSource) {
     }
     let room = RoomId::new(1).unwrap();
     let source = CanonicalSpatialSource {
+        mapping: None,
         id: "outer-mouth".into(),
         members: vec![RegionId(1)],
         rooms: BTreeMap::from([(room, vec![at(1, 1, 0), at(1, 1, 1)])]),
@@ -510,6 +513,7 @@ fn single_exterior_doorway_is_a_valid_passage_component_without_degree_rule() {
     );
     let room = RoomId::new(1).unwrap();
     let source = CanonicalSpatialSource {
+        mapping: None,
         id: "singleton".into(),
         members: vec![RegionId(0)],
         rooms: BTreeMap::from([(room, vec![p(1)])]),
@@ -682,6 +686,11 @@ fn generated_selected_maze_uses_final_open_cells_as_passages_not_population_room
     let source = generated_source(&package, "dungeon/1", 42, &budget(), &work_budget())
         .expect("actual selected maze provenance excludes ordinary Room primary");
     assert!(source.rooms.is_empty());
+    assert_eq!(
+        source.mapping,
+        Some(vec![]),
+        "generated maze is explicitly certified, not absent"
+    );
     assert!(source.doorways.is_empty());
     assert_eq!(
         source.passages.iter().copied().collect::<BTreeSet<_>>(),
@@ -753,6 +762,7 @@ fn exterior_owner_fixture() -> (World, CanonicalSpatialSource) {
     (
         world,
         CanonicalSpatialSource {
+            mapping: None,
             id: "exterior-unique-owner".into(),
             members: vec![RegionId(1)],
             rooms: BTreeMap::from([(room, interior)]),
@@ -923,6 +933,7 @@ fn validated_authored_package_supports_explicit_typed_scope_above_sixty_four_mem
     }
     let members: Vec<_> = (1..=65).map(RegionId).collect();
     let source = CanonicalSpatialSource {
+        mapping: None,
         id: "explicit-authored-test-scope".into(),
         members: members.clone(),
         rooms,

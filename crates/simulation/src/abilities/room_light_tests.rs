@@ -43,6 +43,7 @@ fn fixture(passage: bool, lit: bool) -> (Game, ItemId) {
         PrimarySpace::Room(room)
     };
     let scope = Scope {
+        mapping: crate::spatial_scope::mapping::MappingCertification::Uncertified,
         id: "fixture-room-light".into(),
         members: vec![RegionId(1)],
         primary: vec![PrimaryRun {

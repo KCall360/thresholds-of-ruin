@@ -157,6 +157,7 @@ impl ScenarioCatalog {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Content {
     presentation: Arc<crate::appearance_catalog::PresentationCatalog>,
+    detection_appearances: Arc<BTreeMap<SpeciesId, crate::appearance_catalog::CreatureAppearance>>,
     pub(crate) rules: Arc<Ruleset>,
     pub(crate) catalog: Arc<ScenarioCatalog>,
     /// Immutable ordinary projectile definitions, reconstructed from the saved
@@ -164,6 +165,34 @@ pub struct Content {
     trap_ammunition: Arc<BTreeMap<String, crate::ItemSpec>>,
 }
 impl Content {
+    /// Explicit species-owned labels only; no personal identity or ID prettifying.
+    pub fn detection_appearance(
+        &self,
+        species: &SpeciesId,
+    ) -> Option<&crate::appearance_catalog::CreatureAppearance> {
+        self.detection_appearances.get(species)
+    }
+    /// Independent from Hallucination's roster: adding a species label cannot
+    /// change already selected cosmetic identities or palette ordering.
+    pub fn with_detection_appearances(
+        content: &Arc<Self>,
+        appearances: BTreeMap<SpeciesId, crate::appearance_catalog::CreatureAppearance>,
+    ) -> Result<Arc<Self>, BuildError> {
+        if appearances.len() > content.catalog.species.len()
+            || appearances.iter().any(|(species, value)| {
+                !content.catalog.species.contains_key(species) || !value.valid()
+            })
+        {
+            return Err(BuildError::InvalidDefinition);
+        }
+        Ok(Arc::new(Self {
+            detection_appearances: Arc::new(appearances),
+            presentation: content.presentation.clone(),
+            rules: content.rules.clone(),
+            catalog: content.catalog.clone(),
+            trap_ammunition: content.trap_ammunition.clone(),
+        }))
+    }
     pub fn presentation_catalog(&self) -> &Arc<crate::appearance_catalog::PresentationCatalog> {
         &self.presentation
     }
@@ -176,6 +205,7 @@ impl Content {
             catalog: content.catalog.clone(),
             trap_ammunition: content.trap_ammunition.clone(),
             presentation,
+            detection_appearances: content.detection_appearances.clone(),
         })
     }
     pub fn trap_ammunition(&self, key: &str) -> Option<&crate::ItemSpec> {
@@ -203,6 +233,7 @@ impl Content {
         }
         Ok(Arc::new(Self {
             presentation: content.presentation.clone(),
+            detection_appearances: content.detection_appearances.clone(),
             rules: content.rules.clone(),
             catalog: content.catalog.clone(),
             trap_ammunition: Arc::new(ammunition),
@@ -251,6 +282,11 @@ impl Content {
             catalog: Arc::new(catalog),
             presentation: crate::appearance_catalog::PresentationCatalog::new(vec![], vec![])?,
             trap_ammunition: Arc::new(BTreeMap::new()),
+            detection_appearances: Arc::new(BTreeMap::new()),
         }))
     }
 }
+
+#[cfg(test)]
+#[path = "catalog_detection_tests.rs"]
+mod detection_tests;

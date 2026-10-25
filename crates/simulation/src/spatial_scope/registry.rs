@@ -52,6 +52,7 @@ pub struct Scope {
     pub members: Vec<RegionId>,
     pub primary: Vec<PrimaryRun>,
     pub rooms: Vec<RoomSurfaces>,
+    pub mapping: super::mapping::MappingCertification,
 }
 
 /// Aggregate limits supplied explicitly; there is deliberately no default.
@@ -174,6 +175,40 @@ impl Scope {
                 .checked_add(run.expanded_len().ok_or(Error::Structure)?)
                 .ok_or(Error::Capacity)?;
             usage.within(budget)?;
+        }
+        if let super::mapping::MappingCertification::Certified(frames) = &self.mapping {
+            usage.runs = usage
+                .runs
+                .checked_add(frames.room_frames.len())
+                .and_then(|n| n.checked_add(frames.exterior_doorways.len()))
+                .ok_or(Error::Capacity)?;
+            for run in &frames.exterior_doorways {
+                usage.expanded_refs = usage
+                    .expanded_refs
+                    .checked_add(run.expanded_len().ok_or(Error::Structure)?)
+                    .ok_or(Error::Capacity)?;
+            }
+            usage.within(budget)?;
+            let work = self
+                .primary
+                .len()
+                .checked_add(frames.exterior_doorways.len())
+                .and_then(|n| n.checked_add(frames.room_frames.len()))
+                .and_then(|n| n.checked_mul(usize::BITS as usize * 4 + 16))
+                .ok_or(Error::Capacity)?;
+            super::mapping::validate_structure(
+                self,
+                frames,
+                super::mapping::CertificateBudget {
+                    work,
+                    allocation_bytes: frames.room_frames.len(),
+                    cache_bytes: u64::MAX,
+                },
+            )
+            .map_err(|error| match error {
+                super::mapping::Error::InvalidSource => Error::Structure,
+                _ => Error::Capacity,
+            })?;
         }
         if self.id.is_empty()
             || self.id.chars().any(char::is_control)

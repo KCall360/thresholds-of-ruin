@@ -193,6 +193,7 @@ fn fixture_with_options(
         last_x: if targets == 0 { 1 } else { 4 },
     };
     let scope = Scope {
+        mapping: crate::spatial_scope::mapping::MappingCertification::Uncertified,
         id: "drain-fixture".into(),
         members: vec![RegionId(1)],
         primary: vec![PrimaryRun {
