@@ -1139,3 +1139,15 @@ rendering APIs and gameplay remain unchanged. These two tests are registered but
 unrun at this checkpoint; no borrowing optimization or runtime result is claimed.
 The final five qualified torch executables were separately hash-verified and
 preserved before this future ASCII build can replace an ordinary executable path.
+
+The first ASCII library run executes both registered controls: the independent
+materialized-output oracle passes, and the original retained-payload pointer
+assertion fails at the intended storage boundary. There are no fixture or
+compiler failures. The subsequent narrow green representation uses only occurrence
+position plus a borrowed appearance reference; current-cell appearances remain
+in a caller-owned local vector through rendering, while retained payloads are
+borrowed directly. It adds no owned-size enum, cache or public API. The oracle's
+old materialized baseline remains locally owned, with only its wrapper
+construction adapted; pointer, payload-storage and semantic assertions remain.
+The fresh green library/integration rerun is pending. Pointer identity establishes
+storage reuse, not measured runtime or release-performance parity.

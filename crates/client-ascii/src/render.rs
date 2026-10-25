@@ -36,10 +36,8 @@ pub fn map_tiles(
         .iter()
         .map(|c| (c.position.x, c.position.y, c.position.z))
         .collect();
-    let cells = prepare_appearances(
-        state.map_memory(),
-        map::appearance_cells(&state.state().observation),
-    );
+    let current_appearances = map::appearance_cells(&state.state().observation);
+    let cells = prepare_appearances(state.map_memory(), &current_appearances);
     map::appearance_tiles(&state.state().observation, &cells, palette, &|position| {
         current.contains(&(position.x, position.y, position.z))
     })
@@ -47,7 +45,7 @@ pub fn map_tiles(
 
 fn prepare_appearances<'a>(
     memory: impl Iterator<Item = tor_client_common::MapCell<'a>>,
-    current: Vec<tor_protocol::RememberedMapCell>,
+    current: &'a [tor_protocol::RememberedMapCell],
 ) -> Vec<map::PositionedAppearance<'a>> {
     let mut cells: std::collections::BTreeMap<_, _> = memory
         .map(|cell| {
@@ -55,8 +53,7 @@ fn prepare_appearances<'a>(
                 cell.position,
                 map::PositionedAppearance {
                     position: cell.position,
-                    // First-red scaffold retains the existing materialization until storage regression runs.
-                    appearance: std::borrow::Cow::Owned(cell.appearance()),
+                    appearance: &cell.cell.appearance,
                 },
             )
         })
@@ -66,7 +63,7 @@ fn prepare_appearances<'a>(
             cell.position,
             map::PositionedAppearance {
                 position: cell.position,
-                appearance: std::borrow::Cow::Owned(cell),
+                appearance: cell,
             },
         );
     }
@@ -748,7 +745,6 @@ pub fn logical_mouse(x: f32, y: f32, width: usize, height: usize) -> Option<(usi
 #[cfg(test)]
 mod borrowed_map_tests {
     use super::*;
-    use std::borrow::Cow;
     use tor_client_common::{MapCell, RememberedCell};
     use tor_protocol::{ItemClass, MapItemAppearance, Position, RememberedMapCell};
 
@@ -806,14 +802,14 @@ mod borrowed_map_tests {
                 },
             ]
             .into_iter(),
-            vec![],
+            &[],
         );
         assert_eq!(
             prepared.iter().map(|row| row.position).collect::<Vec<_>>(),
             [position(2, 0), position(4, 1)]
         );
         for row in &prepared {
-            assert!(std::ptr::eq(row.appearance.as_ref(), &saved.appearance));
+            assert!(std::ptr::eq(row.appearance, &saved.appearance));
             assert_eq!(row.material.as_ptr(), saved.material.as_ptr());
             assert_eq!(row.ground_items.as_ptr(), saved.ground_items.as_ptr());
         }
@@ -864,7 +860,7 @@ mod borrowed_map_tests {
         let mut current_item = cell(1, 0);
         current_item.ground_items.push(pile(ItemClass::Wand));
         let current = vec![cell(0, 0), current_item];
-        let prepared = prepare_appearances(memory.into_iter(), current.clone());
+        let prepared = prepare_appearances(memory.into_iter(), &current);
         assert!(
             !prepared[0].wall,
             "current disclosure replaces the stale wall at the same occurrence"
@@ -877,11 +873,12 @@ mod borrowed_map_tests {
         for row in &current {
             old.insert(row.position, row.clone());
         }
-        let old: Vec<_> = old
-            .into_values()
+        let old_materialized: Vec<_> = old.into_values().collect();
+        let old: Vec<_> = old_materialized
+            .iter()
             .map(|row| map::PositionedAppearance {
                 position: row.position,
-                appearance: Cow::Owned(row),
+                appearance: row,
             })
             .collect();
         let is_current = |p| current.iter().any(|row| row.position == p);

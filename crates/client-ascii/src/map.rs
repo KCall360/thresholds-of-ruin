@@ -229,13 +229,13 @@ pub fn in_view(o: &Observation, position: Position) -> bool {
 /// A chart occurrence has its own position; retained payload storage is independent.
 pub(crate) struct PositionedAppearance<'a> {
     pub position: Position,
-    pub appearance: std::borrow::Cow<'a, RememberedMapCell>,
+    pub appearance: &'a RememberedMapCell,
 }
 
 impl std::ops::Deref for PositionedAppearance<'_> {
     type Target = RememberedMapCell;
     fn deref(&self) -> &Self::Target {
-        &self.appearance
+        self.appearance
     }
 }
 
@@ -293,11 +293,12 @@ pub fn tiles(
     palette: &Palette,
     current: &dyn Fn(&CellView) -> bool,
 ) -> Vec<MapTile> {
-    let cells: Vec<_> = appearance_cells(o)
-        .into_iter()
+    let appearances = appearance_cells(o);
+    let cells: Vec<_> = appearances
+        .iter()
         .map(|cell| PositionedAppearance {
             position: cell.position,
-            appearance: std::borrow::Cow::Owned(cell),
+            appearance: cell,
         })
         .collect();
     let current_positions: std::collections::BTreeSet<_> = o
