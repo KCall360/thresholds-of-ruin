@@ -54,8 +54,37 @@ fn detached_historical_source_validation_is_lazy_source_free_and_atomic_at_mater
         .is_some());
 
     let mut forged = encoded;
-    let width = &mut forged["chart_history"]["worlds"][0]["regions"]["1"]["bounds"]["width"];
+    // LocalHistory uses the existing compact checkpoint-world codec, not a
+    // JSON array: geometry is pooled separately from door-state instances.
+    // Decode/re-encode through that codec rather than guessing its layout.
+    let mut worlds =
+        tor_world::checkpoint_worlds::deserialize(forged["chart_history"]["worlds"].clone())
+            .unwrap();
+    assert_eq!(worlds.len(), 1, "one acquired historical World");
+    let original_bounds = worlds[0].region(RegionId(1)).unwrap().bounds;
+    let mut captured = serde_json::to_value(&worlds[0]).unwrap();
+    let width = captured
+        .pointer_mut("/regions/1/bounds/width")
+        .expect("standalone World region extent");
     *width = json!(width.as_i64().expect("saved historical extent") + 1);
+    worlds[0] = serde_json::from_value(captured).unwrap();
+    assert!(worlds[0].historical_checkpoint_valid());
+    assert_eq!(
+        worlds[0].region(RegionId(1)).unwrap().bounds.dimensions(),
+        (
+            original_bounds.dimensions().0 + 1,
+            original_bounds.dimensions().1,
+            original_bounds.dimensions().2,
+        )
+    );
+    let pooled =
+        tor_world::checkpoint_worlds::serialize(&worlds, serde_json::value::Serializer).unwrap();
+    assert_eq!(
+        tor_world::checkpoint_worlds::deserialize(pooled.clone()).unwrap(),
+        worlds,
+        "forged extent survives the actual compact-world codec"
+    );
+    forged["chart_history"]["worlds"] = pooled;
     let bad: tor_simulation::RegionRecordData = serde_json::from_value(forged).unwrap();
     let bad = Shared::new(
         bad.restore(content)
