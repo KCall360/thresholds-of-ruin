@@ -1050,3 +1050,51 @@ mod cancellation_source_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod optional_mapping_source_tests {
+    use super::*;
+    use serde_json::json;
+    #[test]
+    fn reachable_mapping_without_optional_scope_is_lawful_but_preparation_is_unsupported() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/magic-items");
+        let source = resolve_source(&root).unwrap();
+        let rules = std::fs::read_to_string(root.join(&source.manifest.ruleset)).unwrap();
+        let mut manifest = source.manifest;
+        assert!(manifest.spatial_scopes.is_empty());
+        manifest.archetypes.insert(
+            "fixture.mapping".into(),
+            serde_json::from_value(json!({
+                "name":"mapping control","class":"scroll","magical":true,
+                "readable":{"discovery":"on_use","effects":[{"kind":"map_topology"}]}
+            }))
+            .unwrap(),
+        );
+        manifest.characters[0].loadout.push(CharacterLoadout {
+            archetype: "fixture.mapping".into(),
+            quantity: 1,
+            equipped_slot: None,
+        });
+        let region: RegionDef =
+            toml::from_str(&std::fs::read_to_string(root.join("regions/1.toml")).unwrap()).unwrap();
+        let package = Package::from_parts(manifest, vec![region], &rules).unwrap();
+        package.check().unwrap();
+        assert!(
+            !spatial_effect_enabled(&package).unwrap(),
+            "optional mapping does not require source coverage"
+        );
+        let game = package.build(42, true).unwrap();
+        let view = game
+            .detection_chart(
+                tor_simulation::ActorId(1),
+                tor_simulation::chart::Kind::Mapping,
+            )
+            .unwrap();
+        assert!(!view.supported);
+        assert!(view
+            .candidate
+            .as_ref()
+            .is_some_and(|c| c.unavailable_reason().is_some()));
+        assert!(view.acquired_at.is_none());
+    }
+}

@@ -151,7 +151,7 @@ pub struct Choice {
 }
 
 pub const HELP: &str = "\
-Look and ask: charts, chart monsters|food|magic, chart next|previous|cancel, look, examine <thing>, look <direction>, exits, where am i, what now, inventory, stats, status.
+Look and ask: charts, chart monsters|food|magic|mapping, chart next|previous|cancel, look, examine <thing>, look <direction>, exits, where am i, what now, inventory, stats, status.
 Handle things: take <thing>, take all, drop <thing>, wear or wield <item>, remove <item>, ignite <torch>, extinguish <torch>, drink <potion>, eat <food>, read <scroll>, zap <device> <direction>, identify <item> or identify cancel, open or close <door>.
 Fight: attack <creature> [with <equipped weapon>], fight <creature> to keep attacking, follow <creature>, flee, back.
 Move: a direction (north, ne, up...) walks until there's something to see; go to <thing or place>, go to exit, go to start, places, name room <name>.

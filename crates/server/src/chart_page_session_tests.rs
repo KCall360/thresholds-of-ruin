@@ -50,6 +50,7 @@ fn synthetic(service: &mut Service, id: u64, rows: usize) -> ChartTransfer {
     let observed = client.last_observation.as_mut().unwrap();
     let summary = ChartSummary {
         kind: ChartKind::Food,
+        supported: true,
         mode: ChartMode::Historical,
         status: if rows == 0 {
             ChartStatus::Empty

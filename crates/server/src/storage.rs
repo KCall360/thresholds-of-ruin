@@ -33,10 +33,68 @@ pub(crate) fn encode_region(
 #[cfg(test)]
 thread_local! {
     static HISTORY_ADMISSION_TEST_LIMIT: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+    static HISTORY_ADMISSION_TEST_SIZE: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
 }
+/// Test-only scoped fault on the actual checkpoint encoder, not an alternate
+/// storage path. Thread affinity and Drop preserve nested/parallel test isolation.
+#[cfg(test)]
+pub(crate) struct HistoryAdmissionTestLimit {
+    previous: Option<usize>,
+    previous_size: Option<usize>,
+    _thread: std::marker::PhantomData<std::rc::Rc<()>>,
+}
+#[cfg(test)]
+impl HistoryAdmissionTestLimit {
+    pub(crate) fn new(limit: usize) -> Self {
+        Self {
+            previous: HISTORY_ADMISSION_TEST_LIMIT.with(|value| value.replace(Some(limit))),
+            previous_size: HISTORY_ADMISSION_TEST_SIZE.with(|value| value.replace(None)),
+            _thread: std::marker::PhantomData,
+        }
+    }
+    pub(crate) fn required_bytes(&self) -> Option<usize> {
+        HISTORY_ADMISSION_TEST_SIZE.with(std::cell::Cell::get)
+    }
+}
+#[cfg(test)]
+impl Drop for HistoryAdmissionTestLimit {
+    fn drop(&mut self) {
+        HISTORY_ADMISSION_TEST_LIMIT.with(|value| value.set(self.previous));
+        HISTORY_ADMISSION_TEST_SIZE.with(|value| value.set(self.previous_size));
+    }
+}
+/// Measures both sides of the exact raw+compressed encoder ceiling without
+/// retaining a second payload. The encoder's last write is its raw-size trailer.
+#[cfg(test)]
+#[derive(Default)]
+struct HistoryAdmissionCounter {
+    bytes: usize,
+    trailer: [u8; 4],
+}
+#[cfg(test)]
+impl std::io::Write for HistoryAdmissionCounter {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.bytes = self
+            .bytes
+            .checked_add(bytes.len())
+            .ok_or_else(|| std::io::Error::other("test size overflow"))?;
+        if bytes.len() >= 4 {
+            self.trailer.copy_from_slice(&bytes[bytes.len() - 4..]);
+        }
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 fn admit_history_checkpoint(checkpoint: &DiskCheckpoint) -> Result<(), Failure> {
     #[cfg(test)]
     if let Some(limit) = HISTORY_ADMISSION_TEST_LIMIT.with(std::cell::Cell::get) {
+        let size = checkpoint_codec::write_json(checkpoint, HistoryAdmissionCounter::default())
+            .map_err(|_| storage_failure())?;
+        let required = size.bytes.max(u32::from_le_bytes(size.trailer) as usize);
+        HISTORY_ADMISSION_TEST_SIZE.with(|value| value.set(Some(required)));
         return checkpoint_codec::write_json_with_test_limit(checkpoint, std::io::sink(), limit)
             .map(|_| ())
             .map_err(|_| storage_failure());

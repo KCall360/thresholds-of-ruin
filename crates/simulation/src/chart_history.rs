@@ -1,4 +1,4 @@
-//! Actor-owned historical Food/Magic samples and separate latest attempt facts.
+//! Actor-owned historical Food/Magic/Mapping samples and separate latest attempt facts.
 mod codec;
 use crate::{chart, scope_projection, spatial_scope::registry::Registry, ActorId};
 pub(crate) use codec::{local_owners, Pool as StoredPool};
@@ -12,12 +12,14 @@ use tor_world::{Location, Shared, World};
 pub enum Kind {
     Food,
     Magic,
+    Mapping,
 }
 impl Kind {
     fn chart_kind(self) -> chart::Kind {
         match self {
             Self::Food => chart::Kind::Food,
             Self::Magic => chart::Kind::Magic,
+            Self::Mapping => chart::Kind::Mapping,
         }
     }
 }
@@ -36,7 +38,12 @@ pub struct HistoricalChart {
     authority: Shared<AcquisitionAuthority>,
     chart: Arc<chart::Chart>,
     /// One point per row, in exactly the row occurrence order. Private proof only.
-    source_points: Vec<Location>,
+    source: SourceProof,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum SourceProof {
+    Points(Vec<Location>),
+    Mapping(Vec<crate::mapping_chart::SourceRow>),
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(
@@ -79,16 +86,20 @@ pub struct Slot {
 pub struct Owner {
     food: Slot,
     magic: Slot,
+    mapping: Slot,
 }
 impl Owner {
     pub fn get(&self, kind: Kind) -> &Slot {
         match kind {
             Kind::Food => &self.food,
             Kind::Magic => &self.magic,
+            Kind::Mapping => &self.mapping,
         }
     }
     pub fn empty(&self) -> bool {
-        self.food.attempt.is_none() && self.magic.attempt.is_none()
+        self.food.attempt.is_none()
+            && self.magic.attempt.is_none()
+            && self.mapping.attempt.is_none()
     }
     /// Final candidate already passed whole-delivery admission. Positive carries
     /// exactly its new historical root; other statuses never replace the old root.
@@ -102,6 +113,7 @@ impl Owner {
         let slot = match kind {
             Kind::Food => &mut self.food,
             Kind::Magic => &mut self.magic,
+            Kind::Mapping => &mut self.mapping,
         };
         if slot
             .attempt
@@ -189,7 +201,39 @@ impl HistoricalChart {
             scope,
             authority,
             chart,
-            source_points,
+            source: SourceProof::Points(source_points),
+        };
+        value.validate_geometry(budget)?;
+        Ok(value)
+    }
+    pub(crate) fn checked_mapping(
+        acquired_tick: u64,
+        scope: String,
+        authority: Shared<AcquisitionAuthority>,
+        chart: Arc<chart::Chart>,
+        rows: Vec<crate::mapping_chart::SourceRow>,
+        budget: ValidationBudget,
+    ) -> Result<Self, Error> {
+        if !authority.world.historical_checkpoint_valid() {
+            return Err(Error::Source);
+        }
+        Self::mapping_after_world_validation(acquired_tick, scope, authority, chart, rows, budget)
+    }
+    fn mapping_after_world_validation(
+        acquired_tick: u64,
+        scope: String,
+        authority: Shared<AcquisitionAuthority>,
+        chart: Arc<chart::Chart>,
+        rows: Vec<crate::mapping_chart::SourceRow>,
+        budget: ValidationBudget,
+    ) -> Result<Self, Error> {
+        let value = Self {
+            kind: Kind::Mapping,
+            acquired_tick,
+            scope,
+            authority,
+            chart,
+            source: SourceProof::Mapping(rows),
         };
         value.validate_geometry(budget)?;
         Ok(value)
@@ -212,11 +256,18 @@ impl HistoricalChart {
             || self.scope.chars().any(char::is_control)
             || self.chart.kind() != self.kind.chart_kind()
             || self.chart.rows().is_empty()
-            || self.source_points.len() != self.chart.rows().len()
         {
             return Err(Error::Structure);
         }
         if self.scope.len() > budget.scope_bytes {
+            return Err(Error::Capacity);
+        }
+        // Chart is immutable and constructor-validated. The future strict DTO
+        // decoder must invoke that constructor; no redundant Vec clone here.
+        if self.chart.components().len() > budget.chart.components
+            || self.chart.rows().len() > budget.chart.rows
+            || self.chart.encoded_size_bound() > budget.chart.json_bytes
+        {
             return Err(Error::Capacity);
         }
         // Source witnesses retain the producer's exact row-occurrence order;
@@ -227,25 +278,33 @@ impl HistoricalChart {
             .scopes()
             .find(|s| s.id == self.scope)
             .ok_or(Error::Source)?;
-        for point in &self.source_points {
+        let points = match &self.source {
+            SourceProof::Mapping(rows) if self.kind == Kind::Mapping => {
+                return crate::mapping_history::validate_mapping_history(
+                    &self.authority.world,
+                    scope,
+                    &self.chart,
+                    rows,
+                    budget,
+                );
+            }
+            SourceProof::Points(points) if self.kind != Kind::Mapping => points,
+            _ => return Err(Error::Structure),
+        };
+        if points.len() != self.chart.rows().len() {
+            return Err(Error::Structure);
+        }
+        for point in points {
             if scope.members.binary_search(&point.region).is_err()
                 || !self.authority.world.contains(*point)
             {
                 return Err(Error::Source);
             }
         }
-        // Chart is immutable and constructor-validated. The future strict DTO
-        // decoder must invoke that constructor; no redundant Vec clone here.
-        if self.chart.components().len() > budget.chart.components
-            || self.chart.rows().len() > budget.chart.rows
-            || self.chart.encoded_size_bound() > budget.chart.json_bytes
-        {
-            return Err(Error::Capacity);
-        }
         let projection = scope_projection::project(
             &self.authority.world,
             &scope.members,
-            &self.source_points,
+            points,
             budget.projection,
         )
         .map_err(|error| match error {
@@ -334,7 +393,7 @@ pub(crate) fn authority_sources(
 ) -> impl Iterator<Item = (&Shared<World>, &Shared<Registry>, &str)> {
     owners
         .values()
-        .flat_map(|o| [&o.food, &o.magic])
+        .flat_map(|o| [&o.food, &o.magic, &o.mapping])
         .filter_map(|slot| slot.latest.as_ref())
         .map(|root| {
             (
@@ -349,7 +408,7 @@ pub(crate) fn sources(
 ) -> impl Iterator<Item = (&World, &Registry, &str)> {
     owners
         .values()
-        .flat_map(|o| [&o.food, &o.magic])
+        .flat_map(|o| [&o.food, &o.magic, &o.mapping])
         .filter_map(|slot| slot.latest.as_ref())
         .map(|root| {
             (
@@ -368,21 +427,25 @@ pub(crate) fn owners_valid(
         id.0 != 0
             && actor_exists(*id)
             && !owner.empty()
-            && [(Kind::Food, &owner.food), (Kind::Magic, &owner.magic)]
-                .into_iter()
-                .all(|(kind, slot)| match (slot.attempt, slot.latest.as_ref()) {
-                    (None, None) => true,
-                    (Some(attempt), root) if attempt.attempted_at <= tick => match root {
-                        None => !matches!(attempt.status, AttemptStatus::Positive),
-                        Some(root) => {
-                            root.kind == kind
-                                && root.acquired_tick <= attempt.attempted_at
-                                && (!matches!(attempt.status, AttemptStatus::Positive)
-                                    || root.acquired_tick == attempt.attempted_at)
-                        }
-                    },
-                    _ => false,
-                })
+            && [
+                (Kind::Food, &owner.food),
+                (Kind::Magic, &owner.magic),
+                (Kind::Mapping, &owner.mapping),
+            ]
+            .into_iter()
+            .all(|(kind, slot)| match (slot.attempt, slot.latest.as_ref()) {
+                (None, None) => true,
+                (Some(attempt), root) if attempt.attempted_at <= tick => match root {
+                    None => !matches!(attempt.status, AttemptStatus::Positive),
+                    Some(root) => {
+                        root.kind == kind
+                            && root.acquired_tick <= attempt.attempted_at
+                            && (!matches!(attempt.status, AttemptStatus::Positive)
+                                || root.acquired_tick == attempt.attempted_at)
+                    }
+                },
+                _ => false,
+            })
     })
 }
 #[cfg(test)]
@@ -434,3 +497,7 @@ impl crate::Game {
             && self.chart_history != previous.chart_history
     }
 }
+
+#[cfg(test)]
+#[path = "chart_history/mapping_tests.rs"]
+mod mapping_tests;

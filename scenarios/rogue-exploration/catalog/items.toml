@@ -59,7 +59,7 @@ consumable = { discovery = "self_effect", effects = [{ kind = "restore_attribute
 
 [appearance_pools."rogue.potions"]
 asset = "item.potion"
-appearances = ["amber potion", "smoky potion", "violet potion", "azure potion", "crimson potion", "silver potion", "pearl potion", "teal potion", "ochre potion", "indigo potion", "copper potion", "chartreuse potion"]
+appearances = ["amber potion", "smoky potion", "violet potion", "azure potion", "crimson potion", "silver potion", "pearl potion", "teal potion", "ochre potion", "indigo potion", "copper potion", "chartreuse potion", "saffron potion", "cerulean potion", "magenta potion"]
 
 # Ordinary recoverable stacks; neither a purse abstraction nor a supply item.
 [items."rogue.gold"]
@@ -168,7 +168,7 @@ readable = { discovery = "on_use", effects = [{ kind = "apply_condition_for_turn
 
 [appearance_pools."rogue.scrolls"]
 asset = "item.scroll"
-appearances = ["scroll titled VEL MOR", "scroll titled ELAM TOR", "scroll titled NAR SHEN", "scroll titled HETH ARA", "scroll titled TAL ION", "scroll titled UR SEK", "scroll titled KEL RAN", "scroll titled AN DOR", "scroll titled IV MEM", "scroll titled OS THAL", "scroll titled VEL TOR", "scroll titled SAH REN", "scroll titled OR VETH", "scroll titled NEM AL", "scroll titled TIR OS", "scroll titled KHA MER"]
+appearances = ["scroll titled VEL MOR", "scroll titled ELAM TOR", "scroll titled NAR SHEN", "scroll titled HETH ARA", "scroll titled TAL ION", "scroll titled UR SEK", "scroll titled KEL RAN", "scroll titled AN DOR", "scroll titled IV MEM", "scroll titled OS THAL", "scroll titled VEL TOR", "scroll titled SAH REN", "scroll titled OR VETH", "scroll titled NEM AL", "scroll titled TIR OS", "scroll titled KHA MER", "scroll titled LOR NEV"]
 
 [items."rogue.identify_scroll"]
 asset = "item.scroll"
@@ -805,3 +805,51 @@ class = "potion"
 stackable = true
 appearance_pool = "rogue.potions"
 consumable = { discovery = "on_use", effects = [{ kind = "apply_condition_for_turns", condition = "rogue.hallucinating", duration = { kind = "rolled", dice = { count = 1, sides = 85, bonus = 807 } } }] }
+
+# Opt-in chart dose; absent from production stock and starter kits. Recognition
+# requires a complete admitted positive chart, not merely an active condition.
+[items."rogue.monster_detection"]
+asset = "item.potion"
+name = "potion of monster detection"
+identity = "rogue.monster_detection"
+magical = true
+class = "potion"
+stackable = true
+appearance_pool = "rogue.potions"
+consumable = { discovery = "self_effect", effects = [{ kind = "detect_monsters", condition = "rogue.detecting_monsters" }] }
+
+# Opt-in chart dose; absent from production stock and starter kits. Recognition
+# requires a complete admitted positive chart, not merely an active condition.
+[items."rogue.food_detection"]
+asset = "item.potion"
+name = "potion of food detection"
+identity = "rogue.food_detection"
+magical = true
+class = "potion"
+stackable = true
+appearance_pool = "rogue.potions"
+consumable = { discovery = "self_effect", effects = [{ kind = "detect_food" }] }
+
+# Opt-in chart dose; absent from production stock and starter kits. Recognition
+# requires a complete admitted positive chart, not merely an active condition.
+[items."rogue.magic_detection"]
+asset = "item.potion"
+name = "potion of magic detection"
+identity = "rogue.magic_detection"
+magical = true
+class = "potion"
+stackable = true
+appearance_pool = "rogue.potions"
+consumable = { discovery = "self_effect", effects = [{ kind = "detect_magic" }] }
+
+# Opt-in only. Source certification is checked before payment; an admitted
+# mapping read identifies without borrowing detection's positive-only predicate.
+[items."rogue.magic_mapping"]
+asset = "item.scroll"
+name = "scroll of magic mapping"
+identity = "rogue.magic_mapping"
+magical = true
+class = "scroll"
+stackable = true
+appearance_pool = "rogue.scrolls"
+readable = { discovery = "on_use", effects = [{ kind = "map_topology" }] }

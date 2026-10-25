@@ -111,6 +111,7 @@ pub enum PlannedEffect {
         turn_ticks: u64,
     },
     DetectFood,
+    MapTopology,
     DetectMagic,
     DrainLife,
     GainStrength,
@@ -191,6 +192,7 @@ impl PlannedEffect {
             Self::RoomLight
             | Self::DetectMonsters { .. }
             | Self::DetectFood
+            | Self::MapTopology
             | Self::DetectMagic
             | Self::DrainLife
             | Self::AlterEquipment { .. }
@@ -979,6 +981,7 @@ pub(crate) fn effects_valid(effects: &[PlannedEffect], rules: &crate::rules::Rul
             | PlannedEffect::TeleportToRayOrigin
             | PlannedEffect::RoomLight
             | PlannedEffect::DetectFood
+            | PlannedEffect::MapTopology
             | PlannedEffect::DetectMagic
             | PlannedEffect::DrainLife
             | PlannedEffect::GainStrength
@@ -1144,7 +1147,8 @@ pub(super) fn effects_match_definition_scoped(
                     Effect::DetectMonsters { condition },
                     PlannedEffect::DetectMonsters { id, turn_ticks },
                 ) => condition == id && crate::detection_lifecycle::duration(*turn_ticks).is_some(),
-                (Effect::DetectFood, PlannedEffect::DetectFood)
+                (Effect::MapTopology, PlannedEffect::MapTopology)
+                | (Effect::DetectFood, PlannedEffect::DetectFood)
                 | (Effect::DetectMagic, PlannedEffect::DetectMagic) => true,
                 (Effect::TeleportRandom, PlannedEffect::TeleportRandom)
                 | (Effect::TeleportToRayOrigin, PlannedEffect::TeleportToRayOrigin)
@@ -1627,6 +1631,12 @@ impl Game {
                     })
                 }
                 Effect::DetectFood => Ok(PlannedEffect::DetectFood),
+                Effect::MapTopology => {
+                    if !self.mapping_supported(actor) {
+                        return Err(invalid());
+                    }
+                    Ok(PlannedEffect::MapTopology)
+                }
                 Effect::DetectMagic => Ok(PlannedEffect::DetectMagic),
                 Effect::DrainLife => Ok(PlannedEffect::DrainLife),
                 Effect::GainStrength => Ok(PlannedEffect::GainStrength),
@@ -1867,6 +1877,7 @@ impl<'de> Deserialize<'de> for PlannedEffect {
                 turn_ticks: u64,
             },
             DetectFood {},
+            MapTopology {},
             DetectMagic {},
             DrainLife {},
             GainStrength {},
@@ -1961,6 +1972,7 @@ impl<'de> Deserialize<'de> for PlannedEffect {
             Fields::RoomLight {} => Self::RoomLight,
             Fields::DetectMonsters { id, turn_ticks } => Self::DetectMonsters { id, turn_ticks },
             Fields::DetectFood {} => Self::DetectFood,
+            Fields::MapTopology {} => Self::MapTopology,
             Fields::DetectMagic {} => Self::DetectMagic,
             Fields::DrainLife {} => Self::DrainLife,
             Fields::GainStrength {} => Self::GainStrength,

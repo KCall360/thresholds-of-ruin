@@ -55,7 +55,7 @@ fn history_actions_preserve_the_tagged_wire_shape_and_validate_event_payload() {
 
 #[test]
 fn current_wire_protocol_revision_is_explicitly_pinned() {
-    assert_eq!(PROTOCOL_VERSION, 61);
+    assert_eq!(PROTOCOL_VERSION, 62);
 }
 
 #[test]
@@ -452,7 +452,7 @@ fn readiness_is_required_and_does_not_accept_extra_authority() {
     let samples: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/wire-v61.json"
+            "/tests/fixtures/wire-v62.json"
         ))
         .expect("regenerate current wire samples"),
     )

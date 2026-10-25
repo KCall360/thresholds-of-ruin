@@ -435,6 +435,7 @@ fn effects(values: &[Effect], rules: &s::rules::Ruleset) -> Result<Vec<s::rules:
                 },
                 Effect::DetectFood => s::rules::Effect::DetectFood,
                 Effect::DetectMagic => s::rules::Effect::DetectMagic,
+                Effect::MapTopology => s::rules::Effect::MapTopology,
                 Effect::DrainLife => s::rules::Effect::DrainLife,
                 Effect::CancelSpecials => s::rules::Effect::CancelSpecials,
                 Effect::StepSelfOneCell => s::rules::Effect::StepSelfOneCell,

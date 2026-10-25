@@ -657,6 +657,7 @@ pub enum Effect {
     },
     DetectFood,
     DetectMagic,
+    MapTopology,
     DrainLife,
     CancelSpecials,
     StepSelfOneCell,
@@ -1201,6 +1202,7 @@ impl<'de> Deserialize<'de> for Effect {
             },
             DetectFood {},
             DetectMagic {},
+            MapTopology {},
             DrainLife {},
             CancelSpecials {},
             StepSelfOneCell {},
@@ -1314,6 +1316,7 @@ impl<'de> Deserialize<'de> for Effect {
             Fields::DetectMonsters { condition } => Self::DetectMonsters { condition },
             Fields::DetectFood {} => Self::DetectFood,
             Fields::DetectMagic {} => Self::DetectMagic,
+            Fields::MapTopology {} => Self::MapTopology,
             Fields::DrainLife {} => Self::DrainLife,
             Fields::CancelSpecials {} => Self::CancelSpecials,
             Fields::StepSelfOneCell {} => Self::StepSelfOneCell,
@@ -2423,5 +2426,30 @@ mod detection_item_bridge_tests {
             mixed.compile(&rules).is_err(),
             "sole chart payload rule belongs to the core validator"
         );
+    }
+}
+
+#[cfg(test)]
+mod mapping_item_bridge_tests {
+    use super::*;
+    use serde_json::json;
+    #[test]
+    fn mapping_readable_preserves_closed_sole_payload_and_explicit_on_use_policy() {
+        let rules = tor_simulation::rules::Ruleset::validate(
+            toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML).unwrap(),
+        )
+        .unwrap();
+        let source: ReadableSpec = serde_json::from_value(
+            json!({"discovery":"on_use","effects":[{"kind":"map_topology"}]}),
+        )
+        .unwrap();
+        let compiled = source.compile(&rules).unwrap();
+        assert_eq!(
+            serde_json::to_value(&compiled.effects).unwrap(),
+            json!([{"kind":"map_topology"}])
+        );
+        assert_eq!(compiled.discovery, tor_simulation::ItemDiscovery::OnUse);
+        let mixed:ReadableSpec=serde_json::from_value(json!({"effects":[{"kind":"map_topology"},{"kind":"heal","amount":{"kind":"fixed","amount":1}}]})).unwrap();
+        assert!(mixed.compile(&rules).is_err());
     }
 }

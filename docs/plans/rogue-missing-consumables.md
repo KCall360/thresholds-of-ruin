@@ -1768,3 +1768,26 @@ staged separately; only its source certification foundation was previously
 compiled. Format identity bumps, genuine certificates/save/wire regeneration,
 full native regressions, process tests, and final repository gates remain pending.
 The separate unapplied 3D compatibility patch is not native coverage.
+
+### Combined Mapping and current-format source checkpoint
+
+Mapping now has a bounded sparse producer, paid read effect, immutable private
+historical acquisition, and a fourth chart kind across the same host/client path.
+Foreign solid shell geometry is loaded only as a direct physical dependency; its
+member anchor is projected and offset, never used to fabricate foreign component
+alignment. Current scope support is explicit and independent of retained knowledge.
+The integrated world/core/server/protocol/common/Text/ASCII all-target compilation
+passes. Current pure source/vector/recorder contracts (68) and earned-baseline
+provenance contracts (53) pass; native execution and process qualification remain
+pending.
+
+Current identities advance to protocol62/save60/scenario32/validator44,
+RulesInput25/ContentPackage29. The earlier portable-light anatomy/equipment change
+had changed bundled rules without advancing its identity; interactions-v53 now
+names those actual current semantics. New baselinev24 truthfully records both
+required scenario-format and rules-dependency transitions; v23 and all historical
+fixture bytes are unchanged. No earned-route result is inferred from this source
+migration. Genuine current certificates/save/wire samples still require production
+regeneration. The 43 ordinary scenario headers are migrated here; the menagerie
+header and 3D consumer changes remain in a separate unapplied compatibility patch.
+The final 44-scenario/stacked-consumer gate is not waived.

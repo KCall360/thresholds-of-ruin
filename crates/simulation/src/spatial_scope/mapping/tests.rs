@@ -20,16 +20,16 @@ const SIX: [Direction; 6] = [
     Direction::Up,
     Direction::Down,
 ];
-fn at(region: u64, x: i32, y: i32, z: i32) -> Location {
+pub(crate) fn at(region: u64, x: i32, y: i32, z: i32) -> Location {
     Location {
         region: RegionId(region),
         position: Position { x, y, z },
     }
 }
-fn room(value: u32) -> RoomId {
+pub(crate) fn room(value: u32) -> RoomId {
     RoomId::new(value).unwrap()
 }
-fn frame(owner: u32, region: u64, up: Direction) -> MappingRoomFrame {
+pub(crate) fn frame(owner: u32, region: u64, up: Direction) -> MappingRoomFrame {
     MappingRoomFrame {
         room: room(owner),
         region: RegionId(region),
@@ -59,7 +59,7 @@ fn face_budget() -> FaceBudget {
         faces: 100_000,
     }
 }
-fn chamber_world(count: u64, dimensions: [i32; 3]) -> World {
+pub(crate) fn chamber_world(count: u64, dimensions: [i32; 3]) -> World {
     let mut world = World::new(vec![], vec![]).unwrap();
     for id in 1..=count {
         world
@@ -72,7 +72,7 @@ fn chamber_world(count: u64, dimensions: [i32; 3]) -> World {
     }
     world
 }
-fn box_cells(region: u64, min: [i32; 3], max: [i32; 3]) -> Vec<Location> {
+pub(crate) fn box_cells(region: u64, min: [i32; 3], max: [i32; 3]) -> Vec<Location> {
     (min[2]..=max[2])
         .flat_map(|z| {
             (min[1]..=max[1]).flat_map(move |y| (min[0]..=max[0]).map(move |x| at(region, x, y, z)))
@@ -105,7 +105,7 @@ fn runs(cells: impl IntoIterator<Item = Location>) -> Vec<CellRun> {
 // Build the pre-existing primary/lighting source facts, NOT a mapping oracle.
 // World remains the physical neighbor authority. Every expected mapping face
 // below is independently named or constructed from literal boundary planes.
-fn source_scope(
+pub(crate) fn source_scope(
     world: &World,
     interiors: &[(u32, Vec<Location>)],
     doors: &[(Location, u32)],
@@ -202,7 +202,12 @@ fn source_scope(
         .unwrap();
     scope
 }
-fn certify(world: &World, scope: &mut Scope, frames: &[MappingRoomFrame], exterior: &[CellRun]) {
+pub(crate) fn certify(
+    world: &World,
+    scope: &mut Scope,
+    frames: &[MappingRoomFrame],
+    exterior: &[CellRun],
+) {
     scope.mapping = mapping::certify(world, scope, frames, exterior, certificate_budget())
         .expect("complete valid source certificate");
     assert!(matches!(scope.mapping, MappingCertification::Certified(_)));
@@ -213,11 +218,26 @@ fn faces(world: &World, scope: &Scope) -> BTreeSet<(RoomId, Location, Direction)
         .iter()
         .map(|face| (face.room, face.location, face.normal))
         .collect();
+    let occurrences: BTreeSet<_> = raw
+        .iter()
+        .map(|face| {
+            (
+                face.room,
+                face.anchor,
+                face.toward,
+                face.location,
+                face.normal,
+            )
+        })
+        .collect();
     assert_eq!(
         raw.len(),
-        result.len(),
-        "oriented faces must not be duplicated"
+        occurrences.len(),
+        "source-oriented wall occurrences must not be duplicated"
     );
+    // This older geometric set intentionally ignores occurrence multiplicity;
+    // mapping_chart tests separately retain distinct member-anchor occurrences.
+
     result
 }
 

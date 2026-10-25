@@ -210,7 +210,7 @@ fn haste_dose_then_persistent_wand_keeps_original_finite_expiry() {
     let directory = tempfile::tempdir().unwrap();
     let mut wire = Wire::new(
         Engine::open(
-            &directory.path().join("save.db"),
+            directory.path().join("save.db"),
             haste_source(&directory.path().join("source")),
         )
         .unwrap(),
@@ -239,7 +239,7 @@ fn persistent_wand_then_haste_dose_is_paid_overdose_not_finite_upgrade() {
     let directory = tempfile::tempdir().unwrap();
     let mut wire = Wire::new(
         Engine::open(
-            &directory.path().join("save.db"),
+            directory.path().join("save.db"),
             haste_source(&directory.path().join("source")),
         )
         .unwrap(),
@@ -354,7 +354,7 @@ fn haste_dose_detects_ordinary_canonical_haste_even_when_slow_masks_it() {
     let directory = tempfile::tempdir().unwrap();
     let mut wire = Wire::new(
         Engine::open(
-            &directory.path().join("save.db"),
+            directory.path().join("save.db"),
             haste_source(&directory.path().join("source")),
         )
         .unwrap(),

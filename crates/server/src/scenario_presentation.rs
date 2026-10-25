@@ -347,3 +347,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "scenario_detection_content_tests.rs"]
+mod detection_content_tests;

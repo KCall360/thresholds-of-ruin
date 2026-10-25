@@ -585,7 +585,15 @@ impl Game {
             .any(|effect| crate::detection_lifecycle::planned_kind(effect).is_some())
             && !matches!(plan, crate::abilities::Plan::Zap { charges: 0, .. })
         {
-            members.extend(self.detection_required_regions(plan.actor())?);
+            if plan
+                .on_success()
+                .iter()
+                .any(|effect| matches!(effect, crate::abilities::PlannedEffect::MapTopology))
+            {
+                members.extend(self.mapping_required_regions(plan.actor())?);
+            } else {
+                members.extend(self.detection_required_regions(plan.actor())?);
+            }
         }
         let room_light = plan
             .on_success()

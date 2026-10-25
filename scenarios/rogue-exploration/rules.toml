@@ -1,4 +1,4 @@
-import = "interactions-v52"
+import = "interactions-v53"
 
 # Equipment expertise is an ordinary HD-point or earned Intellect choice.
 # No preset, species, NPC or default talent receives a free expertise grant.
@@ -381,3 +381,10 @@ value = { id = "rogue.haste_exhaustion", family = "rogue.haste_exhaustion", life
 op = "add"
 path = ["conditions", "rogue.hallucinating"]
 value = { id = "rogue.hallucinating", family = "rogue.hallucinating", lifecycle = "timed", name = "Hallucinating", hallucinating = true, modifiers = [], stacking = { kind = "extend" }, source_scoped = false, descriptors = [], capacity = "reject", timing = { kind = "actor_active", on_expiry = { kind = "remove" } }, restrictions = [], preparation = "preserve" }
+
+# Whole-floor monster sense is one pure, target-wide fixed-20-base-turn Refresh
+# marker. The dedicated effect owns duration and admitted-chart identification.
+[[overrides]]
+op = "add"
+path = ["conditions", "rogue.detecting_monsters"]
+value = { id = "rogue.detecting_monsters", family = "rogue.detecting_monsters", lifecycle = "timed", name = "Monster detection", detecting_monsters = true, modifiers = [], stacking = { kind = "refresh" }, source_scoped = false, descriptors = [], capacity = "reject", timing = { kind = "actor_active", on_expiry = { kind = "remove" } }, restrictions = [], preparation = "preserve" }

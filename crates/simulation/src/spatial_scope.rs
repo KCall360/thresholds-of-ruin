@@ -17,6 +17,9 @@ use std::num::NonZeroU32;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RoomId(NonZeroU32);
 impl RoomId {
+    pub(crate) fn get(self) -> u32 {
+        self.0.get()
+    }
     pub fn new(value: u32) -> Option<Self> {
         NonZeroU32::new(value).map(Self)
     }
@@ -43,6 +46,13 @@ pub struct Membership {
     doorway: Option<PassageId>,
 }
 impl Membership {
+    pub(crate) fn primary(self) -> PrimarySpace {
+        self.primary
+    }
+    pub(crate) fn doorway(self) -> Option<PassageId> {
+        self.doorway
+    }
+
     pub fn new(primary: PrimarySpace, doorway: Option<PassageId>) -> Option<Self> {
         if doorway.is_some() && matches!(primary, PrimarySpace::Passage(_)) {
             return None;

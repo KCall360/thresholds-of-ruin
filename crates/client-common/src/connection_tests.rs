@@ -2544,6 +2544,7 @@ async fn chart_continuations_are_pure_atomic_and_old_generation_pages_do_not_res
     let address = listener.local_addr().unwrap();
     let mut initial = snapshot();
     Arc::make_mut(&mut initial.state).observation.charts = vec![ChartSummary {
+        supported: true,
         kind: ChartKind::Monsters,
         mode: ChartMode::Live,
         status: ChartStatus::Available,

@@ -18,9 +18,10 @@ pub fn parse(text: &str) -> Result<ChartInput, String> {
         "monster" | "monsters" => Ok(ChartInput::Select(ChartKind::Monsters)),
         "food" => Ok(ChartInput::Select(ChartKind::Food)),
         "magic" => Ok(ChartInput::Select(ChartKind::Magic)),
+        "mapping" => Ok(ChartInput::Select(ChartKind::Mapping)),
         "next" => Ok(ChartInput::Next), "previous" => Ok(ChartInput::Previous),
         "cancel" => Ok(ChartInput::Cancel),
-        _ => Err("Use charts, chart monsters, chart food, chart magic, chart next, chart previous, or chart cancel.".into()),
+        _ => Err("Use charts, chart monsters, chart food, chart magic, chart mapping, chart next, chart previous, or chart cancel.".into()),
     }
 }
 pub fn kind_label(kind: ChartKind) -> &'static str {
@@ -28,6 +29,7 @@ pub fn kind_label(kind: ChartKind) -> &'static str {
         ChartKind::Monsters => "Monster detection",
         ChartKind::Food => "Food detection",
         ChartKind::Magic => "Magic detection",
+        ChartKind::Mapping => "Mapping",
     }
 }
 pub const DISPLAY_ROWS: usize = 20;
@@ -440,11 +442,28 @@ impl ChartPages {
             display.rows.len()
         ));
         for row in display.rows.iter().skip(self.offset).take(DISPLAY_ROWS) {
+            let mapping_label;
             let label = match &row.mark {
                 ChartMark::Monster { name, .. } if !name.is_empty() => name.as_str(),
                 ChartMark::Monster { .. } => "creature",
                 ChartMark::Food => "food",
                 ChartMark::Magic => "magic",
+                ChartMark::Mapping { fact } => {
+                    mapping_label = match fact {
+                        MappingMark::WallFace {
+                            normal: Some([x, y, z]),
+                        } => format!("wall face (normal {x}, {y}, {z})"),
+                        MappingMark::WallFace { normal: None } => {
+                            "wall face (orientation unavailable)".into()
+                        }
+                        MappingMark::Passage => "passage".into(),
+                        MappingMark::Doorway => "doorway".into(),
+                        MappingMark::Stairs => "stairs presence".into(),
+                        MappingMark::SecretDoor => "secret door presence".into(),
+                        MappingMark::TrapPresence => "trap presence".into(),
+                    };
+                    &mapping_label
+                }
             };
             match row.position {
                 Some([x, y, z]) => lines.push(format!(
@@ -479,6 +498,12 @@ fn summary_lines(summary: &ChartSummary) -> Vec<String> {
         "{}: {mode}, {status}{captured}.",
         kind_label(summary.kind)
     )];
+    if !summary.supported {
+        lines.push(
+            "Unsupported in the current scope; retained historical samples remain historical."
+                .into(),
+        );
+    }
     if let Some(attempt) = &summary.latest_attempt {
         let status = match attempt.status {
             ChartAttemptStatus::Empty => "empty",

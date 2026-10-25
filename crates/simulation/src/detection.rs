@@ -83,6 +83,9 @@ impl Game {
         kind: Kind,
         budget: CensusBudget,
     ) -> Result<PreparedDetection, GameError> {
+        if kind == Kind::Mapping {
+            return Err(GameError::Rule(crate::abilities::RuleError::InvalidPlan));
+        }
         let owner = self.actors.get(&observer).ok_or(GameError::UnknownActor)?;
         let hallucination = if kind == Kind::Monsters {
             self.projected_hallucination(observer)?
@@ -323,6 +326,8 @@ impl Game {
 /// overrides historical=true when explicitly presenting a retained boundary.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DetectionView {
+    /// Current preparation support, independent of retained historical knowledge.
+    pub supported: bool,
     pub kind: Kind,
     pub historical: bool,
     pub acquired_at: Option<u64>,
@@ -343,12 +348,16 @@ impl ChartCompletion {
 }
 impl Game {
     pub fn detection_chart(&self, actor: ActorId, kind: Kind) -> Result<DetectionView, GameError> {
+        if kind == Kind::Mapping {
+            return self.mapping_chart(actor);
+        }
         if !self.actors.contains_key(&actor) {
             return Err(GameError::UnknownActor);
         }
         if kind == Kind::Monsters {
             let active = self.monster_detection_active(actor);
             return Ok(DetectionView {
+                supported: true,
                 kind,
                 historical: false,
                 acquired_at: active.then_some(self.tick),
@@ -374,6 +383,7 @@ impl Game {
             .map(|owner| owner.get(history_kind));
         let latest = slot.and_then(|slot| slot.latest());
         Ok(DetectionView {
+            supported: true,
             kind,
             historical: true,
             acquired_at: latest.map(|root| root.acquired_tick()),
@@ -394,6 +404,9 @@ impl Game {
         kind: Kind,
         budget: CensusBudget,
     ) -> Result<ChartCompletion, GameError> {
+        if kind == Kind::Mapping {
+            return self.complete_mapping_chart_with_budget(actor, budget);
+        }
         let prepared = self.prepare_detection_chart(actor, kind, budget)?;
         let mut result = ChartCompletion {
             candidate: prepared.candidate,
@@ -462,8 +475,6 @@ impl Game {
         Ok(result)
     }
 }
-
-
 
 // Test-only injection into the real final page-admission arithmetic, not a
 // forged completion receipt or production/configurable gameplay limit.

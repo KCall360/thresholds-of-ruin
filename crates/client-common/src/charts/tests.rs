@@ -2,6 +2,7 @@ use super::*;
 
 fn client(kind: ChartKind, mode: ChartMode, status: ChartStatus) -> ClientState {
     let summary = ChartSummary {
+        supported: true,
         kind,
         mode,
         status,
@@ -373,4 +374,72 @@ fn empty_samples_are_complete_and_local_paging_cancel_never_make_an_action() {
     ] {
         assert!(parse(input).is_err());
     }
+}
+
+#[test]
+fn unsupported_mapping_keeps_historical_sparse_facts_and_never_merges_them_into_world_or_map() {
+    let state = client(
+        ChartKind::Mapping,
+        ChartMode::Historical,
+        ChartStatus::Available,
+    );
+    let mut snapshot = state.snapshot();
+    Arc::make_mut(&mut snapshot.state).observation.charts[0].supported = false;
+    let state = ClientState::from_snapshot(snapshot.clone()).unwrap();
+    let mut pages = ChartPages::default();
+    assert_eq!(parse("mapping"), Ok(ChartInput::Select(ChartKind::Mapping)));
+    assert!(matches!(
+        pages
+            .request(ChartInput::Select(ChartKind::Mapping), &state)
+            .unwrap(),
+        Some(Request::Chart { .. })
+    ));
+    let mut records = vec![
+        component(0, ChartAlignment::Aligned),
+        component(1, ChartAlignment::Inconsistent),
+    ];
+    for fact in [
+        MappingMark::WallFace {
+            normal: Some([0, 0, -1]),
+        },
+        MappingMark::Passage,
+        MappingMark::Doorway,
+        MappingMark::Stairs,
+        MappingMark::SecretDoor,
+        MappingMark::TrapPresence,
+    ] {
+        records.push(ChartRecord::Row(ChartRow {
+            component: 0,
+            position: Some([2, 3, 4]),
+            mark: ChartMark::Mapping { fact },
+        }));
+    }
+    records.push(ChartRecord::Row(ChartRow {
+        component: 1,
+        position: None,
+        mark: ChartMark::Mapping {
+            fact: MappingMark::WallFace { normal: None },
+        },
+    }));
+    assert!(accept(&mut pages, &state, records, 2, 9, "mapping").unwrap());
+    let text = pages.lines(&state).join("\n");
+    assert!(text.contains("Mapping: historical, available, captured at tick 4"));
+    assert!(text.contains("Unsupported in the current scope"));
+    assert!(text.contains("wall face (normal 0, 0, -1)"));
+    for label in [
+        "passage",
+        "doorway",
+        "stairs presence",
+        "secret door presence",
+        "trap presence",
+        "orientation unavailable",
+    ] {
+        assert!(text.contains(label), "{label}: {text}");
+    }
+    assert!(text.contains("Panel 2 — position unavailable"));
+    assert_eq!(pages.display().unwrap().rows.len(), 7);
+    assert_eq!(state.snapshot(), snapshot);
+    assert!(state.map_memory().next().is_none());
+    assert!(state.state().observation.visible_cells.is_empty());
+    assert!(state.state().observation.visible_actors.is_empty());
 }

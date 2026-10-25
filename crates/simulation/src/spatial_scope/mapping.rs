@@ -63,6 +63,9 @@ pub enum MappingUnavailable {
 /// component frame (never translates it); inconsistent components must omit
 /// both global position and orientation rather than assert an invented frame.
 pub struct MappingFace {
+    /// Member interior witness; foreign solid faces never expand scope ownership.
+    pub anchor: Location,
+    pub toward: Direction,
     pub room: RoomId,
     pub location: Location,
     pub normal: Direction,
@@ -461,8 +464,21 @@ fn opposite(d: Direction) -> Direction {
 pub fn wall_faces(
     world: &World,
     scope: &Scope,
-    mut budget: FaceBudget,
+    budget: FaceBudget,
 ) -> Result<Vec<MappingFace>, MappingUnavailable> {
+    wall_faces_with_usage(world, scope, budget).map(|result| result.faces)
+}
+pub(crate) struct FaceResult {
+    pub faces: Vec<MappingFace>,
+    pub work: usize,
+    pub allocation_bytes: usize,
+}
+pub(crate) fn wall_faces_with_usage(
+    world: &World,
+    scope: &Scope,
+    mut budget: FaceBudget,
+) -> Result<FaceResult, MappingUnavailable> {
+    let initial = budget;
     pay(&mut budget.work, 1).map_err(|_| MappingUnavailable::Capacity)?;
     let frames = match &scope.mapping {
         MappingCertification::Uncertified => return Err(MappingUnavailable::Uncertified),
@@ -511,6 +527,12 @@ pub fn wall_faces(
             if contains(&frames.exterior_doorways, p, &mut budget.work).map_err(convert)? {
                 continue;
             }
+            if !world.contains(p) {
+                return Err(MappingUnavailable::InvalidSource);
+            }
+            if world.is_wall(p) {
+                continue;
+            }
             let i = frame(
                 &frames.room_frames,
                 room,
@@ -557,6 +579,12 @@ pub fn wall_faces(
             if contains(&frames.exterior_doorways, p, &mut budget.work).map_err(convert)? {
                 continue;
             }
+            if !world.contains(p) {
+                return Err(MappingUnavailable::InvalidSource);
+            }
+            if world.is_wall(p) {
+                continue;
+            }
             let i = frame(
                 &frames.room_frames,
                 room,
@@ -577,6 +605,8 @@ pub fn wall_faces(
                     .filter(|(q, _)| world.is_wall(*q))
                 {
                     result.push(MappingFace {
+                        anchor: p,
+                        toward: d,
                         room,
                         location: q,
                         normal: opposite(d.rotated(rotation)),
@@ -592,11 +622,15 @@ pub fn wall_faces(
             .ok_or(MappingUnavailable::Capacity)?,
     )
     .map_err(convert)?;
-    result.sort_unstable_by_key(|f| (f.room, key(f.location), f.normal));
+    result.sort_unstable_by_key(|f| (f.room, key(f.anchor), f.toward, key(f.location), f.normal));
     pay(&mut budget.work, result.len()).map_err(convert)?;
     result.dedup();
-    Ok(result)
+    Ok(FaceResult {
+        faces: result,
+        work: initial.work - budget.work,
+        allocation_bytes: initial.allocation_bytes - budget.allocation_bytes,
+    })
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

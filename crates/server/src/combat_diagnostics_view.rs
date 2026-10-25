@@ -128,7 +128,8 @@ fn record(
                         // diagnostics must not create a second detection disclosure path.
                         | s::abilities::ResolvedEffect::DetectMonsters { .. }
                         | s::abilities::ResolvedEffect::DetectFood { .. }
-                        | s::abilities::ResolvedEffect::DetectMagic { .. } => return None,
+                        | s::abilities::ResolvedEffect::DetectMagic { .. }
+                        | s::abilities::ResolvedEffect::MapTopology { .. } => return None,
                         s::abilities::ResolvedEffect::CorrodeArmor { amount, .. } => {
                             p::DiagnosticEffect::CorrodeArmor {
                                 target,
@@ -622,6 +623,7 @@ mod restorable_loss_diagnostic_tests {
                 },
                 s::abilities::ResolvedEffect::DetectFood { changed },
                 s::abilities::ResolvedEffect::DetectMagic { changed },
+                s::abilities::ResolvedEffect::MapTopology { changed },
                 s::abilities::ResolvedEffect::Damage { amount: 3 },
             ]);
             let view = record(&source, 1, &rules).unwrap();

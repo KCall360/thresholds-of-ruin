@@ -8,7 +8,7 @@ use tor_protocol::{ActorId, BranchId, ErrorCode};
 use tor_simulation::{chart, detection::DetectionView, Game};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct PreparedCharts([DetectionView; 3]);
+pub(crate) struct PreparedCharts([DetectionView; 4]);
 
 impl PreparedCharts {
     /// The Game argument is the selected authority, never an implicit live root.
@@ -25,6 +25,7 @@ impl PreparedCharts {
             read(chart::Kind::Monsters)?,
             read(chart::Kind::Food)?,
             read(chart::Kind::Magic)?,
+            read(chart::Kind::Mapping)?,
         ]))
     }
     pub(crate) fn summaries(
@@ -46,6 +47,7 @@ impl PreparedCharts {
                 };
                 ChartSummary {
                     kind: wire_kind(view.kind),
+                    supported: view.supported,
                     mode: if view.historical {
                         ChartMode::Historical
                     } else {
@@ -88,6 +90,7 @@ pub(crate) fn wire_kind(kind: chart::Kind) -> ChartKind {
         chart::Kind::Monsters => ChartKind::Monsters,
         chart::Kind::Food => ChartKind::Food,
         chart::Kind::Magic => ChartKind::Magic,
+        chart::Kind::Mapping => ChartKind::Mapping,
     }
 }
 fn token(
@@ -109,6 +112,7 @@ fn token(
         chart::Kind::Monsters => 0,
         chart::Kind::Food => 1,
         chart::Kind::Magic => 2,
+        chart::Kind::Mapping => 3,
     }]);
     hash.finalize()
         .iter()
@@ -141,6 +145,16 @@ pub(crate) fn record(chart: &chart::Chart, ordinal: usize) -> Option<ChartRecord
             },
             chart::Mark::Food => ChartMark::Food,
             chart::Mark::Magic => ChartMark::Magic,
+            chart::Mark::Mapping(value) => ChartMark::Mapping {
+                fact: match *value {
+                    chart::MappingMark::WallFace { normal } => MappingMark::WallFace { normal },
+                    chart::MappingMark::Passage => MappingMark::Passage,
+                    chart::MappingMark::Doorway => MappingMark::Doorway,
+                    chart::MappingMark::Stairs => MappingMark::Stairs,
+                    chart::MappingMark::SecretDoor => MappingMark::SecretDoor,
+                    chart::MappingMark::TrapPresence => MappingMark::TrapPresence,
+                },
+            },
         },
     }))
 }

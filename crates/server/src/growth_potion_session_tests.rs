@@ -159,7 +159,7 @@ fn imported_strength_restores_exclusively_then_reaches_combined_cap_independent_
     let directory = tempfile::tempdir().unwrap();
     let mut wire = Wire::new(
         Engine::open(
-            &directory.path().join("save.db"),
+            directory.path().join("save.db"),
             growth_source(&directory.path().join("source"), false),
         )
         .unwrap(),

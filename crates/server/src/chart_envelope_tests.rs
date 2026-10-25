@@ -15,6 +15,10 @@ fn actual_complete_chart_wire_pages_fit_core_admission_with_maximum_correlated_e
     assert_eq!(core::CHART_COMPONENT_BYTES, wire::CHART_COMPONENT_BYTES);
     assert_eq!(core::CHART_ROW_BYTES, wire::CHART_ROW_BYTES);
     assert_eq!(
+        core::CHART_MAPPING_MARK_BYTES,
+        wire::CHART_MAPPING_MARK_BYTES
+    );
+    assert_eq!(
         core::CHART_MONSTER_MARK_BYTES,
         wire::CHART_MONSTER_MARK_BYTES
     );
@@ -156,4 +160,64 @@ fn actual_complete_chart_wire_pages_fit_core_admission_with_maximum_correlated_e
     assert_eq!(validator.records_seen(), 1500);
     assert_eq!(pages, summary.pages);
     assert!(actual_bytes <= summary.encoded_bytes_bound);
+}
+
+#[test]
+fn mapping_fact_record_charges_match_core_and_actual_production_wire_adapter() {
+    use chart::MappingMark as M;
+    let marks = [
+        M::WallFace {
+            normal: Some([1, 0, 0]),
+        },
+        M::WallFace {
+            normal: Some([-1, 0, 0]),
+        },
+        M::WallFace {
+            normal: Some([0, 1, 0]),
+        },
+        M::WallFace {
+            normal: Some([0, -1, 0]),
+        },
+        M::WallFace {
+            normal: Some([0, 0, 1]),
+        },
+        M::WallFace {
+            normal: Some([0, 0, -1]),
+        },
+        M::Passage,
+        M::Doorway,
+        M::Stairs,
+        M::SecretDoor,
+        M::TrapPresence,
+    ];
+    for mark in marks {
+        let candidate = chart::Candidate::from_complete(
+            chart::Kind::Mapping,
+            vec![chart::Component {
+                alignment: tor_simulation::scope_projection::Alignment::Aligned,
+            }],
+            vec![chart::Row {
+                component: 0,
+                position: Some([i64::MIN, i64::MAX, -1]),
+                mark: chart::Mark::Mapping(mark),
+            }],
+            chart::Budget {
+                components: 1,
+                rows: 1,
+                json_bytes: usize::MAX,
+            },
+        )
+        .unwrap();
+        let chart = candidate.chart().unwrap();
+        let record = record(chart, 1);
+        assert_eq!(
+            record.encoded_size_bound().unwrap(),
+            core::CHART_ROW_BYTES + core::CHART_MAPPING_MARK_BYTES
+        );
+        assert_eq!(
+            record.encoded_size_bound().unwrap(),
+            chart.record_encoded_size_bound(1).unwrap()
+        );
+        assert!(serde_json::to_vec(&record).unwrap().len() <= record.encoded_size_bound().unwrap());
+    }
 }

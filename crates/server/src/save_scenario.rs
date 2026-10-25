@@ -1424,6 +1424,7 @@ enum Effect {
     },
     DetectFood,
     DetectMagic,
+    MapTopology,
     DrainLife,
     CancelSpecials,
     StepSelfOneCell,
@@ -4315,7 +4316,7 @@ struct RulesInput {
     #[serde(with = "mapped")]
     document: tor_simulation::rules::RulesetDocument,
 }
-const RULES_INPUT_FORMAT: u32 = 24;
+const RULES_INPUT_FORMAT: u32 = 25;
 pub(crate) fn encode_rules_document(
     document: &tor_simulation::rules::RulesetDocument,
 ) -> Result<String, crate::Failure> {
@@ -4415,7 +4416,7 @@ struct ContentPackage {
     #[serde(with = "mapped")]
     index: source::RegionIndex,
 }
-const CONTENT_PACKAGE_FORMAT: u32 = 28;
+const CONTENT_PACKAGE_FORMAT: u32 = 29;
 pub(crate) fn check_metadata_capacity(package: &source::Package) -> Result<(), crate::Failure> {
     let bytes = serde_json::to_vec(&Borrowed(package)).map_err(|_| storage_failure())?;
     if bytes.len() > MAX_SAVE_METADATA_BYTES {
@@ -4887,14 +4888,14 @@ mod tests {
                 super::CONTENT_PACKAGE_FORMAT,
                 crate::arena_evaluation::FORMAT,
             ),
-            (59, 31, "interactions-v52", 24, 8, 28, "tor-arena-run-v5")
+            (60, 32, "interactions-v53", 25, 8, 29, "tor-arena-run-v5")
         );
     }
 
     #[test]
     fn discovery_formats_preserve_physical_envelopes() {
-        assert_eq!(tor_protocol::PROTOCOL_VERSION, 61);
-        assert_eq!(super::RULES_INPUT_FORMAT, 24);
+        assert_eq!(tor_protocol::PROTOCOL_VERSION, 62);
+        assert_eq!(super::RULES_INPUT_FORMAT, 25);
         assert_eq!(super::REGION_INPUT_FORMAT, 8);
         // Semantic rule, region and package payload versions advance independently
         // of their physical framing, which remains unchanged.
@@ -6827,6 +6828,7 @@ impl Effect {
             },
             DetectFood {},
             DetectMagic {},
+            MapTopology {},
             DrainLife {},
             CancelSpecials {},
             StepSelfOneCell {},
@@ -6939,6 +6941,7 @@ impl Effect {
             Fields::DetectMonsters { condition } => source::Effect::DetectMonsters { condition },
             Fields::DetectFood {} => source::Effect::DetectFood,
             Fields::DetectMagic {} => source::Effect::DetectMagic,
+            Fields::MapTopology {} => source::Effect::MapTopology,
             Fields::DrainLife {} => source::Effect::DrainLife,
             Fields::CancelSpecials {} => source::Effect::CancelSpecials,
             Fields::StepSelfOneCell {} => source::Effect::StepSelfOneCell,
@@ -9873,6 +9876,7 @@ mod detection_effect_schema_tests {
             json!({"kind":"detect_monsters","condition":"test.detecting"}),
             json!({"kind":"detect_food"}),
             json!({"kind":"detect_magic"}),
+            json!({"kind":"map_topology"}),
         ] {
             let raw = good.to_string();
             let authored: source::Effect = serde_json::from_str(&raw)
@@ -9920,6 +9924,7 @@ mod detection_effect_schema_tests {
             r#"{"kind":"detect_monsters","condition":"test.detecting","condition":"test.other"}"#,
             r#"{"kind":"detect_food","condition":"test.detecting"}"#,
             r#"{"kind":"detect_magic","condition":"test.detecting"}"#,
+            r#"{"kind":"map_topology","condition":"test.detecting"}"#,
         ] {
             assert!(serde_json::from_str::<source::Effect>(malformed).is_err());
             assert!(

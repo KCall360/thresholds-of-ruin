@@ -178,8 +178,26 @@ pub fn project(
     world: &World,
     members: &[RegionId],
     points: &[Location],
-    mut b: Budget,
+    b: Budget,
 ) -> Result<Projection, Error> {
+    project_inner(world, members, points, b, false).map(|(projection, _)| projection)
+}
+/// Same exact component frames, ephemeral orientations only. No saved transform graph.
+pub(crate) fn project_oriented(
+    world: &World,
+    members: &[RegionId],
+    points: &[Location],
+    b: Budget,
+) -> Result<(Projection, Vec<Option<u8>>), Error> {
+    project_inner(world, members, points, b, true)
+}
+fn project_inner(
+    world: &World,
+    members: &[RegionId],
+    points: &[Location],
+    mut b: Budget,
+    oriented: bool,
+) -> Result<(Projection, Vec<Option<u8>>), Error> {
     let initial_budget = b;
     if members.len() > b.regions || points.len() > b.samples {
         return Err(Error::Budget);
@@ -312,6 +330,11 @@ pub fn project(
         }
     }
     let mut samples = reserve::<Sample>(points.len(), &mut b)?;
+    let mut rotations = if oriented {
+        reserve::<Option<u8>>(points.len(), &mut b)?
+    } else {
+        Vec::new()
+    };
     for p in points {
         charge(&mut b.work, 1)?;
         if !world.contains(*p) {
@@ -324,19 +347,25 @@ pub fn project(
         } else {
             None
         };
+        if oriented {
+            rotations.push(position.map(|_| frames[i].expect("projected frame").rotation));
+        }
         samples.push(Sample {
             component,
             position,
         });
     }
-    Ok(Projection {
-        usage: Usage {
-            work: initial_budget.work - b.work,
-            allocation_bytes: initial_budget.allocation_bytes - b.allocation_bytes,
+    Ok((
+        Projection {
+            usage: Usage {
+                work: initial_budget.work - b.work,
+                allocation_bytes: initial_budget.allocation_bytes - b.allocation_bytes,
+            },
+            components,
+            samples,
         },
-        components,
-        samples,
-    })
+        rotations,
+    ))
 }
 
 #[cfg(test)]

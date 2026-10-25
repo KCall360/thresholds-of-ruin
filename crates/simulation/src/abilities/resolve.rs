@@ -397,6 +397,9 @@ pub enum ResolvedEffect {
     DetectFood {
         changed: bool,
     },
+    MapTopology {
+        changed: bool,
+    },
     DetectMagic {
         changed: bool,
     },
@@ -509,6 +512,7 @@ impl ResolvedEffect {
             Self::RoomLight { .. }
             | Self::DetectMonsters { .. }
             | Self::DetectFood { .. }
+            | Self::MapTopology { .. }
             | Self::DetectMagic { .. }
             | Self::DrainLife { .. }
             | Self::AlterEquipment { .. }
@@ -530,6 +534,7 @@ impl ResolvedEffect {
             Self::RoomLight { changed }
             | Self::DetectMonsters { changed, .. }
             | Self::DetectFood { changed }
+            | Self::MapTopology { changed }
             | Self::DetectMagic { changed }
             | Self::DrainLife { changed }
             | Self::CancelSpecials { changed } => *changed,
@@ -580,6 +585,7 @@ impl ResolvedEffect {
             | Self::DrainLife { .. }
             | Self::DetectMonsters { .. }
             | Self::DetectFood { .. }
+            | Self::MapTopology { .. }
             | Self::DetectMagic { .. } => self.clone(),
             Self::CancelSpecials { .. } => Self::CancelSpecials {
                 changed: creature.cancel_specials()?,
@@ -1414,6 +1420,7 @@ pub(super) fn resolve_batch<'a>(
                 changed: false,
             },
             PlannedEffect::DetectFood => ResolvedEffect::DetectFood { changed: false },
+            PlannedEffect::MapTopology => ResolvedEffect::MapTopology { changed: false },
             PlannedEffect::DetectMagic => ResolvedEffect::DetectMagic { changed: false },
             PlannedEffect::DrainLife => ResolvedEffect::DrainLife { changed: false },
             PlannedEffect::CancelSpecials => ResolvedEffect::CancelSpecials { changed: false },
@@ -1761,6 +1768,9 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
             DetectFood {
                 changed: bool,
             },
+            MapTopology {
+                changed: bool,
+            },
             DetectMagic {
                 changed: bool,
             },
@@ -1870,6 +1880,7 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
                 changed,
             },
             Fields::DetectFood { changed } => Self::DetectFood { changed },
+            Fields::MapTopology { changed } => Self::MapTopology { changed },
             Fields::DetectMagic { changed } => Self::DetectMagic { changed },
             Fields::DrainLife { changed } => Self::DrainLife { changed },
             Fields::CancelSpecials { changed } => Self::CancelSpecials { changed },

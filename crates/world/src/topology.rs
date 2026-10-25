@@ -928,6 +928,46 @@ impl World {
             && !self.physical_vertical.contains(&(from, direction))
     }
 
+    /// Immutable sparse topology only, without destination or navigation lookup.
+    pub fn stair_candidates_in_region(
+        &self,
+        region: RegionId,
+    ) -> impl Iterator<Item = (Location, bool)> + '_ {
+        let first = Location {
+            region,
+            position: Position {
+                x: i32::MIN,
+                y: i32::MIN,
+                z: i32::MIN,
+            },
+        };
+        self.named_stairs
+            .range((first, Direction::North)..)
+            .take_while(move |((at, _), _)| at.region == region)
+            .map(|((at, _), _)| (*at, true))
+            .chain(
+                self.passages
+                    .range((first, Direction::North)..)
+                    .take_while(move |((at, _), _)| at.region == region)
+                    .map(|((at, direction), _)| (*at, self.is_stair(*at, *direction))),
+            )
+    }
+    /// Sparse physical doorway positions, independent of concealment knowledge.
+    pub fn doors_in_region(&self, region: RegionId) -> impl Iterator<Item = Location> + '_ {
+        let first = Location {
+            region,
+            position: Position {
+                x: i32::MIN,
+                y: i32::MIN,
+                z: i32::MIN,
+            },
+        };
+        self.doors
+            .range(first..)
+            .take_while(move |(at, _)| at.region == region)
+            .map(|(at, _)| *at)
+    }
+
     /// Known owner of a stair landing, even before its coordinates exist.
     pub fn stair_region(&self, from: Location, direction: Direction) -> Option<RegionId> {
         if !self.is_stair(from, direction) {

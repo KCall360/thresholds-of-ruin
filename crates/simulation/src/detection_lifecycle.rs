@@ -16,7 +16,8 @@ pub(crate) fn duration(turn_ticks: u64) -> Option<u64> {
         .filter(|ticks| (1..=crate::limits::NUMERIC as u64).contains(ticks))
 }
 pub(crate) fn valid_resolved_duration(ticks: u64) -> bool {
-    (MONSTER_TURNS..=crate::limits::NUMERIC as u64).contains(&ticks) && ticks % MONSTER_TURNS == 0
+    (MONSTER_TURNS..=crate::limits::NUMERIC as u64).contains(&ticks)
+        && ticks.is_multiple_of(MONSTER_TURNS)
 }
 pub(crate) fn validate_conditions(definitions: &[ConditionDef]) -> Result<(), RulesetError> {
     let mut marked = false;
@@ -50,7 +51,10 @@ pub(crate) fn validate_conditions(definitions: &[ConditionDef]) -> Result<(), Ru
 pub(crate) fn is_effect(effect: &Effect) -> bool {
     matches!(
         effect,
-        Effect::DetectMonsters { .. } | Effect::DetectFood | Effect::DetectMagic
+        Effect::DetectMonsters { .. }
+            | Effect::DetectFood
+            | Effect::DetectMagic
+            | Effect::MapTopology
     )
 }
 pub(crate) fn validate_sole_effects(effects: &[Effect]) -> Result<(), RulesetError> {
@@ -66,6 +70,7 @@ pub(crate) fn planned_kind(effect: &PlannedEffect) -> Option<crate::chart::Kind>
     match effect {
         PlannedEffect::DetectMonsters { .. } => Some(crate::chart::Kind::Monsters),
         PlannedEffect::DetectFood => Some(crate::chart::Kind::Food),
+        PlannedEffect::MapTopology => Some(crate::chart::Kind::Mapping),
         PlannedEffect::DetectMagic => Some(crate::chart::Kind::Magic),
         _ => None,
     }
@@ -74,6 +79,7 @@ pub(crate) fn resolved_kind(effect: &ResolvedEffect) -> Option<crate::chart::Kin
     match effect {
         ResolvedEffect::DetectMonsters { .. } => Some(crate::chart::Kind::Monsters),
         ResolvedEffect::DetectFood { .. } => Some(crate::chart::Kind::Food),
+        ResolvedEffect::MapTopology { .. } => Some(crate::chart::Kind::Mapping),
         ResolvedEffect::DetectMagic { .. } => Some(crate::chart::Kind::Magic),
         _ => None,
     }

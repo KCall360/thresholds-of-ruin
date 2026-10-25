@@ -400,8 +400,8 @@ pub(crate) fn appearance_tiles(
             .or_insert(cell);
     }
     let creatures = CreatureColumns::new(o);
-    let mut items: BTreeMap<(i32, i32), (ItemClass, Option<&str>, Option<&ObjectPresentation>)> =
-        BTreeMap::new();
+    type ItemArt<'a> = (ItemClass, Option<&'a str>, Option<&'a ObjectPresentation>);
+    let mut items: BTreeMap<(i32, i32), ItemArt<'_>> = BTreeMap::new();
     // Current piles retain their disclosed order and win over every stale
     // occurrence in this column, even a lower remembered height plane.
     for item in &o.ground_items {

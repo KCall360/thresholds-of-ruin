@@ -9,6 +9,7 @@ pub const CHART_COMPONENT_BYTES: usize = 96;
 pub const CHART_ROW_BYTES: usize = 256;
 pub const CHART_MONSTER_MARK_BYTES: usize = 96;
 pub const CHART_PRESENCE_MARK_BYTES: usize = 32;
+pub const CHART_MAPPING_MARK_BYTES: usize = 96;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PageLimits {
@@ -62,6 +63,7 @@ pub fn row_encoded_size_bound(row: &Row) -> Result<usize, Invalid> {
             )?
         }
         Mark::Food | Mark::Magic => CHART_PRESENCE_MARK_BYTES,
+        Mark::Mapping(_) => CHART_MAPPING_MARK_BYTES,
     };
     add(CHART_ROW_BYTES, mark)
 }

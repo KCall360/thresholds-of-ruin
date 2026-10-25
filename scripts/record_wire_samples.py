@@ -342,8 +342,8 @@ class Recorder(ProcessTestCase):
         self.assertEqual(observations["extended"]["tick"], "200")
         self.assertIn(deadlines["extended"] - deadlines["visual"], range(80800, 89201, 100))
         for stage, name, asset, object_name, object_asset, cosmetic_class in (
-                ("visual", "emu", "creature.bird.emu", "arrow", "item.weapon", "weapon"),
-                ("extended", "bat", "creature.bat", "torch", None, "tool")):
+                ("visual", "emu", "creature.bird.emu", "scroll titled SAH REN", "item.scroll", "scroll"),
+                ("extended", "bat", "creature.bat", "yew wand", "item.wand", "wand")):
             observation = observations[stage]
             peers = [row for row in observation["visible_actors"] if row["id"] != observation["self_target"]]
             # Body cells are separate lawful occurrences of one target. Keep

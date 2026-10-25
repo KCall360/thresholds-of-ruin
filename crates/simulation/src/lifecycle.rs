@@ -681,6 +681,7 @@ impl Game {
             match &mut outcome.effects[0] {
                 ResolvedEffect::DetectMonsters { changed: value, .. }
                 | ResolvedEffect::DetectFood { changed: value }
+                | ResolvedEffect::MapTopology { changed: value }
                 | ResolvedEffect::DetectMagic { changed: value } => *value = changed,
                 _ => unreachable!("closed detection kind"),
             }

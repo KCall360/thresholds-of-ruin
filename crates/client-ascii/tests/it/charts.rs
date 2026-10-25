@@ -6,6 +6,7 @@ use tor_protocol::{chart_pages::*, *};
 fn app() -> App {
     let mut observation = tor_client_common::test_support::observation();
     observation.charts = vec![ChartSummary {
+        supported: true,
         kind: ChartKind::Monsters,
         mode: ChartMode::Live,
         status: ChartStatus::Available,
@@ -270,4 +271,123 @@ fn chart_timeout_returns_to_catalog_without_actions_and_old_view_timeout_is_igno
     assert!(
         matches!(key(&mut app, Key::Enter), Effect::Request(request) if matches!(*request, Request::Chart { .. }))
     );
+}
+
+#[test]
+fn mapping_modal_renders_sparse_historical_stairs_and_wall_normal_without_map_or_operation_authority(
+) {
+    let mut app = app();
+    let mut snapshot = app.state.as_ref().unwrap().snapshot();
+    let observation = &mut Arc::make_mut(&mut snapshot.state).observation;
+    observation.visible_cells.clear();
+    observation.charts[0].kind = ChartKind::Mapping;
+    observation.charts[0].mode = ChartMode::Historical;
+    observation.charts[0].supported = false;
+    app.set_state(ClientState::from_snapshot(snapshot.clone()).unwrap());
+    let tiles = tor_client_ascii::render::map_tiles(app.state.as_ref().unwrap(), &app.palette);
+    assert_eq!(key(&mut app, Key::Charts), Effect::None);
+    let Effect::Request(request) = key(&mut app, Key::Enter) else {
+        panic!("mapping query")
+    };
+    let Request::Chart { query } = *request else {
+        panic!("read-only mapping query")
+    };
+    let state = app.state.as_ref().unwrap();
+    let mut worker = ChartPages::default();
+    worker.bind(&query, "mapping", state).unwrap();
+    let page = ChartPage {
+        context: query.context.clone(),
+        branch: query.branch.clone(),
+        base: query.base,
+        chart: query.chart.clone(),
+        kind: ChartKind::Mapping,
+        mode: ChartMode::Historical,
+        acquired_at: 0,
+        total_components: 1,
+        total_records: 4,
+        start: 0,
+        next: None,
+        records: vec![
+            ChartRecord::Component(ChartComponent {
+                component: 0,
+                alignment: ChartAlignment::Aligned,
+            }),
+            ChartRecord::Row(ChartRow {
+                component: 0,
+                position: Some([0, 0, 0]),
+                mark: ChartMark::Mapping {
+                    fact: MappingMark::WallFace {
+                        normal: Some([0, -1, 0]),
+                    },
+                },
+            }),
+            ChartRecord::Row(ChartRow {
+                component: 0,
+                position: Some([0, 0, 0]),
+                mark: ChartMark::Mapping {
+                    fact: MappingMark::Stairs,
+                },
+            }),
+            ChartRecord::Row(ChartRow {
+                component: 0,
+                position: Some([0, 0, 0]),
+                mark: ChartMark::Mapping {
+                    fact: MappingMark::TrapPresence,
+                },
+            }),
+        ],
+    };
+    let context = state.snapshot().reply_context();
+    let message = ServerMessage::ChartPage {
+        context: context.clone(),
+        request_id: "mapping".into(),
+        page: Box::new(page.clone()),
+    };
+    worker
+        .accept(
+            &context,
+            "mapping",
+            &page,
+            serde_json::to_vec(&message).unwrap().len(),
+            state,
+        )
+        .unwrap();
+    app.charts
+        .install(worker.presentation().unwrap(), state)
+        .unwrap();
+    let text = app.chart_lines().join("\n");
+    for label in [
+        "Mapping: historical",
+        "Unsupported in the current scope",
+        "wall face (normal 0, -1, 0)",
+        "stairs presence",
+        "trap presence",
+    ] {
+        assert!(text.contains(label), "{text}");
+    }
+    let mut canvas = tor_client_ascii::render::Canvas::default();
+    canvas.draw(&app);
+    for pressed in [
+        Key::Descend,
+        Key::Ascend,
+        Key::Attack,
+        Key::Pickup,
+        Key::Wait,
+    ] {
+        assert_eq!(key(&mut app, pressed), Effect::None);
+    }
+    assert_eq!(app.state.as_ref().unwrap().snapshot(), snapshot);
+    assert_eq!(
+        tor_client_ascii::render::map_tiles(app.state.as_ref().unwrap(), &app.palette),
+        tiles
+    );
+    assert_eq!(key(&mut app, Key::Escape), Effect::CancelCharts);
+    assert!(app
+        .state
+        .as_ref()
+        .unwrap()
+        .state()
+        .observation
+        .visible_cells
+        .is_empty());
 }

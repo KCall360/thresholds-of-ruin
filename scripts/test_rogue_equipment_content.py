@@ -72,7 +72,7 @@ class RogueEquipmentContent(unittest.TestCase):
             self.assertEqual(items["rogue.identify_" + category]["readable"],
                              {"identify": [category], "discovery": "on_use"})
         scrolls = [item for item in items.values() if item.get("appearance_pool") == "rogue.scrolls"]
-        self.assertEqual(len(scrolls), 16)
+        self.assertEqual(len(scrolls), 17)
         self.assertEqual(len(set(catalog["appearance_pools"]["rogue.scrolls"]["appearances"])), len(scrolls))
 
     def test_existing_stages_are_preserved_and_new_stock_is_finite(self):

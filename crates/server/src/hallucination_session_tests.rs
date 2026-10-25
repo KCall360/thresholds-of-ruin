@@ -131,17 +131,23 @@ fn ground(view: &Observation) -> &GroundItemView {
 
 fn assert_sample(view: &Observation, phase: u64) {
     // Frozen values independently evaluated from the documented integer recipe
-    // against the actual production 26-creature/76-object cosmetic roster.
+    // against the actual production 26-creature/80-object cosmetic roster.
     // Seed42, observer1, peer2 / item40. Not a probabilistic inequality.
     let (name, asset, object, object_asset, class) = match phase {
         0 => (
             "emu",
             "creature.bird.emu",
-            "arrow",
-            Some("item.weapon"),
-            ItemClass::Weapon,
+            "scroll titled SAH REN",
+            Some("item.scroll"),
+            ItemClass::Scroll,
         ),
-        1 => ("bat", "creature.bat", "torch", None, ItemClass::Tool),
+        1 => (
+            "bat",
+            "creature.bat",
+            "yew wand",
+            Some("item.wand"),
+            ItemClass::Wand,
+        ),
         _ => panic!("unlisted literal phase witness"),
     };
     let peer = true_peer(view);
@@ -316,9 +322,7 @@ fn peer_driven_exact_base_period_publishes_unsolicited_owner_and_followed_visual
     let initial = wire.snapshot(OWNER);
     assert_eq!(initial.state.observation.tick, 100);
     assert_sample(&initial.state.observation, 0);
-    let initial_seed = true_peer(&initial.state.observation)
-        .appearance_seed
-        .clone();
+    let initial_seed = true_peer(&initial.state.observation).appearance_seed;
     let mut owner_state = (*initial.state).clone();
     let (mut follower, mut follower_state) = follower(&mut wire);
     assert_sample(&follower_state.observation, 0);

@@ -42,6 +42,7 @@ impl NaturalAttack {
                                 Effect::RoomLight
                                     | Effect::DetectMonsters { .. }
                                     | Effect::DetectFood
+                                    | Effect::MapTopology
                                     | Effect::DetectMagic
                                     | Effect::DrainLife
                                     | Effect::CancelSpecials

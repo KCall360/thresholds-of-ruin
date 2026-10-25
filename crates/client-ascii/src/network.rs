@@ -1298,6 +1298,7 @@ mod tests {
         use chart_pages::*;
         let mut observation = tor_client_common::test_support::observation();
         observation.charts = vec![ChartSummary {
+            supported: true,
             kind: ChartKind::Monsters,
             mode: ChartMode::Live,
             status: ChartStatus::Available,

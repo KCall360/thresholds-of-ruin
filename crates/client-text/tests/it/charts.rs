@@ -21,6 +21,7 @@ impl ChartLink {
     fn new() -> Self {
         let mut observation = tor_client_common::test_support::observation();
         observation.charts = vec![ChartSummary {
+            supported: true,
             kind: ChartKind::Monsters,
             mode: ChartMode::Live,
             status: ChartStatus::Available,
@@ -76,6 +77,7 @@ impl ChartLink {
         };
         let id = format!("chart-{}", self.sent.len());
         self.charts.bind(query, &id, &self.state)?;
+        let summary = self.state.state().observation.charts[0].clone();
         let records = if query.cursor.is_none() {
             vec![ChartRecord::Component(ChartComponent {
                 component: 0,
@@ -86,9 +88,15 @@ impl ChartLink {
                 ChartRecord::Row(ChartRow {
                     component: 0,
                     position: Some([3, 4, 5]),
-                    mark: ChartMark::Monster {
-                        name: "painted stairs".into(),
-                        asset: None
+                    mark: if summary.kind == ChartKind::Mapping {
+                        ChartMark::Mapping {
+                            fact: MappingMark::Stairs,
+                        }
+                    } else {
+                        ChartMark::Monster {
+                            name: "painted stairs".into(),
+                            asset: None,
+                        }
                     }
                 });
                 2
@@ -100,9 +108,9 @@ impl ChartLink {
             branch: query.branch.clone(),
             base: query.base,
             chart: query.chart.clone(),
-            kind: ChartKind::Monsters,
-            mode: ChartMode::Live,
-            acquired_at: 0,
+            kind: summary.kind,
+            mode: summary.mode,
+            acquired_at: summary.acquired_at.unwrap(),
             total_components: 1,
             total_records: 3,
             start: query.cursor.unwrap_or(0),
@@ -229,4 +237,36 @@ fn explicit_chart_parser_never_reinterprets_invalid_chart_input_as_actions() {
     ] {
         assert!(tor_client_text::parse(line, link.state.state()).is_err());
     }
+}
+
+#[tokio::test]
+async fn ordinary_mapping_command_keeps_unsupported_historical_stairs_read_only() {
+    let mut link = ChartLink::new();
+    let mut snapshot = link.state.snapshot();
+    let summary = &mut Arc::make_mut(&mut snapshot.state).observation.charts[0];
+    summary.kind = ChartKind::Mapping;
+    summary.mode = ChartMode::Historical;
+    summary.supported = false;
+    link.state = ClientState::from_snapshot(snapshot.clone()).unwrap();
+    let mut engine = Engine::default();
+    let Outcome::Passage(text) = engine.play(&mut link, "chart mapping").await.unwrap() else {
+        panic!("chart quit")
+    };
+    assert!(text.contains("Mapping: historical, available"));
+    assert!(text.contains("Unsupported in the current scope"));
+    assert_eq!(text.matches("stairs presence").count(), 2);
+    assert_eq!(link.sent.len(), 2);
+    assert!(link
+        .sent
+        .iter()
+        .all(|request| matches!(request, Request::Chart { .. })));
+    assert_eq!(link.state.snapshot(), snapshot);
+    let scene = tor_client_text::engine::scene::Scene::new(link.state.state(), &link.palette);
+    assert!(scene.referents.iter().all(|r| !r.name.contains("stairs")));
+    link.role = AccessRole::Player;
+    let _ = engine
+        .play(&mut link, "attack stairs presence")
+        .await
+        .unwrap();
+    assert_eq!(link.sent.len(), 2);
 }

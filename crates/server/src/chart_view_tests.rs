@@ -19,6 +19,7 @@ fn candidate(kind: chart::Kind, rows: usize) -> chart::Candidate {
                     ),
                     chart::Kind::Food => chart::Mark::Food,
                     chart::Kind::Magic => chart::Mark::Magic,
+                    chart::Kind::Mapping => chart::Mark::Mapping(chart::MappingMark::Passage),
                 },
             })
             .collect(),
@@ -32,8 +33,15 @@ fn candidate(kind: chart::Kind, rows: usize) -> chart::Candidate {
 }
 fn prepared() -> PreparedCharts {
     PreparedCharts(
-        [chart::Kind::Monsters, chart::Kind::Food, chart::Kind::Magic].map(|kind| DetectionView {
+        [
+            chart::Kind::Monsters,
+            chart::Kind::Food,
+            chart::Kind::Magic,
+            chart::Kind::Mapping,
+        ]
+        .map(|kind| DetectionView {
             kind,
+            supported: true,
             historical: kind != chart::Kind::Monsters,
             acquired_at: None,
             candidate: None,
@@ -66,7 +74,8 @@ fn summary_distinguishes_inactive_empty_positive_unavailable_and_independent_lat
         vec![
             ChartStatus::Empty,
             ChartStatus::Available,
-            ChartStatus::Unavailable
+            ChartStatus::Unavailable,
+            ChartStatus::Inactive
         ]
     );
     assert!(summaries[0].chart.is_some());
@@ -202,4 +211,73 @@ fn semantic_prepared_equality_detects_far_rows_without_ordinary_sight_inputs() {
         unavailable.clone(),
         "no private phase participates in semantic equality"
     );
+}
+
+#[test]
+fn current_mapping_support_is_separate_from_retained_acquisition() {
+    let mut views = prepared();
+    views.0[3].supported = false;
+    views.0[3].historical = true;
+    views.0[3].candidate = Some(candidate(chart::Kind::Mapping, 1));
+    views.0[3].acquired_at = Some(10);
+    let summaries = views.summaries("salt", ActorId(1), &BranchId("b".into()), 2);
+    validate_summaries(&summaries).unwrap();
+    assert_eq!(summaries.len(), 4);
+    assert_eq!(summaries[3].kind, ChartKind::Mapping);
+    assert!(!summaries[3].supported);
+    assert_eq!(
+        (
+            summaries[3].mode,
+            summaries[3].status,
+            summaries[3].acquired_at
+        ),
+        (ChartMode::Historical, ChartStatus::Available, Some(10))
+    );
+    assert!(summaries[3].chart.is_some() && views.chart(ChartKind::Mapping).is_some());
+    let mut newly_supported = views.clone();
+    newly_supported.0[3].supported = true;
+    assert_ne!(
+        views, newly_supported,
+        "floor support changes are semantic revision facts"
+    );
+}
+#[test]
+fn mapping_adapter_preserves_transformed_cardinal_or_omits_inconsistent_orientation() {
+    for (alignment, position, normal) in [
+        (Alignment::Aligned, Some([7, -2, 1]), Some([0, -1, 0])),
+        (Alignment::Inconsistent, None, None),
+    ] {
+        let candidate = chart::Candidate::from_complete(
+            chart::Kind::Mapping,
+            vec![chart::Component { alignment }],
+            vec![chart::Row {
+                component: 0,
+                position,
+                mark: chart::Mark::Mapping(chart::MappingMark::WallFace { normal }),
+            }],
+            chart::Budget {
+                components: 1,
+                rows: 1,
+                json_bytes: usize::MAX,
+            },
+        )
+        .unwrap();
+        let row = record(candidate.chart().unwrap(), 1).unwrap();
+        let ChartRecord::Row(row) = row else {
+            panic!("mapping row")
+        };
+        row.validate().unwrap();
+        assert_eq!(row.position, position);
+        assert_eq!(
+            row.mark,
+            ChartMark::Mapping {
+                fact: MappingMark::WallFace { normal }
+            }
+        );
+        let value = serde_json::to_value(row).unwrap();
+        assert_eq!(
+            value["mark"],
+            serde_json::json!({"kind":"mapping","fact":{"kind":"wall_face","normal":normal}})
+        );
+    }
 }

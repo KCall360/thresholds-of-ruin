@@ -1070,6 +1070,7 @@ pub enum Effect {
         condition: ConditionId,
     },
     DetectFood,
+    MapTopology,
     DetectMagic,
     DrainLife,
     GainStrength,
@@ -1151,6 +1152,7 @@ impl Effect {
             Self::RoomLight
             | Self::DetectMonsters { .. }
             | Self::DetectFood
+            | Self::MapTopology
             | Self::DetectMagic
             | Self::DrainLife
             | Self::AlterEquipment { .. }
@@ -1196,6 +1198,7 @@ impl<'de> Deserialize<'de> for Effect {
                 condition: ConditionId,
             },
             DetectFood {},
+            MapTopology {},
             DetectMagic {},
             DrainLife {},
             GainStrength {},
@@ -1297,6 +1300,7 @@ impl<'de> Deserialize<'de> for Effect {
             Fields::RoomLight {} => Self::RoomLight,
             Fields::DetectMonsters { condition } => Self::DetectMonsters { condition },
             Fields::DetectFood {} => Self::DetectFood,
+            Fields::MapTopology {} => Self::MapTopology,
             Fields::DetectMagic {} => Self::DetectMagic,
             Fields::DrainLife {} => Self::DrainLife,
             Fields::GainStrength {} => Self::GainStrength,
@@ -3060,6 +3064,7 @@ impl References<'_> {
                 | Effect::TeleportToRayOrigin
                 | Effect::RoomLight
                 | Effect::DetectFood
+                | Effect::MapTopology
                 | Effect::DetectMagic
                 | Effect::DrainLife
                 | Effect::GainStrength
@@ -3710,6 +3715,7 @@ impl Effect {
             | Self::RoomLight
             | Self::DetectMonsters { .. }
             | Self::DetectFood
+            | Self::MapTopology
             | Self::DetectMagic
             | Self::DrainLife
             | Self::GainStrength
@@ -4127,8 +4133,8 @@ mod tests {
         ));
         assert!(
             toml::from_str::<RulesetDocument>(&DEFAULT_RULESET_TOML.replace(
-                "id = \"interactions-v52\"",
-                "id = \"interactions-v52\"\nunknown = true"
+                "id = \"interactions-v53\"",
+                "id = \"interactions-v53\"\nunknown = true"
             ))
             .is_err()
         );

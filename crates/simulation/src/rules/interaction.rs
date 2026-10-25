@@ -171,6 +171,7 @@ impl Ruleset {
                     | PlannedEffect::RoomLight
                     | PlannedEffect::DetectMonsters { .. }
                     | PlannedEffect::DetectFood
+                    | PlannedEffect::MapTopology
                     | PlannedEffect::DetectMagic
                     | PlannedEffect::DrainLife
                     | PlannedEffect::CancelSpecials
@@ -252,6 +253,7 @@ impl Ruleset {
             | Effect::RoomLight
             | Effect::DetectMonsters { .. }
             | Effect::DetectFood
+            | Effect::MapTopology
             | Effect::DetectMagic
             | Effect::DrainLife
             | Effect::CancelSpecials

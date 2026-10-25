@@ -51,8 +51,8 @@ def initial_items(test, frame):
 def assert_sample(test, observation, phase):
     # Frozen values independently evaluated from the documented selector recipe
     # and canonical production tuple roster: seed42, observer1, peer2/item40.
-    expected = {0: ("emu", "creature.bird.emu", "arrow", "item.weapon", "weapon"),
-                1: ("bat", "creature.bat", "torch", None, "tool")}[phase]
+    expected = {0: ("emu", "creature.bird.emu", "scroll titled SAH REN", "item.scroll", "scroll"),
+                1: ("bat", "creature.bat", "yew wand", "item.wand", "wand")}[phase]
     name, asset, object_name, object_asset, cosmetic_class = expected
     peers = [row for row in observation["visible_actors"] if row["id"] != observation["self_target"]]
     # One creature may have several genuinely disclosed body-cell occurrences.

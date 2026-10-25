@@ -53,6 +53,7 @@ impl Species {
                                 | crate::rules::Effect::DrainLife
                                 | crate::rules::Effect::DetectMonsters { .. }
                                 | crate::rules::Effect::DetectFood
+                                | crate::rules::Effect::MapTopology
                                 | crate::rules::Effect::DetectMagic
                         )
                 })

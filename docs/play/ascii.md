@@ -72,7 +72,7 @@ they see the newest rows and are never held.
 
 ### Detection charts
 
-Press **m** to view server-disclosed Monster, Food or Magic detection charts.
+Press **m** to view server-disclosed Monster, Food, Magic or Mapping charts.
 The catalog distinguishes live, historical, empty, inactive and unavailable data.
 Capture time belongs to the retained sample; a later empty or unavailable attempt
 is shown separately and does not relabel an old positive sample as current.
@@ -88,6 +88,11 @@ marks are simply “creature,” never inferred from a personal identity.
 The screen is read-only, including for spectators: clicks, attack, pickup and
 stair keys do not act on chart marks. Closing restores ordinary controls. Charts
 never add sight, ordinary map coverage, item/actor targets or navigation routes.
+
+Mapping charts show sparse historical geometry and generic presence facts in
+separate component panels; they never grant stair movement, trap operations or
+ordinary-map discovery. Wall normals use all three axes. Unsupported current
+scope is labeled independently of any retained historical sample.
 
 ### The map
 

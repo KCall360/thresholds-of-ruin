@@ -123,7 +123,7 @@ class HallucinationServiceContracts(UtilityServiceHarness):
             shifted = [row for row in updates if row["cursor"]["tick"] == "200"]
             self.assertTrue(shifted, "actual unsolicited phase publication is required")
             self.assertTrue(any(row["name"] == "bat" for update in shifted for row in rows(update, "visible_actors")))
-            self.assertTrue(any(row["presentation"] == {"name": "torch", "asset": None,
-                "kind": {"kind": "item", "class": "tool"}} for update in shifted for row in rows(update, "ground_items")))
+            self.assertTrue(any(row["presentation"] == {"name": "yew wand", "asset": "item.wand",
+                "kind": {"kind": "item", "class": "wand"}} for update in shifted for row in rows(update, "ground_items")))
         current = self.snapshot()
         assert_sample(self, observation(current), 1)

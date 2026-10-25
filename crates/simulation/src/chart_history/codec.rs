@@ -17,6 +17,8 @@ struct Point {
     component: usize,
     #[serde(deserialize_with = "crate::bounded::required_option")]
     position: Option<[i64; 3]>,
+    #[serde(deserialize_with = "crate::bounded::required_option")]
+    mapping: Option<MappingProof>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -42,6 +44,7 @@ struct SlotRef {
 struct Slots {
     food: SlotRef,
     magic: SlotRef,
+    mapping: SlotRef,
 }
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -112,8 +115,18 @@ macro_rules! fixed_entry {
     };
 }
 fixed_entry!(Alignment, 32);
-fixed_entry!(Point, 256);
-fixed_entry!(Binding, 256);
+impl Entry for Point {
+    fn read<'de, D: Deserializer<'de>>(d: D, m: &mut Meter) -> Result<Self, D::Error> {
+        m.charge(256)?;
+        let point = Self::deserialize(d)?;
+        if point.mapping.is_some() {
+            m.charge(256)?;
+        }
+        Ok(point)
+    }
+}
+// Three independently timed slots, including the longest unavailable reason.
+fixed_entry!(Binding, 512);
 impl Entry for Vec<Binding> {
     fn read<'de, D: Deserializer<'de>>(d: D, m: &mut Meter) -> Result<Self, D::Error> {
         m.charge(16)?;
@@ -259,8 +272,10 @@ impl Pool {
         for root in &self.roots {
             let cost = root
                 .points
-                .len()
-                .checked_mul(256)
+                .iter()
+                .try_fold(0usize, |n, p| {
+                    n.checked_add(if p.mapping.is_some() { 512 } else { 256 })
+                })
                 .and_then(|n| {
                     root.components
                         .len()
@@ -278,6 +293,10 @@ impl Pool {
             bytes = bytes.checked_sub(cost).ok_or(Error::Capacity)?;
             if root.points.is_empty()
                 || root.components.is_empty()
+                || root.points.iter().any(|p| {
+                    (root.kind == Kind::Mapping) != p.mapping.is_some()
+                        || p.mapping.as_ref().is_some_and(|m| m.decode().is_err())
+                })
                 || root.scope.is_empty()
                 || root.scope.chars().any(char::is_control)
             {
@@ -291,7 +310,7 @@ impl Pool {
             bytes = bytes
                 .checked_sub(
                     dir.len()
-                        .checked_mul(256)
+                        .checked_mul(512)
                         .and_then(|n| n.checked_add(16))
                         .ok_or(Error::Capacity)?,
                 )
@@ -305,12 +324,16 @@ impl Pool {
                 return Err(Error::Structure);
             }
             for binding in dir {
-                if binding.slots.food.attempt.is_none() && binding.slots.magic.attempt.is_none() {
+                if binding.slots.food.attempt.is_none()
+                    && binding.slots.magic.attempt.is_none()
+                    && binding.slots.mapping.attempt.is_none()
+                {
                     return Err(Error::Structure);
                 }
                 for (kind, slot) in [
                     (Kind::Food, binding.slots.food),
                     (Kind::Magic, binding.slots.magic),
+                    (Kind::Mapping, binding.slots.mapping),
                 ] {
                     match (slot.attempt, slot.latest) {
                         (None, None) => {}
@@ -380,11 +403,21 @@ impl Pool {
                             .chart
                             .rows()
                             .iter()
-                            .zip(&root.source_points)
-                            .map(|(row, source)| Point {
-                                source: *source,
-                                component: row.component,
-                                position: row.position,
+                            .enumerate()
+                            .map(|(i, row)| {
+                                let (source, mapping) = match &root.source {
+                                    SourceProof::Points(points) => (points[i], None),
+                                    SourceProof::Mapping(points) => (
+                                        points[i].location,
+                                        Some(MappingProof::capture(points[i].mark, &row.mark)),
+                                    ),
+                                };
+                                Point {
+                                    source,
+                                    component: row.component,
+                                    position: row.position,
+                                    mapping,
+                                }
                             })
                             .collect(),
                     };
@@ -400,6 +433,7 @@ impl Pool {
             let slots = Slots {
                 food: slot(&owner.food),
                 magic: slot(&owner.magic),
+                mapping: slot(&owner.mapping),
             };
             directory.push(Binding { actor, slots });
         }
@@ -434,7 +468,7 @@ impl Pool {
             };
             owners.insert(index);
             for b in directory {
-                for slot in [b.slots.food, b.slots.magic] {
+                for slot in [b.slots.food, b.slots.magic, b.slots.mapping] {
                     if slot.attempt.is_some_and(|a| a.attempted_at > tick) {
                         return false;
                     }
@@ -486,18 +520,23 @@ impl Pool {
                                 }
                             },
                         }));
-                        let mark = match root.kind {
-                            Kind::Food => chart::Mark::Food,
-                            Kind::Magic => chart::Mark::Magic,
-                        };
                         let mut rows = Vec::new();
                         rows.try_reserve_exact(root.points.len())
                             .map_err(|_| Error::Capacity)?;
-                        rows.extend(root.points.iter().map(|p| chart::Row {
-                            component: p.component,
-                            position: p.position,
-                            mark: mark.clone(),
-                        }));
+                        for p in &root.points {
+                            let mark = match root.kind {
+                                Kind::Food => chart::Mark::Food,
+                                Kind::Magic => chart::Mark::Magic,
+                                Kind::Mapping => {
+                                    p.mapping.as_ref().ok_or(Error::Structure)?.decode()?.1
+                                }
+                            };
+                            rows.push(chart::Row {
+                                component: p.component,
+                                position: p.position,
+                                mark,
+                            });
+                        }
                         let candidate = chart::Candidate::from_complete(
                             root.kind.chart_kind(),
                             components,
@@ -506,20 +545,41 @@ impl Pool {
                         )
                         .map_err(|_| Error::Structure)?;
                         let chart = candidate.shared_chart().cloned().ok_or(Error::Capacity)?;
-                        let mut points = Vec::new();
-                        points
-                            .try_reserve_exact(root.points.len())
-                            .map_err(|_| Error::Capacity)?;
-                        points.extend(root.points.iter().map(|p| p.source));
-                        let value = HistoricalChart::checked_after_world_validation(
-                            root.kind,
-                            root.acquired_tick,
-                            root.scope.clone(),
-                            Shared::new(proof),
-                            chart,
-                            points,
-                            archive_budget(),
-                        )?;
+                        let value = if root.kind == Kind::Mapping {
+                            let mut points = Vec::new();
+                            points
+                                .try_reserve_exact(root.points.len())
+                                .map_err(|_| Error::Capacity)?;
+                            for p in &root.points {
+                                points.push(crate::mapping_chart::SourceRow {
+                                    location: p.source,
+                                    mark: p.mapping.as_ref().ok_or(Error::Structure)?.decode()?.0,
+                                });
+                            }
+                            HistoricalChart::mapping_after_world_validation(
+                                root.acquired_tick,
+                                root.scope.clone(),
+                                Shared::new(proof),
+                                chart,
+                                points,
+                                archive_budget(),
+                            )?
+                        } else {
+                            let mut points = Vec::new();
+                            points
+                                .try_reserve_exact(root.points.len())
+                                .map_err(|_| Error::Capacity)?;
+                            points.extend(root.points.iter().map(|p| p.source));
+                            HistoricalChart::checked_after_world_validation(
+                                root.kind,
+                                root.acquired_tick,
+                                root.scope.clone(),
+                                Shared::new(proof),
+                                chart,
+                                points,
+                                archive_budget(),
+                            )?
+                        };
                         entry.insert(Shared::new(value));
                     }
                     Some(cache[&index].clone())
@@ -536,6 +596,7 @@ impl Pool {
                 Owner {
                     food: slot(binding.slots.food)?,
                     magic: slot(binding.slots.magic)?,
+                    mapping: slot(binding.slots.mapping)?,
                 },
             );
         }
@@ -656,12 +717,15 @@ impl<'de> Deserialize<'de> for Point {
             component: usize,
             #[serde(deserialize_with = "crate::bounded::required_option")]
             position: Option<[i64; 3]>,
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            mapping: Option<MappingProof>,
         }
         let f: Fields = crate::bounded::named_map(d)?;
         Ok(Self {
             source: f.source,
             component: f.component,
             position: f.position,
+            mapping: f.mapping,
         })
     }
 }
@@ -689,11 +753,13 @@ impl<'de> Deserialize<'de> for Slots {
         struct Fields {
             food: SlotRef,
             magic: SlotRef,
+            mapping: SlotRef,
         }
         let f: Fields = crate::bounded::named_map(d)?;
         Ok(Self {
             food: f.food,
             magic: f.magic,
+            mapping: f.mapping,
         })
     }
 }
@@ -731,5 +797,103 @@ impl<'de> Deserialize<'de> for LocalHistory {
             history: f.history,
             owners: f.owners,
         })
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum MappingTag {
+    WallFace,
+    Passage,
+    Doorway,
+    Stairs,
+    SecretDoor,
+    TrapPresence,
+}
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+struct MappingProof {
+    tag: MappingTag,
+    room: Option<u32>,
+    toward: Option<tor_world::Direction>,
+    normal: Option<[i8; 3]>,
+}
+impl MappingProof {
+    fn capture(source: crate::mapping_chart::SourceMark, display: &chart::Mark) -> Self {
+        use crate::mapping_chart::SourceMark as S;
+        let (tag, room, toward) = match source {
+            S::WallFace { room, toward } => (MappingTag::WallFace, Some(room.get()), Some(toward)),
+            S::Passage => (MappingTag::Passage, None, None),
+            S::Doorway => (MappingTag::Doorway, None, None),
+            S::Stairs => (MappingTag::Stairs, None, None),
+            S::SecretDoor => (MappingTag::SecretDoor, None, None),
+            S::TrapPresence => (MappingTag::TrapPresence, None, None),
+        };
+        let normal = match display {
+            chart::Mark::Mapping(chart::MappingMark::WallFace { normal }) => *normal,
+            _ => None,
+        };
+        Self {
+            tag,
+            room,
+            toward,
+            normal,
+        }
+    }
+    fn decode(&self) -> Result<(crate::mapping_chart::SourceMark, chart::Mark), Error> {
+        use crate::mapping_chart::SourceMark as S;
+        use chart::MappingMark as M;
+        let pair = match self.tag {
+            MappingTag::WallFace => {
+                let room = crate::spatial_scope::RoomId::new(self.room.ok_or(Error::Structure)?)
+                    .ok_or(Error::Structure)?;
+                let toward = self.toward.ok_or(Error::Structure)?;
+                (
+                    S::WallFace { room, toward },
+                    M::WallFace {
+                        normal: self.normal,
+                    },
+                )
+            }
+            tag => {
+                if self.room.is_some() || self.toward.is_some() || self.normal.is_some() {
+                    return Err(Error::Structure);
+                }
+                match tag {
+                    MappingTag::Passage => (S::Passage, M::Passage),
+                    MappingTag::Doorway => (S::Doorway, M::Doorway),
+                    MappingTag::Stairs => (S::Stairs, M::Stairs),
+                    MappingTag::SecretDoor => (S::SecretDoor, M::SecretDoor),
+                    MappingTag::TrapPresence => (S::TrapPresence, M::TrapPresence),
+                    MappingTag::WallFace => unreachable!(),
+                }
+            }
+        };
+        Ok((pair.0, chart::Mark::Mapping(pair.1)))
+    }
+}
+impl<'de> Deserialize<'de> for MappingProof {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            tag: MappingTag,
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            room: Option<u32>,
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            toward: Option<tor_world::Direction>,
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            normal: Option<[i8; 3]>,
+        }
+        let f: Fields = crate::bounded::named_map(d)?;
+        let value = Self {
+            tag: f.tag,
+            room: f.room,
+            toward: f.toward,
+            normal: f.normal,
+        };
+        value
+            .decode()
+            .map_err(|_| D::Error::custom("invalid mapping proof"))?;
+        Ok(value)
     }
 }

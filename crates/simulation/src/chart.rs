@@ -8,6 +8,7 @@ pub enum Kind {
     Monsters,
     Food,
     Magic,
+    Mapping,
 }
 #[derive(Clone, Copy, Debug)]
 pub struct Budget {
@@ -41,6 +42,17 @@ pub enum Mark {
     Monster(crate::appearance_catalog::CreatureAppearance),
     Food,
     Magic,
+    Mapping(MappingMark),
+}
+/// Sparse topology only; never material, room interior, actors or trap family.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum MappingMark {
+    WallFace { normal: Option<[i8; 3]> },
+    Passage,
+    Doorway,
+    Stairs,
+    SecretDoor,
+    TrapPresence,
 }
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Row {
@@ -119,8 +131,18 @@ impl Candidate {
             match (&kind, &row.mark) {
                 (Kind::Monsters, Mark::Monster(_))
                 | (Kind::Food, Mark::Food)
-                | (Kind::Magic, Mark::Magic) => {}
+                | (Kind::Magic, Mark::Magic)
+                | (Kind::Mapping, Mark::Mapping(_)) => {}
                 _ => return Err(Invalid::Kind),
+            }
+            if let Mark::Mapping(MappingMark::WallFace { normal }) = row.mark {
+                match (c.alignment, normal) {
+                    (crate::scope_projection::Alignment::Aligned, Some(vector))
+                        if vector.into_iter().all(|v| (-1..=1).contains(&v))
+                            && vector.into_iter().filter(|v| *v != 0).count() == 1 => {}
+                    (crate::scope_projection::Alignment::Inconsistent, None) => {}
+                    _ => return Err(Invalid::Position),
+                }
             }
             size = add(size, delivery::row_encoded_size_bound(row)?)?;
         }

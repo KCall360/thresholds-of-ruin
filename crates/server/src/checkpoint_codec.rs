@@ -142,6 +142,15 @@ pub(crate) fn decode(bytes: &[u8]) -> io::Result<Vec<u8>> {
 }
 
 #[cfg(test)]
+pub(super) fn write_json_with_test_limit<T: Serialize, W: Write>(
+    value: &T,
+    output: W,
+    limit: usize,
+) -> io::Result<W> {
+    write_limited(value, output, limit)
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -266,13 +275,4 @@ mod tests {
             assert!(decode(&bytes).is_err());
         }
     }
-}
-
-#[cfg(test)]
-pub(super) fn write_json_with_test_limit<T: Serialize, W: Write>(
-    value: &T,
-    output: W,
-    limit: usize,
-) -> io::Result<W> {
-    write_limited(value, output, limit)
 }

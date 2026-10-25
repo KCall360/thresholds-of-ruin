@@ -24,10 +24,10 @@ class RogueHasteContent(unittest.TestCase):
         self.assertEqual({name for name, item in catalog["items"].items()
                           if item.get("appearance_pool") == "rogue.potions"}, {
             "rogue.restore_strength", "rogue.healing", "rogue.extra_healing", "rogue.confusion",
-            "rogue.blindness", "rogue.poison", "rogue.see_invisible", "rogue.levitation", "rogue.haste", "rogue.gain_strength", "rogue.raise_level", "rogue.hallucination"})
+            "rogue.blindness", "rogue.poison", "rogue.see_invisible", "rogue.levitation", "rogue.haste", "rogue.gain_strength", "rogue.raise_level", "rogue.hallucination", "rogue.monster_detection", "rogue.food_detection", "rogue.magic_detection"})
         self.assertEqual(catalog["appearance_pools"]["rogue.potions"]["appearances"], [
             "amber potion", "smoky potion", "violet potion", "azure potion", "crimson potion",
-            "silver potion", "pearl potion", "teal potion", "ochre potion", "indigo potion", "copper potion", "chartreuse potion"])
+            "silver potion", "pearl potion", "teal potion", "ochre potion", "indigo potion", "copper potion", "chartreuse potion", "saffron potion", "cerulean potion", "magenta potion"])
 
     def test_only_shared_haste_opts_into_mixed_lifetime_and_rest_is_dedicated(self):
         conditions = {row["path"][1]: row["value"] for row in source("rules.toml")["overrides"]

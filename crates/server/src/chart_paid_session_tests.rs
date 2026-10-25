@@ -351,3 +351,239 @@ fn historical_magic_is_frozen_across_movement_source_deleted_reopen_and_spectato
     );
     assert_eq!(checkpoint(&service.engine), before);
 }
+
+#[test]
+fn paid_magic_history_encoder_rejection_rolls_back_then_exact_retry_commits_once() {
+    paid_magic_history_encoder_rollback(true);
+}
+
+#[test]
+fn paid_magic_history_encoder_rejection_allows_explicit_new_user_transaction() {
+    paid_magic_history_encoder_rollback(false);
+}
+
+fn paid_magic_history_encoder_rollback(exact_retry: bool) {
+    let temporary = tempfile::tempdir().unwrap();
+    let source = chart_source(&temporary.path().join("source"), "detect_magic");
+    let mut wire = Wire::new(
+        Engine::open_with_policy(
+            temporary.path().join("game.db"),
+            source,
+            crate::SavePolicy {
+                checkpoint_interval: 0,
+                ..Default::default()
+            },
+        )
+        .unwrap(),
+    );
+    let dose = potion(&mut wire);
+    let request = wire.request(OWNER, Action::Drink { item: dose });
+    let admitted = ack(wire.send(OWNER, "storage-dose", request.clone()));
+    assert!(matches!(admitted, RequestReceipt::Admitted { .. }));
+    let mut rejected = None;
+    // Admit normal peer waits as needed, but execute one actual Engine boundary
+    // at a time so the assertion freezes precisely the paid completion candidate.
+    for turn in 0..16 {
+        if wire.service.engine.next_intention_actor().is_none() {
+            let next = wire.service.engine.next_actor().unwrap();
+            let wait = wire.request(next, Action::Wait);
+            ack(wire.send(next, &format!("storage-peer-{turn}"), wait));
+        }
+        wire.service.engine.flush().unwrap();
+        let before = wire.checkpoint();
+        let state = wire.service.engine.state(OWNER).unwrap();
+        let history = wire
+            .service
+            .engine
+            .history(OWNER, "magic-owner-1", None, 100)
+            .unwrap();
+        let accepted = wire.service.engine.save_status().accepted_sequence;
+        let guard = crate::storage::HistoryAdmissionTestLimit::new(0);
+        match wire.service.engine.execute_next_intention() {
+            Ok(Some(_)) => {
+                assert!(
+                    guard.required_bytes().is_none(),
+                    "no historical book changed before completion"
+                );
+            }
+            Ok(None) => panic!("explicitly queued ordinary work must execute"),
+            Err(error) => {
+                assert_eq!(error.code, ErrorCode::StorageFailure);
+                let exact = guard
+                    .required_bytes()
+                    .expect("real paid candidate reached actual encoder");
+                assert!(exact > 0);
+                assert_eq!(
+                    wire.checkpoint(),
+                    before,
+                    "tick, RNG, items, knowledge, books and retained history roll back"
+                );
+                assert_eq!(wire.service.engine.state(OWNER).unwrap(), state);
+                assert_eq!(
+                    wire.service
+                        .engine
+                        .history(OWNER, "magic-owner-1", None, 100)
+                        .unwrap(),
+                    history
+                );
+                assert_eq!(
+                    wire.service.engine.save_status().accepted_sequence,
+                    accepted
+                );
+                assert_eq!(nothing_items(&before)["10"]["quantity"], 3);
+                let item = state
+                    .observation
+                    .inventory
+                    .iter()
+                    .find(|item| item.id == dose)
+                    .unwrap();
+                assert!(!item.identified);
+                rejected = Some((before, state, history, accepted, exact));
+                break;
+            }
+        }
+    }
+    let (before, state, history, accepted, exact) =
+        rejected.expect("paid Magic acquisition was not attempted");
+    {
+        let guard = crate::storage::HistoryAdmissionTestLimit::new(exact - 1);
+        let error = wire.service.engine.execute_next_intention().unwrap_err();
+        assert_eq!(error.code, ErrorCode::StorageFailure);
+        assert_eq!(
+            guard.required_bytes(),
+            Some(exact),
+            "retry has same complete serialized size"
+        );
+        assert_eq!(wire.checkpoint(), before);
+        assert_eq!(wire.service.engine.state(OWNER).unwrap(), state);
+        assert_eq!(
+            wire.service
+                .engine
+                .history(OWNER, "magic-owner-1", None, 100)
+                .unwrap(),
+            history
+        );
+        assert_eq!(
+            wire.service.engine.save_status().accepted_sequence,
+            accepted
+        );
+    }
+    if !exact_retry {
+        // A failed completion retains the original queue. Cancel it explicitly
+        // through the ordinary user protocol before admitting a NEW transaction;
+        // resetting this test limit does not install any production auto-retry.
+        for actor in wire.clients.keys().copied().collect::<Vec<_>>() {
+            let pending = wire.snapshot(actor).readiness.cancel.clone();
+            for (ordinal, intention) in pending.into_iter().enumerate() {
+                let snapshot = wire.snapshot(actor);
+                let request = Request::Command {
+                    context: snapshot.reply_context().input,
+                    branch: snapshot.branch.clone(),
+                    command: Command::CancelIntention {
+                        expected_revision: snapshot.state.revision,
+                        intention,
+                        step: None,
+                    },
+                };
+                ack(wire.send(
+                    actor,
+                    &format!("storage-cancel-{}-{ordinal}", actor.0),
+                    request,
+                ));
+            }
+            assert!(wire.service.engine.pending_intentions(actor).is_empty());
+        }
+        assert_eq!(nothing_items(&wire.checkpoint())["10"]["quantity"], 3);
+        let cancelled = ack(wire.send(OWNER, "storage-dose", request));
+        assert!(matches!(
+            cancelled,
+            RequestReceipt::Admitted {
+                phase: IntentionPhase::Cancelled,
+                ..
+            }
+        ));
+        let resumed = wire.act("storage-dose-new", Action::Drink { item: dose });
+        assert!(matches!(
+            resumed,
+            RequestReceipt::Admitted {
+                phase: IntentionPhase::Resolved,
+                ..
+            }
+        ));
+        let after = wire.checkpoint();
+        assert_eq!(nothing_items(&after)["10"]["quantity"], 2);
+        let state = wire.service.engine.state(OWNER).unwrap();
+        assert!(
+            state
+                .observation
+                .inventory
+                .iter()
+                .find(|item| item.id == dose)
+                .unwrap()
+                .identified
+        );
+        let summary = state
+            .observation
+            .charts
+            .iter()
+            .find(|s| s.kind == ChartKind::Magic)
+            .unwrap();
+        assert_eq!(
+            (summary.mode, summary.status),
+            (ChartMode::Historical, ChartStatus::Available)
+        );
+        return;
+    }
+    {
+        let guard = crate::storage::HistoryAdmissionTestLimit::new(exact);
+        assert!(
+            matches!(wire.service.step(), Step::Progress),
+            "exact encoder limit must admit the same paid candidate"
+        );
+        assert_eq!(guard.required_bytes(), Some(exact));
+    }
+    assert_eq!(
+        wire.service.engine.save_status().accepted_sequence,
+        accepted + 1
+    );
+    let after = wire.checkpoint();
+    assert_eq!(nothing_items(&after)["10"]["quantity"], 2);
+    assert!(after["game"]["tick"].as_u64().unwrap() > before["game"]["tick"].as_u64().unwrap());
+    let completed = wire.snapshot(OWNER);
+    assert!(
+        completed
+            .state
+            .observation
+            .inventory
+            .iter()
+            .find(|item| item.id == dose)
+            .unwrap()
+            .identified
+    );
+    let summary = completed
+        .state
+        .observation
+        .charts
+        .iter()
+        .find(|s| s.kind == ChartKind::Magic)
+        .unwrap();
+    assert_eq!(
+        (summary.mode, summary.status),
+        (ChartMode::Historical, ChartStatus::Available)
+    );
+    let resolved = ack(wire.send(OWNER, "storage-dose", request.clone()));
+    assert!(matches!(
+        resolved,
+        RequestReceipt::Admitted {
+            phase: IntentionPhase::Resolved,
+            ..
+        }
+    ));
+    let published = wire.checkpoint();
+    assert_eq!(ack(wire.send(OWNER, "storage-dose", request)), resolved);
+    assert_eq!(
+        wire.checkpoint(),
+        published,
+        "accepted receipt retry cannot acquire or consume twice"
+    );
+}

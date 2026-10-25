@@ -721,6 +721,7 @@ fn live_message_dispatch_uses_standard_reply_context_and_complete_page_byte_caps
 
 fn inactive(kind: ChartKind) -> ChartSummary {
     ChartSummary {
+        supported: true,
         kind,
         mode: ChartMode::Historical,
         status: ChartStatus::Inactive,
@@ -761,6 +762,7 @@ fn state() -> crate::StateView {
 #[test]
 fn strict_catalog_separates_retained_sample_from_latest_empty_or_unavailable_attempt() {
     let mut summary = ChartSummary {
+        supported: true,
         kind: ChartKind::Food,
         mode: ChartMode::Historical,
         status: ChartStatus::Available,
@@ -858,6 +860,7 @@ fn observation_and_delta_require_bounded_canonical_catalog_and_preserve_replacem
     next.revision += 1;
     next.observation.tick += 1;
     next.observation.charts[0] = ChartSummary {
+        supported: true,
         kind: ChartKind::Monsters,
         mode: ChartMode::Live,
         status: ChartStatus::Available,
@@ -892,4 +895,229 @@ fn observation_and_delta_require_bounded_canonical_catalog_and_preserve_replacem
     assert_eq!(next.validate(), Err(crate::InvalidState::InvalidChart));
     let query = query(&positive());
     assert!(crate::AccessRole::Spectator.permits(&crate::Request::Chart { query }));
+}
+
+#[test]
+fn mapping_marks_are_closed_strict_named_facts_with_bounded_cardinal_normals() {
+    let mut facts = vec![
+        MappingMark::WallFace { normal: None },
+        MappingMark::Passage,
+        MappingMark::Doorway,
+        MappingMark::Stairs,
+        MappingMark::SecretDoor,
+        MappingMark::TrapPresence,
+    ];
+    for normal in [
+        [-1, 0, 0],
+        [1, 0, 0],
+        [0, -1, 0],
+        [0, 1, 0],
+        [0, 0, -1],
+        [0, 0, 1],
+    ] {
+        facts.push(MappingMark::WallFace {
+            normal: Some(normal),
+        });
+    }
+    for fact in facts {
+        let mark = ChartMark::Mapping { fact };
+        assert_eq!(mark.validate(), Ok(()));
+        let encoded = serde_json::to_string(&mark).unwrap();
+        assert!(encoded.len() <= CHART_MAPPING_MARK_BYTES);
+        assert_eq!(mark.encoded_size_bound(), Ok(96));
+        assert_eq!(serde_json::from_str::<ChartMark>(&encoded).unwrap(), mark);
+        let valid = serde_json::to_value(&mark).unwrap();
+        for path in ["", "/fact"] {
+            for field in valid.pointer(path).unwrap().as_object().unwrap().keys() {
+                let mut bad = valid.clone();
+                bad.pointer_mut(path)
+                    .unwrap()
+                    .as_object_mut()
+                    .unwrap()
+                    .remove(field);
+                assert!(serde_json::from_value::<ChartMark>(bad).is_err());
+            }
+            let mut bad = valid.clone();
+            bad.pointer_mut(path).unwrap()["target"] = Value::Null;
+            assert!(serde_json::from_value::<ChartMark>(bad).is_err());
+            let mut bad = valid.clone();
+            *bad.pointer_mut(path).unwrap() = json!([]);
+            assert!(serde_json::from_value::<ChartMark>(bad).is_err());
+        }
+    }
+    for bad in [
+        json!({"kind":"mapping","fact":null}),
+        json!({"kind":"mapping","fact":{"kind":"floor"}}),
+        json!({"kind":"mapping","fact":{"kind":"stairs","normal":null}}),
+        json!({"kind":"mapping","fact":{"kind":"stairs","destination":"room-1"}}),
+        json!({"kind":"mapping","fact":{"kind":"trap_presence","family":"pit"}}),
+        json!({"kind":"mapping","fact":{"kind":"doorway","room":"private"}}),
+    ] {
+        assert!(serde_json::from_value::<ChartMark>(bad).is_err());
+    }
+    for normal in [
+        json!([0, 0, 0]),
+        json!([1, 1, 0]),
+        json!([2, 0, 0]),
+        json!([-128, 0, 0]),
+        json!([128, 0, 0]),
+        json!([1, 0]),
+        json!([1, 0, 0, 0]),
+        json!([1.0, 0, 0]),
+        json!(["1", "0", "0"]),
+    ] {
+        assert!(serde_json::from_value::<ChartMark>(
+            json!({"kind":"mapping","fact":{"kind":"wall_face","normal":normal}})
+        )
+        .is_err());
+    }
+    for bad in [
+        r#"{"kind":"mapping","fact":{"kind":"stairs","kind":"stairs"}}"#,
+        r#"{"kind":"mapping","fact":{"kind":"wall_face","normal":null,"normal":null}}"#,
+        r#"{"kind":"mapping","fact":{"kind":"stairs"},"fact":{"kind":"stairs"}}"#,
+    ] {
+        assert!(serde_json::from_str::<ChartMark>(bad).is_err());
+    }
+}
+
+#[test]
+fn mapping_wall_orientation_tracks_component_alignment_and_delivery_bound_without_deduplication() {
+    for (alignment, position, normal) in [
+        (
+            ChartAlignment::Aligned,
+            Some([i64::MIN, i64::MAX, 0]),
+            Some([0, 0, -1]),
+        ),
+        (ChartAlignment::Inconsistent, None, None),
+    ] {
+        let row = ChartRow {
+            component: 0,
+            position,
+            mark: ChartMark::Mapping {
+                fact: MappingMark::WallFace { normal },
+            },
+        };
+        let value = reply(
+            vec![
+                component(0, alignment),
+                ChartRecord::Row(row.clone()),
+                ChartRecord::Row(row),
+            ],
+            0,
+            1,
+            3,
+            ChartKind::Mapping,
+        );
+        value.validate().unwrap();
+        assert_eq!(
+            decode_chart_page_reply(&serde_json::to_string(&value).unwrap()).unwrap(),
+            value
+        );
+        for record in &value.page.records {
+            assert!(
+                serde_json::to_vec(record).unwrap().len() <= record.encoded_size_bound().unwrap()
+            );
+        }
+        let bound = CHART_ENVELOPE_BYTES
+            + value
+                .page
+                .records
+                .iter()
+                .map(|r| r.encoded_size_bound().unwrap() + 1)
+                .sum::<usize>();
+        let wire = crate::ServerMessage::ChartPage {
+            context: value.context.clone(),
+            request_id: value.request_id.clone(),
+            page: Box::new(value.page.clone()),
+        };
+        assert!(
+            crate::encode_response(&wire, None, crate::MAX_RESPONSE_BYTES)
+                .unwrap()
+                .text
+                .len()
+                <= bound
+        );
+        let mut proof = ChartStreamValidator::new(crate::ActorId(7), budget());
+        proof
+            .accept(&query(&value), &value.request_id, &value)
+            .unwrap();
+        assert!(proof.is_complete());
+        assert_eq!(proof.records_seen(), 3);
+        let mut bad = value.clone();
+        let ChartRecord::Row(row) = &mut bad.page.records[1] else {
+            unreachable!()
+        };
+        let ChartMark::Mapping {
+            fact: MappingMark::WallFace { normal },
+        } = &mut row.mark
+        else {
+            unreachable!()
+        };
+        *normal = if normal.is_some() {
+            None
+        } else {
+            Some([1, 0, 0])
+        };
+        assert!(bad.validate().is_err());
+        assert!(decode_chart_page_reply(&serde_json::to_string(&bad).unwrap()).is_err());
+        let mut bad = value.clone();
+        let ChartRecord::Component(component) = &mut bad.page.records[0] else {
+            unreachable!()
+        };
+        component.alignment = if alignment == ChartAlignment::Aligned {
+            ChartAlignment::Inconsistent
+        } else {
+            ChartAlignment::Aligned
+        };
+        bad.validate().unwrap(); // Row-local shape is lawful; declaration disagrees.
+        let mut proof = ChartStreamValidator::new(crate::ActorId(7), budget());
+        assert!(proof.accept(&query(&bad), &bad.request_id, &bad).is_err());
+        assert_eq!(proof.records_seen(), 0);
+    }
+    assert_eq!(MAX_CHART_TRANSFER_RECORDS, MAX_CHART_TRANSFER_BYTES / 97);
+    assert_eq!(CHART_ROW_BYTES + CHART_MAPPING_MARK_BYTES, 352);
+    assert!(CHART_ROW_BYTES + CHART_MAPPING_MARK_BYTES < 2372);
+}
+
+#[test]
+fn required_mapping_support_is_separate_from_historical_sample_and_four_kind_catalog_order() {
+    let mut values = vec![
+        inactive(ChartKind::Monsters),
+        inactive(ChartKind::Food),
+        inactive(ChartKind::Magic),
+        inactive(ChartKind::Mapping),
+    ];
+    let mapping = values.last_mut().unwrap();
+    mapping.supported = false;
+    mapping.status = ChartStatus::Available;
+    mapping.acquired_at = Some(2);
+    mapping.chart = Some("historical-map".into());
+    mapping.latest_attempt = Some(ChartAttempt {
+        attempted_at: 9,
+        status: ChartAttemptStatus::Unavailable,
+    });
+    validate_summaries(&values).unwrap();
+    let valid = serde_json::to_value(values.last().unwrap()).unwrap();
+    assert_eq!(
+        serde_json::from_value::<ChartSummary>(valid.clone()).unwrap(),
+        values[3]
+    );
+    for supported in [Value::Null, json!(0), json!("false"), json!([])] {
+        let mut bad = valid.clone();
+        bad["supported"] = supported;
+        assert!(serde_json::from_value::<ChartSummary>(bad).is_err());
+    }
+    let mut missing = valid.clone();
+    missing.as_object_mut().unwrap().remove("supported");
+    assert!(serde_json::from_value::<ChartSummary>(missing).is_err());
+    let duplicate =
+        serde_json::to_string(&valid)
+            .unwrap()
+            .replacen("{", "{\"supported\":false,", 1);
+    assert!(serde_json::from_str::<ChartSummary>(&duplicate).is_err());
+    let mut observed = state();
+    observed.observation.charts = values.clone();
+    observed.validate().unwrap();
+    values.swap(2, 3);
+    assert!(validate_summaries(&values).is_err());
 }

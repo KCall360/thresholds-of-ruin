@@ -1,4 +1,4 @@
-//! Dedicated, non-actionable chart transport. STAGED: no live message integration.
+//! Dedicated, non-actionable chart transport and strict complete-stream validation.
 //!
 //! Components are a canonical declaration prefix, followed by sorted occurrences.
 //! Equal occurrences are meaningful and are never deduplicated. Decoding a page
@@ -21,6 +21,7 @@ pub const CHART_COMPONENT_BYTES: usize = 96;
 pub const CHART_ROW_BYTES: usize = 256;
 pub const CHART_MONSTER_MARK_BYTES: usize = 96;
 pub const CHART_PRESENCE_MARK_BYTES: usize = 32;
+pub const CHART_MAPPING_MARK_BYTES: usize = 96;
 pub const MAX_CHART_NAME_BYTES: usize = 256;
 pub const MAX_CHART_ASSET_BYTES: usize = 80;
 pub const MAX_CHART_TOKEN_BYTES: usize = 128;
@@ -46,7 +47,7 @@ macro_rules! string_enum {
         }
     };
 }
-string_enum!(ChartKind { Monsters => "monsters", Food => "food", Magic => "magic" });
+string_enum!(ChartKind { Monsters => "monsters", Food => "food", Magic => "magic", Mapping => "mapping" });
 string_enum!(ChartMode { Live => "live", Historical => "historical" });
 string_enum!(ChartAlignment { Aligned => "aligned", Inconsistent => "inconsistent" });
 string_enum!(ChartReplyType { ChartPage => "chart_page" });
@@ -83,6 +84,7 @@ impl ChartAttempt {
 }
 record!(ChartSummary {
     kind: ChartKind,
+    supported: bool,
     mode: ChartMode,
     status: ChartStatus,
     #[serde(with = "crate::integers::optional_unsigned")]
@@ -132,12 +134,67 @@ pub(crate) fn read_summaries<'de, D: serde::Deserializer<'de>>(
     Ok(values)
 }
 
+/// Sparse Mapping facts, never full map appearance or navigation authority.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum MappingMark {
+    WallFace { normal: Option<[i8; 3]> },
+    Passage,
+    Doorway,
+    Stairs,
+    SecretDoor,
+    TrapPresence,
+}
+impl<'de> Deserialize<'de> for MappingMark {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            WallFace {
+                #[serde(deserialize_with = "read::required_option")]
+                normal: Option<[i8; 3]>,
+            },
+            Passage {},
+            Doorway {},
+            Stairs {},
+            SecretDoor {},
+            TrapPresence {},
+        }
+        let value = match crate::bounded::named_map(d)? {
+            Fields::WallFace { normal } => Self::WallFace { normal },
+            Fields::Passage {} => Self::Passage,
+            Fields::Doorway {} => Self::Doorway,
+            Fields::Stairs {} => Self::Stairs,
+            Fields::SecretDoor {} => Self::SecretDoor,
+            Fields::TrapPresence {} => Self::TrapPresence,
+        };
+        value.validate().map_err(serde::de::Error::custom)?;
+        Ok(value)
+    }
+}
+impl MappingMark {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if let Self::WallFace {
+            normal: Some(normal),
+        } = self
+        {
+            if normal.iter().filter(|axis| **axis != 0).count() != 1
+                || normal.iter().any(|axis| !matches!(axis, -1..=1))
+            {
+                return Err("mapping wall normal must be cardinal");
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ChartMark {
     Monster { name: String, asset: Option<String> },
     Food,
     Magic,
+    Mapping { fact: MappingMark },
 }
 impl<'de> Deserialize<'de> for ChartMark {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
@@ -152,11 +209,15 @@ impl<'de> Deserialize<'de> for ChartMark {
             },
             Food {},
             Magic {},
+            Mapping {
+                fact: MappingMark,
+            },
         }
         let value = match crate::bounded::named_map(d)? {
             Fields::Monster { name, asset } => Self::Monster { name, asset },
             Fields::Food {} => Self::Food,
             Fields::Magic {} => Self::Magic,
+            Fields::Mapping { fact } => Self::Mapping { fact },
         };
         value.validate().map_err(serde::de::Error::custom)?;
         Ok(value)
@@ -171,6 +232,9 @@ impl ChartMark {
                 return Err("invalid chart monster appearance");
             }
         }
+        if let Self::Mapping { fact } = self {
+            fact.validate()?;
+        }
         Ok(())
     }
     pub fn kind(&self) -> ChartKind {
@@ -178,6 +242,7 @@ impl ChartMark {
             Self::Monster { .. } => ChartKind::Monsters,
             Self::Food => ChartKind::Food,
             Self::Magic => ChartKind::Magic,
+            Self::Mapping { .. } => ChartKind::Mapping,
         }
     }
     fn encoded_size_bound(&self) -> Result<usize, &'static str> {
@@ -192,6 +257,7 @@ impl ChartMark {
                     .ok_or("chart size arithmetic overflow")
             }
             Self::Food | Self::Magic => Ok(CHART_PRESENCE_MARK_BYTES),
+            Self::Mapping { .. } => Ok(CHART_MAPPING_MARK_BYTES),
         }
     }
 }
@@ -216,7 +282,16 @@ record!(ChartRow {
 });
 impl ChartRow {
     pub fn validate(&self) -> Result<(), &'static str> {
-        self.mark.validate()
+        self.mark.validate()?;
+        if let ChartMark::Mapping {
+            fact: MappingMark::WallFace { normal },
+        } = &self.mark
+        {
+            if normal.is_some() != self.position.is_some() {
+                return Err("mapping wall normal and position must share alignment");
+            }
+        }
+        Ok(())
     }
     fn order_key(&self) -> (u64, Option<[i64; 3]>, &ChartMark) {
         (self.component, self.position, &self.mark)
