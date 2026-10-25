@@ -414,8 +414,10 @@ impl CombatDiagnosticRecord {
                 DiagnosticEffect::RoomLight { target, .. }
                 | DiagnosticEffect::DrainLife { target, .. } => *target == self.actor,
                 DiagnosticEffect::DirectHealthLoss { target, .. }
-                | DiagnosticEffect::GainStrength { target, .. }
-                | DiagnosticEffect::RaiseLevel { target, .. } => *target == self.target,
+                | DiagnosticEffect::GainStrength { target, .. } => *target == self.target,
+                DiagnosticEffect::RaiseLevel { target, amount } => {
+                    *target == self.target && *amount > 0
+                }
                 DiagnosticEffect::CancelSpecials { target, .. }
                 | DiagnosticEffect::Translate { target, .. }
                 | DiagnosticEffect::Relocate { target, .. }
@@ -642,7 +644,14 @@ impl<'de> Deserialize<'de> for DiagnosticEffect {
         }
         Ok(match crate::bounded::named_map(deserializer)? {
             Fields::GainStrength { target, change } => Self::GainStrength { target, change },
-            Fields::RaiseLevel { target, amount } => Self::RaiseLevel { target, amount },
+            Fields::RaiseLevel { target, amount } => {
+                if amount == 0 {
+                    return Err(serde::de::Error::custom(
+                        "published Raise credit must be positive",
+                    ));
+                }
+                Self::RaiseLevel { target, amount }
+            }
             Fields::HasteDose {
                 target,
                 condition,
@@ -860,7 +869,7 @@ mod growth_diagnostic_tests {
             let decoded: DiagnosticEffect = serde_json::from_value(value.clone()).unwrap();
             assert_eq!(serde_json::to_value(decoded).unwrap(), value);
         }
-        for amount in [0, u64::from(u32::MAX) + 1, u64::MAX] {
+        for amount in [1, u64::from(u32::MAX) + 1, u64::MAX] {
             let value =
                 serde_json::json!({"type":"raise_level","target":"2","amount":amount.to_string()});
             let decoded: DiagnosticEffect = serde_json::from_value(value.clone()).unwrap();
@@ -871,6 +880,7 @@ mod growth_diagnostic_tests {
             serde_json::json!({"type":"gain_strength","target":"2","change":"other"}),
             serde_json::json!({"type":"gain_strength","target":"2"}),
             serde_json::json!({"type":"gain_strength","target":"2","change":"restored","amount":1}),
+            serde_json::json!({"type":"raise_level","target":"2","amount":"0"}),
             serde_json::json!({"type":"raise_level","target":"2","amount":1}),
             serde_json::json!({"type":"raise_level","target":"2","amount":"01"}),
             serde_json::json!({"type":"raise_level","target":"2","amount":"18446744073709551616"}),

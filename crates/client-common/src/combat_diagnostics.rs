@@ -398,6 +398,14 @@ pub(crate) mod tests {
 
     #[test]
     fn growth_diagnostics_render_actual_results_and_reject_wrong_recipient() {
+        let zero = report_with_effects(vec![DiagnosticEffect::RaiseLevel {
+            target: ActorId(2),
+            amount: 0,
+        }]);
+        assert!(
+            lines(&zero).is_err(),
+            "an internal pure-resolution marker is not a published credit"
+        );
         for (effect, expected) in [
             (
                 DiagnosticEffect::GainStrength {

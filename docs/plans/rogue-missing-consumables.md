@@ -1430,3 +1430,12 @@ remain pending. Full-width credit is owned by core arithmetic and protocol
 boundary controls; the bounded actual diagnostic fixture records a lawful small
 credit using canonical full-width decimal transport, not an invented wide ledger.
 No native, performance, release, hosted or final verification gate is claimed.
+
+The complete candidate passed the grouped affected-owner all-target compilation
+preflight. A subsequent read-only contract audit tightened only public Raise
+result validation: published credit must be positive, including typed diagnostic
+reports. The internal pure-resolution zero marker remains unchanged and is
+replaced before publication by actual checked credit. Positive one, beyond-u32
+and u64-maximum transport controls remain; zero is now a negative, not evidence
+of a paid no-op policy. This reviewed correction precedes runtime and application
+builds in the same cohort; gameplay and new diagnostic tests are still unrun.
