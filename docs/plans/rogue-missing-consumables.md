@@ -1238,3 +1238,10 @@ Rust compilation, meaningful disabled-effect first-red, green runtime and genuin
 current artifacts still await the grouped coordinator run. The complete green
 implementation is retained before that temporary causal-red substitution; no
 unobserved red, successful gameplay or final gate is inferred from static review.
+
+The grouped all-target preflight collects three test-construction errors: two
+RiderDef literals lacked their required `check: None` field, and a Service fixture
+moved a SavePolicy value before its second reopen. The exact test-only corrections
+supply the two fields and clone the first policy use. Production owners otherwise
+checked; no runtime ran. The causal-red manifest is refreshed for the corrected
+unchanged-behavior test input, while the green resolver bytes remain identical.

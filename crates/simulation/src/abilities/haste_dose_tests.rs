@@ -632,6 +632,7 @@ fn haste_source_contract_is_checkless_self_only_with_explicit_condition_shapes()
                 strikes[0].riders.push(RiderDef {
                     cancellable: false,
                     trigger: RiderTrigger::Success,
+                    check: None,
                     condition: None,
                     effects: vec![dose()],
                     descriptors: vec![],
@@ -642,6 +643,7 @@ fn haste_source_contract_is_checkless_self_only_with_explicit_condition_shapes()
                     additional_riders: vec![RiderDef {
                         cancellable: false,
                         trigger: RiderTrigger::Success,
+                        check: None,
                         condition: None,
                         effects: vec![dose()],
                         descriptors: vec![],

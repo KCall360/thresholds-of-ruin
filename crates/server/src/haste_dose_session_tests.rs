@@ -277,7 +277,8 @@ fn pending_haste_dose_interval_one_deleted_source_reopen_preserves_payload_and_r
         checkpoint_interval: 1,
         ..Default::default()
     };
-    let mut wire = Wire::new(Engine::open_with_policy(&path, haste_source(&root), policy).unwrap());
+    let mut wire =
+        Wire::new(Engine::open_with_policy(&path, haste_source(&root), policy.clone()).unwrap());
     let (potion, _) = items(&mut wire);
     assert_eq!(wire.service.engine.next_actor(), Some(OWNER));
     let before = wire.checkpoint();
