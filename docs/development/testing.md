@@ -1517,6 +1517,14 @@ runner reject the flag when `CI` is set, and the verifier also rejects it for a
 CI profile partition. The normal CI matrix runs every graphical test unchanged;
 all jobs on the exact final head must pass before merging.
 
+The independent 3D verifier supports the same exact manifest contract through
+`python crates/client-3d/scripts/verify.py --profile debug --waive-local-graphical MANIFEST`
+(and separately `--profile release`). It snapshots validated authorization before
+any stages and checks the runner's actual waiver records. Its v3 receipt keeps
+`gate_passed` distinct from `clean_passed`, with legacy `passed` strictly clean.
+The ordinary no-waiver commands and CI obligations are unchanged. A local waiver
+never removes non-graphical pre-window rejection checks or hosted native coverage.
+
 Paid public-plan acceptance uses `test_public_plan_process.PublicPlanProcesses`
 for ordinary headless/Text payment, entitled observer spectators, immutable
 history, pause/save/reconnect and rewind. Its separate

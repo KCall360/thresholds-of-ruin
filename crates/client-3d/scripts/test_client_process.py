@@ -14,7 +14,7 @@ import unittest
 CLIENT = Path(__file__).resolve().parents[1]
 ROOT = CLIENT.parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-from process_harness import ProcessTestCase, SPECTATOR_TOKEN, creature_package, door
+from process_harness import ProcessTestCase, SPECTATOR_TOKEN, creature_package, door, non_graphical
 from arena_matrix import toml_source
 from stream_relay import StreamRelay
 
@@ -224,6 +224,7 @@ class Native3DProcesses(ProcessTestCase):
                 self.assertEqual(path.read_bytes(), contents, "a later launch changed a prior save")
             prior = (save, save.read_bytes())
 
+    @non_graphical
     def test_live_appearance_override_is_rejected_before_connecting(self):
         executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
         log = self.directory / "appearance-option.log"

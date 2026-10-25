@@ -1072,3 +1072,24 @@ protected source checkpoint; this subsequent prose update does not claim a new
 binary build. Local native ASCII and independent 3D acceptance, final debug/release
 and hosted gates, and performance qualification remain pending. No gameplay or
 qualification tooling is changed by this outcome checkpoint.
+
+### Independent 3D qualification-tooling restoration
+
+The narrow independent verifier restoration now reuses the maintained exact
+local graphical manifest and runner/accounting helpers. Validated authorization
+is snapshotted before stages; unknown, duplicate or non-graphical IDs cannot be
+waived, and current discovery rather than a provisional count owns admission.
+The pre-window invalid-appearance rejection is now explicitly non-graphical.
+Receipt v3 separates an authorized local `gate_passed` from `clean_passed`, and
+legacy `passed` remains clean-only. Default commands, both profile obligations,
+non-graphical coverage and hosted native requirements are unchanged; CI rejects
+the local option. No workflow or graphical acceptance requirement is removed.
+
+The pure first-red collection ran eleven tests and found the intended existing
+classification failure and missing waiver/accounting seams. After restoration,
+all eleven pure tests pass, as do 32 maintained helper/runner controls. The
+pre-existing unknown-option CI rejection was not counted as new causal coverage.
+These tests exercise mocked verifier execution and real helper accounting; they
+are not an actual v3 verification gate, native run, graphical waiver receipt or
+final discovered execution inventory. Final independent debug/release and hosted
+qualification remain pending. No gameplay change accompanies this checkpoint.
