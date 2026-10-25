@@ -909,3 +909,14 @@ proves two real grip units, three candidate slots, two successful equips and an
 atomic third refusal. The four selected red test bodies are unchanged. The exact
 green implementation is restored; its fresh full-library runtime is still
 pending. These red receipts are not successful portable-torch acceptance.
+
+The restored green full simulation library records 1,866 passes and two fixture
+failures. Burnout inspected a new Extinguish event batch using an offset from the
+previous, already-cleared Ignite batch; its correction scans the current batch
+while retaining the exact intention and no-resurrection assertions. An older
+custom-ring test assumed slot eleven instead of resolving its appended authored
+socket; the new torch socket exposed that stale index. The corrected fixture
+retains its independent weapon-slot and capacity checks. Both are test-only
+corrections, and their fresh grouped rerun remains pending. Fresh applications,
+actual torch processes, current generated artifacts and server acceptance are
+still the next qualification steps; this result is not a clean full-core pass.

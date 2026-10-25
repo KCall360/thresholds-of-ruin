@@ -1346,6 +1346,14 @@ fn frozen_equip_compares_only_its_complete_pool_and_rejects_capacity_changes() {
             .unwrap();
         },
     );
+    let ring_socket = EquipmentSlotId(
+        game.anatomy(ActorId(1))
+            .unwrap()
+            .slots
+            .iter()
+            .position(|slot| slot == &ring_slot)
+            .unwrap() as u16,
+    );
     equip(&mut game, 0, false);
     let item = equip(&mut game, 10, false);
     stow_fixture_weapon(&mut game, item);
@@ -1374,8 +1382,7 @@ fn frozen_equip_compares_only_its_complete_pool_and_rejects_capacity_changes() {
     let ring = game
         .spawn_item_stack(at, Some(ActorId(1)), 1, ring)
         .unwrap();
-    game.equip_authored(ActorId(1), ring, EquipmentSlotId(11))
-        .unwrap();
+    game.equip_authored(ActorId(1), ring, ring_socket).unwrap();
     let Plan::Equip { allocation, .. } = &plan else {
         unreachable!()
     };
@@ -1406,9 +1413,7 @@ fn frozen_equip_compares_only_its_complete_pool_and_rejects_capacity_changes() {
         Some(&item)
     );
     assert_eq!(
-        game.equipment(ActorId(1))
-            .unwrap()
-            .get(&EquipmentSlotId(11)),
+        game.equipment(ActorId(1)).unwrap().get(&ring_socket),
         Some(&ring)
     );
 }

@@ -583,7 +583,6 @@ fn torch_managed_door_change_with_stationary_emitter_yields_before_recovery_time
 fn torch_burnout_during_paid_extinguish_interrupts_exact_item_without_resurrection() {
     let (mut game, item, _) = equipped(50, 4);
     paid(&mut game, Action::Ignite { item }, 100);
-    let events = game.combat_events().len();
     let id = game
         .admit_intention(OWNER, Action::Extinguish { item }, IntentionOrigin::Human)
         .unwrap();
@@ -598,9 +597,11 @@ fn torch_burnout_during_paid_extinguish_interrupts_exact_item_without_resurrecti
     assert_eq!(game.items[&item].fuel.unwrap().remaining, 0);
     assert!(!game.items[&item].fuel.unwrap().lit);
     assert!(game.preparation(OWNER).is_none());
-    assert!(game.combat_events()[events..].iter().any(|event|matches!(event,
+    // Each admitted action starts a fresh event batch; the prior Ignite batch
+    // is not a prefix of this exact Extinguish intention's terminal receipt.
+    assert!(game.combat_events().iter().any(|event|matches!(event,
         crate::combat::CombatEvent::Interrupted{actor,intention:Some(origin)} if *actor==OWNER && *origin==id)));
-    assert!(!game.combat_events()[events..].iter().any(|event| matches!(
+    assert!(!game.combat_events().iter().any(|event| matches!(
         event,
         crate::combat::CombatEvent::ItemCompleted {
             work: crate::Work::Extinguish { .. },
