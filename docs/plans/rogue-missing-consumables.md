@@ -1817,3 +1817,14 @@ Food Detection's authored source is corrected to the agreed Rogue-style scroll
 the independent tested Hallucination vectors remain unchanged. The integrated
 current source/process-helper/recorder/provenance cohort passes 147 pure tests.
 Actual process/native-window execution and genuine current artifacts remain pending.
+
+The corrected full core regression now passes **2,033 tests, zero failures and
+zero ignored**. The grouped world/core/server/protocol/common/headless/Text/ASCII
+all-target strict Clippy preflight also passes. Current source/process-helper/
+recorder/provenance contracts pass147 tests, with64 discovery/CI/waiver contracts
+passing separately. These do not replace current application, server/client test,
+real-process, artifact, final-tier or hosted-CI qualification.
+The actual native chart-window method remains locally deferred under the user's
+explicit same-batch all-graphical permission and the recovered display-socket
+denial. Its exact ID is retained in the local99-method manifest; it is not a
+native pass and remains mandatory in hosted CI. No alternate display was launched.
