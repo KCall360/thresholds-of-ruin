@@ -93,6 +93,19 @@ base. Local evidence for those commits:
   prebuilt examples.
 - **Native mouse test:** the standing local mouse-click test is waived, not
   passed.
+- **Hair timing diagnostic:** a single workload-4 `model_bench` run after the
+  query reuse, on the same machine, gave the following, with 90 frames per case.
+  Earlier figures are from [exact fixed points](#exact-control-solver-fixed-points).
+
+  | Case | Full update p50/p95/max | Earlier |
+  | --- | --- | --- |
+  | Human | 9.69/10.91/11.90 ms | 9.623/9.701/10.458 ms |
+  | Nymph | 39.98/46.11/47.61 ms | 43.526/58.041/58.275 ms |
+  | Nymph control fitting | 11.93/19.25/20.07 ms | 15.142/25.194/25.416 ms |
+  | Nymph face/edge constraints | 26.67/27.98/28.33 ms | — |
+
+  Face constraints now dominate. This is not a controlled base/head
+  comparison, and the long-hair case still misses the 20 ms budget.
 - **Not run:** a controlled `perf_compare` measurement of the hair query
   changes, the 3D client's own `verify.py`, push and full gates, and both-platform
   CI. The query reductions are proven only by exact query-count tests.
