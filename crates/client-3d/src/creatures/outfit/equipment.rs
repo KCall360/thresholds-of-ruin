@@ -51,17 +51,18 @@ impl BodyItem {
         )
     }
 
-    /// The colour of the split panels it hangs below the belt, if any. Plate
-    /// mail's legs are plated instead, and the bare breastplate has none.
+    /// The colour of the split panels it hangs below the belt, if any. The
+    /// bare breastplate, a torso study, has none.
     pub fn tassets(self) -> Option<Vec3> {
         match self {
             Self::Leather | Self::StuddedLeather => Some(Vec3::new(0.43, 0.24, 0.12)),
             Self::RingMail => Some(Vec3::new(0.29, 0.16, 0.08)),
             Self::ChainMail => Some(Vec3::new(0.5, 0.51, 0.55)),
             Self::ScaleMail | Self::SplintMail | Self::BandedMail => {
-                Some(Vec3::new(0.62, 0.64, 0.68))
+                Some(Vec3::new(0.54, 0.56, 0.6))
             }
-            Self::SteelBreastplate | Self::PlateMail => None,
+            Self::PlateMail => Some(Vec3::new(0.6, 0.62, 0.66)),
+            Self::SteelBreastplate => None,
         }
     }
 
@@ -170,7 +171,8 @@ impl Equipment {
                 BodyItem::SteelBreastplate => {}
             }
             if let Some(color) = item.tassets() {
-                base.skirt = Some(tassets(color, base.skirt));
+                let plated = matches!(base.legs, Legs::Plate);
+                base.skirt = Some(tassets(color, base.skirt, plated));
             }
             // An overlaid plate covers sewn bodice ornaments; independent
             // neck jewelry and straps are fitted onto the resolved exterior.
@@ -206,13 +208,16 @@ impl Equipment {
 
 /// Split panels over the wearer's own lower garment, which shows beneath them
 /// as a longer layer; without one, the panels hang over the trousers alone.
-fn tassets(color: Vec3, under: Option<Skirt>) -> Skirt {
+/// Over plated thighs both layers flare to clear the cuisses.
+fn tassets(color: Vec3, under: Option<Skirt>, plated_legs: bool) -> Skirt {
+    let fullness = if plated_legs { 1.42 } else { 1.0 };
     let panels = Skirt {
         color,
         length: 0.17,
         split: 0.09,
         trim: Some(color * 0.7),
         cutaway: false,
+        fullness,
         ..Skirt::PLAIN
     };
     let Some(under) = under else {
@@ -225,6 +230,7 @@ fn tassets(color: Vec3, under: Option<Skirt>) -> Skirt {
             Some(Layer {
                 longer: (under.length * 0.25).max(0.04),
                 split: Some(under.split),
+                fullness: plated_legs.then_some(fullness),
                 hem: under.hem,
                 ..Layer::petticoat(under.color, under.sheer)
             }),
