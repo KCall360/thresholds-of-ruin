@@ -74,6 +74,28 @@ The branch was later rebased without conflicts onto main at `511ea466`
 below were recorded on the earlier base (#171); their source fingerprints describe
 that base, not the rebased commits.
 
+The protocol 61 worn-equipment slice and Rogue armour recipes followed on that
+base. Local evidence for those commits:
+
+- **3D release suite:** 395 renderer-library, 2 model-library and 31 model
+  integration tests pass, with one ignored subprocess fixture. Focused armour
+  tests passed again after the shoulder-cap and tasset change.
+- **`quick` tier (Windows):** formatting, Clippy, architecture, build tools, the
+  isolated simulation check and the debug Rust suite pass.
+- **Arena-search sampling:** two tests fail only because the shared pinned
+  Python environment has numpy 2.5.3 against the branch's 2.5.4 pin. That
+  environment was not updated.
+- **Debug process tests:** five performance tests and one earned-route test
+  first hit the run's 600-second build and wall-clock limits. One performance
+  test also exposed a missing `subprocess` import, which is now fixed. All 18
+  performance tests and the earned-route test pass when rerun individually with
+  prebuilt examples.
+- **Native mouse test:** the standing local mouse-click test is waived, not
+  passed.
+- **Not run:** a controlled `perf_compare` measurement of the hair query
+  changes, the 3D client's own `verify.py`, push and full gates, and both-platform
+  CI. The query reductions are proven only by exact query-count tests.
+
 
 The consolidated Windows release contract check passes 387 renderer-library
 checks, one model-library check and 31 model integration checks, plus tooling,
