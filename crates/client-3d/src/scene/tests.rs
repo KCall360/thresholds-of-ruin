@@ -625,4 +625,66 @@ fn ordinary_corpse_rig_and_real_pick_return_after_a_cosmetic_item_is_cured() {
             tor_client_3d_model::Focus::Item(target) if target == id)
         );
     }
+fn live_sword_swaps_align_handles_and_clear_unequipped_meshes() {
+    fn present(
+        mut commands: Commands,
+        mut game: ResMut<Game>,
+        mut library: ResMut<PropLibrary>,
+        mut meshes: ResMut<Assets<Mesh>>,
+        view: Res<Fixture>,
+    ) {
+        update_held(&mut commands, &mut game, &mut library, &mut meshes, &view.0);
+    }
+    let mut app = app(CreatureModel::Human);
+    app.add_systems(Update, present.after(project));
+    {
+        let mut fixture = app.world_mut().resource_mut::<Fixture>();
+        fixture.0.actors[0].is_self = true;
+        fixture.0.inventory.push(tor_client_3d_model::Carried {
+            model: ItemModel::Greatsword,
+            id: tor_protocol::ItemTarget::from_digest([87; 32]),
+            name: "test sword".into(),
+            class: ItemClass::Weapon,
+            quantity: 1,
+            description: String::new(),
+            equipped: Some("hand".into()),
+            can_equip: true,
+            drinkable: false,
+            edible: false,
+        });
+    }
+    let mut previous = None;
+    for (kind, scale) in [(ItemModel::Greatsword, 1.0), (ItemModel::ShortSword, 0.62)] {
+        app.world_mut().resource_mut::<Fixture>().0.inventory[0].model = kind;
+        app.update();
+        let (actual, hand, entity) = app.world().resource::<Game>().held.unwrap();
+        assert_eq!(actual, kind);
+        let held = app.world().get::<Transform>(entity).unwrap();
+        // Independent authored handle midpoint, checked against the transform
+        // actually spawned by live inventory presentation, not just a helper.
+        let center = Vec3::new(-0.3175, 0.03, 0.0) * scale;
+        assert!(
+            held.transform_point(center)
+                .distance(Vec3::new(-0.03, -0.02, 0.0))
+                < 0.0001
+        );
+        assert!(app.world().get::<Transform>(hand).is_some());
+        if let Some(old) = previous {
+            assert!(
+                app.world().get_entity(old).is_err(),
+                "swapped weapon must be removed"
+            );
+        }
+        previous = Some(entity);
+        app.update();
+        assert_eq!(
+            app.world().resource::<Game>().held.unwrap().2,
+            entity,
+            "unchanged loadout must retain the visible entity"
+        );
+    }
+    app.world_mut().resource_mut::<Fixture>().0.inventory[0].equipped = None;
+    app.update();
+    assert!(app.world().resource::<Game>().held.is_none());
+    assert!(app.world().get_entity(previous.unwrap()).is_err());
 }

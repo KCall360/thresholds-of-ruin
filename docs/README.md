@@ -57,6 +57,8 @@ rather than treating a historical plan as current behavior.
 
 - [3D art direction and animation philosophy](art/3d-art-direction.md): working visual targets and quality criteria, with [generation prompts](art/target-prompts.md)
 - [Procedural 3D art continuation](plans/3d-art-continuation.md): implemented foundations, review limits, challenges and next work
+- [Procedural model refactor handoff](plans/procedural-model-handoff.md): current boundaries, proposed contracts and acceptance gaps
+- [Observer-facing appearance composition proposal](plans/appearance-composition-contract.md): disclosure, shared records, client interpretation and migration acceptance
 - [Rogue creature models](plans/rogue-creature-models.md): 3D recipes for every Rogue monster from the [concept sheets](art/rogue-concepts/README.md)
 
 - [Remaining shared requirements](plans/requirements.md), including portable export

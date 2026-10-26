@@ -148,7 +148,10 @@ fn art_contract_sleeves_and_trousers_stand_off_the_limbs_they_cover() {
         let arm = geometry::upper_arm_form(1.0, build, 1.0, muscle, 1.0);
         let sleeve = geometry::upper_sleeve_form(1.0, build, 1.0, muscle);
         let elbow = arm.onto(Vec3::new(0.0, -0.245, 0.3), Vec3::NEG_Z);
-        assert!(sleeve.distance(elbow) < -(geometry::SLEEVE_EASE * build + 0.003));
+        // Local folds have nearby side edges: their directional relief, not
+        // the nearest surface in any direction, measures compression here.
+        let gathered = sleeve.onto(Vec3::new(0.0, -0.245, 0.3), Vec3::NEG_Z);
+        assert!(gathered.distance(elbow) > geometry::SLEEVE_EASE * build + 0.003);
     }
     for build in 0..3 {
         let body = HumanoidBody::resolve(&appearance(CreatureModel::Human, build == 1, build));
@@ -496,7 +499,8 @@ fn art_contract_spawned_fitted_legs_are_lean_tapered_and_keep_build_identity() {
     // normalizing by resolved build removes species girth, not profile shape.
     let measure = |model, woman, build| {
         let mut look = appearance(model, woman, build).dressed(Wardrobe::Commoner);
-        look.outfit.as_mut().unwrap().legs = outfit::Legs::Fitted(Vec3::new(0.0, 0.0, 0.73));
+        look.outfit.as_mut().unwrap().legs =
+            outfit::Legs::Fitted(outfit::Pigment::Fixed(Vec3::new(0.0, 0.0, 0.73)));
         let mut materials = Assets::<StandardMaterial>::default();
         let mut library = PropLibrary::new(crate::props::PropMaterials::new(&mut materials));
         let mut meshes = Assets::<Mesh>::default();
@@ -810,4 +814,25 @@ fn art_contract_adult_brows_have_substance_taper_and_species_expression() {
     };
     assert!(slope(CreatureModel::Orc) < slope(CreatureModel::Medusa));
     assert!(slope(CreatureModel::Medusa) < slope(CreatureModel::Human));
+}
+
+#[test]
+fn sleeve_gathers_do_not_form_full_rings_around_the_outer_elbow() {
+    for build in [0.8, 1.0, 1.2] {
+        for length in [0.8, 1.2] {
+            for side in [-1.0, 1.0] {
+                let arm = geometry::upper_arm_form(side, build, length, 1.0, 1.0);
+                let sleeve = geometry::upper_sleeve_form(side, build, length, 1.0);
+                for height in [-0.245, -0.28] {
+                    for out in [Vec3::X, Vec3::NEG_X, Vec3::NEG_Z] {
+                        let origin = Vec3::Y * height * length + out * 0.3 * build;
+                        let skin = arm.onto(origin, -out);
+                        let cloth = sleeve.onto(origin, -out);
+                        let gap = skin.distance(cloth);
+                        assert!(gap < 0.011*build,"outer elbow must stay smooth, not encircled by rolls: build={build} length={length} gap={gap}");
+                    }
+                }
+            }
+        }
+    }
 }

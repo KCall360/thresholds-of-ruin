@@ -171,6 +171,69 @@ mod art_contract_tests {
     }
 
     #[test]
+    fn copied_robe_recipe_retains_cloth_and_leg_driven_motion() {
+        let native = Look::with_choice(
+            CreatureModel::Mage,
+            42,
+            Some(Variant {
+                woman: true,
+                build: 1,
+                ..default()
+            }),
+        );
+        let recipe = outfit::Outfit::native(&native);
+        let (_, native_rig, _, native_meshes) = super::super::rogue_tests::spawn_one(&native);
+        let native_mesh = native_meshes
+            .get(&native_rig.robe.as_ref().unwrap().mesh)
+            .unwrap();
+        let positions = |mesh: &Mesh| match mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap() {
+            VertexAttributeValues::Float32x3(values) => values.clone(),
+            _ => panic!("robe positions"),
+        };
+        let colors = |mesh: &Mesh| match mesh.attribute(Mesh::ATTRIBUTE_COLOR).unwrap() {
+            VertexAttributeValues::Float32x4(values) => values.clone(),
+            _ => panic!("robe pigments"),
+        };
+        let mut copied = native.clone();
+        copied.outfit = Some(recipe);
+        let (_, copied_rig, _, copied_meshes) = super::super::rogue_tests::spawn_one(&copied);
+        let copied_robe = copied_rig
+            .robe
+            .as_ref()
+            .expect("explicit recipe lost animated robe");
+        let copied_mesh = copied_meshes.get(&copied_robe.mesh).unwrap();
+        assert_eq!(positions(copied_mesh), positions(native_mesh));
+        assert_eq!(colors(copied_mesh), colors(native_mesh));
+        let mut recipient = Look::with_choice(
+            CreatureModel::Orc,
+            91,
+            Some(Variant {
+                woman: true,
+                build: 2,
+                ..default()
+            }),
+        );
+        recipient.outfit = Some(recipe);
+        let (_, mut rig, _, mut meshes) = super::super::rogue_tests::spawn_one(&recipient);
+        let robe = rig.robe.as_mut().expect("recipient lost animated robe");
+        assert_eq!(
+            colors(meshes.get(&robe.mesh).unwrap()),
+            colors(native_mesh),
+            "robe pigments must not inherit the recipient's palette or fold seed"
+        );
+        let mut rotations = [Quat::IDENTITY; JOINTS];
+        let offsets = [Vec3::ZERO; JOINTS];
+        place(robe, &rig.rest, &rotations, &offsets, &mut meshes);
+        let neutral = positions(meshes.get(&robe.mesh).unwrap());
+        rotations[J::LegL as usize] = Quat::from_rotation_x(0.8);
+        place(robe, &rig.rest, &rotations, &offsets, &mut meshes);
+        let moved = positions(meshes.get(&robe.mesh).unwrap());
+        assert_ne!(moved, neutral, "recipient leg pose must deform its robe");
+        assert_eq!(moved.len(), neutral.len());
+        assert!(moved.iter().all(|p| Vec3::from_array(*p).is_finite()));
+    }
+
+    #[test]
     fn art_contract_motion_changes_only_the_wearers_owned_cloth_mesh() {
         let look = Look::with_choice(
             CreatureModel::Mage,
@@ -201,7 +264,7 @@ mod art_contract_tests {
             &mut library,
             &mut meshes,
             hips,
-            &look,
+            outfit::Outfit::native(&look).robe.unwrap(),
             body,
             boot,
             feet,
@@ -212,7 +275,7 @@ mod art_contract_tests {
             &mut library,
             &mut meshes,
             other_hips,
-            &look,
+            outfit::Outfit::native(&look).robe.unwrap(),
             body,
             boot,
             feet,
@@ -395,6 +458,12 @@ pub(super) struct RobeRig {
     dirty: bool,
 }
 
+impl RobeRig {
+    pub(super) fn invalidate(&mut self) {
+        self.dirty = true;
+    }
+}
+
 fn index(row: usize, column: usize) -> usize {
     row * COLUMNS + column % COLUMNS
 }
@@ -403,22 +472,57 @@ fn ease(t: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
-pub(super) fn belt_radii(build: f32, waist: f32) -> Vec2 {
-    Vec2::new(0.152 * waist + 0.018, 0.121) * build
+pub(super) fn belt_radii(body: HumanoidBody, height: f32) -> Vec2 {
+    let form = geometry::torso_shape(body, None, true);
+    belt_on(body, height, &form)
 }
 
+/// Fit to the same body or outer-shell field that the outfit emits.
+pub(super) fn belt_on(body: HumanoidBody, height: f32, form: &crate::sdf::Sculpt) -> Vec2 {
+    let y = height - body.torso.y;
+    let reach = |out: Vec3| geometry::pelvis_surface(form, y, out).dot(out);
+    let mut radii =
+        Vec2::new(reach(Vec3::X), reach(Vec3::Z).max(reach(Vec3::NEG_Z))) + Vec2::splat(0.006);
+    // The hip cross-section is not a perfect ellipse. Check its diagonals
+    // as well as its axes so the fitted band does not cut into the rear hips.
+    for _ in 0..6 {
+        let gap = (0..48)
+            .map(|k| {
+                let a = k as f32 * TAU / 48.0;
+                form.distance(Vec3::new(a.sin() * radii.x, y, a.cos() * radii.y))
+            })
+            .fold(f32::INFINITY, f32::min);
+        if gap >= 0.003 {
+            break;
+        }
+        radii += Vec2::splat(0.003 - gap);
+    }
+    radii
+}
+
+#[cfg(test)]
 fn neutral(look: &Look, body: HumanoidBody, row: usize, column: usize) -> Vec3 {
-    let (build, hips, waist) = (body.build, body.hips_width, body.waist);
+    neutral_fitted(look.v.shade, body, belt_radii(body, WAIST_TOP), row, column)
+}
+
+fn neutral_fitted(
+    fold_seed: u8,
+    body: HumanoidBody,
+    belt: Vec2,
+    row: usize,
+    column: usize,
+) -> Vec3 {
+    let (build, hips) = (body.build, body.hips_width);
     let t = row.saturating_sub(YOKE_ROWS) as f32 / LOWER_ROWS as f32;
     let angle = column as f32 / COLUMNS as f32 * TAU;
     let top = Vec2::new(0.18 * build * hips, 0.135 * build);
     let bottom = Vec2::new(0.2458 * build * hips, 0.2458 * 0.74 * build);
     let r = if row < YOKE_ROWS {
-        (belt_radii(build, waist) - Vec2::splat(0.003)).lerp(top, row as f32 / YOKE_ROWS as f32)
+        (belt - Vec2::splat(0.003)).lerp(top, row as f32 / YOKE_ROWS as f32)
     } else {
         top.lerp(bottom, ease(t))
     };
-    let phase = rand(u64::from(look.v.shade) + 73, 0) * 0.4;
+    let phase = rand(u64::from(fold_seed) + 73, 0) * 0.4;
     // A free hem: folds deepen toward the edge and the cloth hangs lower
     // where each fold swings out, as on the draped skirts.
     let wave = (angle * 12.0 + phase).cos();
@@ -1438,7 +1542,7 @@ pub(super) fn spawn(
     library: &mut PropLibrary,
     meshes: &mut Assets<Mesh>,
     hips: Entity,
-    look: &Look,
+    recipe: outfit::FittedRobe,
     body: HumanoidBody,
     boot: BootShape,
     feet: [(Vec3, Vec3); 3],
@@ -1456,8 +1560,9 @@ pub(super) fn spawn(
         .1
         .clone();
     let shapes = [body.thigh, body.shin];
+    let belt = belt_radii(body, WAIST_TOP);
     let rest: Box<[Vec3; GRID]> = Box::new(std::array::from_fn(|i| {
-        neutral(look, body, i / COLUMNS, i % COLUMNS)
+        neutral_fitted(recipe.fold_seed, body, belt, i / COLUMNS, i % COLUMNS)
     }));
     let directions: Box<[Vec3; GRID]> = Box::new(std::array::from_fn(|i| {
         rest[i].with_y(0.0).normalize_or(Vec3::Z)
@@ -1472,13 +1577,13 @@ pub(super) fn spawn(
     let mut colors = vec![[0.0; 4]; vertices];
     for i in 0..GRID {
         let angle = (i % COLUMNS) as f32 / COLUMNS as f32 * TAU;
-        let phase = rand(u64::from(look.v.shade) + 73, 0) * 0.4;
+        let phase = rand(u64::from(recipe.fold_seed) + 73, 0) * 0.4;
         let shade = 0.97 + 0.03 * (angle * 12.0 + phase).cos();
-        colors[i] = (look.cloth * shade).extend(1.0).to_array();
-        colors[GRID + i] = (look.cloth * shade * 0.70).extend(1.0).to_array();
+        colors[i] = (recipe.color * shade).extend(1.0).to_array();
+        colors[GRID + i] = (recipe.color * shade * 0.70).extend(1.0).to_array();
     }
     for color in &mut colors[GRID * 2..BODY_VERTICES] {
-        *color = look.trim.extend(1.0).to_array();
+        *color = recipe.trim.extend(1.0).to_array();
     }
     for (tail, recipe) in sashes.iter().enumerate() {
         let start = BODY_VERTICES + tail * SASH_VERTICES;

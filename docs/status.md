@@ -636,7 +636,9 @@ checks do not replace the current
   The prototype adds shared body/fitting dimensions, correlated build silhouettes,
   fitted garment surfaces, an offline swappable wardrobe with garment-owned
   feminine necklines and lower-panel construction, outfit-owned torso ornaments
-  and pouches, peplums fitted over tunics,
+  and pouches, independent offline helm/boots/cloak/breastplate equipment overrides that
+  survive wardrobe changes, fitted torso armor and cloak back clearance during
+  swing, peplums fitted over tunics,
   reusable closed baldrics
   with open buckles and clearance over combined torso layers,
   sewn bindings and straps with coherent surface fitting and

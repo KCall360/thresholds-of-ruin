@@ -57,15 +57,44 @@ impl Pose {
     }
 }
 
+/// Opt-in CPU attribution for the latest animation step; no history is retained.
+/// Phases are pose/joints, robe fitting, drapes/segments, and hair/contact fitting.
+#[derive(Resource, Default, Debug, PartialEq)]
+pub(crate) struct MotionProfile {
+    pub rigs: usize,
+    pub phases: [std::time::Duration; 4],
+    pub hair_phases: [std::time::Duration; 4],
+}
+
+fn record_phase(
+    profile: &mut Option<&mut MotionProfile>,
+    phase: usize,
+    started: Option<std::time::Instant>,
+) {
+    if let (Some(profile), Some(started)) = (profile.as_deref_mut(), started) {
+        profile.phases[phase] += started.elapsed();
+    }
+}
+
 /// Advance timers and pose every creature.
 pub fn animate(
     time: Res<Time>,
     bored: Option<Res<Boredom>>,
+    mut profile: Option<ResMut<MotionProfile>>,
     mut rigs: Query<(&mut Rig, &mut Anim, &Transform)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut joints: Query<&mut Transform, Without<Rig>>,
 ) {
+    if let Some(profile) = profile.as_deref_mut() {
+        *profile = MotionProfile::default();
+    }
     let dt = time.delta_secs().min(0.05);
+    // A held presentation frame must retain contact history and cloth transforms,
+    // not re-evaluate the pose with a zero step.
+    if dt <= 0.0 {
+        return;
+    }
+
     // Left alone for a minute, everyone starts to amuse themselves.
     let fun = bored.map_or(0.0, |b| ease((b.0 - BORED_AFTER) / 3.0));
     for (mut rig, mut anim, root) in &mut rigs {
@@ -139,34 +168,129 @@ pub fn animate(
             anim.fallen = (anim.fallen - dt / 0.8).max(0.0);
         }
         let moving = step > dt * 0.04 * rig.scale.max(0.2);
-        let pose = pose(&rig, &mut anim, fun, dt, supported, moving);
-        for j in 0..JOINTS {
-            if let Some(e) = rig.joints[j] {
-                if let Ok(mut transform) = joints.get_mut(e) {
-                    if j == J::Lift as usize {
-                        // Lunges and falls are in the creature's own frame.
-                        let facing = Quat::from_rotation_y(anim.yaw);
-                        transform.translation = facing * pose.off[j] * rig.scale;
-                        transform.rotation = facing * pose.rot[j];
-                    } else {
-                        transform.translation = rig.rest[j] + pose.off[j];
-                        transform.rotation = pose.rot[j];
-                    }
+        present_pose(
+            &mut rig,
+            &mut anim,
+            fun,
+            dt,
+            supported,
+            moving,
+            &mut meshes,
+            &mut joints,
+            profile.as_deref_mut(),
+        );
+    }
+}
+
+/// An explicit state/composition change needs a pose at the current timestamp.
+/// Unlike a simulation step, this request never advances animation time.
+#[derive(Component)]
+pub(crate) struct PoseRefresh;
+
+pub(crate) fn refresh_pose(
+    mut commands: Commands,
+    bored: Option<Res<Boredom>>,
+    mut rigs: Query<(Entity, &mut Rig, &mut Anim), With<PoseRefresh>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut joints: Query<&mut Transform, Without<Rig>>,
+) {
+    let fun = bored.map_or(0.0, |b| ease((b.0 - BORED_AFTER) / 3.0));
+    for (entity, mut rig, mut anim) in &mut rigs {
+        // A replacement rig cannot inherit another rig's foot ownership.
+        if anim.contacts.rig != rig.joint(J::Lift) {
+            anim.contacts = WalkContacts::default();
+        }
+        let supported = anim.contacts.rig.is_some() && anim.action.is_none() && anim.dead.is_none();
+        present_pose(
+            &mut rig,
+            &mut anim,
+            fun,
+            0.0,
+            supported,
+            false,
+            &mut meshes,
+            &mut joints,
+            None,
+        );
+        commands.entity(entity).remove::<PoseRefresh>();
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn present_pose(
+    rig: &mut Rig,
+    anim: &mut Anim,
+    fun: f32,
+    dt: f32,
+    supported: bool,
+    moving: bool,
+    meshes: &mut Assets<Mesh>,
+    joints: &mut Query<&mut Transform, Without<Rig>>,
+    mut profile: Option<&mut MotionProfile>,
+) {
+    if let Some(profile) = profile.as_deref_mut() {
+        profile.rigs += 1;
+    }
+    let started = profile.as_ref().map(|_| std::time::Instant::now());
+    let pose = pose(rig, anim, fun, dt, supported, moving);
+    for j in 0..JOINTS {
+        if let Some(e) = rig.joints[j] {
+            if let Ok(mut transform) = joints.get_mut(e) {
+                if j == J::Lift as usize {
+                    // Lunges and falls are in the creature's own frame.
+                    let facing = Quat::from_rotation_y(anim.yaw);
+                    transform.translation = facing * pose.off[j] * rig.scale;
+                    transform.rotation = facing * pose.rot[j];
+                } else {
+                    transform.translation = rig.rest[j] + pose.off[j];
+                    transform.rotation = pose.rot[j];
                 }
             }
         }
-        let Rig { rest, robe, .. } = &mut *rig;
-        if let Some(robe) = robe {
-            super::robe::place(robe, rest, &pose.rot, &pose.off, &mut meshes);
-        }
-        place_segments(&rig, &anim, fun, &mut joints);
-        swing_drapes(&rig, &anim, dt, &mut joints);
-        for cloak in &mut rig.cloaks {
-            if let Ok(transform) = joints.get(cloak.entity) {
-                super::cloak::place(cloak, transform.rotation, &mut meshes);
-            }
+    }
+    record_phase(&mut profile, 0, started);
+    let Rig { rest, robe, .. } = rig;
+    let started = (profile.is_some() && robe.is_some()).then(std::time::Instant::now);
+    if let Some(robe) = robe {
+        super::robe::place(robe, rest, &pose.rot, &pose.off, meshes);
+    }
+    record_phase(&mut profile, 1, started);
+    let started = profile.as_ref().map(|_| std::time::Instant::now());
+    place_segments(rig, anim, fun, joints);
+    swing_drapes(rig, anim, dt, joints);
+    for cloak in &mut rig.cloaks {
+        if let Ok(transform) = joints.get(cloak.entity) {
+            super::cloak::place(cloak, transform.rotation, meshes);
         }
     }
+    record_phase(&mut profile, 2, started);
+    let started = (profile.is_some() && rig.hair.is_some()).then(std::time::Instant::now);
+    let head = rig
+        .joint(J::Head)
+        .and_then(|entity| joints.get(entity).ok())
+        .map(Transform::compute_affine);
+    let contacts = if rig.hair.is_some() {
+        super::visual_contact::posed(&rig.visual_contacts, |joint| {
+            rig.joint(joint)
+                .and_then(|entity| joints.get(entity).ok())
+                .map(Transform::compute_affine)
+        })
+    } else {
+        Vec::new()
+    };
+    if let (Some(head), Some(hair)) = (head, &mut rig.hair) {
+        hair.set_contacts(contacts);
+        if let Ok(drape) = joints.get(hair.entity) {
+            super::hair_contact::place_profiled(
+                hair,
+                head * drape.compute_affine(),
+                dt,
+                meshes,
+                profile.as_deref_mut().map(|p| &mut p.hair_phases),
+            );
+        }
+    }
+    record_phase(&mut profile, 3, started);
 }
 
 /// Hanging cloth and hair follow their wearer with a little lag: a cloak
@@ -186,6 +310,17 @@ fn swing_drapes(rig: &Rig, a: &Anim, dt: f32, joints: &mut Query<&mut Transform,
     }) * alive;
     let stir = (a.time * 1.3 + a.seed).sin() * alive;
     let stride = a.walk.sin();
+    // Layers fitted around the same waist retain their relative placement.
+    // The longest authored layer sets the response of that garment stack;
+    // independent peplums, cloaks and hair keep their own motion.
+    let layered_length = rig
+        .drapes
+        .iter()
+        .filter_map(|(entity, kind)| match kind {
+            Drape::Skirt(length) if rig.skirt_layers.contains(entity) => Some(*length),
+            _ => None,
+        })
+        .reduce(f32::max);
     for &(e, kind) in &rig.drapes {
         let rotation = match kind {
             Drape::Cloak => {
@@ -193,6 +328,11 @@ fn swing_drapes(rig: &Rig, a: &Anim, dt: f32, joints: &mut Query<&mut Transform,
                     * Quat::from_rotation_z(0.3 * turning + 0.04 * stride * walk)
             }
             Drape::Skirt(length) => {
+                let length = if rig.skirt_layers.contains(&e) {
+                    layered_length.unwrap_or(length)
+                } else {
+                    length
+                };
                 let give = 1.0 / (1.0 + 2.5 * length);
                 Quat::from_rotation_z((0.09 * stride * walk + 0.2 * turning) * give)
                     * Quat::from_rotation_x((0.1 * walk + 0.008 * stir) * give)
@@ -838,7 +978,7 @@ fn fit_biped_support(p: &mut Pose, rig: &Rig, contacts: &[Vec3; 2], weight: f32)
         drop = drop.max(at.y - contacts[i].y - height);
     }
     p.off[J::Lift as usize].y -= drop * weight;
-    if rig.style == Style::Caster {
+    if rig.robe.is_some() {
         limit_caster_support(p, rig, contacts);
     }
 }
@@ -2041,10 +2181,13 @@ fn biped_pose(p: &mut Pose, rig: &Rig, s: f32, w: f32, breath: f32, m: Option<Mo
         Move::Jump => {
             // The arms swing back into the crouch and up through the
             // spring, ride high in flight and come forward for the landing.
-            let (gather, rise, tuck) = jump_profile(t);
-            let before = if t < 0.3 { gather } else { 0.0 };
-            let after = if t > 0.7 { gather } else { 0.0 };
-            let up = (rise / 0.3).clamp(0.0, 1.0).sqrt();
+            let (gather, _, tuck) = jump_profile(t);
+            // Anticipate takeoff and recover through landing. Deriving arm
+            // lift from sqrt(body height) creates unbounded angular speed at
+            // both flight boundaries, sweeping attached items through hair.
+            let before = 0.7 * envelope(t, 0.0, 0.08, 0.08, 0.20);
+            let after = 0.85 * envelope(t, 0.68, 0.80, 0.84, 1.0);
+            let up = envelope(t, 0.04, 0.50, 0.50, 0.96);
             for (arm, fore, side) in [(J::ArmL, J::ForeL, 1.0f32), (J::ArmR, J::ForeR, -1.0)] {
                 p.r(
                     arm,
@@ -2854,6 +2997,165 @@ mod support_tests {
     use crate::creatures::rogue_tests::spawn_one;
 
     #[test]
+    fn explicit_pose_refresh_preserves_time_and_held_frames() {
+        let look = Look::with_choice(
+            CreatureModel::Human,
+            7,
+            Some(Variant {
+                woman: true,
+                ..default()
+            }),
+        )
+        .dressed(Wardrobe::SylvanDuelist);
+        let (mut world, rig, _, meshes) = spawn_one(&look);
+        let root = world
+            .get::<ChildOf>(rig.joint(J::Lift).unwrap())
+            .unwrap()
+            .parent();
+        let hand = rig.joint(J::HandR).unwrap();
+        let original_hand = *world.get::<Transform>(hand).unwrap();
+        let mut anim = Anim::new(7, Vec3::ZERO);
+        anim.time = 3.0;
+        anim.walk = 0.7;
+        anim.speed = 0.2;
+        anim.hurt = Some(0.1);
+        anim.action = Some((Move::Jump, 0.4));
+        world.entity_mut(root).insert((rig, anim, PoseRefresh));
+        world.insert_resource(meshes);
+        let mut refresh = Schedule::default();
+        refresh.add_systems(refresh_pose);
+        refresh.run(&mut world);
+        assert!(
+            world.get::<PoseRefresh>(root).is_none(),
+            "requests are consumed once"
+        );
+        let anim = world.get::<Anim>(root).unwrap();
+        assert_eq!(
+            (anim.time, anim.walk, anim.speed, anim.hurt),
+            (3.0, 0.7, 0.2, Some(0.1))
+        );
+        assert!(matches!(anim.action, Some((Move::Jump, 0.4))));
+        assert_ne!(
+            *world.get::<Transform>(hand).unwrap(),
+            original_hand,
+            "refresh must actually pose geometry"
+        );
+        let snapshot = |world: &mut World| {
+            let transforms: Vec<_> = world
+                .query::<(Entity, &Transform)>()
+                .iter(world)
+                .map(|(e, t)| (e, *t))
+                .collect();
+            let geometry: Vec<_> = world
+                .resource::<Assets<Mesh>>()
+                .iter()
+                .map(|(id, mesh)| {
+                    let positions = match mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap() {
+                        bevy::render::mesh::VertexAttributeValues::Float32x3(p) => p.clone(),
+                        _ => panic!("expected positions"),
+                    };
+                    (id, positions)
+                })
+                .collect();
+            (transforms, geometry)
+        };
+        let held = snapshot(&mut world);
+        for _ in 0..5 {
+            refresh.run(&mut world);
+        }
+        assert_eq!(
+            snapshot(&mut world),
+            held,
+            "unrequested refresh cannot alter joints or cloth/hair meshes"
+        );
+    }
+
+    #[test]
+    fn jump_crouch_has_bounded_speed_at_phase_boundaries() {
+        for boundary in [0.0_f32, JUMP_TAKEOFF, JUMP_LANDING, 1.0] {
+            let start = (boundary - 0.0001).max(0.0);
+            let end = (boundary + 0.0001).min(1.0);
+            let speed = (jump_profile(end).0 - jump_profile(start).0).abs()
+                / ((end - start) * Move::Jump.duration());
+            assert!(speed < 12.0, "crouch speed={speed} at phase {boundary}");
+        }
+        assert!(jump_profile(0.15).0 > 0.9, "retain takeoff crouch");
+        assert!(jump_profile(0.85).0 > 0.8, "retain landing absorption");
+        assert_eq!(jump_profile(0.5).0, 0.0);
+    }
+
+    #[test]
+    fn jump_arms_move_continuously_through_takeoff_and_landing() {
+        let look = Look::with_choice(
+            CreatureModel::Human,
+            7,
+            Some(Variant {
+                woman: false,
+                ..default()
+            }),
+        );
+        let (_, rig, _, _) = spawn_one(&look);
+        let arms = |t| {
+            let mut p = Pose::new();
+            biped_pose(&mut p, &rig, 0.0, 0.0, 0.0, Some(Move::Jump), t);
+            [J::ArmL, J::ArmR, J::ForeL, J::ForeR].map(|j| p.rot[j as usize])
+        };
+        // Limit angular travel per real second at supported review rates,
+        // including samples straddling the flight boundaries at finer steps.
+        for hz in [20.0, 50.0, 60.0, 120.0, 240.0] {
+            let dt = 1.0 / hz / Move::Jump.duration();
+            let mut t = 0.0;
+            while t < 1.0 {
+                let end = (t + dt).min(1.0);
+                for (a, b) in arms(t).into_iter().zip(arms(end)) {
+                    let speed = a.angle_between(b) / ((end - t) * Move::Jump.duration());
+                    assert!(speed < 14.0, "{hz}Hz t={t}: arm speed={speed}");
+                }
+                t = end;
+            }
+        }
+        for boundary in [JUMP_TAKEOFF, JUMP_LANDING] {
+            for (a, b) in arms(boundary - 0.0001)
+                .into_iter()
+                .zip(arms(boundary + 0.0001))
+            {
+                assert!(
+                    a.angle_between(b) < 0.004,
+                    "arm snaps at flight boundary {boundary}"
+                );
+            }
+        }
+        // Smoothing must preserve the recognizable overhead flight pose.
+        assert!(arms(0.5)[0].angle_between(arms(0.0)[0]) > 2.0);
+    }
+
+    #[test]
+    fn mage_replacement_support_has_no_invisible_floor_length_robe() {
+        for model in [CreatureModel::Mage, CreatureModel::RedMage] {
+            for woman in [false, true] {
+                let look = Look::with_choice(model, 17, Some(Variant { woman, ..default() }))
+                    .dressed(Wardrobe::Knight);
+                let (_, mut rig, _, _) = spawn_one(&look);
+                assert!(rig.robe.is_none());
+                let contacts = biped_rest_contacts(&rig);
+                let mut caster = Pose::new();
+                caster.rot[J::Hips as usize] = fwd(0.65);
+                caster.off[J::Lift as usize] = Vec3::new(0.0, -0.2, 0.3);
+                let mut ordinary = Pose::new();
+                ordinary.rot = caster.rot;
+                ordinary.off = caster.off;
+                fit_biped_support(&mut caster, &rig, &contacts, 1.0);
+                rig.style = Style::Common;
+                fit_biped_support(&mut ordinary, &rig, &contacts, 1.0);
+                assert_eq!(
+                    caster.off, ordinary.off,
+                    "support follows worn cloth, not caster identity"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn women_of_every_kind_flirt_and_men_do_not() {
         // The flirt's kiss: her left forearm bent to her lips.
         let kissing = |model: CreatureModel, woman: bool| {
@@ -2961,5 +3263,30 @@ mod support_tests {
             assert_eq!(checked, 4, "{model:?} needs four supporting limbs");
         }
         assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+}
+
+#[cfg(test)]
+mod profile_tests {
+    use super::*;
+
+    #[test]
+    fn held_frame_clears_profile_and_profile_is_optional() {
+        let mut app = App::new();
+        app.insert_resource(Time::<()>::default())
+            .init_resource::<Assets<Mesh>>()
+            .insert_resource(MotionProfile {
+                rigs: 9,
+                phases: [std::time::Duration::from_secs(1); 4],
+                hair_phases: [std::time::Duration::from_secs(1); 4],
+            })
+            .add_systems(Update, animate);
+        app.update();
+        assert_eq!(
+            *app.world().resource::<MotionProfile>(),
+            MotionProfile::default()
+        );
+        app.world_mut().remove_resource::<MotionProfile>();
+        app.update();
     }
 }

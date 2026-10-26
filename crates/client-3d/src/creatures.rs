@@ -47,12 +47,16 @@ pub struct Look {
     /// Its cache identity before it was dressed: the body every outfit is
     /// cut for.
     body_key: Option<String>,
+    /// Preset identity is separate from independent equipped visual pieces.
+    wardrobe: Wardrobe,
+    equipment: Equipment,
 }
 
 /// How one individual differs from others of its kind: for people, sex,
 /// build, skin, hair and beard; for beasts, coat shade and markings. Rolled
 /// from a seed, so the same individual always looks the same.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct Variant {
     pub woman: bool,
     /// 0 slender, 1 average, 2 sturdy.
@@ -306,16 +310,55 @@ impl Look {
         if !outfit::dresses(&self) {
             return self;
         }
-        let body_key = self.body_key.take().unwrap_or_else(|| self.key.clone());
-        if wardrobe == Wardrobe::Native {
-            self.outfit = None;
-            self.key = body_key;
+        self.wardrobe = wardrobe;
+        self.outfit =
+            (wardrobe != Wardrobe::Native).then(|| outfit::Outfit::from_wardrobe(wardrobe, &self));
+        self.refresh_clothing_key();
+        self
+    }
+
+    /// Replace the independent visual loadout, retaining the selected preset.
+    /// Empty equipment reveals that preset's original pieces. The initial
+    /// fitting implementation supports the same bodies as the offline wardrobe.
+    pub(crate) fn equipped(mut self, equipment: Equipment) -> Look {
+        if !outfit::dresses(&self) {
             return self;
         }
-        self.outfit = Some(outfit::Outfit::from_wardrobe(wardrobe, &self));
-        self.key = format!("{body_key}:{wardrobe:?}");
-        self.body_key = Some(body_key);
+        self.equipment = equipment;
+        self.refresh_clothing_key();
         self
+    }
+
+    /// Resolve an exact requested composition, rejecting unsupported bodies and
+    /// recipes instead of invoking the interactive wardrobe's fallback policy.
+    /// Keep this renderer-local: gameplay equip permission belongs to the server.
+    pub(crate) fn composed(self, wardrobe: Wardrobe, equipment: Equipment) -> Result<Self, String> {
+        if !self.dresses() && (wardrobe != Wardrobe::Native || !equipment.is_empty()) {
+            return Err("cannot wear the requested composition".into());
+        }
+        if wardrobe.recipe_for(self.woman()) != wardrobe {
+            return Err("outfit requires a female body; implicit fallback is forbidden".into());
+        }
+        Ok(self.dressed(wardrobe).equipped(equipment))
+    }
+
+    pub(crate) fn equipment(&self) -> Equipment {
+        self.equipment
+    }
+
+    fn refresh_clothing_key(&mut self) {
+        let body = self.body_key.take().unwrap_or_else(|| self.key.clone());
+        self.key = body.clone();
+        if self.wardrobe != Wardrobe::Native {
+            self.key.push_str(&format!(":{:?}", self.wardrobe));
+        }
+        if !self.equipment.is_empty() {
+            self.key
+                .push_str(&format!(":equipment:{:?}", self.equipment));
+        }
+        if self.wardrobe != Wardrobe::Native || !self.equipment.is_empty() {
+            self.body_key = Some(body);
+        }
     }
 
     /// Whether this look can be redressed from the wardrobe.
@@ -519,6 +562,8 @@ impl Look {
             v: Variant::default(),
             outfit: None,
             body_key: None,
+            wardrobe: Wardrobe::Native,
+            equipment: Equipment::default(),
         };
         let teal = Vec3::new(0.045, 0.6, 0.55);
         if model == CreatureModel::Placeholder {
@@ -1048,6 +1093,9 @@ pub struct Rig {
     robe: Option<robe::RobeRig>,
     /// Instance-owned connected shoulder sheets; materials remain shared.
     cloaks: Vec<cloak::CloakRig>,
+    /// Instance-owned loose hair fitted against the composed torso layers.
+    hair: Option<hair_contact::HairRig>,
+    visual_contacts: Vec<visual_contact::Part>,
     stride: f32,
     hunch: f32,
     style: Style,
@@ -1063,6 +1111,8 @@ pub struct Rig {
     girth: f32,
     /// Hanging cloth that swings on its own as the wearer moves.
     drapes: Vec<(Entity, Drape)>,
+    /// Skirt layers sharing a waist pivot and fitted clearance move together.
+    skirt_layers: Vec<Entity>,
 }
 
 /// How a piece of hanging cloth swings.
@@ -1080,6 +1130,19 @@ pub(crate) enum Drape {
 }
 
 impl Rig {
+    /// Re-enter a preloaded review scene without retaining prior cloth/contact caches.
+    pub(crate) fn reset_presentation(&mut self) {
+        if let Some(hair) = &mut self.hair {
+            hair.reset_presentation();
+        }
+        if let Some(robe) = &mut self.robe {
+            robe.invalidate();
+        }
+        for cloak in &mut self.cloaks {
+            cloak.invalidate();
+        }
+    }
+
     pub fn joint(&self, j: J) -> Option<Entity> {
         self.joints[j as usize]
     }
@@ -1274,11 +1337,12 @@ pub(crate) fn jump_profile(t: f32) -> (f32, f32, f32) {
     let gather = if t < JUMP_TAKEOFF {
         // Down into the crouch, then driving up out of it.
         let k = t / JUMP_TAKEOFF;
-        (std::f32::consts::PI * k.powf(0.7)).sin()
+        (std::f32::consts::PI * animation::ease(k)).sin()
     } else if t > JUMP_LANDING {
-        // The landing is absorbed, then she straightens.
+        // Ease into landing absorption, then straighten. Fractional powers
+        // of k give the torso and head unbounded speed at first contact.
         let k = (t - JUMP_LANDING) / (1.0 - JUMP_LANDING);
-        0.85 * (std::f32::consts::PI * k.powf(0.45)).sin()
+        0.85 * (std::f32::consts::PI * animation::ease(k)).sin()
     } else {
         0.0
     };
@@ -1383,8 +1447,10 @@ mod cloak;
 #[cfg(test)]
 mod cloak_tests;
 mod corpse;
+mod deformation;
 mod effects;
 mod geometry;
+mod hair_contact;
 mod outfit;
 #[cfg(test)]
 mod reaction_tests;
@@ -1393,11 +1459,15 @@ mod robe;
 mod rogue_tests;
 #[cfg(test)]
 mod soft_tests;
+mod visual_contact;
 
+pub(crate) use animation::MotionProfile;
 pub use animation::{animate, soften, Boredom, BORED_AFTER};
+pub(crate) use animation::{refresh_pose, PoseRefresh};
 pub use corpse::{snuff, spawn_corpse, Snuffed};
 pub use effects::{effects, stage, Bolt, Fade};
 pub use geometry::spawn;
+pub(crate) use outfit::Equipment;
 pub use outfit::Wardrobe;
 
 /// Convert only the shared cosmetic seed to this renderer's variation stream.
@@ -1504,7 +1574,6 @@ mod dressing_tests {
         for model in [
             CreatureModel::Guardian,
             CreatureModel::Yeti,
-            CreatureModel::Mage,
             CreatureModel::Bat,
         ] {
             let base = Look::of(model, 2);

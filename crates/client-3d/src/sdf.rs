@@ -4,8 +4,11 @@
 //! doll, above all for faces: cheekbones flow into the jaw, the brow shades
 //! the eye sockets, the nose grows out of the face.
 
+mod contact_field;
+mod partition;
 use crate::props::Builder;
 use bevy::prelude::*;
+pub(crate) use contact_field::ContactField;
 
 /// One primitive of a sculpt.
 #[derive(Clone, Copy)]
@@ -20,7 +23,7 @@ pub enum Shape {
 }
 
 impl Shape {
-    fn distance(self, p: Vec3) -> f32 {
+    pub(crate) fn distance(self, p: Vec3) -> f32 {
         match self {
             Shape::Ellipsoid(c, r) => {
                 // A good approximation of the distance to an ellipsoid.
@@ -71,17 +74,24 @@ pub enum Step {
 }
 
 fn smooth_min(a: f32, b: f32, k: f32) -> f32 {
+    smooth_min_with_weight(a, b, k).0
+}
+
+/// Distance and derivative weight of the existing (left) source. Surface
+/// provenance uses the exact same blend as geometry, including ordered unions.
+#[inline]
+pub(crate) fn smooth_min_with_weight(a: f32, b: f32, k: f32) -> (f32, f32) {
     if k <= 0.0 {
-        return a.min(b);
+        return (a.min(b), if a <= b { 1.0 } else { 0.0 });
     }
     if b - a >= k {
-        return a;
+        return (a, 1.0);
     }
     if a - b >= k {
-        return b;
+        return (b, 0.0);
     }
     let h = (0.5 + 0.5 * (b - a) / k).clamp(0.0, 1.0);
-    b + (a - b) * h - k * h * (1.0 - h)
+    (b + (a - b) * h - k * h * (1.0 - h), h)
 }
 
 fn smooth_max(a: f32, b: f32, k: f32) -> f32 {
@@ -320,6 +330,20 @@ impl Sculpt {
         step: f32,
         paint: &dyn Fn(Vec3, Vec3) -> Vec3,
     ) {
+        self.mesh_partitioned(b, min, max, step, paint, None);
+    }
+
+    /// Preserve a hard coverage edge instead of interpolating its pigments.
+    #[allow(clippy::too_many_arguments)]
+    pub fn mesh_partitioned(
+        &self,
+        b: &mut Builder,
+        min: Vec3,
+        max: Vec3,
+        step: f32,
+        paint: &dyn Fn(Vec3, Vec3) -> Vec3,
+        coverage: Option<&dyn Fn(Vec3) -> bool>,
+    ) {
         let profile_started = crate::props::profile_builds().then(std::time::Instant::now);
         let size = ((max - min) / step).ceil().as_uvec3() + UVec3::ONE;
         let (nx, ny, nz) = (size.x as usize, size.y as usize, size.z as usize);
@@ -444,6 +468,25 @@ impl Sculpt {
                 vs.reverse();
             }
             for tri in [[vs[0], vs[1], vs[2]], [vs[0], vs[2], vs[3]]] {
+                if let Some(region) = coverage {
+                    let input = tri.map(|v| partition::Vertex {
+                        position: v.position,
+                        sample: v.position,
+                        normal: v.normal,
+                        shade: v.shade,
+                    });
+                    if let Some(pieces) = partition::split(input, region) {
+                        for face in pieces {
+                            b.tri_smooth_shaded(
+                                face.map(|v| v.position),
+                                face.map(|v| v.normal),
+                                face.map(|v| paint(v.sample, v.normal)),
+                                face.map(|v| v.shade),
+                            );
+                        }
+                        continue;
+                    }
+                }
                 // Preserve the existing triangle order and winding. Pigment
                 // remains sRGB and occlusion remains linear until upload.
                 b.tri_smooth_shaded(
@@ -688,5 +731,40 @@ mod tests {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn painted_cut_edges_do_not_interpolate_between_skin_and_cloth() {
+    use crate::props::{Parts, PropMaterials};
+    use bevy::render::mesh::VertexAttributeValues;
+    let mut form = Sculpt::default();
+    form.add(Shape::Ellipsoid(Vec3::ZERO, Vec3::splat(0.1)), 0.0);
+    let mut parts = Parts::default();
+    form.mesh_partitioned(
+        &mut parts.matte,
+        Vec3::splat(-0.15),
+        Vec3::splat(0.15),
+        0.025,
+        &|at, _| if at.y < 0.023 { Vec3::X } else { Vec3::Z },
+        Some(&|at| at.y < 0.023),
+    );
+    let mut meshes = Assets::<Mesh>::default();
+    let mut materials = Assets::<StandardMaterial>::default();
+    let model = parts.finish(&mut meshes, &PropMaterials::new(&mut materials));
+    let mesh = meshes.get(&model.0[0].0).unwrap();
+    let VertexAttributeValues::Float32x4(colors) = mesh.attribute(Mesh::ATTRIBUTE_COLOR).unwrap()
+    else {
+        panic!("colors")
+    };
+    let indices: Vec<_> = mesh.indices().unwrap().iter().collect();
+    assert!(indices.len() > 60);
+    for tri in indices.as_chunks::<3>().0 {
+        let cloth = colors[tri[0]][0] > colors[tri[0]][2];
+        assert!(
+            tri.iter().all(|&i| (colors[i][0] > colors[i][2]) == cloth),
+            "one triangle bridges the skin/cloth cut and blends pigment past the intended edge"
+        );
     }
 }

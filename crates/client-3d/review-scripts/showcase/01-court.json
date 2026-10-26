@@ -1,0 +1,448 @@
+{
+  "version": 1,
+  "hz": 20,
+  "viewport": [
+    1280,
+    720
+  ],
+  "actors": [
+    {
+      "id": "actor-1",
+      "model": "Human",
+      "seed": 7,
+      "body": {
+        "woman": true,
+        "hair": 2,
+        "build": 0,
+        "skin": 0
+      },
+      "outfit": "princess",
+      "equipment": [],
+      "position": [
+        -1.15,
+        -0.5,
+        0
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "actor-2",
+      "model": "Mage",
+      "seed": 19,
+      "body": {
+        "woman": true,
+        "hair": 2,
+        "build": 1,
+        "skin": 1
+      },
+      "outfit": "royal-princess",
+      "equipment": [],
+      "position": [
+        0.0,
+        -0.5,
+        0
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "actor-3",
+      "model": "Vampire",
+      "seed": 31,
+      "body": {
+        "woman": true,
+        "hair": 1,
+        "build": 2,
+        "skin": 2
+      },
+      "outfit": "courtier",
+      "equipment": [],
+      "position": [
+        1.15,
+        -0.5,
+        0
+      ],
+      "yaw": 0
+    }
+  ],
+  "cameras": [
+    {
+      "id": "front",
+      "position": [
+        0,
+        1.0,
+        3.3
+      ],
+      "target": [
+        0,
+        0.22,
+        0
+      ],
+      "fov_degrees": 48
+    },
+    {
+      "id": "three-quarter",
+      "position": [
+        2.5,
+        1.3,
+        3.8
+      ],
+      "target": [
+        0,
+        0.25,
+        0
+      ],
+      "fov_degrees": 52
+    },
+    {
+      "id": "low-front",
+      "position": [
+        0,
+        0.65,
+        3.5
+      ],
+      "target": [
+        0,
+        0.35,
+        0
+      ],
+      "fov_degrees": 48
+    },
+    {
+      "id": "actor-1",
+      "position": [
+        -1.15,
+        0.65,
+        2.2
+      ],
+      "target": [
+        -1.15,
+        0.25,
+        0
+      ],
+      "fov_degrees": 46
+    },
+    {
+      "id": "actor-2",
+      "position": [
+        0.0,
+        0.65,
+        2.2
+      ],
+      "target": [
+        0.0,
+        0.25,
+        0
+      ],
+      "fov_degrees": 46
+    },
+    {
+      "id": "actor-3",
+      "position": [
+        1.15,
+        0.65,
+        2.2
+      ],
+      "target": [
+        1.15,
+        0.25,
+        0
+      ],
+      "fov_degrees": 46
+    }
+  ],
+  "events": [
+    {
+      "tick": 1,
+      "actor": "actor-1",
+      "operation": {
+        "type": "action",
+        "name": "gesture"
+      }
+    },
+    {
+      "tick": 5,
+      "actor": "actor-2",
+      "operation": {
+        "type": "action",
+        "name": "gesture"
+      }
+    },
+    {
+      "tick": 9,
+      "actor": "actor-3",
+      "operation": {
+        "type": "action",
+        "name": "gesture"
+      }
+    },
+    {
+      "tick": 26,
+      "actor": "actor-1",
+      "operation": {
+        "type": "velocity",
+        "value": [
+          0,
+          0,
+          0.35
+        ]
+      }
+    },
+    {
+      "tick": 26,
+      "actor": "actor-2",
+      "operation": {
+        "type": "velocity",
+        "value": [
+          0,
+          0,
+          0.35
+        ]
+      }
+    },
+    {
+      "tick": 26,
+      "actor": "actor-3",
+      "operation": {
+        "type": "velocity",
+        "value": [
+          0,
+          0,
+          0.35
+        ]
+      }
+    },
+    {
+      "tick": 50,
+      "actor": "actor-1",
+      "operation": {
+        "type": "velocity",
+        "value": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "tick": 50,
+      "actor": "actor-2",
+      "operation": {
+        "type": "velocity",
+        "value": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "tick": 50,
+      "actor": "actor-3",
+      "operation": {
+        "type": "velocity",
+        "value": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "tick": 54,
+      "actor": "actor-1",
+      "operation": {
+        "type": "action",
+        "name": "strike"
+      }
+    },
+    {
+      "tick": 57,
+      "actor": "actor-2",
+      "operation": {
+        "type": "action",
+        "name": "heavy"
+      }
+    },
+    {
+      "tick": 60,
+      "actor": "actor-3",
+      "operation": {
+        "type": "action",
+        "name": "thrust"
+      }
+    },
+    {
+      "tick": 90,
+      "actor": "actor-1",
+      "operation": {
+        "type": "action",
+        "name": "focus"
+      }
+    },
+    {
+      "tick": 93,
+      "actor": "actor-2",
+      "operation": {
+        "type": "action",
+        "name": "focus"
+      }
+    },
+    {
+      "tick": 96,
+      "actor": "actor-3",
+      "operation": {
+        "type": "action",
+        "name": "focus"
+      }
+    },
+    {
+      "tick": 118,
+      "actor": "actor-1",
+      "operation": {
+        "type": "action",
+        "name": "jump"
+      }
+    },
+    {
+      "tick": 122,
+      "actor": "actor-2",
+      "operation": {
+        "type": "action",
+        "name": "jump"
+      }
+    },
+    {
+      "tick": 126,
+      "actor": "actor-3",
+      "operation": {
+        "type": "action",
+        "name": "jump"
+      }
+    },
+    {
+      "tick": 150,
+      "actor": "actor-1",
+      "operation": {
+        "type": "teleport",
+        "position": [
+          -1.15,
+          -0.5,
+          0
+        ],
+        "yaw": 25
+      }
+    },
+    {
+      "tick": 150,
+      "actor": "actor-2",
+      "operation": {
+        "type": "teleport",
+        "position": [
+          0.0,
+          -0.5,
+          0
+        ],
+        "yaw": 0
+      }
+    },
+    {
+      "tick": 150,
+      "actor": "actor-3",
+      "operation": {
+        "type": "teleport",
+        "position": [
+          1.15,
+          -0.5,
+          0
+        ],
+        "yaw": -25
+      }
+    },
+    {
+      "tick": 154,
+      "actor": "actor-1",
+      "operation": {
+        "type": "action",
+        "name": "gesture"
+      }
+    },
+    {
+      "tick": 158,
+      "actor": "actor-2",
+      "operation": {
+        "type": "action",
+        "name": "gesture"
+      }
+    },
+    {
+      "tick": 162,
+      "actor": "actor-3",
+      "operation": {
+        "type": "action",
+        "name": "gesture"
+      }
+    }
+  ],
+  "captures": [
+    {
+      "tick": 0,
+      "name": "arrival",
+      "camera": "front"
+    },
+    {
+      "tick": 12,
+      "name": "greetings",
+      "camera": "front"
+    },
+    {
+      "tick": 38,
+      "name": "walk",
+      "camera": "three-quarter"
+    },
+    {
+      "tick": 62,
+      "name": "action",
+      "camera": "low-front"
+    },
+    {
+      "tick": 84,
+      "name": "portrait-left",
+      "camera": "actor-1"
+    },
+    {
+      "tick": 94,
+      "name": "portrait-center",
+      "camera": "actor-2"
+    },
+    {
+      "tick": 102,
+      "name": "portrait-right",
+      "camera": "actor-3"
+    },
+    {
+      "tick": 126,
+      "name": "takeoff",
+      "camera": "front"
+    },
+    {
+      "tick": 132,
+      "name": "flight",
+      "camera": "three-quarter"
+    },
+    {
+      "tick": 142,
+      "name": "landing",
+      "camera": "front"
+    },
+    {
+      "tick": 164,
+      "name": "finale",
+      "camera": "low-front"
+    },
+    {
+      "tick": 180,
+      "name": "curtain",
+      "camera": "front"
+    }
+  ]
+}

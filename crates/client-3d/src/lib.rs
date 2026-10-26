@@ -16,11 +16,15 @@ mod interact;
 mod launch;
 mod lighting;
 mod minimap;
+#[doc(hidden)]
+pub mod model_benchmark;
 mod net;
 mod picking;
 mod props;
 #[cfg(test)]
 mod render_contracts;
+mod review_clock;
+mod review_script;
 mod sdf;
 mod showcase;
 #[cfg(test)]
@@ -61,6 +65,13 @@ const HELP: &str = "WASD/arrows: move   Q/E: turn   wheel: zoom   click: act   G
 X: door   I: pack   Space: wait   R/F: up/down   M: map   Tab: control   Esc: close/quit";
 
 pub fn run() -> Result<(), Error> {
+    let arguments: Vec<String> = std::env::args().skip(1).collect();
+    if arguments.iter().any(|arg| arg == "--live-playlist") {
+        return review_script::live::cli(&arguments);
+    }
+    if arguments.iter().any(|arg| arg == "--scene-script") {
+        return review_script::cli(&arguments);
+    }
     let mut connect: Option<SocketAddr> = None;
     let mut actor = ActorId(1);
     let mut observe = false;
@@ -101,6 +112,11 @@ pub fn run() -> Result<(), Error> {
             }
             "--demo" => diagnostics.demo = true,
             "--quit-after" => diagnostics.quit_after = Some(value()?.parse()?),
+            "--review-step-hz" => {
+                let hz = value()?.parse()?;
+                review_clock::ReviewStep::new(hz)?;
+                diagnostics.review_step_hz = Some(hz);
+            }
             "--capture-every" => diagnostics.capture_every = Some(value()?.parse()?),
             "--distance" => diagnostics.distance = Some(value()?.parse()?),
             "--azimuth" => {
@@ -150,6 +166,9 @@ pub fn run() -> Result<(), Error> {
                 let name = value()?;
                 diagnostics.outfit = creatures::Wardrobe::parse(&name)
                     .ok_or_else(|| format!("unknown outfit {name}"))?;
+            }
+            "--wear" => {
+                diagnostics.equipment.select(&value()?)?;
             }
             "--wardrobe-cycle" => {
                 // Redress the bestiary's humanoids every so many seconds.
@@ -221,6 +240,7 @@ pub fn run() -> Result<(), Error> {
                      tor-client-3d --connect 127.0.0.1:PORT [--actor 1] [--observe]  (token from TOR_SERVER_TOKEN)\n\
                      Offline: --bestiary or --gallery [--azimuth DEGREES]\n\
                      Model review: --lineups [--women] [--jump] [--lively] [--antic N] [--turn DEGREES] [--bust-study contours|volumes] or --fallen-lineups [--capture DIR]\n\
+                     Wardrobe: --outfit NAME [--wear helm] [--wear boots] [--wear cloak] [--wear breastplate] [--wardrobe-cycle SECS]\n\
                      Motion review: --travel-study [--capture DIR --capture-every SECS]\n\
                      Without --connect it starts a private server with a fresh save.\n{HELP}"
                 );
@@ -247,11 +267,22 @@ pub fn run() -> Result<(), Error> {
                 .into(),
         );
     }
+    if !diagnostics.equipment.is_empty() && (connect.is_some() || gallery || !bestiary) {
+        return Err(
+            "--wear is available only in the offline bestiary; live equipment is server-owned"
+                .into(),
+        );
+    }
     if creatures::PLAYER_LOOK.get().is_some() && (gallery || !bestiary) {
         return Err(
             "--appearance is available only with --bestiary; live appearance is server-owned"
                 .into(),
         );
+    }
+    if diagnostics.review_step_hz.is_some()
+        && (connect.is_some() || gallery || !diagnostics.lineups)
+    {
+        return Err("--review-step-hz requires offline --lineups".into());
     }
     if gallery {
         gallery::run(diagnostics);
@@ -404,6 +435,7 @@ pub(crate) struct Diagnostics {
     turn: f32,
     /// Seconds between screenshots with --capture.
     capture_every: Option<f32>,
+    review_step_hz: Option<u32>,
     /// In the bestiary, go straight to the close-ups.
     portraits: bool,
     /// Let offline bestiary shaders warm up before starting its capture clock.
@@ -433,6 +465,8 @@ pub(crate) struct Diagnostics {
     families: Vec<String>,
     /// What the bestiary's humanoids wear at first.
     outfit: creatures::Wardrobe,
+    /// Independent visual equipment for offline composition review.
+    equipment: creatures::Equipment,
     /// Redress them in the next outfit every so many seconds.
     wardrobe_cycle: Option<f32>,
     /// Offline travel, fast gait transitions, and interrupted contact recovery.

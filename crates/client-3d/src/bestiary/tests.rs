@@ -6,7 +6,7 @@ fn lineup_app() -> App {
     let mut app = App::new();
     let mut materials = Assets::<StandardMaterial>::default();
     let library = PropLibrary::new(PropMaterials::new(&mut materials));
-    app.add_plugins(MinimalPlugins)
+    app.add_plugins((MinimalPlugins, crate::review_clock::ReviewClockPlugin))
         .add_event::<AppExit>()
         .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs(10)))
         .insert_resource(Diagnostics {
@@ -144,4 +144,104 @@ fn every_bestiary_creature_has_a_model_and_families_filter_the_line_ups() {
     };
     assert_eq!(roster(&diagnostics), vec!["dragon", "venus flytrap"]);
     assert_eq!(roster(&Diagnostics::default()), names);
+}
+
+#[test]
+fn lineup_capture_deadlines_preserve_motion_frames_on_slow_updates() {
+    assert_eq!(lineup_capture_deadline(3.9, 2.0, 0.0, Some(0.5)), 2.5);
+    assert_eq!(lineup_capture_deadline(4.8, 2.0, 3.0, Some(0.5)), 3.0);
+    // A coincident named shot leaves the same motion deadline for the next
+    // free update rather than issuing two readbacks for one render target.
+    assert_eq!(lineup_capture_deadline(5.8, 2.0, 4.8, Some(0.5)), 4.8);
+    assert_eq!(lineup_capture_deadline(3.9, 2.0, 0.0, None), 3.9);
+    assert_eq!(lineup_capture_deadline(3.9, 2.0, 0.0, Some(f32::NAN)), 3.9);
+}
+
+#[test]
+fn automatic_redressing_waits_for_the_presented_lineup_clock() {
+    let mut app = App::new();
+    let mut materials = Assets::<StandardMaterial>::default();
+    app.add_plugins(MinimalPlugins)
+        .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs(10)))
+        .insert_resource(Diagnostics {
+            lineups: true,
+            wardrobe_cycle: Some(1.5),
+            ..default()
+        })
+        .insert_resource(PropLibrary::new(PropMaterials::new(&mut materials)))
+        .init_resource::<Assets<Mesh>>()
+        .init_resource::<Lineup>()
+        .insert_resource(Dress {
+            wardrobe: creatures::Wardrobe::Ranger,
+            since: 0.0,
+        })
+        .add_systems(Update, redress);
+    app.update();
+    app.update();
+    assert_eq!(
+        app.world().resource::<Dress>().wardrobe,
+        creatures::Wardrobe::Ranger,
+        "GPU readback stalls must not cycle outfits on unpresented frames"
+    );
+    app.world_mut().resource_mut::<Lineup>().elapsed = 1.5;
+    app.update();
+    assert_eq!(
+        app.world().resource::<Dress>().wardrobe,
+        creatures::Wardrobe::Knight
+    );
+    app.update();
+    assert_eq!(
+        app.world().resource::<Dress>().wardrobe,
+        creatures::Wardrobe::Knight,
+        "one presented deadline triggers only one wardrobe change"
+    );
+    app.world_mut().resource_mut::<Lineup>().elapsed = 3.0;
+    app.update();
+    assert_eq!(
+        app.world().resource::<Dress>().wardrobe,
+        creatures::Wardrobe::Courtier
+    );
+}
+
+#[test]
+fn pending_lineup_capture_holds_the_actual_action_pose_and_resumes_after_readback() {
+    let mut app = lineup_app();
+    app.add_systems(Update, creatures::animate.after(lineup));
+    app.update();
+    let actor = app.world().resource::<Lineup>().group[0];
+    app.world_mut()
+        .get_mut::<Anim>(actor)
+        .unwrap()
+        .act(Move::Jump);
+    app.update();
+    screenshot(&mut app);
+    let phase = app.world().get::<Anim>(actor).unwrap().action.unwrap().1;
+    let transforms = |app: &mut App| {
+        app.world_mut()
+            .query::<(Entity, &Transform)>()
+            .iter(app.world())
+            .map(|(id, transform)| (id, *transform))
+            .collect::<Vec<_>>()
+    };
+    let held = transforms(&mut app);
+    for _ in 0..8 {
+        app.update();
+    }
+    assert_eq!(
+        app.world().get::<Anim>(actor).unwrap().action.unwrap().1,
+        phase,
+        "GPU readback latency must not age the captured action"
+    );
+    assert_eq!(
+        transforms(&mut app),
+        held,
+        "all posed joints and hanging cloth stay frozen"
+    );
+    let pending = screenshot(&mut app);
+    app.world_mut().despawn(pending);
+    app.update();
+    assert!(
+        app.world().get::<Anim>(actor).unwrap().action.unwrap().1 > phase,
+        "animation resumes once readback completes"
+    );
 }

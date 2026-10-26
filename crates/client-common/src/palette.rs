@@ -143,7 +143,8 @@ impl<V> AssetTable<V> {
     }
 }
 
-/// Every asset an observation names: its cells, doors, items and actors.
+/// Every disclosed asset, including own-body and corpse-body appearances.
+/// Item presentation and the body represented by its remains are distinct assets.
 pub fn observation_assets(observation: &Observation) -> impl Iterator<Item = &str> {
     let cells = observation.visible_cells.iter().flat_map(|cell| {
         [
@@ -154,27 +155,32 @@ pub fn observation_assets(observation: &Observation) -> impl Iterator<Item = &st
             cell.door.as_ref().and_then(|door| door.asset.as_deref()),
         ]
     });
-    let items = observation
+    // A presented ground object shows only its presentation; otherwise an
+    // item's own asset and, for remains, the body it represents.
+    let body = |item: &'_ tor_protocol::ItemView| {
+        item.corpse.as_ref().and_then(|body| body.asset.as_deref())
+    };
+    let ground = observation
         .ground_items
         .iter()
-        .map(|ground| {
-            ground
-                .presentation
-                .as_ref()
-                .map_or(&ground.item.asset, |p| &p.asset)
-                .as_deref()
-        })
-        .chain(
-            observation
-                .inventory
-                .iter()
-                .map(|item| item.asset.as_deref()),
-        );
+        .flat_map(move |ground| match &ground.presentation {
+            Some(presented) => [presented.asset.as_deref(), None],
+            None => [ground.item.asset.as_deref(), body(&ground.item)],
+        });
+    let carried = observation
+        .inventory
+        .iter()
+        .flat_map(move |item| [item.asset.as_deref(), body(item)]);
+    let items = ground.chain(carried);
     let actors = observation
         .visible_actors
         .iter()
         .map(|actor| actor.asset.as_deref());
-    cells.chain(items).chain(actors).flatten()
+    let own = observation
+        .self_appearance
+        .as_ref()
+        .and_then(|body| body.asset.as_deref());
+    cells.chain(items).chain(actors).chain([own]).flatten()
 }
 
 /// Frozen map recipes participate in palette repair without acquiring actions.
@@ -201,6 +207,65 @@ pub(crate) fn map_assets(cells: &[tor_protocol::RememberedMapCell]) -> impl Iter
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn observation_assets_include_self_and_both_corpse_carriers() {
+        use tor_protocol::{
+            AppearanceSeed, CreatureAppearance, GroundItemView, ItemClass, ItemTarget, ItemView,
+        };
+        let appearance = |asset: &str| CreatureAppearance {
+            seed: AppearanceSeed::from_digest([7; 32]),
+            asset: Some(asset.into()),
+        };
+        let corpse = |id, asset| ItemView {
+            corpse: Some(appearance(asset)),
+            class: ItemClass::Corpse,
+            quantity: 1,
+            appearance: "remains".into(),
+            identified: true,
+            description: String::new(),
+            id: ItemTarget::from_digest([id; 32]),
+            name: "remains".into(),
+            asset: Some("item.corpse".into()),
+            known_supply: None,
+            known_currency: None,
+        };
+        let mut observation = crate::test_support::observation();
+        observation.self_appearance = Some(appearance("creature.self-only"));
+        observation.visible_actors[0].asset = Some("creature.visible".into());
+        observation.ground_items.push(GroundItemView {
+            reachable: true,
+            supply_reachable: false,
+            item: corpse(1, "creature.ground-remains"),
+            position: observation.position,
+        });
+        observation
+            .inventory
+            .push(corpse(2, "creature.carried-remains"));
+        assert_eq!(
+            observation_assets(&observation).collect::<BTreeSet<_>>(),
+            BTreeSet::from([
+                "creature.self-only",
+                "creature.visible",
+                "item.corpse",
+                "creature.ground-remains",
+                "creature.carried-remains"
+            ])
+        );
+        observation.self_appearance.as_mut().unwrap().asset = None;
+        observation.ground_items[0]
+            .item
+            .corpse
+            .as_mut()
+            .unwrap()
+            .asset = None;
+        observation.inventory[0].corpse = None;
+        assert_eq!(
+            observation_assets(&observation).collect::<BTreeSet<_>>(),
+            BTreeSet::from(["creature.visible", "item.corpse"]),
+            "absent appearance must not invent an asset"
+        );
+    }
 
     fn full(revision: u64, assets: &[&str]) -> PaletteUpdate {
         PaletteUpdate {

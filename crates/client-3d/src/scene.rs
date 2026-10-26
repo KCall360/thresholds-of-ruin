@@ -1010,23 +1010,7 @@ fn update_held(
     if let Some((kind, body)) = wanted {
         let model = library.item(kind, meshes);
         let held = commands
-            .spawn((
-                // Point forward from the fist, edge up, the grip in the hand.
-                Transform::from_rotation(
-                    Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2)
-                        * Quat::from_rotation_x(std::f32::consts::FRAC_PI_2),
-                )
-                .with_translation(Vec3::new(
-                    0.0,
-                    -0.02,
-                    if kind == ItemModel::ShortSword {
-                        0.17
-                    } else {
-                        0.29
-                    },
-                )),
-                Visibility::default(),
-            ))
+            .spawn((crate::props::held_transform(kind), Visibility::default()))
             .with_children(|parent| model.attach(parent))
             .id();
         commands.entity(body).add_child(held);

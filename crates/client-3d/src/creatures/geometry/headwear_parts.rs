@@ -119,57 +119,73 @@ pub(super) fn witch_hat(p: &mut Parts, color: Vec3, band: Vec3) {
     );
 }
 
-/// A wreath of leaves round the brow, meeting over the forehead and
-/// pointing back toward the crown.
+/// Fit to the already generated face and hair, before adding ornament geometry.
+fn brow_point(p: &Parts, angle: f32) -> Vec3 {
+    let out = Vec3::new(angle.sin(), 0.0, angle.cos());
+    let origin = Vec3::new(0.0, 0.241 - 0.006 * angle.cos(), -0.012);
+    p.matte
+        .outer_surface(origin, out)
+        .unwrap_or(origin + out * 0.10)
+        + out * 0.006
+}
+
+fn brow_path(p: &Parts) -> Vec<Vec3> {
+    (0..=64)
+        .map(|i| brow_point(p, i as f32 * TAU / 64.0))
+        .collect()
+}
+
+/// A wreath following the wearer's hair, with leaves above the brows.
 pub(super) fn wreath(p: &mut Parts, color: Vec3) {
+    let path = brow_path(p);
     for k in -6i32..=6 {
         if k == 0 {
             continue;
         }
         let a = k as f32 * 0.24;
-        let root = Vec3::new(a.sin() * 0.168, 0.2, a.cos() * 0.168 - 0.012);
-        let back = Vec3::new(a.cos(), 0.0, -a.sin()) * a.signum();
-        let dir = (back + Vec3::Y * 0.35 + Vec3::new(a.sin(), 0.0, a.cos()) * 0.3).normalize();
-        rogue::leaf(&mut p.metal, root, dir, 0.08, 0.032, color);
+        let root = brow_point(p, a);
+        let back =
+            (brow_point(p, a + 0.02) - brow_point(p, a - 0.02)).normalize_or(Vec3::X) * a.signum();
+        let dir = (back + Vec3::Y * 0.45 + Vec3::new(a.sin(), 0.0, a.cos()) * 0.15).normalize();
+        ornament_parts::leaf(&mut p.metal, root, dir, 0.05, 0.015, color);
     }
-    p.metal.torus(
-        Vec3::new(0.0, 0.2, -0.012),
-        Vec3::Y,
-        0.166,
-        0.004,
-        16,
-        3,
+    tube(
+        &mut p.metal,
+        &path,
+        &vec![(0.003, 0.003); path.len()],
         color * 0.8,
     );
 }
 
-/// A band round the brow, low in front, narrow or broad, perhaps set with
-/// a jewel over the forehead.
+/// A close-fitting brow band with an optional forehead plaque and jewel.
 pub(super) fn circlet(p: &mut Parts, color: Vec3, gem: Option<Vec3>, broad: bool) {
-    let axis = Vec3::new(0.0, 1.0, 0.15).normalize();
-    let center = Vec3::new(0.0, 0.205, -0.012);
-    p.metal.torus(
-        center,
-        axis,
-        0.168,
-        if broad { 0.016 } else { 0.007 },
-        18,
-        4,
+    let path = brow_path(p);
+    let front = path[0];
+    tube(
+        &mut p.metal,
+        &path,
+        &vec![
+            if broad {
+                (0.009, 0.009)
+            } else {
+                (0.004, 0.004)
+            };
+            path.len()
+        ],
         color,
     );
     if broad {
-        // A plaque over the forehead.
         p.metal.cuboid(
-            Vec3::new(0.0, 0.195, 0.162),
-            Vec3::new(0.035, 0.026, 0.006),
-            Quat::from_rotation_x(-0.15),
+            front + Vec3::Z * 0.004,
+            Vec3::new(0.025, 0.016, 0.004),
+            Quat::IDENTITY,
             color,
         );
     }
     if let Some(gem) = gem {
         p.satin.blob(
-            Vec3::new(0.0, 0.19, 0.172),
-            Vec3::new(0.015, 0.018, 0.009),
+            front + Vec3::Z * 0.011,
+            Vec3::new(0.012, 0.014, 0.007),
             1,
             0.0,
             gem,
@@ -208,4 +224,89 @@ pub(super) fn veiled(p: &mut Parts, cap: Vec3, veil: Vec3) {
         0.004,
         veil,
     );
+}
+
+/// The braid emerges from the lower rear of this cap, not from the neck.
+pub(super) const WINGED_HELM_HAIR_ROOT: Vec3 = Vec3::new(0.0, 0.215, -0.125);
+
+/// An open cap keeps the face readable; fans use the same closed feathers as wings.
+pub(super) fn winged_helm(p: &mut Parts, metal: Vec3, feathers: Vec3) {
+    p.metal.blob(
+        Vec3::new(0.0, 0.28, -0.025),
+        Vec3::new(0.13, 0.10, 0.135),
+        3,
+        0.0,
+        metal,
+    );
+    // A close forehead band follows the cap rather than the hair-sized
+    // circlet. Its lower edge stays above the eyes on every scaled head.
+    p.metal.torus(
+        Vec3::new(0.0, 0.245, -0.025),
+        Vec3::Y,
+        0.132,
+        0.008,
+        32,
+        6,
+        GILT,
+    );
+    p.metal.blob(
+        Vec3::new(0.0, 0.25, 0.112),
+        Vec3::new(0.018, 0.022, 0.008),
+        1,
+        0.0,
+        GILT,
+    );
+    for side in [-1.0f32, 1.0] {
+        let root = Vec3::new(side * 0.115, 0.25, -0.015);
+        for k in 0..6 {
+            let t = k as f32 / 5.0;
+            feather_parts::vane(
+                &mut p.matte,
+                root + Vec3::Z * (t * 0.045),
+                Vec3::new(side * (0.30 + t * 0.5), 1.0 - t * 0.35, -0.25),
+                0.22 - t * 0.07,
+                0.022,
+                Vec3::Z,
+                if k < 3 { feathers } else { CREAM },
+                Some(GILT),
+            );
+        }
+        p.metal.blob(root, Vec3::splat(0.025), 1, 0.0, GILT);
+    }
+}
+
+/// Open arches with gem-set points; the supporting band follows actual hair.
+pub(super) fn crown(p: &mut Parts, metal: Vec3, gem: Vec3) {
+    let path = brow_path(p);
+    tube(
+        &mut p.metal,
+        &path,
+        &vec![(0.004, 0.004); path.len()],
+        metal,
+    );
+    for k in 0..8 {
+        let index = k * 8;
+        let a = path[index];
+        let b = path[index + 8];
+        let peak = path[index + 4] + Vec3::Y * (if k == 0 || k == 7 { 0.095 } else { 0.065 });
+        let points = [
+            a,
+            a.lerp(peak, 0.55) + Vec3::Y * 0.009,
+            peak,
+            b.lerp(peak, 0.55) + Vec3::Y * 0.009,
+            b,
+        ];
+        tube(&mut p.metal, &points, &[(0.003, 0.003); 5], metal);
+        p.metal.blob(peak, Vec3::splat(0.005), 1, 0.0, metal);
+        let jewel = path[index + 4] + Vec3::Y * 0.035;
+        p.metal
+            .blob(jewel, Vec3::new(0.012, 0.021, 0.009), 1, 0.0, metal);
+        p.satin.blob(
+            jewel + Vec3::new(jewel.x, 0.0, jewel.z).normalize_or(Vec3::Z) * 0.005,
+            Vec3::new(0.008, 0.015, 0.008),
+            1,
+            0.0,
+            gem,
+        );
+    }
 }

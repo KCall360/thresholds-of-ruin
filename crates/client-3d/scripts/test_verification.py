@@ -314,6 +314,37 @@ class LocalGraphicalWaiverContracts(unittest.TestCase):
                 self.assertEqual(receipt["gate_passed"], mode == "valid")
                 self.assertFalse(receipt["clean_passed"])
                 self.assertFalse(receipt["passed"])
+class ScreenshotPixels(unittest.TestCase):
+    def test_native_png_filters_preserve_actual_pixels(self):
+        import struct
+        import zlib
+        from render_pixels import decode_png, dark_fraction
+
+        def chunk(kind, payload):
+            return (struct.pack(">I", len(payload)) + kind + payload
+                    + struct.pack(">I", zlib.crc32(kind + payload)))
+        expected = [bytes([10, 20, 30, 40, 50, 60]), bytes([20, 35, 50, 65, 80, 95])]
+        filtered = [
+            ([10, 20, 30, 40, 50, 60], [20, 35, 50, 65, 80, 95]),
+            ([10, 20, 30, 30, 30, 30], [20, 35, 50, 45, 45, 45]),
+            ([10, 20, 30, 40, 50, 60], [10, 15, 20, 25, 30, 35]),
+            ([10, 20, 30, 35, 40, 45], [15, 25, 35, 35, 38, 40]),
+            ([10, 20, 30, 30, 30, 30], [10, 15, 20, 25, 30, 35]),
+        ]
+        for kind, rows in enumerate(filtered):
+            raw = b"".join(bytes([kind]) + bytes(row) for row in rows)
+            data = (b"\x89PNG\r\n\x1a\n"
+                    + chunk(b"IHDR", struct.pack(">IIBBBBB", 2, 2, 8, 2, 0, 0, 0))
+                    + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+            width, height, channels, decoded = decode_png(data)
+            self.assertEqual((width, height, channels), (2, 2, 3))
+            self.assertEqual(decoded, expected, kind)
+            self.assertEqual(dark_fraction(data, (0, 0, 1, 1)), 0.75)
+        raw = bytes([0, 10, 20, 30, 255, 90, 100, 110, 0])
+        data = (b"\x89PNG\r\n\x1a\n"
+                + chunk(b"IHDR", struct.pack(">IIBBBBB", 2, 1, 8, 6, 0, 0, 0))
+                + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+        self.assertEqual(dark_fraction(data, (0, 0, 1, 1)), 0.5, "alpha is not brightness")
 
 if __name__ == "__main__":
     unittest.main()

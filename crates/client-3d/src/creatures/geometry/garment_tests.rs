@@ -250,9 +250,8 @@ struct Band {
 }
 
 /// Restrict the support comparison to geometry that really is unchanged by
-/// suppressing the ornament. Closing Medusa's neckline changes paint, not the
-/// body mesh. Selecting Orc's native recipe removes its decorative cowl; its
-/// extra neck cut is above the short shell. Verify that premise explicitly.
+/// suppressing decorative layers. An explicit Orc outfit adds a neck cut above
+/// the short shell. Verify unchanged geometry within the measured range.
 fn check_visibility(
     label: &str,
     look: &Look,
@@ -262,6 +261,16 @@ fn check_visibility(
 ) -> Vec<String> {
     let visible = torso(look);
     let baseline = torso(suppressed);
+    check_triangle_visibility(label, visible, baseline, pigment, bands)
+}
+
+fn check_triangle_visibility(
+    label: &str,
+    visible: Vec<Triangle>,
+    baseline: Vec<Triangle>,
+    pigment: Vec3,
+    bands: &[Band],
+) -> Vec<String> {
     let keys: BTreeSet<_> = visible.iter().map(|t| t.signature()).collect();
     let low = bands.iter().map(|b| b.low).reduce(f32::min).unwrap();
     let high = bands.iter().map(|b| b.high).reduce(f32::max).unwrap();
@@ -453,18 +462,32 @@ fn native_medusa_sewn_edges_remain_visible_over_the_emitted_body() {
         let mut look = female(CreatureModel::Medusa, build);
         look.trim = MARKER;
         assert!(look.outfit.is_none());
-        let mut suppressed = look.clone();
-        let mut outfit = Outfit::worn(&look);
-        outfit.bodice.cut = Neckline::Closed;
-        outfit.armhole_edge = None;
-        // Its intentional metal neck band/disc is not a structural occluder.
-        // Metal is excluded from the marked top faces, and removed in baseline.
-        outfit.torso_ornament = None;
-        suppressed.outfit = Some(outfit);
-        failures.extend(check_visibility(
+        // Keep the cut: closing it changes the mesh partition at the skin/
+        // cloth boundary. Recolor only trim to identify all its faces (including
+        // dark sides and the intentional metal neck ornament), then remove those
+        // faces from the support mesh. No fitting/SDF helper defines this oracle.
+        let visible = torso(&look);
+        let mut recolored = look.clone();
+        recolored.trim = Vec3::new(0.13, 0.61, 0.29);
+        let comparison = torso(&recolored);
+        assert_eq!(visible.len(), comparison.len(), "trim changed topology");
+        let baseline: Vec<_> = visible
+            .iter()
+            .zip(comparison)
+            .filter_map(|(original, changed)| {
+                assert_eq!(original.p, changed.p, "trim changed vertex placement");
+                assert_eq!(original.metal, changed.metal, "trim changed material");
+                (original.colors == changed.colors).then_some(*original)
+            })
+            .collect();
+        assert!(
+            baseline.len() < visible.len(),
+            "trim recoloring had no effect"
+        );
+        failures.extend(check_triangle_visibility(
             &format!("native Medusa build {build}"),
-            &look,
-            &suppressed,
+            visible,
+            baseline,
             MARKER,
             &bands,
         ));
@@ -566,6 +589,7 @@ fn native_orc_upper_harness_remains_visible_above_its_short_shell() {
         };
         let mut suppressed = look.clone();
         outfit.torso_ornament = None;
+        outfit.neck_drape = None;
         suppressed.outfit = Some(outfit);
         failures.extend(check_visibility(
             &format!("native Orc build {build}"),
@@ -576,6 +600,150 @@ fn native_orc_upper_harness_remains_visible_above_its_short_shell() {
         ));
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn transferred_collar_buttons_survive_and_equipment_hides_only_the_resolved_copy() {
+    let button = linear(Vec3::new(0.9, 0.75, 0.35));
+    let buttons = |look: &Look| {
+        torso(look)
+            .into_iter()
+            .filter(|tri| {
+                tri.metal
+                    && tri.colors.iter().all(|c| c.distance(button) < 1e-5)
+                    && (0.1..0.32).contains(&tri.center().y)
+            })
+            .count()
+    };
+    for woman in [false, true] {
+        let native = Look::with_choice(
+            CreatureModel::Vampire,
+            42,
+            Some(Variant {
+                woman,
+                build: 1,
+                ..default()
+            }),
+        );
+        let expected = buttons(&native);
+        assert!(expected > 12, "fixture must contain the authored buttons");
+        let recipe = Outfit::native(&native);
+        let mut explicit = native.clone();
+        explicit.outfit = Some(recipe);
+        assert_eq!(
+            buttons(&explicit),
+            expected,
+            "explicit recipe lost collar buttons"
+        );
+        let mut recipient = Look::with_choice(
+            CreatureModel::Human,
+            42,
+            Some(Variant {
+                woman,
+                build: 1,
+                ..default()
+            }),
+        );
+        recipient.outfit = Some(recipe);
+        assert_eq!(
+            buttons(&recipient),
+            expected,
+            "recipient lost the outfit's buttons"
+        );
+        let mut equipment = super::super::outfit::Equipment::default();
+        equipment.select("breastplate").unwrap();
+        let equipped = recipient.clone().equipped(equipment);
+        assert_eq!(buttons(&equipped), 0, "plate must suppress sewn decoration");
+        assert_eq!(
+            equipped.outfit,
+            Some(recipe),
+            "coverage must not mutate the base recipe"
+        );
+        assert_eq!(buttons(&equipped.equipped(Default::default())), expected);
+    }
+}
+
+#[test]
+fn native_shell_openings_survive_explicit_outfit_transfer() {
+    let positions = |look: &Look| {
+        let outfit = Outfit::worn(look);
+        let body = HumanoidBody::resolve(look);
+        let shell = outfit_shell(body, &outfit, true).expect("native outer shell");
+        let Some(Outer::Shell { top, underbust, .. }) = outfit.outer else {
+            unreachable!()
+        };
+        let top = shell_top(body, top, underbust);
+        let mut parts = Parts::default();
+        shell.mesh(
+            &mut parts.satin,
+            Vec3::new(-0.36, -0.03, -0.2) * body.build.max(1.0),
+            Vec3::new(0.36, top + 0.03, 0.22) * body.build.max(1.0),
+            0.0075,
+            &|_, _| Vec3::ONE,
+        );
+        let mut meshes = Assets::<Mesh>::default();
+        let mut materials = Assets::<StandardMaterial>::default();
+        let materials = crate::props::PropMaterials::new(&mut materials);
+        let model = parts.finish(&mut meshes, &materials);
+        assert_eq!(model.0.len(), 1);
+        let mesh = meshes.get(&model.0[0].0).unwrap();
+        let Some(VertexAttributeValues::Float32x3(points)) =
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            panic!("shell positions")
+        };
+        points.clone()
+    };
+    for model in [
+        CreatureModel::Vampire,
+        CreatureModel::Wraith,
+        CreatureModel::Leprechaun,
+    ] {
+        let native = female(model, 1);
+        let expected = positions(&native);
+        assert!(expected.len() > 100, "fixture must emit a real shell");
+        let mut explicit = native.clone();
+        explicit.outfit = Some(Outfit::native(&native));
+        let actual = positions(&explicit);
+        assert_eq!(
+            actual.len(),
+            expected.len(),
+            "{model:?}: transferred shell topology changed"
+        );
+        assert!(
+            actual.iter().zip(&expected).all(|(a, b)| a == b),
+            "{model:?}: transferred shell vertices changed"
+        );
+    }
+}
+
+#[test]
+fn native_scarf_survives_explicit_outfit_transfer() {
+    let mut native = female(CreatureModel::Orc, 1);
+    native.trim = MARKER;
+    let marked_tail = |look: &Look| {
+        torso(look)
+            .into_iter()
+            .filter(|triangle| {
+                triangle.painted(linear(MARKER)) && (0.27..0.38).contains(&triangle.center().y)
+            })
+            .count()
+    };
+    let expected = marked_tail(&native);
+    assert!(expected > 8, "native scarf must have visible tail faces");
+    let mut transferred = native.clone();
+    transferred.outfit = Some(Outfit::native(&native));
+    assert_eq!(
+        marked_tail(&transferred),
+        expected,
+        "explicit outfit lost its native scarf"
+    );
+    let mut human = female(CreatureModel::Human, 1);
+    human.outfit = transferred.outfit;
+    assert!(
+        marked_tail(&human) > 8,
+        "scarf must follow the outfit to another body"
+    );
 }
 
 #[test]
@@ -602,9 +770,10 @@ fn native_orc_scarf_tail_remains_visible_over_body_and_shell() {
         look.trim = MARKER;
         assert!(look.outfit.is_none());
         let mut outfit = Outfit::worn(&look);
-        // Selecting the recipe suppresses the native cowl/tail. Remove the
-        // harness too: the tail intentionally overlaps it, and this contract
-        // measures structural body/shell contact, not decoration ordering.
+        // Suppress the scarf and harness explicitly: the tail intentionally
+        // overlaps the harness, and this measures structural body/shell contact,
+        // not decoration ordering.
+        outfit.neck_drape = None;
         outfit.torso_ornament = None;
         let mut suppressed = look.clone();
         suppressed.outfit = Some(outfit);
@@ -681,4 +850,315 @@ fn transferred_orc_harness_remains_visible_over_human_body_and_shell() {
         ));
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn study_tabards_keep_their_costume_palette_when_the_wearer_changes() {
+    use super::super::outfit::Wardrobe;
+    for model in [CreatureModel::Human, CreatureModel::Sentinel] {
+        for woman in [false, true] {
+            for wardrobe in [Wardrobe::Paladin, Wardrobe::Valkyrie] {
+                let mut wearer = Look::with_choice(model, 42, Some(Variant { woman, ..default() }));
+                wearer.cloth = MARKER;
+                let dressed = wearer.dressed(wardrobe);
+                let triangles = torso(&dressed);
+                assert!(!triangles.iter().any(|t| t.painted(linear(MARKER))), "{model:?} {woman} {wardrobe:?}: a study tabard must not inherit the wearer's native cloth");
+                assert!(
+                    triangles
+                        .iter()
+                        .filter(|t| t.painted(linear(Vec3::new(0.065, 0.16, 0.40))))
+                        .count()
+                        > 100,
+                    "{model:?} {woman} {wardrobe:?}: the fitted blue tabard must remain present"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn stacked_skirts_keep_outer_cloth_outside_their_underlayers() {
+    use super::super::outfit::Wardrobe;
+    for model in [
+        CreatureModel::Human,
+        CreatureModel::Nymph,
+        CreatureModel::Troll,
+    ] {
+        for wardrobe in [Wardrobe::Cleric, Wardrobe::Druid, Wardrobe::Necromancer] {
+            for woman in [false, true] {
+                let look = Look::with_choice(model, 42, Some(Variant { woman, ..default() }))
+                    .dressed(wardrobe);
+                let (world, rig, _, meshes) = super::super::rogue_tests::spawn_one(&look);
+                let layers: Vec<Vec<Triangle>> = rig
+                    .drapes
+                    .iter()
+                    .filter(|(_, kind)| matches!(kind, Drape::Skirt(_)))
+                    .map(|(root, _)| {
+                        let mut triangles = Vec::new();
+                        for child in world.get::<Children>(*root).unwrap().iter() {
+                            let Some(mesh) =
+                                world.get::<Mesh3d>(child).and_then(|m| meshes.get(&m.0))
+                            else {
+                                continue;
+                            };
+                            let Some(VertexAttributeValues::Float32x3(points)) =
+                                mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+                            else {
+                                panic!("positions")
+                            };
+                            let transform = world.get::<Transform>(child).unwrap().compute_affine();
+                            let indices: Vec<_> = mesh.indices().unwrap().iter().collect();
+                            triangles.extend(indices.as_chunks::<3>().0.iter().map(|index| {
+                                Triangle {
+                                    p: index
+                                        .map(|i| transform.transform_point3(Vec3::from(points[i]))),
+                                    colors: [Vec3::ZERO; 3],
+                                    metal: false,
+                                }
+                            }));
+                        }
+                        triangles
+                    })
+                    .collect();
+                assert!(layers.len() >= 2);
+                let mut compared = 0;
+                for pair in layers.windows(2) {
+                    for side in 0..32 {
+                        let angle = (side as f32 + 0.37) * TAU / 32.0;
+                        let radial = Vec3::new(angle.sin(), 0.0, angle.cos());
+                        let tangent = Vec3::new(angle.cos(), 0.0, -angle.sin());
+                        let depths = |layer: &Vec<Triangle>, y: f32| {
+                            layer
+                                .iter()
+                                .filter_map(|tri| {
+                                    let mut rotated = *tri;
+                                    rotated.p = tri
+                                        .p
+                                        .map(|p| Vec3::new(p.dot(tangent), p.y, p.dot(radial)));
+                                    rotated.depth(Vec2::new(0.0, y)).filter(|d| *d > 0.0)
+                                })
+                                .reduce(f32::max)
+                        };
+                        for y in [-0.06, -0.10, -0.16, -0.22, -0.30] {
+                            if let (Some(outer), Some(inner)) =
+                                (depths(&pair[0], y), depths(&pair[1], y))
+                            {
+                                compared += 1;
+                                assert!(outer>inner+0.001,"{wardrobe:?} woman={woman}: underlayer crosses outer cloth at angle={angle}, y={y}: outer={outer}, inner={inner}");
+                            }
+                        }
+                    }
+                }
+                assert!(
+                    compared > 80,
+                    "must compare actual overlapping cloth panels, not only their openings"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn breastplate_clears_emitted_underlayers_and_cloak_clears_plate_through_swing() {
+    for model in [CreatureModel::Human, CreatureModel::Orc] {
+        for woman in [false, true] {
+            for wardrobe in [Wardrobe::RoyalPrincess, Wardrobe::Ranger, Wardrobe::Knight] {
+                let mut base = Look::with_choice(model, 17, Some(Variant { woman, ..default() }))
+                    .dressed(wardrobe);
+                // The cloak is an outer layer; it is tested separately below.
+                base.outfit.as_mut().unwrap().cloak = None;
+                let mut equipment = Equipment::default();
+                equipment.select("breastplate").unwrap();
+                let armored = base.clone().equipped(equipment);
+                let armor: Vec<_> = torso(&armored).into_iter().filter(|t| t.metal).collect();
+                let armor_support = Support::new(armor.clone());
+                let opening = armor_parts::opening(HumanoidBody::resolve(&armored)).map(|shape| {
+                    let mut cut = crate::sdf::Sculpt::default();
+                    cut.add(shape, 0.0);
+                    cut
+                });
+                let mut checked = 0;
+                let mut underlayers = base.clone();
+                underlayers.outfit.as_mut().unwrap().baldric = None;
+                for triangle in torso(&underlayers).into_iter().filter(|t| !t.metal) {
+                    let at = triangle.center();
+                    if !(0.11..0.40).contains(&at.y) || at.x.abs() > 0.09 || at.z.abs() < 0.04 {
+                        continue;
+                    }
+                    // Garment or skin visible through the intentional neckline
+                    // is not an underlayer penetration of the breastplate.
+                    if opening.as_ref().is_some_and(|cut| cut.distance(at) < 0.02) {
+                        continue;
+                    }
+                    let front = at.z > 0.0;
+                    let outside = armor_support
+                        .depth(at, front)
+                        .expect("breastplate covers core torso");
+                    let gap = if front {
+                        outside - at.z
+                    } else {
+                        at.z - outside
+                    };
+                    assert!(
+                    gap > 0.004,
+                    "{model:?} woman={woman} {wardrobe:?}: underlying torso pierces armor at {at:?}, gap={gap}"
+                );
+                    checked += 1;
+                }
+                assert!(
+                    checked > 100,
+                    "substantial emitted underlayer witness: {checked}"
+                );
+                equipment.select("cloak").unwrap();
+                let look = base.equipped(equipment);
+                let (world, mut rig, _, mut meshes) =
+                    crate::creatures::rogue_tests::spawn_one(&look);
+                assert_eq!(rig.cloaks.len(), 1);
+                let cloak = &mut rig.cloaks[0];
+                let entity = cloak.entity;
+                for rotation in [
+                    Quat::IDENTITY,
+                    Quat::from_rotation_x(0.35),
+                    Quat::from_rotation_x(-0.18),
+                    Quat::from_euler(EulerRot::XYZ, 0.3, 0.0, -0.25),
+                ] {
+                    crate::creatures::cloak::place(cloak, rotation, &mut meshes);
+                    let mesh = meshes.get(&world.get::<Mesh3d>(entity).unwrap().0).unwrap();
+                    let Some(VertexAttributeValues::Float32x3(points)) =
+                        mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+                    else {
+                        panic!("cloak positions")
+                    };
+                    let mut transform = *world.get::<Transform>(entity).unwrap();
+                    transform.rotation = rotation;
+                    let transform = transform.compute_affine();
+                    let indices: Vec<_> = mesh.indices().unwrap().iter().collect();
+                    let cloth = Support::new(
+                        indices
+                            .as_chunks::<3>()
+                            .0
+                            .iter()
+                            .map(|tri| Triangle {
+                                p: tri.map(|i| {
+                                    transform.transform_point3(Vec3::from_array(points[i]))
+                                }),
+                                colors: [Vec3::ZERO; 3],
+                                metal: false,
+                            })
+                            .collect(),
+                    );
+                    let mut checked = 0;
+                    for triangle in &armor {
+                        let at = triangle.center();
+                        if at.z >= -0.04 || !(0.11..0.44).contains(&at.y) || at.x.abs() > 0.13 {
+                            continue;
+                        }
+                        let inside = cloth
+                            .depth(at, true)
+                            .expect("cloak covers central back plate");
+                        assert!(inside<at.z-0.002,"{model:?} woman={woman} {wardrobe:?} rotation={rotation:?}: plate pierces cloak at {at:?}, lining={inside}");
+                        checked += 1;
+                    }
+                    assert!(checked > 100, "substantial rear armor witness: {checked}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn equipped_plate_covers_lateral_torso_underlayers_in_sylvan_fixture() {
+    let mut base = Look::with_choice(
+        CreatureModel::Human,
+        7,
+        Some(Variant {
+            woman: true,
+            bust_lean: 1,
+            ..default()
+        }),
+    )
+    .dressed(Wardrobe::SylvanDuelist);
+    base.outfit.as_mut().unwrap().cloak = None;
+    let mut equipment = Equipment::default();
+    equipment.select("breastplate").unwrap();
+    let armored = base.clone().equipped(equipment);
+    let armor = Support::new(
+        torso(&armored)
+            .into_iter()
+            .filter(|t| t.metal && (t.p[1] - t.p[0]).cross(t.p[2] - t.p[0]).z > 0.0)
+            .collect(),
+    );
+    let mut checked = 0;
+    for triangle in torso(&base).into_iter().filter(|t| !t.metal) {
+        let at = triangle.center();
+        if !(0.10..0.20).contains(&at.x.abs()) || !(0.12..0.32).contains(&at.y) || at.z < 0.04 {
+            continue;
+        }
+        let outside = armor
+            .depth(at, true)
+            .expect("lateral chest must be protected");
+        assert!(
+            outside - at.z > 0.004,
+            "lateral underlayer at {at:?} breaches armor: outside={outside}, gap={}",
+            outside - at.z
+        );
+        checked += 1;
+    }
+    assert!(
+        checked > 100,
+        "substantial lateral surface coverage: {checked}"
+    );
+}
+
+#[test]
+fn loose_front_locks_clear_equipped_torso_surface() {
+    let mut equipment = Equipment::default();
+    equipment.select("breastplate").unwrap();
+    let look = Look::with_choice(
+        CreatureModel::Human,
+        7,
+        Some(Variant {
+            woman: true,
+            bust_lean: 1,
+            ..default()
+        }),
+    )
+    .dressed(Wardrobe::SylvanDuelist)
+    .equipped(equipment);
+    let support = Support::new(torso(&look).into_iter().filter(|t| t.metal).collect());
+    let (world, rig, _, meshes) = crate::creatures::rogue_tests::spawn_one(&look);
+    let hair = rig
+        .drapes
+        .iter()
+        .find(|(_, kind)| *kind == Drape::Hair)
+        .unwrap()
+        .0;
+    let head = rig.joint(J::Head).unwrap();
+    let frame = world.get::<Transform>(head).unwrap().compute_affine()
+        * world.get::<Transform>(hair).unwrap().compute_affine();
+    let mut checked = 0;
+    for child in world.get::<Children>(hair).unwrap().iter() {
+        let mesh = meshes.get(&world.get::<Mesh3d>(child).unwrap().0).unwrap();
+        let Some(VertexAttributeValues::Float32x3(points)) =
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            panic!("hair vertices")
+        };
+        let transform = frame * world.get::<Transform>(child).unwrap().compute_affine();
+        for point in points {
+            let at = transform.transform_point3(Vec3::from_array(*point));
+            if !(0.12..0.40).contains(&at.y) || at.z < 0.0 {
+                continue;
+            }
+            let Some(outside) = support.depth(at, true) else {
+                continue;
+            };
+            assert!(
+                at.z > outside + 0.003,
+                "front hair penetrates armor at {at:?}, armor={outside}"
+            );
+            checked += 1;
+        }
+    }
+    assert!(checked > 20, "front hair must be checked, count={checked}");
 }
