@@ -1382,7 +1382,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         self.assertFalse(detection.summary(before, "mapping")["supported"])
         scroll, = [row for row in items(before, "scroll") if row["quantity"] == "2"]
         self.assertFalse(scroll["identified"])
-        refused = self.act(owner, {"type": "read", "item": scroll["id"]})
+        self.act(owner, {"type": "read", "item": scroll["id"]})
         after = self.snapshot(owner)
         self.assertEqual(observation(after)["tick"], observation(before)["tick"])
         self.assertEqual(detection.summary(after, "mapping"), detection.summary(before, "mapping"))

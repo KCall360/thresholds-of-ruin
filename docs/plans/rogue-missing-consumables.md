@@ -1919,3 +1919,49 @@ apps, the genuine aggregate tiers, independent 3D checks and the bounded idle
 release performance gate remain required. Recoverable cache rotation preserves
 compiled outputs and proof records; it is not permission to lower resource guards,
 assume a native pass, or discard the source needed for restoration.
+
+### Final consumer and bounded-history qualification
+
+The completed reconstruction checkpoint supersedes the pending consumer results
+above. On the same frozen gameplay inputs, exhaustive debug Python discovery
+records **2,158 passed and 99 explicitly deferred graphical methods**, with no
+failures or errors. Workspace Rust unit/integration owners and all 29 Service
+contracts pass in both debug and release. The original enclosing `full` attempt
+is still a failed receipt: its release-process prerequisite hit the existing
+600-second cold application-build timeout before executing process cases. The
+exact ordinary release application recipe subsequently completed, followed by
+all **592 non-graphical release process methods**, with the same 99 graphical
+deferrals and no failures or errors. These recovered constituents are not
+relabeled as a successful enclosing `full` or `push` run.
+
+The independent 3D verifier passes every stage in both debug and release,
+including strict lint, all 66 renderer/scene tests, 38 model tests, current
+menagerie validation and its retained non-graphical process method. Its existing
+ignored malformed-startup subprocess fixture is exercised by the owning
+lifecycle test, not counted as an additional passing test. Nine exact graphical
+methods remain locally deferred in each profile. A new corpse/cure test first
+failed because its Equine oracle expected a humanoid Head joint; the corrected
+positive checks the actual quadruped plan and seven live articulation joints
+before and after cure, retaining real item targeting and unchanged-frame reuse.
+The 3D receipts report `gate_passed=true` and `clean_passed=false` because of
+the authorized waivers. This correction changes only the independent 3D test
+oracle/assertions; the retained core,
+ordinary-client and performance inputs are hash-identical.
+
+The bounded idle optimized history qualification also completes. Fixed cohorts
+cover repeated captures through 1,024 roots, complete larger Mapping restores,
+distinct lawful Worlds, cached/uncached semantic equality and preservation of
+every per-root source/extent proof. Seventeen native owner invocations retain
+five samples per measured cohort, serialized sizes, operation counts and
+whole-owner peak memory. The observed fixed workloads remain practical; maximal
+cold source audits can take seconds, so this is not a per-turn latency promise,
+a universal linear-work guarantee or a formal before/after speedup claim. Raw
+samples remain local; no published benchmark headline or ledger entry is implied.
+
+All graphical deferrals are the maintainer's explicit local-only authorization,
+never native passes or hosted-CI waivers. The normal local pre-push gate or an
+explicit task-scoped exception, and the canonical exact-head required hosted
+platform gates, remain publication/merge requirements. Source identities,
+unchanged-input bridges, failed attempts and recovered stage receipts remain
+separate; neither cache recovery nor a documentation-only outcome update changes
+what each tested artifact actually qualifies.

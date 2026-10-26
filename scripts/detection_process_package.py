@@ -7,12 +7,15 @@ isolate ordinary paid clocks. This module launches no process on import.
 import copy
 import json
 import sqlite3
+import struct
+import threading
 import tomllib
 from contextlib import closing
 from pathlib import Path
 
 from checkpoint_payload import decode_checkpoint_payload
 from process_harness import ROOT
+from stream_relay import StreamRelay, exact
 
 PRODUCTION = ROOT / "scenarios/rogue-exploration"
 DOSES = {"monsters": (30, "monster_detection", 6), "food": (31, "food_detection", 5),
@@ -279,11 +282,6 @@ def checkpoint_payload(test):
 
 # This relay only observes real masked/unmasked frames. It never synthesizes,
 # retries, delays or normalizes a chart request or response.
-from stream_relay import StreamRelay, exact
-import struct
-import threading
-
-
 class ChartCaptureRelay(StreamRelay):
     def __init__(self, upstream):
         self.chart_requests = []
