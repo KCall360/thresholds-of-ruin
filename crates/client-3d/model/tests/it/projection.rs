@@ -326,6 +326,7 @@ fn false_corpse_and_stair_models_keep_real_handles_and_item_mechanics() {
     let real = ItemView {
         corpse: Some(CreatureAppearance {
             seed: AppearanceSeed::from_digest([28; 32]),
+            worn: Vec::new(),
             asset: Some("creature.equine".into()),
         }),
         id: ItemTarget::from_digest([29; 32]),

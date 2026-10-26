@@ -271,7 +271,8 @@ lying on the ground.
   gained a field. Per-slot visibility and coverage would need a content and save
   decision.
 - **Disclosure.** The list exists only for the Creature disclosure. Anonymous
-  contacts, guises and less-disclosed figures carry none. Private facts, such as
+  contacts, guises, hallucinated figures and less-disclosed figures carry none.
+  Private facts, such as
   enchantment, curse, true name or which of two identical-looking items is worn,
   cannot change the record.
 - **Updates.** The list is part of the actor entry, so existing deltas replace it

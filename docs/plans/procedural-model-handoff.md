@@ -74,6 +74,18 @@ The branch was later rebased without conflicts onto main at `511ea466`
 below were recorded on the earlier base (#171); their source fingerprints describe
 that base, not the rebased commits.
 
+The branch was rebased again onto main at `feae51f2` (#195), which had
+reached protocol 62 with hallucinated presentations. Conflicts were resolved
+as follows:
+
+- **Worn equipment:** the worn list now bumps the protocol to 63.
+- **Hallucination:** a hallucinated figure carries no worn list, so its true
+  gear cannot betray it.
+- **Palette discovery:** a ground item with a presentation contributes only
+  that presentation's asset, never its true corpse body asset.
+
+The local evidence listed below was recorded before this second rebase.
+
 The protocol 61 worn-equipment slice and Rogue armour recipes followed on that
 base. Local evidence for those commits:
 

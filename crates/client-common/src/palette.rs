@@ -157,20 +157,20 @@ pub fn observation_assets(observation: &Observation) -> impl Iterator<Item = &st
     });
     // A presented ground object shows only its presentation; otherwise an
     // item's own asset and, for remains, the body it represents.
-    let body = |item: &'_ tor_protocol::ItemView| {
+    fn body(item: &tor_protocol::ItemView) -> Option<&str> {
         item.corpse.as_ref().and_then(|body| body.asset.as_deref())
-    };
+    }
     let ground = observation
         .ground_items
         .iter()
-        .flat_map(move |ground| match &ground.presentation {
+        .flat_map(|ground| match &ground.presentation {
             Some(presented) => [presented.asset.as_deref(), None],
             None => [ground.item.asset.as_deref(), body(&ground.item)],
         });
     let carried = observation
         .inventory
         .iter()
-        .flat_map(move |item| [item.asset.as_deref(), body(item)]);
+        .flat_map(|item| [item.asset.as_deref(), body(item)]);
     let items = ground.chain(carried);
     let actors = observation
         .visible_actors
@@ -235,6 +235,7 @@ mod tests {
         observation.self_appearance = Some(appearance("creature.self-only"));
         observation.visible_actors[0].asset = Some("creature.visible".into());
         observation.ground_items.push(GroundItemView {
+            presentation: None,
             reachable: true,
             supply_reachable: false,
             item: corpse(1, "creature.ground-remains"),

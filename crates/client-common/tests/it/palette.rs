@@ -193,6 +193,7 @@ fn update(sequence: u64, names: &[&str], carrier: Carrier) -> ServerMessage {
                 state.observation.inventory.push(item);
             } else {
                 state.observation.ground_items.push(GroundItemView {
+                    presentation: None,
                     reachable: true,
                     supply_reachable: false,
                     item,

@@ -2340,6 +2340,9 @@ fn fake_ground_stairs_are_an_object_not_a_way_and_known_stairs_stay_factual() {
             direction: Direction::Down
         }]
     );
+}
+
+#[test]
 fn examining_a_figure_names_only_its_disclosed_visible_equipment() {
     let mut s = state();
     let piece = |slot: &str, class, appearance: &str| WornView {

@@ -1485,6 +1485,9 @@ fn hallucination_map_acquisition_freezes_payload_without_granting_stair_facts() 
     assert!(!wire.stairs_up && !wire.stairs_down);
     assert_eq!(wire.ground_items[0].class, p::ItemClass::Coin);
     assert_eq!(wire.ground_items[0].quantity, 7);
+}
+
+#[test]
 fn disclosed_worn_equipment_reaches_actor_and_self_records_in_canonical_form() {
     let (mut view, scene, scope) = fixture();
     let mail = s::WornView {

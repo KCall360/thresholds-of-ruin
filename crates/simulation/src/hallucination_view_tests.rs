@@ -420,3 +420,41 @@ fn intact_visual_guise_substitutes_as_object_but_invisible_awareness_does_not() 
         .filter(|o| o.subject == SUBJECT)
         .all(|o| o.presentation.is_none()));
 }
+
+#[test]
+fn a_hallucinated_figure_shows_none_of_its_true_gear() {
+    use crate::interactions::{AnatomySpec, EquipmentSlot, EquipmentSlotId};
+    let mut game = fixture();
+    let location = game.actors[&SUBJECT].location;
+    let mut spec = crate::ItemSpec::ordinary("plate mail".into());
+    spec.class = crate::ItemClass::Armor;
+    spec.asset = Some("item.armor.plate".into());
+    let mail = game
+        .place_item_stack(72, location, Some(SUBJECT), 1, spec)
+        .unwrap();
+    let wearer = game.actors.get_mut(&SUBJECT).unwrap();
+    wearer.anatomy = tor_world::Shared::new(AnatomySpec {
+        slots: vec![EquipmentSlot::new("body_armor").unwrap()],
+        ..AnatomySpec::default()
+    });
+    wearer.equipment.insert(EquipmentSlotId(0), mail);
+    let seen = |view: &Observation| {
+        view.visible_actors
+            .iter()
+            .find(|a| a.id == SUBJECT)
+            .unwrap()
+            .worn
+            .len()
+    };
+    assert_eq!(
+        seen(&game.observe(OWNER).unwrap()),
+        1,
+        "a clear eye sees the armour"
+    );
+    drink(&mut game);
+    assert_eq!(
+        seen(&game.observe(OWNER).unwrap()),
+        0,
+        "the hallucination hides it"
+    );
+}
