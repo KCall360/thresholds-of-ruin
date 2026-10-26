@@ -679,6 +679,9 @@ fn ordinary_corpse_rig_and_real_pick_return_after_a_cosmetic_item_is_cured() {
             tor_client_3d_model::Focus::Item(target) if target == id)
         );
     }
+}
+
+#[test]
 fn live_sword_swaps_align_handles_and_clear_unequipped_meshes() {
     fn present(
         mut commands: Commands,
@@ -705,6 +708,7 @@ fn live_sword_swaps_align_handles_and_clear_unequipped_meshes() {
             can_equip: true,
             drinkable: false,
             edible: false,
+            portable_light: None,
         });
     }
     let mut previous = None;
