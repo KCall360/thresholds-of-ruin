@@ -51,6 +51,7 @@ fn app() -> App {
         },
     };
     let mut app = App::new();
+    app.role = AccessRole::Player;
     app.set_state(ClientState::from_snapshot(snapshot).unwrap());
     app.ready();
     app
@@ -62,7 +63,32 @@ fn key(app: &mut App, key: Key) -> Effect {
 #[test]
 fn chart_modal_draws_complete_disclosure_but_never_offers_map_actions_and_escape_restores_controls()
 {
+    // Establish the ordinary controlling action before introducing the modal.
+    // A separate same-boundary app avoids a locally pending, unsent action.
+    let mut ordinary = app();
+    assert_eq!(ordinary.role, AccessRole::Player);
+    assert!(ordinary.state.as_ref().unwrap().has_control());
+    assert!(ordinary.state.as_ref().unwrap().can_admit_intention());
+    let Effect::Request(ordinary_stair_request) = key(&mut ordinary, Key::Descend) else {
+        panic!("ordinary stair control must work before opening a chart")
+    };
+    assert!(matches!(
+        *ordinary_stair_request,
+        Request::Command {
+            command: Command::Act {
+                action: Action::Move {
+                    direction: Direction::Down
+                },
+                ..
+            },
+            ..
+        }
+    ));
     let mut app = app();
+    assert_eq!(
+        app.state.as_ref().unwrap().snapshot(),
+        ordinary.state.as_ref().unwrap().snapshot()
+    );
     let before = app.state.as_ref().unwrap().snapshot();
     let map = tor_client_ascii::render::map_tiles(app.state.as_ref().unwrap(), &app.palette);
     assert_eq!(key(&mut app, Key::Charts), Effect::None);
@@ -154,6 +180,10 @@ fn chart_modal_draws_complete_disclosure_but_never_offers_map_actions_and_escape
     let Effect::Request(request) = key(&mut app, Key::Descend) else {
         panic!("ordinary stair control restored")
     };
+    assert_eq!(
+        request, ordinary_stair_request,
+        "the chart cannot create or alter stair authority"
+    );
     assert!(matches!(
         *request,
         Request::Command {
@@ -171,7 +201,14 @@ fn chart_modal_draws_complete_disclosure_but_never_offers_map_actions_and_escape
 #[test]
 fn spectators_can_select_charts_and_a_new_observation_withholds_old_live_rows() {
     let mut app = app();
+    let mut snapshot = app.state.as_ref().unwrap().snapshot();
+    snapshot.has_control = false;
+    snapshot.readiness.admission = false;
     app.role = AccessRole::Spectator;
+    app.set_state(ClientState::from_snapshot(snapshot).unwrap());
+    assert!(!app.state.as_ref().unwrap().has_control());
+    assert!(!app.state.as_ref().unwrap().can_admit_intention());
+    assert_eq!(key(&mut app, Key::Descend), Effect::None);
     assert_eq!(key(&mut app, Key::Charts), Effect::None);
     let Effect::Request(request) = key(&mut app, Key::Enter) else {
         panic!("spectator read-only chart")

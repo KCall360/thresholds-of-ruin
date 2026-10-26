@@ -1324,7 +1324,8 @@ mod tests {
             }),
             readiness: Readiness {
                 revision: 0,
-                admission: true,
+                // This attachment is a spectator: chart reads need no action admission.
+                admission: false,
                 resume: vec![],
                 cancel: vec![],
             },
@@ -1338,6 +1339,25 @@ mod tests {
         };
         tor_client_common::ClientState::from_snapshot(snapshot.clone()).unwrap();
         snapshot
+    }
+
+    #[test]
+    fn chart_timeout_fixture_is_read_only_and_rejects_admission_without_control() {
+        let snapshot = timeout_chart_snapshot();
+        assert_eq!(snapshot.state.validate(), Ok(()));
+        assert!(!snapshot.has_control);
+        assert!(!snapshot.readiness.admission);
+        let state = tor_client_common::ClientState::from_snapshot(snapshot.clone()).unwrap();
+        assert!(!state.can_admit_intention());
+
+        // The former fixture contradicted its spectator authority. Preserve the
+        // negative witness instead of relaxing the production readiness check.
+        let mut malformed = snapshot;
+        malformed.readiness.admission = true;
+        assert_eq!(
+            tor_client_common::ClientState::from_snapshot(malformed),
+            Err(tor_client_common::StreamError::InconsistentState)
+        );
     }
 
     #[test]
