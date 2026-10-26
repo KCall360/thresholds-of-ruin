@@ -11,7 +11,23 @@ pub(super) fn fit(
     pinned: &[bool],
     distance: impl Fn(Vec3) -> f32,
 ) -> Vec<Vec3> {
+    let distance = memoized(distance);
     solve(targets, radii, pinned, targets, targets, false, &distance)
+}
+
+/// The field is fixed for one fit and a sweep often returns to a point it
+/// already measured, so each exact position (by its bits) is queried once.
+fn memoized(distance: impl Fn(Vec3) -> f32) -> impl Fn(Vec3) -> f32 {
+    let known = std::cell::RefCell::new(std::collections::HashMap::new());
+    move |p: Vec3| {
+        let key = p.to_array().map(f32::to_bits);
+        if let Some(&value) = known.borrow().get(&key) {
+            return value;
+        }
+        let value = distance(p);
+        known.borrow_mut().insert(key, value);
+        value
+    }
 }
 
 /// Continue an existing fit; retain its contact side while restoring the target.
@@ -36,6 +52,7 @@ pub(super) fn advance(
     // constraint iteration budget. Contact sweeps still bound the prediction.
     const RECOVERY_RATE: f32 = 60.0;
     let blend = -(-RECOVERY_RATE * dt).exp_m1();
+    let distance = memoized(distance);
     let destinations: Vec<_> = previous
         .iter()
         .zip(targets)
@@ -129,6 +146,42 @@ mod transport_tests {
             assert_eq!(fitted[0].y, 0.0);
             assert_eq!(fitted[0].z, 0.0);
         }
+    }
+
+    #[test]
+    fn an_advance_never_queries_the_same_point_twice() {
+        use std::cell::RefCell;
+        use std::collections::HashSet;
+        // A lock swinging against a sphere: contact, sliding and recovery.
+        let rest = [
+            Vec3::new(0.0, 0.6, 0.0),
+            Vec3::new(0.0, 0.45, 0.05),
+            Vec3::new(0.0, 0.3, 0.1),
+        ];
+        let previous = [
+            rest[0],
+            Vec3::new(0.05, 0.45, 0.0),
+            Vec3::new(0.1, 0.3, -0.05),
+        ];
+        let seen = RefCell::new(HashSet::new());
+        let repeats = RefCell::new(0usize);
+        let field = |p: Vec3| {
+            if !seen.borrow_mut().insert(p.to_array().map(f32::to_bits)) {
+                *repeats.borrow_mut() += 1;
+            }
+            p.distance(Vec3::new(0.0, 0.35, 0.0)) - 0.12
+        };
+        advance(
+            &previous,
+            &rest,
+            &rest,
+            0.02,
+            &[0.02; 3],
+            &[true, false, false],
+            field,
+        );
+        assert!(seen.borrow().len() > 20, "the fit consults the field");
+        assert_eq!(*repeats.borrow(), 0, "each exact position is queried once");
     }
 
     #[test]
