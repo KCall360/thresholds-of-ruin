@@ -184,6 +184,7 @@ fn app(model: CreatureModel) -> App {
         id: ActorTarget::from_digest([4; 32]),
         model,
         wearing: Default::default(),
+        attire: Default::default(),
         name: "first name".into(),
         description: String::new(),
         position: Position { x: 1, y: 0, z: 0 },

@@ -47,6 +47,7 @@ fn scene(id: &str, name: &str, show_target: bool, disclose_target: bool) -> (App
             appearance_seed: None,
             model: CreatureModel::Placeholder,
             wearing: Default::default(),
+            attire: Default::default(),
             id,
             name: String::new(),
             description: String::new(),

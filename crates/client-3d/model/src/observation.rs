@@ -13,6 +13,8 @@ pub struct Actor {
     pub model: CreatureModel,
     /// Disclosed visible equipment; empty when none is disclosed.
     pub wearing: Wearing,
+    /// The same equipment as names, for describing the creature.
+    pub attire: tor_client_common::narration::Attire,
     pub id: ActorTarget,
     pub name: String,
     pub description: String,
@@ -131,6 +133,7 @@ pub fn view(state: &ClientState, palette: &Palette) -> View {
             appearance_seed: a.appearance_seed,
             model: actor_model(palette, a),
             wearing: wearing(palette, &a.worn),
+            attire: tor_client_common::narration::Attire::of(&a.worn),
             id: a.id,
             name: a.name.clone(),
             description: a.description.clone(),
@@ -167,6 +170,12 @@ pub fn view(state: &ClientState, palette: &Palette) -> View {
                     .as_ref()
                     .map_or_else(Wearing::default, |appearance| {
                         wearing(palette, &appearance.worn)
+                    }),
+                attire: o
+                    .self_appearance
+                    .as_ref()
+                    .map_or_else(Default::default, |appearance| {
+                        tor_client_common::narration::Attire::of(&appearance.worn)
                     }),
                 id: o.self_target,
                 name: String::new(),

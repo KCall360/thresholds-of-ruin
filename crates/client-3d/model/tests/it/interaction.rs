@@ -321,3 +321,26 @@ fn a_found_trap_is_named_by_family_and_only_an_unknown_reachable_one_is_studied(
     assert_eq!(name, "Bear trap");
     assert!(intent.is_none(), "a known trap needs no study");
 }
+
+#[test]
+fn hovering_a_creature_names_its_visible_gear() {
+    let mut view = view(&super::projection::state(), &Palette::default());
+    let creature = view.actors.iter_mut().find(|a| !a.is_self).unwrap();
+    creature.description = "A wary guard.".into();
+    creature.attire = tor_client_common::narration::Attire {
+        wears: vec!["ring mail".into()],
+        holds: vec!["mace".into()],
+    };
+    let at = creature.position;
+    let (_, description, _) = describe(&view, at);
+    assert_eq!(
+        description,
+        "A wary guard. Wearing ring mail, holding mace."
+    );
+    view.actors.iter_mut().find(|a| !a.is_self).unwrap().attire = Default::default();
+    assert_eq!(
+        describe(&view, at).1,
+        "A wary guard.",
+        "nothing disclosed, nothing added"
+    );
+}

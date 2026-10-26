@@ -252,7 +252,21 @@ fn describe_actor(view: &View, creature: &Actor) -> (String, String, Option<Inte
     } else {
         capitalise(&creature.name)
     };
-    (name, creature.description.clone(), intent)
+    let mut description = creature.description.clone();
+    let mut clauses = Vec::new();
+    if !creature.attire.wears.is_empty() {
+        clauses.push(format!("wearing {}", creature.attire.wears.join(" and ")));
+    }
+    if !creature.attire.holds.is_empty() {
+        clauses.push(format!("holding {}", creature.attire.holds.join(" and ")));
+    }
+    if !clauses.is_empty() {
+        if !description.is_empty() {
+            description.push(' ');
+        }
+        description.push_str(&capitalise(&format!("{}.", clauses.join(", "))));
+    }
+    (name, description, intent)
 }
 
 fn describe_items(items: &[&GroundItem]) -> (String, String, Option<Intent>) {
