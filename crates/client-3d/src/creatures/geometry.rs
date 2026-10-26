@@ -157,7 +157,7 @@ mod art_contract_tests {
                             0.94,
                         );
                         let mut parts = Parts::default();
-                        biped_pauldron(&mut parts, side, body);
+                        biped_pauldron(&mut parts, side, body, PauldronFinish::STEEL);
                         let mut materials = Assets::<StandardMaterial>::default();
                         let mut meshes = Assets::<Mesh>::default();
                         let model = parts.finish(
@@ -4893,7 +4893,29 @@ fn biped_cuff(
 
 /// A broad forged crown over a thinner sliding lame. Ring profiles give the
 /// metal deliberate planes; the hollow underside is fitted to the actual arm.
-fn biped_pauldron(p: &mut Parts, side: f32, body: HumanoidBody) {
+/// The material and colours of layered shoulder caps: steel with a gilt rim
+/// for plate, or boiled leather with a stitched, studded or iron rim.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct PauldronFinish {
+    pub leather: bool,
+    pub face: Vec3,
+    pub rim: Vec3,
+}
+
+impl PauldronFinish {
+    pub const STEEL: Self = Self {
+        leather: false,
+        face: STEEL,
+        rim: GILT,
+    };
+}
+
+fn biped_pauldron(p: &mut Parts, side: f32, body: HumanoidBody, finish: PauldronFinish) {
+    let layer = if finish.leather {
+        &mut p.matte
+    } else {
+        &mut p.metal
+    };
     let build = body.build;
     let mut support = upper_arm_form(side, build, body.arm_length, body.profile.muscle, 0.94);
     // Facet chords need room as well as their vertices. Padding is part of the
@@ -4977,7 +4999,7 @@ fn biped_pauldron(p: &mut Parts, side: f32, body: HumanoidBody) {
                 let next = (k + 1) % SIDES;
                 let inside =
                     Vec3::Y * (profile[row].0 + profile[row + 1].0) * 0.5 * body.arm_length;
-                p.metal.quad_out(
+                layer.quad_out(
                     [
                         outer[row][k],
                         outer[row + 1][k],
@@ -4986,9 +5008,9 @@ fn biped_pauldron(p: &mut Parts, side: f32, body: HumanoidBody) {
                     ],
                     inside,
                     if row + 2 == inner.len() {
-                        GILT
+                        finish.rim
                     } else {
-                        STEEL * tint
+                        finish.face * tint
                     },
                 );
                 // Reverse winding on the inside: the surface faces the arm.
@@ -5003,8 +5025,8 @@ fn biped_pauldron(p: &mut Parts, side: f32, body: HumanoidBody) {
                 if normal.dot((q[0] + q[2]) * 0.5 - inside) > 0.0 {
                     q.reverse();
                 }
-                p.metal.tri([q[0], q[1], q[2]], STEEL * 0.68);
-                p.metal.tri([q[0], q[2], q[3]], STEEL * 0.68);
+                layer.tri([q[0], q[1], q[2]], finish.face * 0.68);
+                layer.tri([q[0], q[2], q[3]], finish.face * 0.68);
             }
         }
         for row in [0, inner.len() - 1] {
@@ -5012,7 +5034,7 @@ fn biped_pauldron(p: &mut Parts, side: f32, body: HumanoidBody) {
             let inside = Vec3::Y * profile[row].0 * body.arm_length - upward;
             for k in 0..SIDES {
                 let next = (k + 1) % SIDES;
-                p.metal.quad_out(
+                layer.quad_out(
                     [
                         inner[row][k],
                         outer[row][k],
@@ -5020,7 +5042,7 @@ fn biped_pauldron(p: &mut Parts, side: f32, body: HumanoidBody) {
                         inner[row][next],
                     ],
                     inside,
-                    GILT,
+                    finish.rim,
                 );
             }
         }
@@ -5029,15 +5051,15 @@ fn biped_pauldron(p: &mut Parts, side: f32, body: HumanoidBody) {
             let outer_center = inner_center + Vec3::Y * 0.008 * build;
             for k in 0..SIDES {
                 let next = (k + 1) % SIDES;
-                p.metal.tri_out(
+                layer.tri_out(
                     [outer_center, outer[0][k], outer[0][next]],
                     outer_center - Vec3::Y,
-                    STEEL,
+                    finish.face,
                 );
-                p.metal.tri_out(
+                layer.tri_out(
                     [inner_center, inner[0][k], inner[0][next]],
                     inner_center + Vec3::Y,
-                    STEEL * 0.68,
+                    finish.face * 0.68,
                 );
             }
         }
@@ -7066,8 +7088,14 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
                     29 + side as u64,
                 );
             }
+            if let (false, Some(finish)) =
+                (metal, armor_item.and_then(armor_parts::shoulder_finish))
+            {
+                // Lighter armours cap the shoulder over the sleeve, as on the sheets.
+                biped_pauldron(p, side, body, finish);
+            }
             if metal {
-                biped_pauldron(p, side, body);
+                biped_pauldron(p, side, body, PauldronFinish::STEEL);
                 // Rerebrace lames below the pauldron, each tucked under the last.
                 plate_lames(&mut p.metal, &rerebrace_lames(body));
             }

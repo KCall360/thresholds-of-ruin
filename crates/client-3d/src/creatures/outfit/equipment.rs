@@ -51,6 +51,20 @@ impl BodyItem {
         )
     }
 
+    /// The colour of the split panels it hangs below the belt, if any. Plate
+    /// mail's legs are plated instead, and the bare breastplate has none.
+    pub fn tassets(self) -> Option<Vec3> {
+        match self {
+            Self::Leather | Self::StuddedLeather => Some(Vec3::new(0.43, 0.24, 0.12)),
+            Self::RingMail => Some(Vec3::new(0.29, 0.16, 0.08)),
+            Self::ChainMail => Some(Vec3::new(0.5, 0.51, 0.55)),
+            Self::ScaleMail | Self::SplintMail | Self::BandedMail => {
+                Some(Vec3::new(0.62, 0.64, 0.68))
+            }
+            Self::SteelBreastplate | Self::PlateMail => None,
+        }
+    }
+
     /// The recipe for a disclosed armour model; unrecognised armour keeps the
     /// generic plate rather than guessing a lighter style.
     pub fn of(model: tor_client_3d_model::ItemModel) -> Self {
@@ -155,6 +169,9 @@ impl Equipment {
                 }
                 BodyItem::SteelBreastplate => {}
             }
+            if let Some(color) = item.tassets() {
+                base.skirt = Some(tassets(color, base.skirt));
+            }
             // An overlaid plate covers sewn bodice ornaments; independent
             // neck jewelry and straps are fitted onto the resolved exterior.
             base.torso_ornament = None;
@@ -184,6 +201,36 @@ impl Equipment {
             ));
         }
         base
+    }
+}
+
+/// Split panels over the wearer's own lower garment, which shows beneath them
+/// as a longer layer; without one, the panels hang over the trousers alone.
+fn tassets(color: Vec3, under: Option<Skirt>) -> Skirt {
+    let panels = Skirt {
+        color,
+        length: 0.17,
+        split: 0.09,
+        trim: Some(color * 0.7),
+        cutaway: false,
+        ..Skirt::PLAIN
+    };
+    let Some(under) = under else {
+        return panels;
+    };
+    Skirt {
+        length: (under.length * 0.75).min(0.19),
+        split: under.split.max(0.09),
+        layers: [
+            Some(Layer {
+                longer: (under.length * 0.25).max(0.04),
+                split: Some(under.split),
+                hem: under.hem,
+                ..Layer::petticoat(under.color, under.sheer)
+            }),
+            None,
+        ],
+        ..panels
     }
 }
 

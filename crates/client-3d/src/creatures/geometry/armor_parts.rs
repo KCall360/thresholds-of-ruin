@@ -362,6 +362,31 @@ pub(super) fn emit(
     }
 }
 
+/// Shoulder caps for armours that leave the sleeves free; plated arms bring
+/// their own steel pauldrons, and mail shirts have none.
+pub(super) fn shoulder_finish(item: super::super::outfit::BodyItem) -> Option<PauldronFinish> {
+    use super::super::outfit::BodyItem as Item;
+    let leather = |rim| PauldronFinish {
+        leather: true,
+        face: BOILED,
+        rim,
+    };
+    match item {
+        Item::Leather => Some(leather(STITCH)),
+        Item::StuddedLeather => Some(leather(GILT)),
+        Item::RingMail => Some(PauldronFinish {
+            face: BACKING,
+            ..leather(IRON * 1.25)
+        }),
+        Item::ScaleMail => Some(PauldronFinish {
+            leather: false,
+            face: STEEL * 0.9,
+            rim: BACKING,
+        }),
+        _ => None,
+    }
+}
+
 /// The lowest height the female opening reaches in front of the sternum.
 pub(super) fn opening_floor(opening: Option<&crate::sdf::Sculpt>) -> Option<f32> {
     let cut = opening?;
