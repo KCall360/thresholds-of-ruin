@@ -596,12 +596,25 @@ fn ordinary_corpse_rig_and_real_pick_return_after_a_cosmetic_item_is_cured() {
             let body = &game.corpses[&id];
             assert_eq!(body.model, CreatureModel::Equine);
             assert_eq!(body.appearance_seed, Some(seed));
-            assert!(app
-                .world()
-                .get::<creatures::Rig>(body.entity)
-                .unwrap()
-                .joint(J::Head)
-                .is_some());
+            let rig = app.world().get::<creatures::Rig>(body.entity).unwrap();
+            assert_eq!(rig.plan, creatures::Plan::Quadruped);
+            // Equine's head is articulated at Snout, unlike the Head joint in
+            // the humanoid corpse fixture above. Check its actual body plan.
+            for joint in [
+                J::Body,
+                J::Neck,
+                J::Snout,
+                J::HoofFL,
+                J::HoofFR,
+                J::HoofBL,
+                J::HoofBR,
+            ] {
+                assert!(
+                    rig.joint(joint)
+                        .is_some_and(|entity| app.world().entities().contains(entity)),
+                    "equine corpse must retain its live {joint:?} articulation"
+                );
+            }
             if step == 0 {
                 assert_eq!(body.entity, initial, "unchanged corpse retains its rig");
             }
