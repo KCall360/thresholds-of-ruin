@@ -432,12 +432,14 @@ fn a_hallucinated_figure_shows_none_of_its_true_gear() {
     let mail = game
         .place_item_stack(72, location, Some(SUBJECT), 1, spec)
         .unwrap();
-    let wearer = game.actors.get_mut(&SUBJECT).unwrap();
-    wearer.anatomy = tor_world::Shared::new(AnatomySpec {
-        slots: vec![EquipmentSlot::new("body_armor").unwrap()],
-        ..AnatomySpec::default()
-    });
-    wearer.equipment.insert(EquipmentSlotId(0), mail);
+    {
+        let mut wearer = game.actors.get_mut(&SUBJECT).unwrap();
+        wearer.anatomy = tor_world::Shared::new(AnatomySpec {
+            slots: vec![EquipmentSlot::new("body_armor").unwrap()],
+            ..AnatomySpec::default()
+        });
+        wearer.equipment.insert(EquipmentSlotId(0), mail);
+    }
     let seen = |view: &Observation| {
         view.visible_actors
             .iter()
