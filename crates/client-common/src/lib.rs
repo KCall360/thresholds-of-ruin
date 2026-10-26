@@ -22,6 +22,7 @@ pub mod presentation;
 pub mod public_plan;
 mod state;
 pub mod stats;
+pub mod status;
 pub mod surfaces;
 pub use connection::Connection;
 pub use palette::{observation_assets, AssetTable, Palette};

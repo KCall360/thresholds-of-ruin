@@ -338,7 +338,12 @@ Objects:
 
 - `net.rs` owns `tor_client_common::Connection` on a worker thread and builds
   requests exactly as the ASCII client does, sending the window a plain `View`
-  (visible cells, aligned map memory, creatures, items, narration, HP).
+  (visible cells, aligned map memory, creatures, items, narration, HP and the
+  shared status rows). The HUD shows those rows as the ASCII client does:
+  attributes, hit dice, place and objective, then health, resource pools,
+  gold, hunger, time, holds and combat state, including Dead and Victorious.
+  Projectile choices and advancement pages also come from the worker, which
+  binds each query to its reply.
 - Observations are in an observer frame that moves with the character. The
   window matches cell keys that appear once in consecutive views to recover the
   shift, so the world stays still and the camera glides after the player.

@@ -35,6 +35,7 @@ pub(crate) fn view(revision: u64) -> View {
         abilities: vec![],
         identify: None,
         narration: vec![],
+        status: Default::default(),
         hp: None,
         has_control: false,
         can_act: false,

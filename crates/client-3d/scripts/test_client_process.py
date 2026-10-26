@@ -1076,7 +1076,8 @@ class Native3DProcesses(ProcessTestCase):
         try:
             self.assertEqual(window.child.wait(timeout=30), 0)
         finally:
-            native("Escape", False)
+            if window.child.poll() is None:
+                native("Escape", False)
 
     def test_native_advancement_screen_reads_the_owners_pages(self):
         """F10 opens the owner's advancement pages from the real server, and a
@@ -1106,7 +1107,7 @@ class Native3DProcesses(ProcessTestCase):
         for letter in "ledger":
             frame = tap(letter, lambda frame, letter=letter: frame["advancement"]["typed"].endswith(letter))
         self.assertEqual(frame["advancement"]["typed"], "ledger")
-        frame = tap("Return", lambda frame: "Ledger" in lines(frame) and frame["advancement"]["typed"] == "")
+        frame = tap("Return", lambda frame: "Purchase ledger" in lines(frame) and frame["advancement"]["typed"] == "")
         self.assertEqual(frame["world_feet"], feet, "typing a, d, e and the like never moves the character")
         frame = tap("Escape", lambda frame: frame["advancement"] is None)
         self.assertIsNone(window.child.poll(), "Esc closes the screen, not the game")
@@ -1114,7 +1115,8 @@ class Native3DProcesses(ProcessTestCase):
         try:
             self.assertEqual(window.child.wait(timeout=30), 0)
         finally:
-            native("Escape", False)
+            if window.child.poll() is None:
+                native("Escape", False)
 
     def test_fresh_window_hydrates_occluded_terrain_after_save_reload(self):
         server = self.server()

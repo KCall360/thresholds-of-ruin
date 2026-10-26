@@ -938,14 +938,14 @@ fn hud(
         text.0 = lines.into_iter().rev().collect::<Vec<_>>().join("\n");
     }
     if let Ok(mut text) = status.single_mut() {
+        let mut rows = Vec::new();
         let mut parts = Vec::new();
         if let Some(view) = &game.view {
-            match view.hp {
-                Some((0, _)) => parts.push("You have fallen.".into()),
-                Some((hp, max)) => parts.push(format!("HP {hp}/{max}")),
-                None => {}
+            // The shared status rows, as the ASCII client shows them.
+            rows.extend(view.status.iter().filter(|row| !row.is_empty()).cloned());
+            if view.hp.is_some_and(|(hp, _)| hp == 0) {
+                parts.push("You have fallen.".into());
             }
-            parts.push(format!("tick {}", view.tick));
             parts.push(
                 if view.has_control {
                     "in control"
@@ -970,7 +970,11 @@ fn hud(
         if !game.status.is_empty() {
             parts.push(game.status.clone());
         }
-        text.0 = parts.join("   |   ");
+        rows.push(parts.join("   |   "));
+        text.0 = rows.join(
+            "
+",
+        );
     }
 }
 

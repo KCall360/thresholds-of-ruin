@@ -47,6 +47,9 @@ pub struct View {
     /// `None` when no choice is waiting.
     pub identify: Option<Vec<ItemTarget>>,
     pub narration: Vec<String>,
+    /// The shared status rows: attributes and place, then health, pools,
+    /// gold, hunger, time, holds and combat state.
+    pub status: [String; 2],
     pub hp: Option<(u64, u64)>,
     pub has_control: bool,
     /// Whether a new action would be admitted now (no journey or work under way).
@@ -312,6 +315,7 @@ pub fn view(state: &ClientState, palette: &Palette) -> View {
                     .collect()
             }),
         narration: state.narration().to_vec(),
+        status: tor_client_common::status::lines(state, &[]),
         hp: o.combat.as_ref().map(|c| (c.hp, c.max_hp)),
         has_control: state.has_control(),
         can_act: state.can_admit_intention(),
