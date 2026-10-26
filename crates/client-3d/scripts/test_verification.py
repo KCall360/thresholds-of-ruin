@@ -314,6 +314,38 @@ class LocalGraphicalWaiverContracts(unittest.TestCase):
                 self.assertEqual(receipt["gate_passed"], mode == "valid")
                 self.assertFalse(receipt["clean_passed"])
                 self.assertFalse(receipt["passed"])
+    def test_a_timed_out_process_suite_still_reports_what_failed(self):
+        module = self.module()
+        name = "test_fixture.Native.test_window"
+        rows = [{"kind": "diagnostic", "test_id": name, "exception_type": "TimeoutExpired",
+                 "traceback": "Traceback\nsubprocess.TimeoutExpired: window took too long"},
+                {"kind": "test", "test_id": name, "outcome": "error", "seconds": 181.5}]
+        with tempfile.TemporaryDirectory(dir=ROOT / ".local") as temporary:
+            directory = Path(temporary)
+            def run(command, **kwargs):
+                self.assertIn("test_runner.py", command[1])
+                self.assertEqual(command[-1], "-v")
+                self.assertNotIn("--waive-local-graphical", command)
+                self.assertEqual(kwargs["timeout"], module.PROCESS_TIMEOUT)
+                Path(kwargs["env"]["TOR_TEST_TIMINGS"]).write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+                raise module.subprocess.TimeoutExpired(command, kwargs["timeout"])
+            printed = io.StringIO()
+            with mock.patch.object(module, "ROOT", directory), \
+                    mock.patch.object(module, "TARGET", directory / "target"), \
+                    mock.patch.object(module, "steps", return_value=[("process-tests", ["python", "-m", "unittest", "discover"])]), \
+                    mock.patch.object(module, "source_identity", return_value={"hash": "a"}), \
+                    mock.patch.object(module.subprocess, "check_output", return_value="fixture toolchain"), \
+                    mock.patch.object(module.subprocess, "run", side_effect=run), \
+                    mock.patch.dict(os.environ, {}, clear=True), contextlib.redirect_stdout(printed):
+                self.assertEqual(module.main([]), 1)
+            receipt = json.loads(next((directory / ".local/verify-3d").glob("*/receipt.json")).read_text())
+            self.assertEqual(receipt["steps"][0]["exit_code"], 124)
+            output = printed.getvalue()
+            self.assertIn("181.5s error " + name, output)
+            self.assertIn("TimeoutExpired in " + name, output)
+            self.assertIn("window took too long", output)
+
+
 class ScreenshotPixels(unittest.TestCase):
     def test_native_png_filters_preserve_actual_pixels(self):
         import struct
