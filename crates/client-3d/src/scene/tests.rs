@@ -720,7 +720,11 @@ fn disclosed_equipment_changes_rebuild_the_rig_and_removal_restores_the_costume(
     assert_ne!(rebuilt, plain, "a disclosed change rebuilds the rig");
     assert_ne!(worn, costume, "the worn piece is part of the composition");
     let (same, again) = rendered(&mut app, armoured);
-    assert_eq!((same, &again), (rebuilt, &worn), "an unchanged view reuses it");
+    assert_eq!(
+        (same, &again),
+        (rebuilt, &worn),
+        "an unchanged view reuses it"
+    );
     let (_, restored) = rendered(&mut app, Default::default());
     assert_eq!(restored, costume, "removal restores the body's own costume");
 }

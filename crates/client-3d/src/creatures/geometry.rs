@@ -3,8 +3,8 @@ use super::anatomy::{
 };
 use super::animation::ease;
 use super::outfit::{
-    Arms, Baldric, Bodice, Composition, Cover, Feet, Headwear, Hem, Legs, NeckDrape,
-    Neckline, Outer, Outfit, ShellOpening, Shoes, Skirt, SleeveCut, Straps, Support, TorsoOrnament,
+    Arms, Baldric, Bodice, Composition, Cover, Feet, Headwear, Hem, Legs, NeckDrape, Neckline,
+    Outer, Outfit, ShellOpening, Shoes, Skirt, SleeveCut, Straps, Support, TorsoOrnament,
 };
 use super::outfit::{Heraldry, Pattern};
 use super::*;

@@ -3783,7 +3783,11 @@ pub fn describe(
             ));
         }
         let attire = tor_client_common::narration::Attire::of(&actor.worn);
-        let held: Vec<String> = attire.holds.iter().map(|name| item_phrase(name, 1)).collect();
+        let held: Vec<String> = attire
+            .holds
+            .iter()
+            .map(|name| item_phrase(name, 1))
+            .collect();
         for (verb, names) in [("wearing", &attire.wears), ("holding", &held)] {
             if !names.is_empty() {
                 text.push_str(&format!(", {verb} {}", names.join(" and ")));

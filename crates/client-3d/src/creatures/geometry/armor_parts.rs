@@ -174,7 +174,9 @@ pub(super) fn emit(
             plate.mesh(&mut p.matte, min, max, 0.008, &|at, _| stitched(at, BOILED));
         }
         Item::RingMail | Item::SplintMail => {
-            plate.mesh(&mut p.matte, min, max, 0.008, &|at, _| stitched(at, BACKING));
+            plate.mesh(&mut p.matte, min, max, 0.008, &|at, _| {
+                stitched(at, BACKING)
+            });
         }
         Item::ChainMail => {
             plate.mesh(&mut p.metal, min, max, 0.008, &|at, _| {
@@ -287,8 +289,15 @@ pub(super) fn emit(
                     Some(site.around),
                 );
                 for end in [path[0], path[6]] {
-                    p.metal
-                        .prism(end, end + outward * 0.006, 0.004, 0.003, 6, STEEL * 1.1, 0.0);
+                    p.metal.prism(
+                        end,
+                        end + outward * 0.006,
+                        0.004,
+                        0.003,
+                        6,
+                        STEEL * 1.1,
+                        0.0,
+                    );
                 }
             }
             fitted_band(&mut p.matte, plate, 0.11, 0.135, 0.012, LEATHER);
@@ -323,7 +332,14 @@ pub(super) fn emit(
             }
         }
         Item::ChainMail => {
-            fitted_band(&mut p.matte, plate, BOTTOM + 0.004, BOTTOM + 0.016, 0.004, LEATHER);
+            fitted_band(
+                &mut p.matte,
+                plate,
+                BOTTOM + 0.004,
+                BOTTOM + 0.016,
+                0.004,
+                LEATHER,
+            );
         }
         Item::SteelBreastplate | Item::PlateMail => {}
     }
@@ -331,7 +347,14 @@ pub(super) fn emit(
         item,
         Item::SteelBreastplate | Item::PlateMail | Item::BandedMail | Item::ScaleMail
     ) {
-        fitted_band(&mut p.metal, plate, BOTTOM + 0.006, BOTTOM + 0.013, 0.003, GILT);
+        fitted_band(
+            &mut p.metal,
+            plate,
+            BOTTOM + 0.006,
+            BOTTOM + 0.013,
+            0.003,
+            GILT,
+        );
         // A circumferential band would bridge the open neckline with triangles.
         if opening.is_none() {
             fitted_band(&mut p.metal, plate, TOP - 0.013, TOP - 0.006, 0.003, GILT);
@@ -401,17 +424,32 @@ mod tests {
             let mut cut = crate::sdf::Sculpt::default();
             cut.add(opening(body).expect("female opening"), 0.0);
             let sites = lattice(&plate, Some(&cut), BOTTOM + 0.018, TOP - 0.022, 0.04, 0.042);
-            assert!(sites.len() > 60, "a full lattice of details: {}", sites.len());
+            assert!(
+                sites.len() > 60,
+                "a full lattice of details: {}",
+                sites.len()
+            );
             for (_, site) in &sites {
                 assert!(cut.distance(site.at) >= 0.014, "detail inside the opening");
-                assert!(plate.distance(site.at).abs() < 0.002, "detail floats off the shell");
+                assert!(
+                    plate.distance(site.at).abs() < 0.002,
+                    "detail floats off the shell"
+                );
                 assert!(site.normal.dot(site.around).abs() < 1e-3);
             }
             // Staggered rows really are offset, rather than stacking in columns.
-            let row = |r| sites.iter().filter(move |(k, _)| *k == r).map(|(_, s)| s.at.x);
+            let row = |r| {
+                sites
+                    .iter()
+                    .filter(move |(k, _)| *k == r)
+                    .map(|(_, s)| s.at.x)
+            };
             let first = row(2).fold(f32::MAX, |a, x| a.min(x.abs()));
             let second = row(3).fold(f32::MAX, |a, x| a.min(x.abs()));
-            assert!((first - second).abs() > 0.004, "rows {first} and {second} align");
+            assert!(
+                (first - second).abs() > 0.004,
+                "rows {first} and {second} align"
+            );
         }
     }
 

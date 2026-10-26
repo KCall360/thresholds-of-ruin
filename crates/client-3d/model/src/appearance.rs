@@ -332,7 +332,10 @@ mod tests {
             },
             "a third weapon socket and an unknown slot are not moved elsewhere"
         );
-        assert!(wearing(&palette, &[]).is_empty(), "nothing disclosed, nothing worn");
+        assert!(
+            wearing(&palette, &[]).is_empty(),
+            "nothing disclosed, nothing worn"
+        );
     }
 
     #[test]

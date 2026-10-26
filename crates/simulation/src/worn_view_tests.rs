@@ -27,14 +27,20 @@ fn fixture() -> (Game, ActorId, ActorId) {
     let observer = game
         .spawn_actor(
             Location {
-                position: Position { x: 2, ..at.position },
+                position: Position {
+                    x: 2,
+                    ..at.position
+                },
                 ..at
             },
             NonZeroU64::new(100).unwrap(),
         )
         .unwrap();
     game.actors.get_mut(&wearer).unwrap().anatomy = Shared::new(AnatomySpec {
-        slots: SLOTS.iter().map(|s| EquipmentSlot::new(s).unwrap()).collect(),
+        slots: SLOTS
+            .iter()
+            .map(|s| EquipmentSlot::new(s).unwrap())
+            .collect(),
         ..AnatomySpec::default()
     });
     (game, wearer, observer)
@@ -42,7 +48,9 @@ fn fixture() -> (Game, ActorId, ActorId) {
 
 fn wear(game: &mut Game, wearer: ActorId, id: u64, socket: u16, spec: ItemSpec) -> ItemId {
     let at = game.actors[&wearer].location;
-    let item = game.place_item_stack(id, at, Some(wearer), 1, spec).unwrap();
+    let item = game
+        .place_item_stack(id, at, Some(wearer), 1, spec)
+        .unwrap();
     game.actors
         .get_mut(&wearer)
         .unwrap()
@@ -61,10 +69,39 @@ fn worn(game: &Game, wearer: ActorId) -> Vec<(String, u8, String)> {
 #[test]
 fn weapons_and_armour_are_worn_visibly_and_rings_are_not() {
     let (mut game, wearer, _) = fixture();
-    wear(&mut game, wearer, 10, 4, spec("dagger", "dagger", ItemClass::Weapon, "item.weapon"));
-    wear(&mut game, wearer, 11, 1, spec("ring mail", "ring mail", ItemClass::Armor, "item.armor.mail"));
-    wear(&mut game, wearer, 12, 3, spec("ring of stealth", "jade ring", ItemClass::Ring, "item.ring"));
-    wear(&mut game, wearer, 13, 0, spec("mace", "mace", ItemClass::Weapon, "item.weapon.mace"));
+    wear(
+        &mut game,
+        wearer,
+        10,
+        4,
+        spec("dagger", "dagger", ItemClass::Weapon, "item.weapon"),
+    );
+    wear(
+        &mut game,
+        wearer,
+        11,
+        1,
+        spec(
+            "ring mail",
+            "ring mail",
+            ItemClass::Armor,
+            "item.armor.mail",
+        ),
+    );
+    wear(
+        &mut game,
+        wearer,
+        12,
+        3,
+        spec("ring of stealth", "jade ring", ItemClass::Ring, "item.ring"),
+    );
+    wear(
+        &mut game,
+        wearer,
+        13,
+        0,
+        spec("mace", "mace", ItemClass::Weapon, "item.weapon.mace"),
+    );
     assert_eq!(
         worn(&game, wearer),
         [
@@ -82,22 +119,61 @@ fn weapons_and_armour_are_worn_visibly_and_rings_are_not() {
 #[test]
 fn private_item_facts_never_change_the_worn_record() {
     let (mut game, wearer, _) = fixture();
-    let mail = wear(&mut game, wearer, 11, 1, spec("ring mail", "ring mail", ItemClass::Armor, "item.armor"));
+    let mail = wear(
+        &mut game,
+        wearer,
+        11,
+        1,
+        spec("ring mail", "ring mail", ItemClass::Armor, "item.armor"),
+    );
     let before = game.worn_view(&game.actors[&wearer]);
     // Enchantment, true name and the hidden ring beneath are private.
-    game.items.edit(mail, |item| item.condition.hit_enchantment = 3);
-    wear(&mut game, wearer, 12, 2, spec("ring of teleportation", "opal ring", ItemClass::Ring, "item.ring"));
+    game.items
+        .edit(mail, |item| item.condition.hit_enchantment = 3);
+    wear(
+        &mut game,
+        wearer,
+        12,
+        2,
+        spec(
+            "ring of teleportation",
+            "opal ring",
+            ItemClass::Ring,
+            "item.ring",
+        ),
+    );
     assert_eq!(game.worn_view(&game.actors[&wearer]), before);
     // A different item with the same look is indistinguishable.
-    game.actors.get_mut(&wearer).unwrap().equipment.remove(&EquipmentSlotId(1));
-    wear(&mut game, wearer, 14, 1, spec("cursed ring mail", "ring mail", ItemClass::Armor, "item.armor"));
+    game.actors
+        .get_mut(&wearer)
+        .unwrap()
+        .equipment
+        .remove(&EquipmentSlotId(1));
+    wear(
+        &mut game,
+        wearer,
+        14,
+        1,
+        spec(
+            "cursed ring mail",
+            "ring mail",
+            ItemClass::Armor,
+            "item.armor",
+        ),
+    );
     assert_eq!(game.worn_view(&game.actors[&wearer]), before);
 }
 
 #[test]
 fn onlookers_and_the_wearer_receive_the_same_worn_record() {
     let (mut game, wearer, observer) = fixture();
-    wear(&mut game, wearer, 11, 1, spec("ring mail", "ring mail", ItemClass::Armor, "item.armor"));
+    wear(
+        &mut game,
+        wearer,
+        11,
+        1,
+        spec("ring mail", "ring mail", ItemClass::Armor, "item.armor"),
+    );
     let own = game.observe(wearer).unwrap();
     assert_eq!(own.worn, game.worn_view(&game.actors[&wearer]));
     let seen = game.observe(observer).unwrap();
@@ -108,6 +184,9 @@ fn onlookers_and_the_wearer_receive_the_same_worn_record() {
         .collect();
     assert!(!views.is_empty(), "the observer sees the wearer");
     for view in views {
-        assert_eq!(view.worn, own.worn, "every visible cell carries the same record");
+        assert_eq!(
+            view.worn, own.worn,
+            "every visible cell carries the same record"
+        );
     }
 }

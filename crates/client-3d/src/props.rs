@@ -972,14 +972,22 @@ fn body_armor(p: &mut Parts, kind: Kind) {
     match kind {
         Kind::RingMail => {
             for at in grid(6, 5, 0.065, 0.062) {
-                p.metal
-                    .torus(Vec3::new(at.x, top, at.y), Vec3::Y, 0.024, 0.0045, 10, 4, STEEL);
+                p.metal.torus(
+                    Vec3::new(at.x, top, at.y),
+                    Vec3::Y,
+                    0.024,
+                    0.0045,
+                    10,
+                    4,
+                    STEEL,
+                );
             }
         }
         Kind::StuddedLeather => {
             for at in grid(8, 6, 0.054, 0.048) {
                 let at = Vec3::new(at.x, top - 0.002, at.y);
-                p.metal.prism(at, at + Vec3::Y * 0.008, 0.008, 0.006, 8, BRONZE, 0.0);
+                p.metal
+                    .prism(at, at + Vec3::Y * 0.008, 0.008, 0.006, 8, BRONZE, 0.0);
             }
         }
         Kind::ScaleMail => {

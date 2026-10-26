@@ -297,9 +297,9 @@ mod tests {
                 for y in -4..=4 {
                     for z in -4..=4 {
                         let point = Vec3::new(x as f32, y as f32, z as f32) * 0.11;
-                        let expected = posed
-                            .iter()
-                            .fold(scene.body.distance(point), |d, c| nearer(d, c.distance(point)));
+                        let expected = posed.iter().fold(scene.body.distance(point), |d, c| {
+                            nearer(d, c.distance(point))
+                        });
                         assert_eq!(
                             scene.distance(point).to_bits(),
                             expected.to_bits(),
@@ -394,7 +394,10 @@ mod tests {
             let p = Vec3::splat(magnitude);
             let expected = c.distance(p);
             for best in [0.0, expected, expected * 0.99, expected * 1.01] {
-                assert_eq!(c.nearest(p, best).to_bits(), nearer(best, expected).to_bits());
+                assert_eq!(
+                    c.nearest(p, best).to_bits(),
+                    nearer(best, expected).to_bits()
+                );
             }
         }
     }

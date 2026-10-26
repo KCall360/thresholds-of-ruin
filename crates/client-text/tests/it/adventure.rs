@@ -2362,7 +2362,10 @@ fn examining_a_figure_names_only_its_disclosed_visible_equipment() {
         position: Position { x: 3, y: 0, z: 0 },
     });
     let text = said("x goblin", &s);
-    assert!(text.contains("It wears ring mail and holds a mace."), "{text}");
+    assert!(
+        text.contains("It wears ring mail and holds a mace."),
+        "{text}"
+    );
     s.observation.visible_actors[0].worn.clear();
     let text = said("x goblin", &s);
     assert!(!text.contains("wears") && !text.contains("holds"), "{text}");

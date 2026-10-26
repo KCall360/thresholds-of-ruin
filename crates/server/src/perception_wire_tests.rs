@@ -1515,10 +1515,13 @@ fn disclosed_worn_equipment_reaches_actor_and_self_records_in_canonical_form() {
         ]),
         "zero occurrences and absent assets are omitted"
     );
-    assert_eq!(wire["self_appearance"]["worn"], json!([
-        {"slot": "body_armor", "class": "armor", "appearance": "ring mail",
-         "asset": "item.armor.mail.ring"}
-    ]));
+    assert_eq!(
+        wire["self_appearance"]["worn"],
+        json!([
+            {"slot": "body_armor", "class": "armor", "appearance": "ring mail",
+             "asset": "item.armor.mail.ring"}
+        ])
+    );
 }
 
 #[test]

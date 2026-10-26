@@ -1011,7 +1011,10 @@ mod face_constraint_tests {
             p.x
         };
         constrain_faces(&mut points, &triangles, &[], &[1.0; 6], &field);
-        assert!(points[0].x >= 0.0, "the pressed face is cleared: {points:?}");
+        assert!(
+            points[0].x >= 0.0,
+            "the pressed face is cleared: {points:?}"
+        );
         assert_eq!(far.get(), 4, "each unmoved far sample is queried once");
     }
 }

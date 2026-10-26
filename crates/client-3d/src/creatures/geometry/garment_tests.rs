@@ -1193,7 +1193,10 @@ fn every_rogue_body_armour_builds_its_own_torso_on_both_sexes() {
             // Leather armours are leather; the rest are mostly metal.
             let leathern = matches!(
                 item,
-                BodyItem::Leather | BodyItem::StuddedLeather | BodyItem::RingMail | BodyItem::SplintMail
+                BodyItem::Leather
+                    | BodyItem::StuddedLeather
+                    | BodyItem::RingMail
+                    | BodyItem::SplintMail
             );
             let bare_metal = bare.iter().filter(|t| t.metal).count();
             if item == BodyItem::Leather {

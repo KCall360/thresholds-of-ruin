@@ -1778,7 +1778,11 @@ fn attire(r: &Referent, scene: &Scene) -> Option<String> {
     let actor = o.visible_actors.iter().find(|a| a.id == id)?;
     let attire = narration::Attire::of(&actor.worn);
     // Armour names are mass nouns ("ring mail"); weapons are counted.
-    let held: Vec<String> = attire.holds.iter().map(|name| prose::indefinite(name)).collect();
+    let held: Vec<String> = attire
+        .holds
+        .iter()
+        .map(|name| prose::indefinite(name))
+        .collect();
     let clauses: Vec<String> = [("wears", attire.wears), ("holds", held)]
         .into_iter()
         .filter(|(_, items)| !items.is_empty())
