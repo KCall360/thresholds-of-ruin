@@ -3479,67 +3479,9 @@ pub fn glyph_at(o: &Observation, palette: &tor_client_common::Palette, x: i32, y
         .map_or(' ', |t| t.glyph)
 }
 
+/// One history entry as a line, in the shared client wording.
 pub fn history_text(entry: &HistoryEntry) -> String {
-    match &entry.content {
-        HistoryContent::PlaceRenamed { name, .. } => format!("Place named {}.", name),
-        HistoryContent::Travel { .. } => "Travel requested.".into(),
-        HistoryContent::Wizard { summary, .. } => summary.clone(),
-        HistoryContent::Action { event, .. } => match event.as_ref() {
-            Event::Moved { direction } => format!("Moved {}.", direction_name(*direction)),
-            Event::Escaped { .. } => "Escaped with the objective item.".into(),
-            Event::Crumbled { quantity, .. } => {
-                if *quantity == 1 {
-                    "An item crumbled during pickup.".into()
-                } else {
-                    format!("{quantity} items crumbled during pickup.")
-                }
-            }
-            Event::Taken { quantity, .. } => {
-                format!(
-                    "Picked up {}.",
-                    if *quantity == 1 {
-                        "an item".to_owned()
-                    } else {
-                        format!("{quantity} items")
-                    }
-                )
-            }
-            Event::Dropped { quantity, .. } => {
-                format!(
-                    "Dropped {}.",
-                    if *quantity == 1 {
-                        "an item".to_owned()
-                    } else {
-                        format!("{quantity} items")
-                    }
-                )
-            }
-            Event::DoorChanged { open, .. } => {
-                format!("{} door.", if *open { "Opened" } else { "Closed" })
-            }
-            Event::Waited => "Waited.".into(),
-            Event::PreparationPaused => "Preparation paused.".into(),
-            Event::AbilityStarted { ability, .. } => format!("Prepared {}.", ability.name),
-            Event::EscapeStarted { .. } => "Began trying to escape a hold.".into(),
-            Event::ItemStarted { action } => match action {
-                tor_protocol::Action::Equip { .. } => "Began equipping an item.".into(),
-                tor_protocol::Action::Unequip { .. } => "Began removing an item.".into(),
-                tor_protocol::Action::Ignite { .. } => "Began igniting an item.".into(),
-                tor_protocol::Action::Extinguish { .. } => "Began extinguishing an item.".into(),
-                tor_protocol::Action::Drink { .. } => "Began drinking an item.".into(),
-                tor_protocol::Action::Eat { .. } => "Began eating an item.".into(),
-                _ => "Began preparation.".into(),
-            },
-        },
-        HistoryContent::Annotation { text, .. } => {
-            let audience = if entry.audience == Audience::Private {
-                "Private note"
-            } else {
-                "Note"
-            };
-            format!("{audience}: {text}")
-        }
-    }
+    tor_client_common::history::text(entry)
 }
 
 pub fn wrap(text: &str, width: usize) -> Vec<String> {

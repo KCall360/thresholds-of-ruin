@@ -13,7 +13,7 @@ pub(super) fn input(
     mut rig: ResMut<CameraRig>,
 ) {
     // Typed advancement commands neither turn the camera nor move.
-    if game.advancement_open {
+    if game.screen.is_some() {
         return;
     }
     if keys.just_pressed(KeyCode::KeyQ) {

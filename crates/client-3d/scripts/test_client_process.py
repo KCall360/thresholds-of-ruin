@@ -810,7 +810,7 @@ class Native3DProcesses(ProcessTestCase):
                 vk = ord(name.upper()) if len(name) == 1 and name.isascii() and name.isalnum() else {
                     "Escape": 0x1B, "space": 0x20, "Return": 0x0D, "Tab": 0x09,
                     "Up": 0x26, "Down": 0x28, "Left": 0x25, "Right": 0x27,
-                    "PageUp": 0x21, "PageDown": 0x22, "F10": 0x79,
+                    "PageUp": 0x21, "PageDown": 0x22, "F2": 0x71, "F4": 0x73, "F5": 0x74, "F10": 0x79,
                 }[name]
                 scan = user32.MapVirtualKeyW(vk, 0)
                 extended = name in ("Up", "Down", "Left", "Right", "PageUp", "PageDown")
@@ -1111,6 +1111,62 @@ class Native3DProcesses(ProcessTestCase):
         self.assertEqual(frame["world_feet"], feet, "typing a, d, e and the like never moves the character")
         frame = tap("Escape", lambda frame: frame["advancement"] is None)
         self.assertIsNone(window.child.poll(), "Esc closes the screen, not the game")
+        native("Escape", True)
+        try:
+            self.assertEqual(window.child.wait(timeout=30), 0)
+        finally:
+            if window.child.poll() is None:
+                native("Escape", False)
+
+    def test_native_screens_rename_a_place_save_a_note_and_read_both_in_history(self):
+        """F5 renames a known place and F4 saves a note through the real
+        server; F2 then shows both as the server recorded them, and C opens
+        the charts. No screen's typing moves the character."""
+        self.server()
+        executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
+        window = self.launch("tor-client-3d", [
+            "--connect", self.address, "--capture", self.directory / "captures", "--capture-every", "0.4",
+            "--quit-after", "180",
+        ], executable=executable)
+        self.captured(window, lambda frame: frame["has_control"] and not frame["busy"])
+        native = self.native_keys(window)
+
+        def tap(name, done):
+            native(name, True)
+            try:
+                return self.captured(window, lambda frame: not frame["busy"] and done(frame))
+            finally:
+                native(name, False)
+
+        def text(frame):
+            return chr(10).join(frame["screen_text"] or [])
+
+        def type_line(line):
+            for letter in line:
+                frame = tap(letter, lambda frame, letter=letter: (frame["typed"] or "").endswith(letter))
+            return frame
+
+        feet = self.captured(window)["world_feet"]
+        frame = tap("F5", lambda frame: (frame["screen"] or "").startswith("Places"))
+        self.assertIn("1 ", text(frame), "the starting place is known")
+        frame = tap("1", lambda frame: "New name for" in text(frame))
+        type_line("den")
+        frame = tap("Return", lambda frame: "den (your name for it)" in text(frame))
+        frame = tap("Escape", lambda frame: frame["screen"] is None)
+
+        frame = tap("F4", lambda frame: (frame["screen"] or "").startswith("Note"))
+        self.assertIn("Audience: only you", text(frame))
+        type_line("ok")
+        frame = tap("Tab", lambda frame: "Audience: everyone" in text(frame))
+        frame = tap("Return", lambda frame: frame["screen"] is None)
+
+        frame = tap("F2", lambda frame: frame["screen"] == "History" and "Note: ok" in text(frame))
+        self.assertIn("Place named den.", text(frame))
+        frame = tap("F2", lambda frame: frame["screen"] is None)
+
+        frame = tap("c", lambda frame: frame["screen"] == "Charts" and "Waiting for the charts." not in text(frame))
+        frame = tap("c", lambda frame: frame["screen"] is None)
+        self.assertEqual(frame["world_feet"], feet, "typing on the screens never moves the character")
         native("Escape", True)
         try:
             self.assertEqual(window.child.wait(timeout=30), 0)

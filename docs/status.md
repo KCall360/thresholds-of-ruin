@@ -640,6 +640,12 @@ checks do not replace the current
   Text examination and the ASCII look line name the visible gear. The 3D client
   dresses bodies from it: each of Rogue's eight body armours now has its own
   asset and torso recipe, following the maintainer's style guide.
+  The 3D client now plays what the server offers through the shared client
+  logic: reading, zapping and identifying items, aimed abilities and projectile
+  choices, traps and holds, number-keyed pack actions, resuming and cancelling
+  work, and the advancement, places, chart, history and note screens. The
+  personal stats screen, end-of-game summary, message log, releasing control and
+  running remain ASCII-only; see the [3D guide](../crates/client-3d/README.md).
   The prototype adds shared body/fitting dimensions, correlated build silhouettes,
   fitted garment surfaces, an offline swappable wardrobe with garment-owned
   feminine necklines and lower-panel construction, outfit-owned torso ornaments

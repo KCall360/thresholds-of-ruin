@@ -347,7 +347,7 @@ pub fn click(
     mut game: ResMut<Game>,
     mut pursuit: ResMut<Pursuit>,
 ) {
-    if !mouse.just_pressed(MouseButton::Left) || hover.over_ui || game.advancement_open {
+    if !mouse.just_pressed(MouseButton::Left) || hover.over_ui || game.screen.is_some() {
         return;
     }
     // An ability waiting for a creature takes the clicked one.
@@ -531,14 +531,45 @@ pub fn keys(
     mut panel: ResMut<Panel>,
     mut exit: EventWriter<AppExit>,
 ) {
-    // The advancement screen takes the keyboard for its command line.
-    if keys.just_pressed(KeyCode::F10)
-        || (game.advancement_open && keys.just_pressed(KeyCode::Escape))
-    {
-        crate::advancement_screen::toggle(&net, &mut game);
+    // A full screen takes the keyboard for its typed line.
+    use crate::screen::{toggle, Screen};
+    if keys.just_pressed(KeyCode::F10) {
+        toggle(&net, &mut game, Screen::Advancement);
         return;
     }
-    if game.advancement_open {
+    if keys.just_pressed(KeyCode::F2) {
+        toggle(&net, &mut game, Screen::History);
+        return;
+    }
+    if keys.just_pressed(KeyCode::F4) {
+        let revision = game.view.as_ref().map(|view| view.revision);
+        if let Some(revision) = revision.filter(|_| {
+            game.screen
+                .is_none_or(|open| matches!(open, Screen::Note { .. }))
+        }) {
+            toggle(
+                &net,
+                &mut game,
+                Screen::Note {
+                    revision,
+                    private: true,
+                },
+            );
+        }
+        return;
+    }
+    if keys.just_pressed(KeyCode::F5) {
+        toggle(&net, &mut game, Screen::Places { renaming: None });
+        return;
+    }
+    if keys.just_pressed(KeyCode::KeyC) && game.screen.is_none_or(|open| open == Screen::Charts) {
+        toggle(&net, &mut game, Screen::Charts);
+        return;
+    }
+    if let Some(open) = game.screen {
+        if keys.just_pressed(KeyCode::Escape) {
+            toggle(&net, &mut game, open);
+        }
         return;
     }
     if keys.just_pressed(KeyCode::Escape) {
@@ -560,6 +591,15 @@ pub fn keys(
     }
     if keys.any_just_pressed([KeyCode::KeyI, KeyCode::KeyZ]) {
         panel.open = !panel.open;
+    }
+    // Paused or ongoing work, as the ASCII client's F8 and F9.
+    if keys.just_pressed(KeyCode::F8) {
+        send(&net, &mut game, Cmd::Resume);
+        return;
+    }
+    if keys.just_pressed(KeyCode::F9) {
+        send(&net, &mut game, Cmd::Cancel);
+        return;
     }
     if panel.open {
         const DIGITS: [KeyCode; crate::pack::HOTKEYS] = [

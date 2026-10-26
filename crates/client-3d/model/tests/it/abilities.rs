@@ -213,3 +213,86 @@ fn examining_a_trap_sends_only_for_an_unknown_one_within_reach() {
     );
     assert!(action(&state, Cmd::ExamineTrap(TrapTarget::from_digest([43; 32]))).is_err());
 }
+
+#[test]
+fn paused_work_is_resumed_or_cancelled_only_when_the_server_offers_it() {
+    let observed = test_support::observation();
+    let snapshot = |offered: bool| -> ClientState {
+        let ids = if offered { vec!["work"] } else { vec![] };
+        let snapshot: Snapshot = serde_json::from_value(serde_json::json!({
+            "readiness": {"revision": "1", "admission": false, "resume": ids, "cancel": ids},
+            "context": StreamContext { stream: StreamId("work".into()), epoch: 0 },
+            "actor": observed.actor, "branch": "play", "cursor": {"sequence": "0", "tick": "0"},
+            "has_control": true,
+            "intentions": [{"actor": observed.actor, "branch": "play", "intention": "work",
+                            "entry_id": "root", "phase": "suspended"}],
+            "history": {"entries": [], "older_before": null},
+            "state": {"wizard_game": false, "revision": "0", "observation": observed},
+        }))
+        .unwrap();
+        ClientState::from_snapshot(snapshot).unwrap()
+    };
+    let offered = snapshot(true);
+    let projected = view(&offered, &Palette::default());
+    assert!(projected.can_resume && projected.can_cancel);
+    let request =
+        |state: &ClientState, command| request_from(state, &state.reply_context(), command);
+    assert!(matches!(
+        request(&offered, Cmd::Resume),
+        Ok(Request::Command { command: Command::ResumeIntention { intention, .. }, .. }) if intention.0 == "work"
+    ));
+    assert!(matches!(
+        request(&offered, Cmd::Cancel),
+        Ok(Request::Command { command: Command::CancelIntention { intention, step: None, .. }, .. }) if intention.0 == "work"
+    ));
+    let withheld = snapshot(false);
+    let projected = view(&withheld, &Palette::default());
+    assert!(!projected.can_resume && !projected.can_cancel);
+    assert!(
+        request(&withheld, Cmd::Resume).is_err(),
+        "a suspended phase alone grants nothing"
+    );
+    assert!(request(&withheld, Cmd::Cancel).is_err());
+}
+
+#[test]
+fn a_note_is_anchored_to_its_revision_with_the_chosen_audience_and_bounded() {
+    let state = state();
+    let note = |text: String, private| {
+        request_from(
+            &state,
+            &state.reply_context(),
+            Cmd::Note {
+                revision: 4,
+                text,
+                private,
+            },
+        )
+    };
+    assert!(matches!(
+        note("Trap by the door".into(), true),
+        Ok(Request::Command {
+            command: Command::Annotate {
+                anchor: Anchor::State { revision: 4 },
+                audience: Audience::Private,
+                category: AnnotationCategory::Note,
+                source: ClientSource::User,
+                text,
+            },
+            ..
+        }) if text == "Trap by the door"
+    ));
+    assert!(matches!(
+        note("shared".into(), false),
+        Ok(Request::Command {
+            command: Command::Annotate {
+                audience: Audience::Actor,
+                ..
+            },
+            ..
+        })
+    ));
+    assert!(note("   ".into(), true).is_err(), "a blank note is refused");
+    assert!(note("x".repeat(MAX_NOTE_BYTES + 1), true).is_err());
+    assert!(note("x".repeat(MAX_NOTE_BYTES), true).is_ok());
+}

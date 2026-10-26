@@ -30,6 +30,24 @@ pub enum Cmd {
     /// An advancement command as the player types it ("overview", "purchase
     /// ..."). The connection's advancement pages turn it into requests.
     Advancement(String),
+    /// Browse the read-only detection charts; the connection fetches pages.
+    Chart(tor_client_common::charts::ChartInput),
+    /// A note anchored to the state at this revision, private or visible to
+    /// the actor's other observers.
+    Note {
+        revision: u64,
+        text: String,
+        private: bool,
+    },
+    /// Give a remembered place the player's own name.
+    RenamePlace {
+        key: String,
+        name: String,
+    },
+    /// Resume the paused work the server offers to resume.
+    Resume,
+    /// Cancel the work the server offers to cancel.
+    Cancel,
     Door(DoorTarget, bool),
     /// Journey to a known cell, named by its key.
     Travel(String),
@@ -59,6 +77,9 @@ pub enum AbilityTarget {
     Direction(Direction),
 }
 
+/// The longest place name the ASCII client also accepts.
+pub const MAX_PLACE_NAME: usize = 80;
+
 pub struct Input {
     pub shown: ReplyContext,
     pub command: Cmd,
@@ -85,6 +106,55 @@ pub fn request(state: &ClientState, command: Cmd) -> Result<Request, String> {
     if !state.has_control() {
         return Err("You are observing. Press Tab to take control.".into());
     }
+    // Work control names the server's exact intention and needs no admission.
+    match command {
+        Cmd::Resume => {
+            return state
+                .resume_intention_request()
+                .ok_or_else(|| "There is no work to resume.".into())
+        }
+        Cmd::Cancel => {
+            return state
+                .cancel_intention_request()
+                .ok_or_else(|| "There is no work you can cancel.".into())
+        }
+        Cmd::Note {
+            revision,
+            text,
+            private,
+        } => {
+            if text.trim().is_empty() || text.len() > MAX_NOTE_BYTES {
+                return Err(format!("A note is 1 to {MAX_NOTE_BYTES} bytes."));
+            }
+            return Ok(state.command_request(Command::Annotate {
+                anchor: Anchor::State { revision },
+                text,
+                source: ClientSource::User,
+                audience: if private {
+                    Audience::Private
+                } else {
+                    Audience::Actor
+                },
+                category: AnnotationCategory::Note,
+            }));
+        }
+        Cmd::RenamePlace { key, name } => {
+            let view = &state.state().observation;
+            let name = name.trim();
+            if !view.places.iter().any(|place| place.key == key) {
+                return Err("That place is no longer known.".into());
+            }
+            if name.is_empty() || name.len() > MAX_PLACE_NAME {
+                return Err(format!("A place name is 1 to {MAX_PLACE_NAME} bytes."));
+            }
+            return Ok(state.command_request(Command::RenamePlace {
+                expected_revision: state.state().revision,
+                key,
+                name: name.to_owned(),
+            }));
+        }
+        _ => {}
+    }
     if let Cmd::Move(direction) = command {
         if let Some(request) = state.cancel_intention_with_step_request(direction) {
             return Ok(request);
@@ -100,7 +170,10 @@ pub fn request(state: &ClientState, command: Cmd) -> Result<Request, String> {
         }
         return Err("You can't act right now.".into());
     }
-    if matches!(command, Cmd::Projectile(_) | Cmd::Advancement(_)) {
+    if matches!(
+        command,
+        Cmd::Projectile(_) | Cmd::Advancement(_) | Cmd::Chart(_)
+    ) {
         return Err("Choices with server pages are made in the session.".into());
     }
     let action = match command {
@@ -162,7 +235,14 @@ pub fn request(state: &ClientState, command: Cmd) -> Result<Request, String> {
                 None => Action::Move { direction },
             }
         }
-        Cmd::Control | Cmd::Projectile(_) | Cmd::Advancement(_) => {
+        Cmd::Control
+        | Cmd::Projectile(_)
+        | Cmd::Advancement(_)
+        | Cmd::Chart(_)
+        | Cmd::Resume
+        | Cmd::Cancel
+        | Cmd::RenamePlace { .. }
+        | Cmd::Note { .. } => {
             unreachable!("handled before acting")
         }
     };

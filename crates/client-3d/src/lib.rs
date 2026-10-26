@@ -4,7 +4,8 @@
 //! The server describes cells in an observer frame that moves with the
 //! character. Matching cell keys between views recovers that motion, so the
 //! window keeps one steady world and the camera glides after the player.
-mod advancement_screen;
+// The frame diagnostics report is one large `serde_json::json!` object.
+#![recursion_limit = "256"]
 mod autoplay;
 mod bestiary;
 mod cave;
@@ -34,6 +35,7 @@ mod test_support;
 use diagnostics::capture;
 mod camera;
 mod scene;
+mod screen;
 use camera::{follow_actors, input, rig_camera, torch_flicker, update_cave_params};
 use scene::{animate_props, react, receive, stand, studio_lights, tend_the_dead};
 
@@ -352,7 +354,7 @@ pub fn run() -> Result<(), Error> {
         (
             setup,
             interact::setup,
-            advancement_screen::setup,
+            screen::setup,
             minimap::setup,
             cursor::setup,
         )
@@ -364,7 +366,7 @@ pub fn run() -> Result<(), Error> {
             receive,
             react,
             interact::keys,
-            (advancement_screen::typing, advancement_screen::show),
+            (screen::typing, screen::show),
             interact::panel,
             interact::panel_buttons,
             input,
@@ -552,8 +554,11 @@ struct Game {
     aiming: Option<Aim>,
     /// A projectile choice in progress, as the session last presented it.
     projectile: Option<net::ProjectilePrompt>,
-    /// The advancement screen: open, its pages and the command being typed.
-    advancement_open: bool,
+    /// The full screen holding the keyboard, if any; the advancement pages
+    /// it shows and the line being typed.
+    screen: Option<screen::Screen>,
+    /// The detection charts as the session last presented them.
+    charts: Vec<String>,
     advancement: Vec<String>,
     typed: String,
     busy: bool,
@@ -945,6 +950,12 @@ fn hud(
             rows.extend(view.status.iter().filter(|row| !row.is_empty()).cloned());
             if view.hp.is_some_and(|(hp, _)| hp == 0) {
                 parts.push("You have fallen.".into());
+            }
+            if view.can_resume {
+                parts.push("F8 resumes your work".into());
+            }
+            if view.can_cancel {
+                parts.push("F9 cancels it".into());
             }
             parts.push(
                 if view.has_control {

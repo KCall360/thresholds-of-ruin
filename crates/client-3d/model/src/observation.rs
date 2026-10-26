@@ -54,6 +54,15 @@ pub struct View {
     pub has_control: bool,
     /// Whether a new action would be admitted now (no journey or work under way).
     pub can_act: bool,
+    /// The latest retained history, oldest first, as "T:tick  what happened".
+    pub history: Vec<String>,
+    /// The detection charts disclosed so far, in catalog order.
+    pub chart_kinds: Vec<tor_protocol::chart_pages::ChartKind>,
+    /// Places the character knows, with where each name came from.
+    pub places: Vec<PlaceView>,
+    /// Whether the server offers to resume or cancel work now.
+    pub can_resume: bool,
+    pub can_cancel: bool,
     pub tick: u64,
     /// Changes whenever the server's state does; events belong to one revision.
     pub revision: u64,
@@ -121,6 +130,9 @@ pub struct Carried {
     /// How a zappable device is aimed, when it can be zapped now.
     pub device: Option<DeviceActivation>,
 }
+
+/// How much retained history the history screen shows.
+pub const HISTORY_LINES: usize = 40;
 
 pub fn view(state: &ClientState, palette: &Palette) -> View {
     let o = &state.state().observation;
@@ -319,6 +331,23 @@ pub fn view(state: &ClientState, palette: &Palette) -> View {
         hp: o.combat.as_ref().map(|c| (c.hp, c.max_hp)),
         has_control: state.has_control(),
         can_act: state.can_admit_intention(),
+        history: {
+            let entries = state.history();
+            entries[entries.len().saturating_sub(HISTORY_LINES)..]
+                .iter()
+                .map(|entry| {
+                    format!(
+                        "T:{}  {}",
+                        entry.tick,
+                        tor_client_common::history::text(entry)
+                    )
+                })
+                .collect()
+        },
+        chart_kinds: o.charts.iter().map(|summary| summary.kind).collect(),
+        places: o.places.clone(),
+        can_resume: state.can_resume_intention(),
+        can_cancel: state.can_cancel_intention(),
         tick: o.tick,
         revision: state.state().revision,
         events: happenings(o),

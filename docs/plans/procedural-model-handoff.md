@@ -122,6 +122,28 @@ base. Local evidence for those commits:
   changes, the 3D client's own `verify.py`, push and full gates, and both-platform
   CI. The query reductions are proven only by exact query-count tests.
 
+The 3D gameplay-parity commits that followed use the maintainer's expedited
+policy: focused checks locally, with exhaustive qualification left to the
+required CI on both platforms. The push tier was skipped at the maintainer's
+direction. Local evidence on the final source:
+
+- **3D model crate:** all library and integration tests pass, including the
+  new resume/cancel and note request tests.
+- **3D renderer library (debug):** 413 tests pass, with one ignored subprocess
+  fixture. The debug run exposed a `debug_assert` in the baldric's waist turn,
+  where a ray grazing the flank exhausted one bounded surface march. The turn
+  now keeps marching from where that march stopped; converged points are
+  unchanged.
+- **Shared and ASCII clients:** `tor-client-common` and `tor-client-ascii`
+  library tests pass after history wording moved into `client-common`.
+- **Clippy:** clean with `-D warnings` on all targets of both 3D packages,
+  `tor-client-common` and `tor-client-ascii`.
+- **Native 3D processes (release client, Windows):** the new places, notes,
+  history and charts test, and the advancement and read/identify/zap tests,
+  pass against a real server.
+- **Not run locally:** the 3D release library suite, the 3D `verify.py`, the
+  quick, push and full tiers, and Linux. CI covers them before merge.
+
 
 The consolidated Windows release contract check passes 387 renderer-library
 checks, one model-library check and 31 model integration checks, plus tooling,

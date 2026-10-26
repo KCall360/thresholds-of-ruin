@@ -4,6 +4,7 @@ pub mod abilities;
 pub mod advancement;
 pub mod charts;
 mod connection;
+pub mod history;
 pub mod holds;
 pub mod inspection;
 pub mod inspection_pages;

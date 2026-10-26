@@ -331,8 +331,24 @@ Objects:
   any [advancement command](../../docs/play/advancement.md) and press Enter;
   Esc or F10 closes the screen. While it is open, typing never moves the
   character or turns the camera.
+- C opens the read-only detection charts (monsters, food, magic, mapping) the
+  character has acquired. A number key opens one; Page Up and Page Down page
+  it; Tab returns to the list. The connection fetches and checks every page,
+  and browsing never takes game time.
+- F2 shows the latest retained history, oldest first.
+- F4 writes a note on the current state. It starts private; Tab makes it
+  visible to everyone who observes the actor. Enter saves it.
+- F5 lists the places the character knows and where each name came from. A
+  number key picks one, then type its new name and press Enter.
+- F8 resumes and F9 cancels paused or ongoing work, when the server offers
+  either; the status line says when it does.
 - Number keys 1 to 9, then 0, take the pack's first ten actions in order.
   Each button shows its key, so the pack can be played without the mouse.
+
+Compared with the [ASCII client](../../docs/play/ascii.md), the 3D client
+does not yet have the personal stats screen, the victory or death summary,
+the message log, help, releasing control, running, or paging back past the
+latest 40 history entries.
 
 ## How it works
 

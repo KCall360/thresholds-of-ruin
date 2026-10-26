@@ -27,6 +27,8 @@ pub enum Event {
     Projectile(Option<ProjectilePrompt>),
     /// The advancement pages as the player reads them.
     Advancement(Vec<String>),
+    /// The detection charts: the catalog, or the chosen chart's rows.
+    Charts(Vec<String>),
     Status(String),
     Ready,
     Fatal(String),
@@ -243,6 +245,7 @@ async fn session(
     }
     let mut menu = None;
     let mut advancement = Vec::new();
+    let mut charts = Vec::new();
     loop {
         tokio::select! {
             biased;
@@ -256,6 +259,24 @@ async fn session(
                     } else {
                         publish(tx, Event::Status("Resynchronizing; try again.".into()))?;
                     }
+                    publish(tx, Event::Ready)?;
+                }
+                Some(Input { command: Cmd::Chart(input), .. }) => {
+                    // Read-only presentation: browsing never takes game time.
+                    if input == tor_client_common::charts::ChartInput::Cancel {
+                        connection.cancel_charts();
+                    } else {
+                        match connection.charts.request(input, &connection.state) {
+                            Ok(Some(request)) => {
+                                if let Err(error) = connection.request(request).await {
+                                    publish(tx, Event::Status(error.to_string()))?;
+                                }
+                            }
+                            Ok(None) => {}
+                            Err(reason) => publish(tx, Event::Status(reason))?,
+                        }
+                    }
+                    present_charts(connection, &mut charts, tx, true)?;
                     publish(tx, Event::Ready)?;
                 }
                 Some(Input { command: Cmd::Advancement(text), .. }) => {
@@ -285,6 +306,7 @@ async fn session(
                 present(connection, &message, tx)?;
                 projectile::revalidate(connection, &mut menu, tx)?;
                 present_advancement(connection, &mut advancement, tx, false)?;
+                present_charts(connection, &mut charts, tx, false)?;
             }
         }
     }
@@ -303,6 +325,35 @@ fn present_advancement(
     if always || lines != *shown {
         shown.clone_from(&lines);
         publish(tx, Event::Advancement(lines))?;
+    }
+    Ok(())
+}
+
+/// The chart catalog with its number keys, or the chosen chart's rows.
+fn present_charts(
+    connection: &Connection,
+    shown: &mut Vec<String>,
+    tx: &SyncSender<Event>,
+    always: bool,
+) -> Result<(), Error> {
+    let state = &connection.state;
+    let mut lines = Vec::new();
+    if connection.charts.selected().is_none() {
+        for (index, summary) in state.state().observation.charts.iter().enumerate().take(10) {
+            lines.push(format!(
+                "{} {}",
+                (index + 1) % 10,
+                tor_client_common::charts::kind_label(summary.kind)
+            ));
+        }
+        if lines.is_empty() {
+            lines.push("No detection charts have been disclosed.".into());
+        }
+    }
+    lines.extend(connection.charts.lines(state));
+    if always || lines != *shown {
+        shown.clone_from(&lines);
+        publish(tx, Event::Charts(lines))?;
     }
     Ok(())
 }
