@@ -4831,6 +4831,32 @@ fn styled_sleeve_top(
     if sleeve.cut == SleeveCut::OffShoulder {
         royal_parts::sleeve_swag(builder, b, arm_len, color, sleeve.flare);
     }
+    if sleeve.cut == SleeveCut::Short {
+        // A fitted cap over the shoulder, ending a third of the way down the
+        // upper arm in a turned-up hem.
+        builder.blob(
+            Vec3::new(side * 0.006, -0.035 * arm_len, 0.0),
+            Vec3::new(0.074, 0.066, 0.074) * b,
+            11,
+            0.0,
+            color,
+        );
+        builder.tube(
+            &[Vec3::Y * -0.03 * arm_len, Vec3::Y * -0.115 * arm_len],
+            &[Vec2::splat(0.071 * b), Vec2::splat(0.067 * b)],
+            16,
+            &|_, _, _| color,
+        );
+        builder.torus(
+            Vec3::Y * -0.112 * arm_len,
+            Vec3::Y,
+            0.066 * b,
+            0.009 * b,
+            16,
+            4,
+            sleeve.flare.unwrap_or(color * 0.82),
+        );
+    }
 }
 
 /// One sleeve or bracer follows the forearm's full upper mass and narrow

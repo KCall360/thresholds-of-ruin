@@ -23,6 +23,49 @@ pub(super) fn compose(w: Wardrobe, l: &Look) -> Outfit {
         | Wardrobe::Necromancer
         | Wardrobe::Desert => studies::compose(w, l),
         Wardrobe::Native => Outfit::native(l),
+        Wardrobe::Adventurer => {
+            // The base every Rogue armour sheet is drawn over.
+            let shirt = Vec3::new(0.29, 0.42, 0.21);
+            Outfit {
+                tunic: shirt,
+                bodice: Bodice {
+                    cover: Cover::Full,
+                    cut: Neckline::fitted(fem, Neckline::DEEP),
+                    edge: shirt * 0.72,
+                    lacing: None,
+                    support: Support::Loose,
+                    ..Bodice::PLAIN
+                },
+                collar_edge: shirt * 0.72,
+                belt: true,
+                arms: Arms::Styled(Sleeve {
+                    color: shirt,
+                    cut: SleeveCut::Short,
+                    puff: false,
+                    puff_lining: None,
+                    sheer: false,
+                    flare: None,
+                }),
+                legs: Legs::Trousers(Vec3::new(0.3, 0.2, 0.12)),
+                feet: Feet::Boots(Boots {
+                    color: LEATHER * 1.05,
+                    tall: true,
+                    heel: false,
+                    buckles: false,
+                    cuffed: true,
+                }),
+                // Split tails hang below the belt, front and back.
+                skirt: Some(Skirt {
+                    color: shirt * 0.98,
+                    length: if fem { 0.2 } else { 0.22 },
+                    split: 0.075,
+                    trim: None,
+                    cutaway: false,
+                    ..Skirt::PLAIN
+                }),
+                ..Outfit::base(l)
+            }
+        }
         Wardrobe::Commoner => {
             let tunic = Vec3::new(0.52, 0.45, 0.34);
             // Each wearer's own tunic: a laced split V or a deep wrap.

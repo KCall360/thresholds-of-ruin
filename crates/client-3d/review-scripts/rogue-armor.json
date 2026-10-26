@@ -11,7 +11,7 @@
       "model": "Human",
       "seed": 7,
       "body": {},
-      "outfit": "commoner",
+      "outfit": "adventurer",
       "equipment": [],
       "position": [
         -0.45,
@@ -28,7 +28,7 @@
         "woman": true,
         "bust": 3
       },
-      "outfit": "commoner",
+      "outfit": "adventurer",
       "equipment": [],
       "position": [
         0.45,

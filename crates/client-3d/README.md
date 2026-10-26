@@ -103,7 +103,10 @@ and stops it on exit. Other options:
   `queen`, `pharaoh`, `goddess`, `juliet`, `jungle`, `genie`, `princess`, `royal-princess`, `sylvan-duelist`,
   `pirate`, `maiden` and `witch`. Character-study recipes add `elven-ranger`,
   `rogue`, `paladin`, `barbarian`, `valkyrie`, `cleric`, `druid`, `bard`,
-  `vampire-noble`, `necromancer` and `desert`. These paired adult costumes
+  `vampire-noble`, `necromancer` and `desert`. `adventurer` is the Rogue armor
+  style guide's unarmored base: a green short-sleeved shirt with split tails,
+  brown trousers and cuffed tall boots. Every body armor preview is drawn over it
+  in `review-scripts/rogue-armor.json`. These paired adult costumes
   select wearer-fitted necklines, independent skirt layers, embroidery and
   shared fur, leaf or feather trim. Female cuts emphasize fitted waists,
   exposed cleavage and split skirts; male openings are authored separately.

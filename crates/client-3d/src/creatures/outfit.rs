@@ -52,7 +52,11 @@ impl Arms {
             Arms::Bare => true,
             Arms::Styled(sleeve) => matches!(
                 sleeve.cut,
-                SleeveCut::Puff | SleeveCut::Gauntlet | SleeveCut::Draped | SleeveCut::OffShoulder
+                SleeveCut::Puff
+                    | SleeveCut::Gauntlet
+                    | SleeveCut::Draped
+                    | SleeveCut::OffShoulder
+                    | SleeveCut::Short
             ),
             _ => false,
         }
@@ -73,6 +77,9 @@ pub(crate) enum SleeveCut {
     Draped,
     /// Off the shoulder: a gathered band round the upper arm.
     OffShoulder,
+    /// A plain short sleeve over the top of the upper arm, its hem turned
+    /// up; the rest of the arm bare.
+    Short,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -919,10 +926,13 @@ pub enum Wardrobe {
     VampireNoble,
     Necromancer,
     Desert,
+    /// The style guide's unarmoured base: a green open-collared shirt with
+    /// short sleeves and split tails, brown trousers and cuffed tall boots.
+    Adventurer,
 }
 
 impl Wardrobe {
-    pub const ALL: [Wardrobe; 31] = [
+    pub const ALL: [Wardrobe; 32] = [
         Wardrobe::Native,
         Wardrobe::Commoner,
         Wardrobe::Ranger,
@@ -954,6 +964,7 @@ impl Wardrobe {
         Wardrobe::VampireNoble,
         Wardrobe::Necromancer,
         Wardrobe::Desert,
+        Wardrobe::Adventurer,
     ];
 
     /// The eleven paired character-study recipes, in reference-sheet order.
@@ -1061,7 +1072,8 @@ impl Outfit {
                 SleeveCut::Puff
                 | SleeveCut::Gauntlet
                 | SleeveCut::Draped
-                | SleeveCut::OffShoulder => skin,
+                | SleeveCut::OffShoulder
+                | SleeveCut::Short => skin,
             },
         }
     }
@@ -1071,7 +1083,7 @@ impl Outfit {
         match self.arms {
             Arms::Styled(sleeve) => match sleeve.cut {
                 SleeveCut::Bell | SleeveCut::Gauntlet | SleeveCut::Draped => sleeve.color,
-                SleeveCut::Puff | SleeveCut::OffShoulder => skin,
+                SleeveCut::Puff | SleeveCut::OffShoulder | SleeveCut::Short => skin,
             },
             _ => self.sleeve(skin),
         }
