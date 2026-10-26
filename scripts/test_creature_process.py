@@ -518,6 +518,10 @@ class CreatureAbilityProcesses(ProcessTestCase):
         self.assertEqual(starts, [ability])
         self.assertEqual(resource(prepared, "mana")["balance"], initial_mana - 1)
         for remaining in (2, 1, 0):
+            # Ready completes the prior command, not a later streamed update.
+            # The headless observer cannot synchronize this Text socket. A
+            # read-only snapshot settles its revision before each mutation.
+            self.assertNotIn("Server error", wizard.command("sync"))
             output = wizard.command("wizard creature remove-hd 1")
             self.assertNotIn("Server error", output)
             changed = self.request(observer, {"type": "snapshot"})
