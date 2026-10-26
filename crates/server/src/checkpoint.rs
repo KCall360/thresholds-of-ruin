@@ -29,7 +29,7 @@ struct SavedBoundary {
     revisions: Revisions,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct DiskCheckpoint {
     pub save_id: String,
@@ -43,7 +43,44 @@ pub(crate) struct DiskCheckpoint {
     shared: SharedState,
     game: Snapshot,
     revisions: Revisions,
+    #[serde(deserialize_with = "saved_boundaries::deserialize")]
     boundaries: Vec<SavedBoundary>,
+}
+
+// Decode the exact saved fields first, including the bounded history reader.
+// Canonical-shape serialization requires the enclosing roots' actual count;
+// this is not gameplay/source authority and restore binds them independently.
+#[derive(Deserialize)]
+#[serde(remote = "DiskCheckpoint", deny_unknown_fields)]
+struct DiskCheckpointFields {
+    pub save_id: String,
+    pub sequence: u64,
+    pub record_count: usize,
+    version: u32,
+    ruleset: String,
+    #[serde(with = "crate::storage::schema::BranchId")]
+    current_branch: BranchId,
+    wizard_game: bool,
+    shared: SharedState,
+    game: Snapshot,
+    revisions: Revisions,
+    #[serde(deserialize_with = "saved_boundaries::deserialize")]
+    boundaries: Vec<SavedBoundary>,
+}
+impl<'de> Deserialize<'de> for DiskCheckpoint {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut checkpoint = DiskCheckpointFields::deserialize(deserializer)?;
+        let roots: Vec<_> = std::iter::once(&checkpoint.game)
+            .chain(checkpoint.boundaries.iter().map(|boundary| &boundary.game))
+            .collect();
+        checkpoint
+            .shared
+            .prepare_spatial_serialization(&roots)
+            .map_err(serde::de::Error::custom)?;
+        // The private root fields remain unchanged through strict SameJson's
+        // immediate serialization. A later restore never trusts this cache.
+        Ok(checkpoint)
+    }
 }
 
 impl Checkpoint {
@@ -242,6 +279,60 @@ fn replay_private_boundary(
     Ok(())
 }
 
+// Uncertified source control retained independently from canonical Package verification.
+#[cfg(test)]
+fn canonical_spatial_restore_guard(
+    registry: &tor_simulation::spatial_scope::registry::Registry,
+) -> Result<(), Failure> {
+    if registry.scopes().next().is_some() {
+        return Err(Failure::new(
+            ErrorCode::InvalidArchive,
+            "Spatial registry requires canonical source verification",
+        ));
+    }
+    Ok(())
+}
+
+mod saved_boundaries {
+    use super::SavedBoundary;
+    use serde::de::{DeserializeSeed, Error as _, SeqAccess, Visitor};
+    use serde::Deserializer;
+    use std::fmt;
+
+    struct RejectBoundary;
+    impl<'de> DeserializeSeed<'de> for RejectBoundary {
+        type Value = ();
+        fn deserialize<D: Deserializer<'de>>(self, _deserializer: D) -> Result<(), D::Error> {
+            Err(D::Error::custom("too many checkpoint boundaries"))
+        }
+    }
+    struct Boundaries;
+    impl<'de> Visitor<'de> for Boundaries {
+        type Value = Vec<SavedBoundary>;
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("bounded checkpoint boundaries")
+        }
+        fn visit_seq<A: SeqAccess<'de>>(self, mut sequence: A) -> Result<Self::Value, A::Error> {
+            let mut boundaries = Vec::new();
+            while boundaries.len() < super::MAX_RETAINED_BOUNDARIES {
+                let Some(boundary) = sequence.next_element::<SavedBoundary>()? else {
+                    return Ok(boundaries);
+                };
+                boundaries.push(boundary);
+            }
+            if sequence.next_element_seed(RejectBoundary)?.is_some() {
+                return Err(A::Error::custom("too many checkpoint boundaries"));
+            }
+            Ok(boundaries)
+        }
+    }
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Vec<SavedBoundary>, D::Error> {
+        deserializer.deserialize_seq(Boundaries)
+    }
+}
+
 impl DiskCheckpoint {
     pub(super) fn restore(self, archive: Archive) -> Result<Engine, Failure> {
         if self.version != ARCHIVE_VERSION
@@ -251,8 +342,11 @@ impl DiskCheckpoint {
             || self.wizard_game && !archive.wizard_game
             || self.boundaries.is_empty()
             || self.boundaries.len() > MAX_RETAINED_BOUNDARIES
-            // Private queue transitions do not create additional world states.
-            || !self.shared.valid_world_count(REWIND_BOUNDARIES + 1)
+            // Includes acquisition Worlds retained only by reachable historical
+            // chart roots. Detached blobs validate their own independent pools.
+            || !self.shared.world_references_valid(
+                std::iter::once(&self.game).chain(self.boundaries.iter().map(|b| &b.game)),
+            )
             || !self.shared.explored_map_references_valid(
                 std::iter::once(&self.game).chain(self.boundaries.iter().map(|b| &b.game)),
             )
@@ -361,9 +455,29 @@ impl DiskCheckpoint {
             )
         };
         let mut restore = RestoreContext::new(&self.shared, archive.scenario.content()?);
+        let spatial_roots: Vec<_> = std::iter::once(&self.game)
+            .chain(self.boundaries.iter().map(|boundary| &boundary.game))
+            .collect();
+        restore
+            .bind_spatial_roots(&spatial_roots)
+            .map_err(|error| Failure::new(ErrorCode::InvalidArchive, &error.to_string()))?;
         let game = restore
             .restore(self.game)
             .map_err(|error| Failure::new(ErrorCode::InvalidArchive, &error.to_string()))?;
+        let mut spatial_audit = crate::scenario_package::SpatialAudit::new(
+            archive.scenario.package.as_deref(),
+            archive.scenario.seed,
+        )
+        .map_err(|_| invalid_archive())?;
+        let mut historical_audit = crate::scenario_package::HistoricalSourceAudit::new(
+            archive.scenario.package.as_deref(),
+            archive.scenario.seed,
+        )
+        .map_err(|_| invalid_archive())?;
+        spatial_audit.check(&game)?;
+        for (world, registry, scope) in game.historical_chart_authorities() {
+            historical_audit.check_shared(world, registry, scope)?;
+        }
         let mut activations = super::floor_activation_audit::ActivationAudit::new(
             &archive.initial_activations,
             &archive.initial_retrievals,
@@ -437,6 +551,10 @@ impl DiskCheckpoint {
             let game = restore
                 .restore(boundary.game)
                 .map_err(|error| Failure::new(ErrorCode::InvalidArchive, &error.to_string()))?;
+            spatial_audit.check(&game)?;
+            for (world, registry, scope) in game.historical_chart_authorities() {
+                historical_audit.check_shared(world, registry, scope)?;
+            }
             if !valid_population(&game)
                 || !valid_retrieval(&game)
                 || !boundary.revisions.valid_for(&game)
@@ -538,6 +656,8 @@ impl DiskCheckpoint {
             previous_record_index = record_index;
         }
         drop(restore);
+        drop(spatial_audit);
+        drop(historical_audit);
         drop(activations);
         drop(population);
         drop(retrieval);
@@ -593,6 +713,280 @@ mod tests {
     use super::*;
 
     #[test]
+    fn compressed_checkpoint_strict_roundtrip_binds_actual_roots_and_rejects_stale_indices() {
+        for spatial in [false, true] {
+            for historical in [false, true] {
+                let scenario = if spatial {
+                    Scenario {
+                        actors: vec![],
+                        regions: 1,
+                        package: Some(Arc::new(
+                            crate::scenario_package::spatial_audit_test_package(),
+                        )),
+                        ..Scenario::two_room(42)
+                    }
+                } else {
+                    Scenario::two_room(42)
+                };
+                let engine = Engine::memory(scenario).unwrap();
+                assert_eq!(
+                    engine.game.spatial_registry().scopes().next().is_some(),
+                    spatial
+                );
+                let captured = Checkpoint::capture(&engine).encode("strict-rooted", 0);
+                let compressed =
+                    crate::storage::checkpoint_codec::write_json(&captured, Vec::new()).unwrap();
+                let bytes = crate::storage::checkpoint_codec::decode(&compressed).unwrap();
+                let valid: DiskCheckpoint = crate::storage::codec::strict(&bytes).unwrap();
+                assert!(!valid.boundaries.is_empty());
+                valid.restore(engine.archive.clone()).unwrap();
+                let mut stale: DiskCheckpoint = crate::storage::codec::strict(&bytes).unwrap();
+                let snapshot = if historical {
+                    &mut stale.boundaries[0].game
+                } else {
+                    &mut stale.game
+                };
+                let mut altered = serde_json::to_value(&*snapshot).unwrap();
+                altered["spatial"] = serde_json::json!(u32::MAX);
+                *snapshot = serde_json::from_value(altered).unwrap();
+                // Deliberate private-field mutation: raw internal serialization is
+                // not acceptance authority. Both real boundaries check ACTUAL roots.
+                let stale_bytes = serde_json::to_vec(&stale).unwrap();
+                assert!(crate::storage::codec::strict::<DiskCheckpoint>(&stale_bytes).is_err());
+                assert_eq!(
+                    stale.restore(engine.archive.clone()).unwrap_err().code,
+                    ErrorCode::InvalidArchive
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn canonical_scope_omission_in_current_or_historical_root_is_rejected() {
+        for historical in [false, true] {
+            let package = crate::scenario_package::spatial_audit_test_package();
+            let scenario = Scenario {
+                actors: vec![],
+                regions: 1,
+                package: Some(Arc::new(package)),
+                ..Scenario::two_room(42)
+            };
+            let mut engine = Engine::memory(scenario).unwrap();
+            assert_eq!(engine.game.spatial_registry().scopes().count(), 1);
+            let positive = Checkpoint::capture(&engine).encode("test", 0);
+            let bytes = serde_json::to_vec(&positive).unwrap();
+            let positive: DiskCheckpoint = serde_json::from_slice(&bytes).unwrap();
+            positive.restore(engine.archive.clone()).unwrap();
+            let target = if historical {
+                &mut Arc::make_mut(engine.boundaries.front_mut().unwrap()).game
+            } else {
+                &mut engine.game
+            };
+            assert_eq!(target.spatial_registry().scopes().count(), 1);
+            let mut shared = SharedState::default();
+            let snapshot = target.checkpoint(&mut shared);
+            let mut pool = serde_json::to_value(&shared).unwrap();
+            pool["spatial"]["scopes"] = serde_json::json!([]);
+            pool["spatial"]["directories"] = serde_json::json!([[]]);
+            let mut root = serde_json::to_value(&snapshot).unwrap();
+            root["spatial"] = serde_json::json!(0);
+            let shared = serde_json::from_value(pool).unwrap();
+            let snapshot = serde_json::from_value(root).unwrap();
+            let missing =
+                Game::restore_checkpoint(snapshot, &shared, target.content().clone()).unwrap();
+            assert_eq!(
+                missing.loaded_regions().collect::<Vec<_>>(),
+                target.loaded_regions().collect::<Vec<_>>()
+            );
+            assert!(missing.spatial_registry().scopes().next().is_none());
+            *target = missing;
+            let captured = Checkpoint::capture(&engine).encode("test", 0);
+            let bytes = serde_json::to_vec(&captured).unwrap();
+            let captured: DiskCheckpoint = serde_json::from_slice(&bytes).unwrap();
+            let failure = captured.restore(engine.archive.clone()).unwrap_err();
+            assert_eq!(failure.code, ErrorCode::InvalidArchive);
+            assert_eq!(
+                failure.message,
+                "Spatial registry differs from canonical source"
+            );
+        }
+    }
+
+    #[test]
+    fn native_spatial_current_and_history_roots_fail_closed_before_source_certification() {
+        use tor_simulation::spatial_scope::registry::{Budget, Scope};
+        let budget = Budget {
+            scopes: 1,
+            members: 1,
+            rooms: 0,
+            passages: 0,
+            runs: 0,
+            expanded_refs: 0,
+            label_bytes: 64,
+        };
+        let scope = Scope {
+            mapping: tor_simulation::spatial_scope::mapping::MappingCertification::Uncertified,
+            id: "native-only".into(),
+            members: vec![tor_world::RegionId(1)],
+            primary: vec![],
+            rooms: vec![],
+        };
+        scope.validate(&budget).unwrap();
+        for historical in [false, true] {
+            let mut engine = Engine::memory(Scenario::two_room(42)).unwrap();
+            let valid = Checkpoint::capture(&engine).encode("test", 0);
+            let bytes = serde_json::to_vec(&valid).unwrap();
+            let decoded: DiskCheckpoint = serde_json::from_slice(&bytes).unwrap();
+            decoded.restore(engine.archive.clone()).unwrap();
+            let target = if historical {
+                &mut Arc::make_mut(engine.boundaries.front_mut().unwrap()).game
+            } else {
+                &mut engine.game
+            };
+            target
+                .register_spatial_scope(scope.clone(), &budget)
+                .unwrap();
+            assert_eq!(target.spatial_registry().scopes().count(), 1);
+            // Native trusted API injection is deliberate, not a claim that a
+            // production source installed/certified this registry. No JSON forging.
+            let captured = Checkpoint::capture(&engine).encode("test", 0);
+            let bytes = serde_json::to_vec(&captured).unwrap();
+            let decoded: DiskCheckpoint = serde_json::from_slice(&bytes).unwrap();
+            let failure = decoded.restore(engine.archive.clone()).unwrap_err();
+            assert_eq!(failure.code, ErrorCode::InvalidArchive);
+            assert_eq!(
+                failure.message,
+                "Spatial registry requires canonical source verification"
+            );
+        }
+    }
+
+    #[test]
+    fn checkpoint_boundary_reader_rejects_excess_before_restore() {
+        let engine = Engine::memory(Scenario::two_room(42)).unwrap();
+        let disk = Checkpoint::capture(&engine).encode("test", 0);
+        let value = serde_json::to_value(&disk).unwrap();
+        let bytes = serde_json::to_vec(&value).unwrap();
+        let valid: DiskCheckpoint = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(valid.boundaries.len(), 1);
+        let boundary = value["boundaries"][0].clone();
+        assert!(boundary.is_object());
+        let mut exact = value.clone();
+        exact["boundaries"] =
+            serde_json::Value::Array(vec![boundary.clone(); MAX_RETAINED_BOUNDARIES]);
+        let exact_bytes = serde_json::to_vec(&exact).unwrap();
+        let decoded: DiskCheckpoint = serde_json::from_slice(&exact_bytes).unwrap();
+        assert_eq!(decoded.boundaries.len(), MAX_RETAINED_BOUNDARIES);
+        let mut excessive = exact;
+        excessive["boundaries"]
+            .as_array_mut()
+            .unwrap()
+            .push(boundary);
+        let bytes = serde_json::to_vec(&excessive).unwrap();
+        assert!(
+            serde_json::from_slice::<DiskCheckpoint>(&bytes).is_err(),
+            "boundary count must reject during bounded decode, not post-allocation restore"
+        );
+    }
+
+    #[test]
+    fn checkpoint_boundary_reader_rejects_excess_before_malformed_payload_decode() {
+        let engine = Engine::memory(Scenario::two_room(42)).unwrap();
+        let mut value =
+            serde_json::to_value(Checkpoint::capture(&engine).encode("test", 0)).unwrap();
+        let boundary = value["boundaries"][0].clone();
+        let mut entries = vec![boundary; MAX_RETAINED_BOUNDARIES];
+        entries.push(serde_json::Value::Null); // invalid SavedBoundary, never visit it
+        value["boundaries"] = serde_json::Value::Array(entries);
+        let bytes = serde_json::to_vec(&value).unwrap();
+        let error = match serde_json::from_slice::<DiskCheckpoint>(&bytes) {
+            Ok(_) => panic!("excess boundary accepted"),
+            Err(error) => error,
+        };
+        assert!(
+            error.to_string().contains("too many checkpoint boundaries"),
+            "{error}"
+        );
+        assert!(
+            !error.to_string().contains("invalid type"),
+            "payload decoder was invoked: {error}"
+        );
+    }
+
+    #[test]
+    fn checkpoint_boundary_reader_rejects_excess_before_deep_tail_traversal() {
+        let engine = Engine::memory(Scenario::two_room(42)).unwrap();
+        let mut value =
+            serde_json::to_value(Checkpoint::capture(&engine).encode("test", 0)).unwrap();
+        let boundary = value["boundaries"][0].clone();
+        value["boundaries"] = serde_json::Value::Array(vec![boundary; MAX_RETAINED_BOUNDARIES]);
+        let exact = serde_json::to_vec(&value).unwrap();
+        let decoded: DiskCheckpoint = serde_json::from_slice(&exact).unwrap();
+        assert_eq!(decoded.boundaries.len(), MAX_RETAINED_BOUNDARIES);
+        // Change only the excess subtree. About1KiB is enough to exceed normal JSON
+        // recursion depth; do not allocate a giant archive to test early rejection.
+        const MARKER: &str = "__excess_boundary_tail_only__";
+        value["boundaries"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::Value::String(MARKER.into()));
+        let template = serde_json::to_string(&value).unwrap();
+        let quoted = serde_json::to_string(MARKER).unwrap();
+        assert_eq!(template.matches(&quoted).count(), 1);
+        let tail = format!("{}null{}", "[".repeat(512), "]".repeat(512));
+        assert_eq!(tail.len(), 1028);
+        let encoded = template.replacen(&quoted, &tail, 1);
+        let error = match serde_json::from_str::<DiskCheckpoint>(&encoded) {
+            Ok(_) => panic!("excess nested boundary accepted"),
+            Err(error) => error,
+        };
+        assert!(
+            error.to_string().contains("too many checkpoint boundaries"),
+            "{error}"
+        );
+        assert!(
+            !error.to_string().contains("recursion"),
+            "excess tail traversed: {error}"
+        );
+        assert!(
+            !error.to_string().contains("invalid type"),
+            "excess payload decoded: {error}"
+        );
+    }
+
+    #[test]
+    fn nonempty_structural_registry_requires_server_canonical_source_verification() {
+        use tor_simulation::spatial_scope::registry::{Budget, Registry, Scope};
+        let budget = Budget {
+            scopes: 1,
+            members: 1,
+            rooms: 0,
+            passages: 0,
+            runs: 0,
+            expanded_refs: 0,
+            label_bytes: 64,
+        };
+        let scope = Scope {
+            mapping: tor_simulation::spatial_scope::mapping::MappingCertification::Uncertified,
+            id: "native-only".into(),
+            members: vec![tor_world::RegionId(1)],
+            primary: vec![],
+            rooms: vec![],
+        };
+        scope.validate(&budget).unwrap();
+        let mut registry = Registry::default();
+        canonical_spatial_restore_guard(&registry).unwrap();
+        registry.register(scope, &budget).unwrap();
+        assert_eq!(registry.scopes().count(), 1);
+        let failure = canonical_spatial_restore_guard(&registry).unwrap_err();
+        assert_eq!(failure.code, ErrorCode::InvalidArchive);
+        assert_eq!(
+            failure.message,
+            "Spatial registry requires canonical source verification"
+        );
+    }
+
+    #[test]
     fn checkpoint_actors_reference_the_catalog_once_in_the_archive() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../scenarios/tests/interactions");
@@ -607,7 +1001,7 @@ mod tests {
         assert!(package.get("rules_source").is_none());
         let rules: serde_json::Value =
             serde_json::from_str(package["rules_document"].as_str().unwrap()).unwrap();
-        assert_eq!(rules["format"], 24);
+        assert_eq!(rules["format"], 25);
         assert!(rules["document"].is_object());
         assert_eq!(
             archive["ruleset_hash"],
@@ -860,3 +1254,14 @@ mod tests {
 #[cfg(test)]
 #[path = "wandering_checkpoint_tests.rs"]
 mod wandering_checkpoint_tests;
+
+#[cfg(test)]
+impl Engine {
+    /// Service fixtures pass an actual admitted checkpoint and independently
+    /// mutated copies through the production strict decoder and restore path.
+    /// No caller-provided source/catalog replaces the retained archive authority.
+    pub(crate) fn test_restore_checkpoint(&self, bytes: &[u8]) -> Result<(), Failure> {
+        let checkpoint: DiskCheckpoint = crate::storage::codec::strict(bytes)?;
+        checkpoint.restore(self.archive.clone()).map(drop)
+    }
+}

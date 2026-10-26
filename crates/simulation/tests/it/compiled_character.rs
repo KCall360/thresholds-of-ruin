@@ -180,6 +180,7 @@ fn warm_dynamic_sources_never_resample_owned_health_at_any_hd() {
                 item: ItemId(19),
                 socket: EquipmentSlotId(0),
                 modifiers: vec![Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Add {
                         stat: Stat::Attribute {
@@ -376,6 +377,7 @@ fn warm_runtime_and_rejected_equipment_preserve_holds_and_exact_records() {
             socket: EquipmentSlotId(0),
             attack: None,
             modifiers: vec![Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Set {
                     stat: Stat::Health,
@@ -463,6 +465,7 @@ fn warm_armed_folds_keep_independent_natural_operands_without_visiting_hit_dice(
                 item: ItemId(19),
                 socket: EquipmentSlotId(0),
                 modifiers: vec![Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Add {
                         stat: Stat::Attribute {

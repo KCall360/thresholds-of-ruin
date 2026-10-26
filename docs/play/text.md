@@ -32,6 +32,26 @@ another client already controls the actor, you remain an observer. The normal
 prompt is `>`. Try `look`, `stats`, `inventory`, `east` and `examine <thing>`.
 `help` gives ordinary commands; `help session` gives connection and history tools.
 
+## Detection charts
+
+`charts` lists the disclosed catalog; `chart monsters`, `chart food`,
+`chart magic` and `chart mapping` select a complete read-only chart. Use `chart next` and
+`chart previous` to page occurrences, and `chart cancel` to close it. These are
+inspection commands available to spectators too, not movement or targeting.
+A name appearing only in a chart does not become a scenery or action referent.
+
+Live/historical status and capture tick are explicit. The latest attempt has its
+own outcome and tick, so an empty or unavailable repeat does not misrepresent a
+retained positive sample. Separate panels have independent three-dimensional
+coordinates; inconsistent placement stays unavailable rather than inventing an
+offset. Repeated marks remain repeated, and an unnamed monster is “creature.”
+
+Mapping is a sparse historical chart, not the ordinary map. It can disclose wall
+face orientation, passages, doorways, generic stairs presence, secret doors and
+trap presence without revealing destinations, trap families, items or occupants.
+Current-scope support is shown separately from any retained historical sample;
+unsupported scope does not make an older sample current or actionable.
+
 ## Commands
 
 Commands use disclosed names. A direction walks toward a way onward; it is not
@@ -50,6 +70,7 @@ necessarily one cell. `step east` is the explicit one-step alternative.
 | `examine floor`, `walls`, `ceiling` | Describe currently perceived surfaces |
 | `examine me`, `diagnose`, `how am i` | Your condition and what you have in use |
 | `status`, `score` | Condition and the disclosed objective |
+| `charts`, `chart monsters`, `chart food`, `chart magic`, `chart mapping` | Inspect the disclosed read-only detection catalog or one complete chart; `chart next`, `chart previous`, `chart cancel` page or close it |
 | `stats` | Detailed personal creature build, without advancing time |
 | `advancement` | Owner-only point ledger, exact purchase/respec previews and confirmation; see [controls](advancement.md) |
 | `inventory`, `i` | Carried items, quantities and equipment |

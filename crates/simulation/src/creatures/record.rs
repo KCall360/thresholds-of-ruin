@@ -23,6 +23,7 @@ pub struct CreatureRecord {
     build_epoch: BuildEpoch,
     earned_progress: crate::earned_growth::EarnedProgress,
     restorable_losses: super::RestorableLosses,
+    cancelled: bool,
     injury: u64,
     dead: bool,
     #[serde(deserialize_with = "named_map")]
@@ -45,6 +46,7 @@ impl<'de> serde::Deserialize<'de> for CreatureRecord {
             build_epoch: BuildEpoch,
             earned_progress: crate::earned_growth::EarnedProgress,
             restorable_losses: super::RestorableLosses,
+            cancelled: bool,
             injury: u64,
             dead: bool,
             #[serde(deserialize_with = "named_map")]
@@ -63,6 +65,7 @@ impl<'de> serde::Deserialize<'de> for CreatureRecord {
             build_epoch: fields.build_epoch,
             earned_progress: fields.earned_progress,
             restorable_losses: fields.restorable_losses,
+            cancelled: fields.cancelled,
             injury: fields.injury,
             dead: fields.dead,
             health_recovery: fields.health_recovery,
@@ -256,6 +259,7 @@ impl CreatureRecord {
             build_epoch: creature.build_epoch(),
             earned_progress: creature.earned_progress().clone(),
             restorable_losses: creature.restorable_losses(),
+            cancelled: creature.cancelled(),
             injury: creature.health().injury(),
             dead: creature.health().dead(),
             health_recovery: HealthRecoveryRecord {
@@ -316,6 +320,7 @@ impl CreatureRecord {
             self.dead,
             conditions,
             equipment,
+            self.cancelled,
             |maxima, rules| {
                 let pools = ByResource {
                     stamina: &self.pools.stamina,
@@ -361,6 +366,7 @@ impl CreatureRecord {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BuildRecord {
+    strength_acquired: u8,
     species: SpeciesId,
     future_growth: crate::earned_growth::FutureGrowth,
     starting_skills: [Skill; 2],
@@ -651,6 +657,7 @@ impl ChoiceRecord {
 impl BuildRecord {
     pub fn capture(build: &CreatureBuild) -> Self {
         Self {
+            strength_acquired: build.strength_acquired(),
             species: build.species().id.clone(),
             future_growth: build.future_growth().clone(),
             starting_skills: *build.starting_skills(),
@@ -760,6 +767,7 @@ impl BuildRecord {
             },
             self.templates.0.clone(),
         )?;
+        build.strength_acquired = self.strength_acquired;
         build.intellect_learning = Some(Arc::new(self.intellect_learning.restore(&build)?));
         build.derive()?;
         build.set_future_growth(self.future_growth.clone())?;
@@ -784,6 +792,7 @@ mod tests {
                 item: crate::ItemId(1),
                 socket: crate::EquipmentSlotId(0),
                 modifiers: vec![Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Add {
                         stat: Stat::ResourceMax {
@@ -938,6 +947,7 @@ mod tests {
             .unwrap()
             .modifiers
             .push(Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Add {
                     stat: Stat::ResourceMax {
@@ -1010,6 +1020,7 @@ mod tests {
             .unwrap()
             .modifiers
             .push(Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Set {
                     stat: attribute.clone(),
@@ -1038,6 +1049,7 @@ mod tests {
             socket: crate::EquipmentSlotId(0),
             attack: None,
             modifiers: vec![Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Add {
                     stat: attribute,
@@ -1135,6 +1147,7 @@ mod tests {
             if conditioned {
                 let mut immune = equipment;
                 immune[0].modifiers.push(Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Immunity {
                         selector: crate::rules::Selector::Descriptor {

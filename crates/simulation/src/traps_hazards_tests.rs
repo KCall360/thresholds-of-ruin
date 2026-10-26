@@ -56,6 +56,7 @@ fn fixture_with_resistance(modifiers: Vec<Modifier>, difficulty: i32) -> (Game, 
     opponent.source_scoped = true;
     opponent.lifecycle = crate::rules::ConditionLifecycle::Timed;
     opponent.modifiers = vec![Modifier {
+        cancellable: false,
         scope: Scope::VersusSource,
         op: ModifierOp::Add {
             stat: Stat::IncomingEdge { defense: None },
@@ -591,6 +592,7 @@ fn arrow_hit_absorbed_by_live_armor_is_not_a_miss_or_an_arrow_drop() {
 fn trap_damage_never_borrows_recipient_melee_damage_bonus() {
     let (mut ordinary, a) = fixture(vec![]);
     let (mut powerful, b) = fixture(vec![Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Add {
             stat: Stat::AttackDamageRollBonus,
@@ -763,6 +765,7 @@ fn poison_dart_hit_and_athletics_resistance_are_separate_and_loss_is_restorable_
     for sustained in [false, true] {
         let modifiers = sustained
             .then_some(Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::SustainAttribute {
                     attribute: Attribute::Strength,
@@ -828,6 +831,7 @@ fn poison_dart_hit_and_athletics_resistance_are_separate_and_loss_is_restorable_
 #[test]
 fn environmental_check_uses_ordinary_incoming_edge_but_has_no_fabricated_opponent() {
     let (mut game, actor) = fixture(vec![Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Add {
             stat: Stat::IncomingEdge {
@@ -1354,6 +1358,7 @@ fn authored_gas_exposure_uses_athletics_and_failed_sleep_expires_at_200_active_t
 #[test]
 fn poison_immunity_blocks_gas_without_a_check_but_does_not_classify_ordinary_sleep() {
     let (mut game, actor) = fixture(vec![Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Immunity {
             selector: crate::rules::Selector::Descriptor {

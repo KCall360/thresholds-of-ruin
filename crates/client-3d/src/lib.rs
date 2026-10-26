@@ -472,6 +472,7 @@ impl Default for CameraRig {
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 enum CellLook {
+    Object(ItemModel),
     Door,
     StairsUp,
     StairsDown,

@@ -15,7 +15,7 @@ fn views(count: usize, case: &str) -> (StateView, StateView) {
     let fixture: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/wire-v60.json"
+            "/tests/fixtures/wire-v62.json"
         ))
         .expect("regenerate current wire samples"),
     )
@@ -57,6 +57,7 @@ fn views(count: usize, case: &str) -> (StateView, StateView) {
         };
         o.inventory.push(item.clone());
         o.ground_items.push(GroundItemView {
+            presentation: None,
             reachable: false,
             supply_reachable: false,
             item: ItemView {

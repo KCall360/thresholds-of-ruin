@@ -260,6 +260,7 @@ class StreamRelay:
             state['inventory'].append({'start': 0, 'remove': 0, 'insert': items})
         elif self.oversized_retained_state.is_set():
             state['ground_items'].append({'start':0, 'remove':0, 'insert':[{
+                'presentation':None,
                 'reachable':False, 'supply_reachable':False, 'position':{'x':0, 'y':0, 'z':0},
                 'item':{'id':'i_' + 'f' * 64, 'quantity':'1', 'name':'inserted test item',
                         'appearance':'stone', 'class':'misc', 'identified':False,

@@ -7,7 +7,9 @@ mod interaction;
 mod observation;
 mod routing;
 
-pub use appearance::{actor_model, creature_model, item_model, CreatureModel, ItemModel};
+pub use appearance::{
+    actor_model, creature_model, item_model, object_model, CreatureModel, ItemModel,
+};
 pub use commands::{offset, request_from, Cmd, Input};
 pub use frame::{FrameChange, SceneFrame};
 pub use interaction::{

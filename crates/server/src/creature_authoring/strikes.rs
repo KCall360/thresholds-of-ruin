@@ -51,6 +51,8 @@ pub struct Natural {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Strike {
+    #[serde(default)]
+    pub cancellable: bool,
     pub offset: u64,
     pub unlock: Option<String>,
     pub check: Option<Check>,
@@ -66,6 +68,8 @@ pub struct Strike {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Rider {
+    #[serde(default)]
+    pub cancellable: bool,
     pub trigger: RiderTrigger,
     pub condition: Option<RiderCondition>,
     pub check: Option<RiderCheck>,
@@ -226,6 +230,7 @@ fn descriptors(values: &[String], rules: &s::rules::Ruleset) -> Result<Vec<Descr
 impl Strike {
     fn compile(&self, rules: &s::rules::Ruleset) -> Result<s::rules::StrikeDef, Failure> {
         Ok(s::rules::StrikeDef {
+            cancellable: self.cancellable,
             offset: self.offset,
             unlock: self
                 .unlock
@@ -241,6 +246,7 @@ impl Strike {
                 .iter()
                 .map(|rider| {
                     Ok(s::rules::RiderDef {
+                        cancellable: rider.cancellable,
                         trigger: match rider.trigger {
                             RiderTrigger::Success => s::rules::RiderTrigger::Success,
                             RiderTrigger::Failure => s::rules::RiderTrigger::Failure,
@@ -403,6 +409,10 @@ fn effects(values: &[Effect], rules: &s::rules::Ruleset) -> Result<Vec<s::rules:
                         .map_err(|_| invalid("Invalid condition ID"))?,
                     duration: amount(duration),
                 },
+                Effect::HasteDose { condition, rest } => s::rules::Effect::HasteDose {
+                    condition: ConditionId::new(condition).map_err(|_| invalid("Invalid condition ID"))?,
+                    rest: ConditionId::new(rest).map_err(|_| invalid("Invalid rest condition ID"))?,
+                },
                 Effect::ApplyPersistentCondition { condition, cancels } => s::rules::Effect::ApplyPersistentCondition {
                     condition: ConditionId::new(condition).map_err(|_| invalid("Invalid condition ID"))?,
                     cancels: cancels.as_ref().map(|id| ConditionId::new(id).map_err(|_| invalid("Invalid condition ID"))).transpose()?,
@@ -416,6 +426,18 @@ fn effects(values: &[Effect], rules: &s::rules::Ruleset) -> Result<Vec<s::rules:
                 },
                 Effect::DrainLatestHitDie => s::rules::Effect::DrainLatestHitDie,
                 Effect::RestoreHitDie => s::rules::Effect::RestoreHitDie,
+                Effect::GainStrength => s::rules::Effect::GainStrength,
+                Effect::RaiseLevel => s::rules::Effect::RaiseLevel,
+                Effect::RoomLight => s::rules::Effect::RoomLight,
+                Effect::DetectMonsters { condition } => s::rules::Effect::DetectMonsters {
+                    condition: ConditionId::new(condition)
+                        .map_err(|_| invalid("Invalid condition ID"))?,
+                },
+                Effect::DetectFood => s::rules::Effect::DetectFood,
+                Effect::DetectMagic => s::rules::Effect::DetectMagic,
+                Effect::MapTopology => s::rules::Effect::MapTopology,
+                Effect::DrainLife => s::rules::Effect::DrainLife,
+                Effect::CancelSpecials => s::rules::Effect::CancelSpecials,
                 Effect::StepSelfOneCell => s::rules::Effect::StepSelfOneCell,
                 Effect::TeleportRandom => s::rules::Effect::TeleportRandom,
                 Effect::TeleportToRayOrigin => s::rules::Effect::TeleportToRayOrigin,
@@ -614,5 +636,32 @@ mod restorable_loss_tests {
             amount: AmountExpr::Fixed { amount: 1 },
         }];
         assert!(invalid.compile(&rules).is_err());
+    }
+}
+
+#[cfg(test)]
+mod detection_effect_adapter_tests {
+    use super::*;
+    #[test]
+    fn detection_adapter_preserves_exact_operands_and_validates_condition_identifier() {
+        let rules =
+            s::rules::Ruleset::validate(toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap())
+                .unwrap();
+        for value in [
+            serde_json::json!({"kind":"detect_monsters","condition":"braced"}),
+            serde_json::json!({"kind":"detect_food"}),
+            serde_json::json!({"kind":"detect_magic"}),
+        ] {
+            let source: Effect = serde_json::from_value(value.clone()).unwrap();
+            let compiled = effects(&[source], &rules).unwrap();
+            assert_eq!(
+                serde_json::to_value(&compiled).unwrap(),
+                serde_json::json!([value])
+            );
+        }
+        let bad: Effect = serde_json::from_value(serde_json::json!({
+            "kind":"detect_monsters","condition":""}))
+        .unwrap();
+        assert!(effects(&[bad], &rules).is_err());
     }
 }

@@ -315,6 +315,7 @@ pub(crate) fn own_stats(stats: s::creatures::OwnStats) -> p::OwnStats {
                     s::rules::Reach::Sight { range } | s::rules::Reach::MutualSight { range } => {
                         p::AbilityReach::Sight { range }
                     }
+                    s::rules::Reach::UntilObstruction => p::AbilityReach::UntilObstruction,
                     s::rules::Reach::SelfOnly => p::AbilityReach::SelfOnly,
                     s::rules::Reach::SelfOrAlly { range } => p::AbilityReach::SelfOrAlly {
                         range: match range {
@@ -333,6 +334,7 @@ pub(crate) fn own_stats(stats: s::creatures::OwnStats) -> p::OwnStats {
                     p::AbilityTargetKind::DirectionalRay
                 } else {
                     match def.reach {
+                        s::rules::Reach::UntilObstruction => p::AbilityTargetKind::DirectionalRay,
                         s::rules::Reach::Projectile => p::AbilityTargetKind::DirectionalProjectile,
                         s::rules::Reach::SelfOnly => p::AbilityTargetKind::SelfOnly,
                         s::rules::Reach::SelfOrAlly { .. } => p::AbilityTargetKind::SelfOrAlly,

@@ -13,6 +13,8 @@ use tor_world::{Location, RegionId, Shared};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ActorRecord {
+    #[serde(deserialize_with = "crate::bounded::required_option")]
+    hallucination: Option<crate::hallucination_clock::HallucinationCadence>,
     guise: crate::perception::GuiseState,
     readied_ambush: crate::readied_ambush::ReadiedRecord,
     holds: crate::linked_hold::HoldBook,
@@ -57,6 +59,8 @@ impl<'de> Deserialize<'de> for ActorRecord {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Fields {
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            hallucination: Option<crate::hallucination_clock::HallucinationCadence>,
             guise: crate::perception::GuiseState,
             readied_ambush: crate::readied_ambush::ReadiedRecord,
             holds: crate::linked_hold::HoldBook,
@@ -98,6 +102,7 @@ impl<'de> Deserialize<'de> for ActorRecord {
         }
         let fields: Fields = crate::bounded::named_map(deserializer)?;
         Ok(Self {
+            hallucination: fields.hallucination,
             guise: fields.guise,
             readied_ambush: fields.readied_ambush,
             holds: fields.holds,
@@ -140,6 +145,7 @@ struct CombatantRecord {
 impl ActorRecord {
     pub(crate) fn capture(actor: &Actor) -> Self {
         Self {
+            hallucination: actor.hallucination.clone(),
             guise: actor.guise.clone(),
             readied_ambush: crate::readied_ambush::ReadiedRecord::capture(&actor.readied_ambush),
             holds: actor.holds.clone(),
@@ -192,6 +198,7 @@ impl ActorRecord {
             })
             .collect::<Result<Vec<_>, crate::checkpoint::PersistError>>()?;
         let state = Actor {
+            hallucination: self.hallucination.clone(),
             guise: self.guise.clone(),
             readied_ambush: self
                 .readied_ambush
@@ -234,7 +241,8 @@ impl ActorRecord {
             public_plan: self.public_plan.clone(),
             asset: self.asset.clone(),
         };
-        if !state.readied_ambush.valid_for(&state)
+        if !crate::hallucination_clock::valid_for(&state)
+            || !state.readied_ambush.valid_for(&state)
             || !state.awareness.valid_for(&state)
             || !state.search_clock.valid_for(&state)
             || !state.periodic_relocations.valid_for(&state, items)
@@ -278,6 +286,7 @@ mod public_plan_record_tests {
             record
         );
         let fields = [
+            "hallucination",
             "guise",
             "readied_ambush",
             "holds",
@@ -335,6 +344,7 @@ mod public_plan_record_tests {
         );
         assert!(serde_json::from_value::<ActorRecord>(positional).is_err());
         for key in [
+            "hallucination",
             "readied_ambush",
             "known_charges",
             "known_equipment",
@@ -358,6 +368,11 @@ mod public_plan_record_tests {
             assert!(serde_json::from_value::<ActorRecord>(missing).is_err());
         }
         let text = std::str::from_utf8(&bytes).unwrap();
+        let duplicate_clock = text.replace(
+            "\"hallucination\":null",
+            "\"hallucination\":null,\"hallucination\":null",
+        );
+        assert!(serde_json::from_slice::<ActorRecord>(duplicate_clock.as_bytes()).is_err());
         let duplicate = text.replace(
             "\"public_plan\":null",
             "\"public_plan\":null,\"public_plan\":null",

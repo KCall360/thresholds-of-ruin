@@ -121,7 +121,7 @@ impl std::error::Error for DecodeError {
     }
 }
 
-fn decode<T: DeserializeOwned>(text: &str, limit: usize) -> Result<T, DecodeError> {
+pub(crate) fn decode<T: DeserializeOwned>(text: &str, limit: usize) -> Result<T, DecodeError> {
     if text.len() > limit {
         return Err(DecodeError::TooLarge { limit });
     }
@@ -186,6 +186,11 @@ pub fn decode_response(text: &str) -> Result<crate::ServerMessage, DecodeError> 
     if text.len() > MAX_RESPONSE_BYTES {
         return Err(DecodeError::TooLarge {
             limit: MAX_RESPONSE_BYTES,
+        });
+    }
+    if text.len() > crate::chart_pages::MAX_CHART_PAGE_BYTES && response_kind::chart_page(text)? {
+        return Err(DecodeError::TooLarge {
+            limit: crate::chart_pages::MAX_CHART_PAGE_BYTES,
         });
     }
     if text.len() > crate::MAX_MAP_PAGE_BYTES && response_kind::map_page(text)? {
@@ -293,6 +298,8 @@ pub fn encode_response(
     use crate::{ServerMessage, StateDelta, StreamUpdate, UpdateBody};
     let limit = limit.min(if matches!(message, ServerMessage::MapPage { .. }) {
         crate::MAX_MAP_PAGE_BYTES
+    } else if matches!(message, ServerMessage::ChartPage { .. }) {
+        crate::chart_pages::MAX_CHART_PAGE_BYTES
     } else if matches!(message, ServerMessage::ProjectileChoices { .. }) {
         crate::MAX_PROJECTILE_CHOICE_PAGE_BYTES
     } else if matches!(message, ServerMessage::AdvancementPage { .. }) {
@@ -421,7 +428,7 @@ mod tests {
         let samples: serde_json::Value = serde_json::from_str(
             &std::fs::read_to_string(concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/tests/fixtures/wire-v60.json"
+                "/tests/fixtures/wire-v62.json"
             ))
             .expect("regenerate current wire samples"),
         )
@@ -572,7 +579,7 @@ mod tests {
         let samples: serde_json::Value = serde_json::from_str(
             &std::fs::read_to_string(concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/tests/fixtures/wire-v60.json"
+                "/tests/fixtures/wire-v62.json"
             ))
             .expect("regenerate current wire samples"),
         )

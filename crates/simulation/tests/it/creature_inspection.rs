@@ -10,6 +10,7 @@ use tor_world::{Location, Position, RegionId};
 fn game() -> Game {
     let mut template = Template::new(TemplateId::new("mindless_form").unwrap(), 10);
     template.modifiers = vec![Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Flag {
             flag: FlagId::new("mindless").unwrap(),

@@ -162,6 +162,12 @@ async fn run() -> Result<(), Error> {
                                     Err(error) => println!("{}", safe(error)),
                                 }
                             }
+                            Ok(Input::Chart(input)) => {
+                                let mut record = tor_client_text::engine::narrate::Record::default();
+                                tor_client_text::engine::turn::chart(&mut connection,
+                                    &mut tor_client_text::engine::chronicle::Chronicler::default(), &mut record, input).await?;
+                                println!("{}", tor_client_text::engine::narrate::compose(&record));
+                            }
                             Ok(Input::Quit) => break,
                             Ok(Input::Look) => println!("{}", describe(connection.state.state())),
                             Ok(Input::Places) => println!("{}", tor_client_text::places(connection.state.state())),
@@ -362,7 +368,8 @@ fn present(connection: &Connection, message: &ServerMessage) -> Result<(), Error
         ServerMessage::ProjectileChoices { .. } | ServerMessage::AbilityWeaponPreview { .. } => {} // Only the matching preview gate presents terms.
         ServerMessage::Palette { .. }
         | ServerMessage::Waiting { .. }
-        | ServerMessage::MapPage { .. } => {}
+        | ServerMessage::MapPage { .. }
+        | ServerMessage::ChartPage { .. } => {}
         ServerMessage::Error { code, message, .. } => {
             println!("Server error {code:?}: {}", safe(message))
         }

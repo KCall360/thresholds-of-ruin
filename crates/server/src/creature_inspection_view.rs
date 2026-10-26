@@ -228,6 +228,18 @@ fn effect_view(value: &s::rules::Effect, rules: &Ruleset) -> p::CombatTraceStep 
         s::rules::Effect::Heal { amount } => ("heal", vec![text("amount", amount_text(amount))]),
         s::rules::Effect::DrainLatestHitDie => ("drain_latest_hit_die", vec![]),
         s::rules::Effect::RestoreHitDie => ("restore_hit_die", vec![]),
+        s::rules::Effect::GainStrength => ("gain_strength", vec![]),
+        s::rules::Effect::RaiseLevel => ("raise_level", vec![]),
+        s::rules::Effect::RoomLight => ("room_light", vec![]),
+        s::rules::Effect::DetectMonsters { condition: id } => (
+            "detect_monsters",
+            vec![content("condition", condition(id, rules))],
+        ),
+        s::rules::Effect::DetectFood => ("detect_food", vec![]),
+        s::rules::Effect::DetectMagic => ("detect_magic", vec![]),
+        s::rules::Effect::MapTopology => ("map_topology", vec![]),
+        s::rules::Effect::DrainLife => ("drain_life", vec![]),
+        s::rules::Effect::CancelSpecials => ("cancel_specials", vec![]),
         s::rules::Effect::StepSelfOneCell => ("step_self_one_cell", vec![]),
         s::rules::Effect::TeleportRandom => ("teleport_random", vec![]),
         s::rules::Effect::TeleportToRayOrigin => ("teleport_to_ray_origin", vec![]),
@@ -291,6 +303,16 @@ fn effect_view(value: &s::rules::Effect, rules: &Ruleset) -> p::CombatTraceStep 
             vec![
                 content("condition", condition(id, rules)),
                 text("duration_turns", amount_text(duration)),
+            ],
+        ),
+        s::rules::Effect::HasteDose {
+            condition: id,
+            rest,
+        } => (
+            "haste_dose",
+            vec![
+                content("condition", condition(id, rules)),
+                content("rest", condition(rest, rules)),
             ],
         ),
         s::rules::Effect::ApplyPersistentCondition {

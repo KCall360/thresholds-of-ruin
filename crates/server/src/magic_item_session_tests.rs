@@ -40,6 +40,10 @@ struct Wire {
 impl Wire {
     fn new(engine: Engine) -> Self {
         let actors = engine.actors();
+        Self::for_actors(engine, actors)
+    }
+
+    fn for_actors(engine: Engine, actors: impl IntoIterator<Item = ActorId>) -> Self {
         let mut wire = Self {
             service: Service::new(engine),
             clients: BTreeMap::new(),
@@ -121,15 +125,28 @@ impl Wire {
     }
 
     fn finish(&mut self, actor: ActorId, id: &str, request: &Request) -> RequestReceipt {
+        let mut last_receipt = None;
         for _ in 0..64 {
             self.service.run_until_blocked();
             for other in self.clients.keys().copied().collect::<Vec<_>>() {
-                assert!(!self
+                let errors: Vec<_> = self
                     .drain(other)
-                    .iter()
-                    .any(|message| matches!(message, ServerMessage::Error { .. })));
+                    .into_iter()
+                    .filter(|message| matches!(message, ServerMessage::Error { .. }))
+                    .collect();
+                assert!(errors.is_empty(), "execution of {id}: {errors:?}");
             }
             let receipt = ack(self.send(actor, id, request.clone()));
+            assert!(
+                !matches!(
+                    &receipt,
+                    RequestReceipt::Admitted {
+                        phase: IntentionPhase::Failed | IntentionPhase::Cancelled,
+                        ..
+                    }
+                ),
+                "admitted work {id} terminated before successful completion: {receipt:?}"
+            );
             if matches!(
                 receipt,
                 RequestReceipt::Admitted {
@@ -139,12 +156,13 @@ impl Wire {
             ) {
                 return receipt;
             }
+            last_receipt = Some(receipt);
             let next = self.service.engine.next_actor().unwrap();
             self.serial += 1;
             let request = self.request(next, Action::Wait);
             ack(self.send(next, &format!("clock-{}", self.serial), request));
         }
-        panic!("ordinary magic-item work did not resolve")
+        panic!("ordinary magic-item work {id} did not resolve; last receipt: {last_receipt:?}")
     }
 
     fn act(&mut self, id: &str, action: Action) -> RequestReceipt {
@@ -384,7 +402,9 @@ fn late_store_rejection_rolls_back_magic_charge_and_paid_selection_then_retries(
                 );
                 Action::Zap {
                     item: wand,
-                    direction: Direction::East,
+                    aim: tor_protocol::DeviceAim::Direction {
+                        direction: Direction::East,
+                    },
                 }
             }
             "read" => Action::Read { item: scroll },
@@ -857,3 +877,120 @@ fn encoded_control_reads_pay_once_and_restore_armed_charge_from_stored_package()
     let reopened = Wire::new(Engine::open(&path, crate::Scenario::two_room(999)).unwrap());
     assert_eq!(reopened.checkpoint(), expected);
 }
+
+#[test]
+fn encoded_unknown_ray_self_aim_rejects_without_payment_and_direction_retries_once() {
+    let mut wire = Wire::new(Engine::memory(scenario(false)).unwrap());
+    let wand = wire.take(ItemClass::Wand);
+    let snapshot = wire.snapshot(OWNER);
+    let item = snapshot
+        .state
+        .observation
+        .inventory
+        .iter()
+        .find(|row| row.id == wand)
+        .unwrap();
+    assert!(!item.identified);
+    let affordance = snapshot
+        .state
+        .observation
+        .interactions
+        .as_ref()
+        .unwrap()
+        .inventory
+        .iter()
+        .find(|row| row.item == wand)
+        .unwrap();
+    assert!(affordance.zappable);
+    assert_eq!(
+        affordance.device_activation,
+        Some(DeviceActivation::Direction)
+    );
+    let request = wire.request(
+        OWNER,
+        Action::Zap {
+            item: wand,
+            aim: DeviceAim::SelfTarget {},
+        },
+    );
+    let before = wire.checkpoint();
+    rejected(wire.send(OWNER, "unknown-self", request));
+    assert_eq!(
+        wire.checkpoint(),
+        before,
+        "rejection must not admit, spend, learn or roll"
+    );
+    // Exact balances require the ordinary paid identification path; merely
+    // firing an unknown device must not manufacture charge knowledge.
+    let scroll = wire.take(ItemClass::Scroll);
+    wire.act("identify-scroll", Action::Read { item: scroll });
+    let pending = choice(&wire.snapshot(OWNER));
+    wire.act(
+        "identify-ray",
+        Action::Identify {
+            choice: pending.choice,
+            item: Some(wand),
+        },
+    );
+    let known = wire.snapshot(OWNER);
+    let row = known
+        .state
+        .observation
+        .interactions
+        .as_ref()
+        .unwrap()
+        .inventory
+        .iter()
+        .find(|row| row.item == wand)
+        .unwrap();
+    assert_eq!(row.charges, Some(3));
+    assert_eq!(row.device_activation, Some(DeviceActivation::Direction));
+    let request = wire.request(
+        OWNER,
+        Action::Zap {
+            item: wand,
+            aim: DeviceAim::SelfTarget {},
+        },
+    );
+    let before = wire.checkpoint();
+    rejected(wire.send(OWNER, "known-ray-self", request));
+    assert_eq!(wire.checkpoint(), before);
+    let request = wire.request(
+        OWNER,
+        Action::Zap {
+            item: wand,
+            aim: DeviceAim::Direction {
+                direction: Direction::East,
+            },
+        },
+    );
+    let admitted = ack(wire.send(OWNER, "ordinary-ray", request.clone()));
+    let resolved = wire.finish(OWNER, "ordinary-ray", &request);
+    assert_eq!(resolved.entry_id(), admitted.entry_id());
+    let snapshot = wire.snapshot(OWNER);
+    let affordance = snapshot
+        .state
+        .observation
+        .interactions
+        .as_ref()
+        .unwrap()
+        .inventory
+        .iter()
+        .find(|row| row.item == wand)
+        .unwrap();
+    assert_eq!(affordance.charges, Some(2));
+    assert_eq!(
+        affordance.device_activation,
+        Some(DeviceActivation::Direction)
+    );
+    let after = wire.checkpoint();
+    assert_eq!(ack(wire.send(OWNER, "ordinary-ray", request)), resolved);
+    assert_eq!(
+        wire.checkpoint(),
+        after,
+        "receipt retry spends no second charge"
+    );
+}
+
+#[path = "self_device_session_tests.rs"]
+mod self_devices;

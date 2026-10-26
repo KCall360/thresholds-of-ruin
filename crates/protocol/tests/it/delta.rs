@@ -85,6 +85,7 @@ fn equipped_state(requires_attack: bool) -> StateView {
         known_supply: None,
     }];
     state.observation.interactions = Some(InteractionView {
+        refused: vec![],
         curse_blocked: vec![],
         identification: None,
         completed: vec![],
@@ -105,6 +106,8 @@ fn equipped_state(requires_attack: bool) -> StateView {
             edible: false,
             readable: false,
             zappable: false,
+            portable_light: None,
+            device_activation: None,
             charges: None,
         }],
     });
@@ -162,6 +165,7 @@ fn synthetic_digest(index: u64) -> [u8; 32] {
 
 fn cell(x: i32, y: i32, z: i32, key: &str) -> CellView {
     CellView {
+        object_presentation: None,
         lit: true,
         asset: None,
         trap: None,
@@ -199,6 +203,7 @@ fn room(ox: i32, oy: i32, revision: u64) -> StateView {
             places: Vec::new(),
             actor: ActorId(1),
             self_target: ActorTarget::from_digest(synthetic_digest(1)),
+            charts: Vec::new(),
             linked_holds: vec![],
             tick: revision,
             position: Position { x: 0, y: 0, z: 0 },
@@ -225,6 +230,7 @@ fn prepared_ability_snapshots_validate_and_round_trip_deltas() {
         let mut next = base.clone();
         next.revision = 2;
         next.observation.interactions = Some(InteractionView {
+            refused: vec![],
             curse_blocked: vec![],
             identification: None,
             completed: vec![],
@@ -265,6 +271,7 @@ fn interaction_snapshots_round_trip_delta_and_validate_anatomy_bounds() {
     let mut next = base.clone();
     next.revision = 2;
     next.observation.interactions = Some(InteractionView {
+        refused: vec![],
         curse_blocked: vec![],
         identification: None,
         completed: vec![Action::Drink {
@@ -733,13 +740,19 @@ fn complete_encoding_prefers_full_when_every_cell_changes_or_base_is_wrong() {
 #[test]
 fn equal_complete_encoded_sizes_prefer_full() {
     let mut found = false;
-    for key_length in 1..=256 {
+    // Keep one cell and forget one. The removed coordinates add delta-only
+    // bytes; the retained key adds full-only bytes. This makes the sweep cross
+    // equality without omitting any required cell fields or exceeding key bounds.
+    for key_length in 1..=128 {
         let mut base = room(15, 15, 9_000_000_000_000_000_000);
-        base.observation.visible_cells.truncate(1);
+        base.observation.visible_cells.truncate(2);
         base.observation.visible_cells[0].key = "k".repeat(key_length);
         let mut next = base.clone();
+        next.observation.visible_cells.truncate(1);
         next.revision += 1;
         next.observation.tick += 1;
+        assert_eq!(base.validate(), Ok(()));
+        assert_eq!(next.validate(), Ok(()));
         let previous = exact_base(&base, base.revision);
         let full = complete_observation(next.clone(), next.revision);
         let mut candidate = full.clone();
@@ -785,6 +798,7 @@ fn collection_view(count: usize) -> StateView {
         };
         state.observation.inventory.push(item.clone());
         state.observation.ground_items.push(GroundItemView {
+            presentation: None,
             reachable: false,
             supply_reachable: false,
             item: ItemView {
@@ -1423,6 +1437,7 @@ fn health_recovery_progress_validates_against_full_and_dead_combat_and_deltas() 
 fn phase5_preparation_supply_shape_is_validated_for_direct_values() {
     let mut state = room(5, 5, 1);
     state.observation.interactions = Some(InteractionView {
+        refused: vec![],
         curse_blocked: vec![],
         identification: None,
         completed: vec![],
@@ -1495,6 +1510,7 @@ fn paid_choice_and_instance_charges_validate_and_survive_full_delta_replacement(
         known_supply: None,
     });
     next.observation.interactions = Some(InteractionView {
+        refused: vec![],
         curse_blocked: vec![],
         identification: Some(IdentificationChoiceView {
             choice: IntentionId("opaque-paid-choice".into()),
@@ -1518,6 +1534,8 @@ fn paid_choice_and_instance_charges_validate_and_survive_full_delta_replacement(
             edible: false,
             readable: false,
             zappable: true,
+            portable_light: None,
+            device_activation: Some(tor_protocol::DeviceActivation::Direction),
             charges: None,
         }],
     });
@@ -1764,4 +1782,179 @@ fn trap_presence_family_and_reach_are_exact_delta_fields_without_hidden_operands
     let mut cell = serde_json::to_value(&base.observation.visible_cells[0]).unwrap();
     cell.as_object_mut().unwrap().remove("trap");
     assert!(serde_json::from_value::<CellView>(cell).is_err());
+}
+
+#[test]
+fn device_activation_is_knowledge_gated_and_exactly_matches_zappable() {
+    let base = room(5, 5, 1);
+    let mut next = base.clone();
+    next.revision += 1;
+    let item = ItemTarget::from_digest([75; 32]);
+    next.observation.inventory.push(ItemView {
+        id: item,
+        class: ItemClass::Wand,
+        quantity: 1,
+        name: "ivory wand".into(),
+        appearance: "ivory wand".into(),
+        identified: false,
+        corpse: None,
+        description: String::new(),
+        asset: None,
+        known_currency: None,
+        known_supply: None,
+    });
+    next.observation.interactions = Some(InteractionView {
+        refused: vec![],
+        curse_blocked: vec![],
+        identification: Some(IdentificationChoiceView {
+            choice: IntentionId("opaque-paid-choice".into()),
+            classes: vec![ItemClass::Wand],
+            items: vec![item],
+        }),
+        completed: vec![Action::Read {
+            item: ItemTarget::from_digest([76; 32]),
+        }],
+        slots: vec![],
+        preparation: None,
+        inventory: vec![ItemInteractionView {
+            item,
+            slot: None,
+            equipped_slot: None,
+            known_cursed: None,
+            known_protected: None,
+            known_projectile_bonus: None,
+            known_equipment: None,
+            drinkable: false,
+            edible: false,
+            readable: false,
+            zappable: true,
+            portable_light: None,
+            device_activation: Some(tor_protocol::DeviceActivation::Direction),
+            charges: None,
+        }],
+    });
+    next.observation
+        .interactions
+        .as_mut()
+        .unwrap()
+        .identification = None;
+    next.observation
+        .interactions
+        .as_mut()
+        .unwrap()
+        .completed
+        .clear();
+    assert!(
+        next.validate().is_ok(),
+        "unknown Direction is a valid disclosed mode"
+    );
+    round_trip(&base, &next);
+    let mut known_self = next.clone();
+    known_self.observation.inventory[0].identified = true;
+    known_self
+        .observation
+        .interactions
+        .as_mut()
+        .unwrap()
+        .inventory[0]
+        .device_activation = Some(DeviceActivation::SelfTarget);
+    assert!(
+        known_self.validate().is_ok(),
+        "identified self-device positive control"
+    );
+    round_trip(&base, &known_self);
+    let mut nondevice = next.clone();
+    nondevice.observation.inventory[0].class = ItemClass::Misc;
+    let row = &mut nondevice
+        .observation
+        .interactions
+        .as_mut()
+        .unwrap()
+        .inventory[0];
+    row.zappable = false;
+    row.device_activation = None;
+    assert!(
+        nondevice.validate().is_ok(),
+        "nondevice absent activation positive control"
+    );
+    round_trip(&base, &nondevice);
+    for (zappable, activation) in [
+        (false, Some(DeviceActivation::Direction)),
+        (false, Some(DeviceActivation::SelfTarget)),
+        (true, None),
+        (true, Some(DeviceActivation::SelfTarget)),
+    ] {
+        let mut invalid = next.clone();
+        let row = &mut invalid.observation.interactions.as_mut().unwrap().inventory[0];
+        row.zappable = zappable;
+        row.device_activation = activation;
+        assert!(
+            invalid.validate().is_err(),
+            "invalid unknown mode: {zappable:?} {activation:?}"
+        );
+    }
+}
+
+#[test]
+fn paid_refusal_observation_rejects_forged_non_item_action() {
+    let mut state = room(5, 5, 1);
+    state.observation.interactions = Some(InteractionView {
+        identification: None,
+        completed: vec![],
+        curse_blocked: vec![],
+        slots: vec![],
+        preparation: None,
+        inventory: vec![],
+        refused: vec![ItemRefusalView {
+            action: Action::Zap {
+                item: ItemTarget::from_digest([71; 32]),
+                aim: DeviceAim::SelfTarget {},
+            },
+            reason: ItemRefusalReason::TooWeak,
+        }],
+    });
+    state.validate().unwrap();
+    state.observation.interactions.as_mut().unwrap().refused[0].action = Action::Wait;
+    assert_eq!(state.validate(), Err(InvalidState::InvalidInteraction));
+}
+
+#[test]
+fn cosmetic_cell_changes_and_cures_are_not_lost_by_exhaustive_delta_comparison() {
+    let mut base = room(5, 5, 1);
+    base.observation.visible_cells[0].stairs_down = true;
+    let mut next = base.clone();
+    next.revision += 1;
+    next.observation.visible_cells[0].object_presentation = Some(ObjectPresentation {
+        name: "silver flask".into(),
+        asset: None,
+        kind: ObjectPresentationKind::Item {
+            class: ItemClass::Potion,
+        },
+    });
+    let delta = round_trip(&base, &next);
+    assert_eq!(
+        delta.cells.changed,
+        vec![next.observation.visible_cells[0].clone()]
+    );
+    let mut shifted = next.clone();
+    shifted.revision += 1;
+    shifted.observation.visible_cells[0].object_presentation = Some(ObjectPresentation {
+        name: "stairs".into(),
+        asset: None,
+        kind: ObjectPresentationKind::Stairs,
+    });
+    let delta = round_trip(&next, &shifted);
+    assert_eq!(
+        delta.cells.changed,
+        vec![shifted.observation.visible_cells[0].clone()]
+    );
+    let mut cured = shifted.clone();
+    cured.revision += 1;
+    cured.observation.visible_cells[0].object_presentation = None;
+    let delta = round_trip(&shifted, &cured);
+    assert_eq!(
+        delta.cells.changed,
+        vec![cured.observation.visible_cells[0].clone()]
+    );
+    assert!(cured.observation.visible_cells[0].stairs_down);
 }

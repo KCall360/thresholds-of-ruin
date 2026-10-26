@@ -153,6 +153,7 @@ pub(super) struct PreparedArchetype {
     pub readable: Option<tor_simulation::ReadableSpec>,
     pub ground_scare: Option<tor_simulation::control_scrolls::ScareSpec>,
     pub device: Option<tor_simulation::DeviceSpec>,
+    pub held_light: Option<tor_simulation::HeldLightSpec>,
     pub edible: Option<tor_simulation::EdibleSpec>,
     pub supply: Option<tor_simulation::content_ids::SupplyId>,
     pub magical: bool,
@@ -216,6 +217,10 @@ impl PreparedArchetype {
                 .device
                 .as_ref()
                 .map(|device| device.compile(catalog.content().rules()))
+                .transpose()?,
+            held_light: author
+                .held_light
+                .map(super::HeldLightSpec::compile)
                 .transpose()?,
             edible: author.edible.clone(),
             supply: author
@@ -284,7 +289,7 @@ pub(super) struct PreparedDefinitions {
 
 /// Prepare ordinary recoverable ammunition before any creature build captures
 /// Content. Reuse the exact normal item adapter, without allocating an entity.
-pub(super) fn compile_trap_ammunition(
+fn compile_trap_ammunition(
     manifest: &Manifest,
     catalog: CompiledCatalog,
 ) -> Result<CompiledCatalog, Failure> {
@@ -335,6 +340,15 @@ pub(super) fn compile_trap_ammunition(
     definitions.catalog.with_trap_ammunition(ammunition)
 }
 
+/// Shared normal/source-free immutable decorations, before any actor captures Content.
+pub(super) fn compile_content_decorations(
+    manifest: &Manifest,
+    catalog: CompiledCatalog,
+) -> Result<CompiledCatalog, Failure> {
+    let catalog = catalog.with_presentation_catalog(super::presentation::compile(manifest)?);
+    compile_trap_ammunition(manifest, catalog)
+}
+
 impl PreparedDefinitions {
     pub fn creature_catalog(&self) -> &CompiledCatalog {
         &self.catalog
@@ -375,7 +389,7 @@ impl PreparedDefinitions {
             .compile_with_context(rules, |kind, id, failure| {
                 super::source::catalog_context(provenance, kind, id, failure)
             })?;
-        let catalog = compile_trap_ammunition(manifest, catalog)?;
+        let catalog = compile_content_decorations(manifest, catalog)?;
         let ai_profiles: BTreeMap<_, _> = manifest
             .ai_profiles
             .iter()
@@ -685,6 +699,7 @@ impl PreparedDefinitions {
             readable: inherited.readable.clone(),
             ground_scare: inherited.ground_scare.clone(),
             device: inherited.device.clone(),
+            held_light: inherited.held_light,
             edible: inherited.edible.clone(),
             supply: inherited.supply.clone(),
             magical: inherited.magical,
@@ -1442,6 +1457,7 @@ mod tests {
             .get_mut("figure")
             .unwrap()
             .modifiers = vec![crate::creature_authoring::Modifier {
+            cancellable: false,
             scope: crate::creature_authoring::Scope::Always,
             op: crate::creature_authoring::Op::Add {
                 stat: crate::creature_authoring::Stat::Health,
@@ -1462,6 +1478,7 @@ mod tests {
                 readable: None,
                 ground_scare: None,
                 device: None,
+                held_light: None,
                 edible: None,
                 supply: None,
                 magical: false,

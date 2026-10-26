@@ -40,6 +40,7 @@ fn request_kind(request: &Request) -> &'static str {
         Request::Snapshot => "snapshot",
         Request::Palette => "palette",
         Request::Map { .. } => "map",
+        Request::Chart { .. } => "chart",
         Request::Command { command, .. } => match command {
             Command::ProjectileChoices { .. } => "command.projectile_choices",
             Command::PreviewAbilityWeapon { .. } => "command.preview_ability_weapon",
@@ -62,6 +63,8 @@ fn request_kind(request: &Request) -> &'static str {
                 Action::Unequip { .. } => "act.unequip",
                 Action::Drink { .. } => "act.drink",
                 Action::Read { .. } => "act.read",
+                Action::Ignite { .. } => "act.ignite",
+                Action::Extinguish { .. } => "act.extinguish",
                 Action::Zap { .. } => "act.zap",
                 Action::Identify { .. } => "act.identify",
                 Action::ExamineTrap { .. } => "act.examine_trap",
@@ -92,6 +95,7 @@ const CLIENT_KINDS: &[&str] = &[
     "snapshot",
     "palette",
     "map",
+    "chart",
     "command.rename_place",
     "command.resume_intention",
     "command.cancel_intention",
@@ -104,6 +108,8 @@ const CLIENT_KINDS: &[&str] = &[
     "act.unequip",
     "act.drink",
     "act.read",
+    "act.ignite",
+    "act.extinguish",
     "act.zap",
     "act.identify",
     "act.examine_trap",
@@ -162,6 +168,7 @@ server_sample_kinds! {
     AbilityWeaponPreview => ("ability_weapon_preview", None),
     ProjectileChoices => ("projectile_choices", None),
     MapPage => ("map_page", None),
+    ChartPage => ("chart_page", None),
     CombatDiagnostics => ("combat_diagnostics", None),
     Error => ("error", None),
     Palette => ("palette", None),
@@ -199,6 +206,7 @@ fn server_kind(message: &ServerMessage) -> ServerSampleKind {
         ServerMessage::AbilityWeaponPreview { .. } => Kind::AbilityWeaponPreview,
         ServerMessage::AdvancementPage { .. } => Kind::AdvancementPage,
         ServerMessage::MapPage { .. } => Kind::MapPage,
+        ServerMessage::ChartPage { .. } => Kind::ChartPage,
         ServerMessage::CombatDiagnostics { .. } => Kind::CombatDiagnostics,
         ServerMessage::Error { .. } => Kind::Error,
         ServerMessage::Palette { .. } => Kind::Palette,
@@ -253,6 +261,7 @@ fn recorded_request_envelopes_preserve_payload_bytes_and_validation() {
             payload,
             Request::Attach { .. }
                 | Request::Map { .. }
+                | Request::Chart { .. }
                 | Request::Command { .. }
                 | Request::History { .. }
                 | Request::HistoryBranch { .. }

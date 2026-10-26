@@ -39,7 +39,7 @@ class RogueEscapeContent(unittest.TestCase):
             "slot": "ring", "modifiers": [], "potency_modifiers": [],
             "periodic_relocation": {"interval": 100, "chance_denominator": 50}})
         abilities = {row["value"]["id"]: row["value"] for row in source("rules.toml")["overrides"]
-                     if row["path"][0] == "abilities"}
+                     if row["path"][0] == "abilities" and len(row["path"]) == 2}
         for suffix, effect in (("away", "teleport_random"), ("to", "teleport_to_ray_origin")):
             with self.subTest(device=suffix):
                 identity = "rogue.wand_teleport_" + suffix

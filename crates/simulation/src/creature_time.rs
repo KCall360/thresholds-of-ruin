@@ -334,6 +334,8 @@ mod tests {
         };
         definition.timing.scaled_by = None;
         document.conditions.push(ConditionDef {
+            detecting_monsters: false,
+            hallucinating: false,
             id: borrowed.clone(),
             family: crate::content_ids::ConditionFamilyId::new(borrowed.as_str()).unwrap(),
             lifecycle: crate::rules::ConditionLifecycle::Timed,
@@ -342,6 +344,7 @@ mod tests {
             preparation: tor_simulation::rules::ConditionPreparation::Preserve,
             name: "Borrowed mana".into(),
             modifiers: vec![Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Add {
                     stat: Stat::ResourceMax {
@@ -359,6 +362,7 @@ mod tests {
         let species = catalog.species.get_mut(original.species_id()).unwrap();
         species.modifiers.extend([
             Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Set {
                     stat: Stat::Health,
@@ -366,6 +370,7 @@ mod tests {
                 },
             },
             Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::GrantAbility {
                     ability: bolt.clone(),
@@ -819,6 +824,8 @@ mod tests {
         };
         attack.timing.scaled_by = None;
         document.conditions.push(ConditionDef {
+            detecting_monsters: false,
+            hallucinating: false,
             id: id.clone(),
             family: crate::content_ids::ConditionFamilyId::new(id.as_str()).unwrap(),
             lifecycle: crate::rules::ConditionLifecycle::Timed,
@@ -827,6 +834,7 @@ mod tests {
             preparation: tor_simulation::rules::ConditionPreparation::Preserve,
             name: "Temporary health".into(),
             modifiers: vec![Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Add {
                     stat: Stat::Health,
@@ -928,6 +936,8 @@ mod tests {
         let id = crate::content_ids::ConditionId::new("temporary_health").unwrap();
         let mut document = original.ruleset().document().clone();
         document.conditions.push(ConditionDef {
+            detecting_monsters: false,
+            hallucinating: false,
             id: id.clone(),
             family: crate::content_ids::ConditionFamilyId::new(id.as_str()).unwrap(),
             lifecycle: crate::rules::ConditionLifecycle::Timed,
@@ -936,6 +946,7 @@ mod tests {
             preparation: tor_simulation::rules::ConditionPreparation::Preserve,
             name: "Temporary health".into(),
             modifiers: vec![Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Add {
                     stat: Stat::Health,

@@ -472,7 +472,7 @@ fn rogue_rattlesnake_owned_venom_and_canonical_strength_restoration_bind_existin
     assert_eq!(
         signature["strikes"],
         serde_json::json!({"kind":"natural_melee", "additional_riders":[{
-        "trigger":"success", "condition":null, "check":null,
+        "trigger":"success", "cancellable":false, "condition":null, "check":null,
         "effects":[{"kind":"lose_attribute","attribute":"strength","amount":{"kind":"fixed","amount":1}}],
         "descriptors":["poison"]}]})
     );
@@ -609,7 +609,7 @@ fn rogue_wraith_owns_five_seeded_rows_parentless_drain_and_four_unspent_points()
     assert_eq!(
         signature["strikes"],
         serde_json::json!({"kind":"natural_melee", "additional_riders":[{
-            "trigger":"success", "condition":null, "check":{"skill":{"kind":"natural_attack"},"defense":"spiritual"},
+            "trigger":"success", "cancellable":false, "condition":null, "check":{"skill":{"kind":"natural_attack"},"defense":"spiritual"},
             "effects":[{"kind":"drain_latest_hit_die"}], "descriptors":[]}]})
     );
     // Shared resolver/loss tests own fatality, injury, ceilings and rollback.
@@ -753,7 +753,7 @@ fn rogue_jabberwock_signature_imports_natural_rows_and_one_shared_conditional_ri
     assert_eq!(
         signature["strikes"],
         serde_json::json!({"kind":"natural_melee", "additional_riders":[{
-            "trigger":"success", "condition":{"kind":"sequence_successful_hits","minimum":2}, "check":null,
+            "trigger":"success", "cancellable":false, "condition":{"kind":"sequence_successful_hits","minimum":2}, "check":null,
             "effects":[{"kind":"damage","damage":{"kind":"components","components":[{
                 "category":"keen","descriptor":null,"amount":{"kind":"rolled","dice":{"count":1,"sides":6,"bonus":0}}}]}}],
             "descriptors":[]}]})
@@ -1130,7 +1130,7 @@ fn rogue_flytrap_clutch_has_shared_policy_and_tightening_is_owned_at_hd_six() {
         ability["strikes"],
         serde_json::json!({
             "kind":"natural_melee", "additional_riders":[{
-                "trigger":"success", "condition":null, "check":null, "descriptors":[],
+                "trigger":"success", "cancellable":false, "condition":null, "check":null, "descriptors":[],
                 "effects":[{"kind":"apply_linked_hold", "policy":{
                     "sustaining":"clutch", "preparation":100, "recovery":100, "protection":400
                 }}]
@@ -1389,7 +1389,7 @@ fn rogue_dragon_natural_unlocks_fire_subtype_and_ray_use_shared_compiled_rules()
     assert_eq!(
         signature["strikes"],
         serde_json::json!({"kind":"authored","strikes":[{
-            "offset":0,"unlock":null,
+            "offset":0,"unlock":null,"cancellable":false,
             "check":{"actor":"target","skill":{"kind":"named","skill":"agility"},"against":{"kind":"opposed","skill":{"kind":"named","skill":"breath"}}},
             "on_success":[],"on_failure":[{"kind":"damage","damage":{"kind":"components","components":[{
                 "category":"energy","descriptor":"fire","amount":{"kind":"rolled","dice":{"count":6,"sides":6,"bonus":0}}

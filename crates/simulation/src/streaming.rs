@@ -350,6 +350,7 @@ pub struct RegionRecord {
     ai: BTreeMap<ActorId, Ai>,
     navigation: BTreeMap<ActorId, Navigation>,
     explored_maps: BTreeMap<ActorId, Shared<ExploredMap>>,
+    chart_history: Shared<BTreeMap<ActorId, crate::chart_history::Owner>>,
     items: BTreeMap<ItemId, Item>,
     displaced: BTreeSet<ActorId>,
     impacts: Vec<Impact>,
@@ -366,9 +367,35 @@ pub struct RegionRecordData {
     navigation: BTreeMap<ActorId, Navigation>,
     #[serde(with = "crate::checkpoint::explored_actor_maps")]
     explored_maps: BTreeMap<ActorId, Shared<ExploredMap>>,
+    #[serde(with = "crate::chart_history::local_owners")]
+    chart_history: Shared<BTreeMap<ActorId, crate::chart_history::Owner>>,
     items: BTreeMap<ItemId, Item>,
     displaced: BTreeSet<ActorId>,
     impacts: Vec<Impact>,
+}
+impl RegionRecord {
+    pub fn historical_chart_authorities(
+        &self,
+    ) -> impl Iterator<
+        Item = (
+            &Shared<tor_world::World>,
+            &Shared<crate::spatial_scope::registry::Registry>,
+            &str,
+        ),
+    > {
+        crate::chart_history::authority_sources(&self.chart_history)
+    }
+    pub fn historical_chart_sources(
+        &self,
+    ) -> impl Iterator<
+        Item = (
+            &tor_world::World,
+            &crate::spatial_scope::registry::Registry,
+            &str,
+        ),
+    > {
+        crate::chart_history::sources(&self.chart_history)
+    }
 }
 impl RegionRecordData {
     pub fn capture(record: &RegionRecord) -> Self {
@@ -383,6 +410,7 @@ impl RegionRecordData {
             ai: record.ai.clone(),
             navigation: record.navigation.clone(),
             explored_maps: record.explored_maps.clone(),
+            chart_history: record.chart_history.clone(),
             items: record.items.clone(),
             displaced: record.displaced.clone(),
             impacts: record.impacts.clone(),
@@ -413,6 +441,11 @@ impl RegionRecordData {
                 crate::checkpoint::PersistError::ItemDefinition { item: *id, error }
             })?;
         }
+        if !crate::chart_history::owners_valid(&self.chart_history, u64::MAX, |id| {
+            self.actors.contains_key(&id)
+        }) {
+            return Err(crate::checkpoint::PersistError::ChartHistory);
+        }
         let record = RegionRecord {
             world: self.world,
             actors: self
@@ -428,6 +461,7 @@ impl RegionRecordData {
             ai: self.ai,
             navigation: self.navigation,
             explored_maps: self.explored_maps,
+            chart_history: self.chart_history,
             items: self.items,
             displaced: self.displaced,
             impacts: self.impacts,
@@ -506,6 +540,9 @@ impl RegionRecord {
             && self.explored_maps.iter().all(|(id, map)| {
                 self.actors.contains_key(id)
                     && (trusted_maps || maps.as_mut().is_some_and(|maps| maps.structure(map)))
+            })
+            && crate::chart_history::owners_valid(&self.chart_history, tick, |id| {
+                self.actors.contains_key(&id)
             })
             && self.displaced.iter().all(|id| self.actors.contains_key(id))
             && self.items.iter().all(|(id, item)| {
@@ -1038,7 +1075,7 @@ impl Game {
                     } else {
                         crate::observation::merge_perception(
                             self.world.neighborhood_scene(eye, frame),
-                            self.world.illuminated_eye_scene(eye, frame, SIGHT_RANGE),
+                            self.illuminated_scene(eye, frame, SIGHT_RANGE),
                         )
                     };
                     need.active
@@ -1124,7 +1161,7 @@ impl Game {
 
     /// Where an observing point's view starts, with any stair landings it
     /// discloses.
-    fn observer_eye(
+    pub(crate) fn observer_eye(
         &self,
         target: ReferenceTarget,
         can_prepare: &dyn Fn(RegionId) -> bool,
@@ -1220,6 +1257,7 @@ impl Game {
         let ordinary_loaded = t.loaded.clone();
         self.relocation_loaded_closure(&ordinary_active, &mut t.loaded);
         self.trap_loaded_closure(&ordinary_loaded, &mut t.loaded);
+        t.loaded.extend(self.light_required_regions());
         if let Some(source) = self.retrieval_source_region() {
             t.loaded.insert(source);
         }
@@ -1861,6 +1899,7 @@ impl Game {
             ai: BTreeMap::new(),
             navigation: BTreeMap::new(),
             explored_maps: BTreeMap::new(),
+            chart_history: Shared::new(BTreeMap::new()),
             items: BTreeMap::new(),
             displaced: BTreeSet::new(),
             impacts,
@@ -1877,6 +1916,9 @@ impl Game {
             }
             if let Some(navigation) = self.navigation.remove(&id) {
                 record.navigation.insert(id, (*navigation).clone());
+            }
+            if let Some(history) = self.chart_history.remove(&id) {
+                record.chart_history.insert(id, history);
             }
             if let Some(map) = self.explored_maps.remove(&id) {
                 record.explored_maps.insert(id, map);
@@ -2032,6 +2074,7 @@ impl Game {
             ai,
             navigation,
             explored_maps,
+            chart_history,
             items,
             displaced,
             impacts,
@@ -2054,6 +2097,11 @@ impl Game {
         self.navigation
             .extend(navigation.into_iter().map(|(id, n)| (id, Shared::new(n))));
         self.explored_maps.extend(explored_maps);
+        self.chart_history.extend(
+            chart_history
+                .iter()
+                .map(|(actor, owner)| (*actor, owner.clone())),
+        );
         if !items.is_empty() {
             self.items.extend(items);
         }
@@ -3517,6 +3565,7 @@ mod explored_map_tests {
 
     fn remembered() -> Shared<MapAppearance> {
         Shared::new(MapAppearance {
+            object_presentation: None,
             wall: true,
             material: "stale stone".into(),
             asset: None,
@@ -3900,5 +3949,50 @@ mod explored_map_tests {
         );
         assert_eq!(game, before);
         assert!(!game.explored_maps.contains_key(&actor));
+    }
+}
+
+#[cfg(test)]
+mod historical_chart_streaming_tests {
+    use super::*;
+    use crate::chart_history::{Attempt, AttemptStatus, Kind};
+    #[test]
+    fn frozen_owner_detach_sourcefree_record_roundtrip_and_attach_keeps_history() {
+        let (mut game, actor, root) = crate::chart_history::tests::fixture();
+        game.chart_history
+            .entry(actor)
+            .or_default()
+            .record_attempt(
+                Kind::Food,
+                Attempt {
+                    attempted_at: 0,
+                    status: AttemptStatus::Positive,
+                },
+                Some(root.clone()),
+            )
+            .unwrap();
+        game.freeze_region(RegionId(1)).unwrap();
+        let (id, record) = game.detach_record(RegionId(1)).unwrap();
+        assert!(game.chart_history(actor).is_none());
+        assert!(record.chart_history[&actor]
+            .get(Kind::Food)
+            .latest()
+            .unwrap()
+            .shares_storage(&root));
+        assert!(record
+            .historical_chart_authorities()
+            .all(|(world, _, _)| world.region(RegionId(1)).is_some()));
+        let encoded = serde_json::to_vec(&RegionRecordData::capture(&record)).unwrap();
+        let decoded: RegionRecordData = serde_json::from_slice(&encoded).unwrap();
+        let decoded = decoded.restore(game.content().clone()).unwrap();
+        let mut records = MemoryRecords::default();
+        records.put(id, Shared::new(decoded));
+        let identities = game.attach_record(RegionId(1), &mut records).unwrap();
+        game.check_arrival_states(&[(RegionId(1), identities)])
+            .unwrap();
+        let history = game.chart_history(actor).unwrap().get(Kind::Food);
+        assert_eq!(history.attempt().unwrap().status, AttemptStatus::Positive);
+        assert_eq!(history.latest().unwrap().chart(), root.chart());
+        assert_eq!(history.latest().unwrap().chart().rows().len(), 2);
     }
 }

@@ -756,6 +756,10 @@ fn next_timer(actor: &Actor) -> Option<u64> {
     creature
         .into_iter()
         .chain(
+            crate::hallucination_clock::next_in(actor)
+                .and_then(|interval| actor.active_since.checked_add(interval)),
+        )
+        .chain(
             actor
                 .awareness
                 .next_in(actor)
@@ -947,6 +951,7 @@ mod tests {
         let species = crate::test_creatures::unmodified_species("index_subject");
         let mut template = Template::new(TemplateId::new("capacity").unwrap(), 0);
         template.modifiers.push(Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Add {
                 stat: Stat::ResourceMax {

@@ -29,7 +29,7 @@ fn response(query: Value, entries: Value, total: u16, next: Option<u16>) -> Valu
         "page":{"basis":basis(),"revision":"5","query":query,"total":total,"next":next,"entries":entries}})
 }
 fn overview() -> Value {
-    json!({"kind":"overview","value":{
+    json!({"kind":"overview","value":{"strength_acquired":0,
         "starting_skills":[{"id":"athletics","name":"Athletics"},{"id":"lore","name":"Lore"}],
         "points":{"earned":"2","spent":"1","unspent":"1"},
         "growth":{"highest_applied_tier":"2","restorable_hit_dice":"0","restoration_blocker":null,"highest_earned_tier":"2","peak_threat":"2","held_xp":"0","earned_xp":"0","spent_xp":"0","next_threshold":"100","future":{"kind":"disabled"}},
@@ -38,7 +38,7 @@ fn overview() -> Value {
         "received_loss_remaining":"0","perceived_threat":false,"ready":true,"other_preparation":false,"respec":null}})
 }
 fn summary() -> Value {
-    json!({"kind":"summary","value":{
+    json!({"kind":"summary","value":{"strength_acquired":0,
         "proposal":proposal(),"resulting_build_epoch":"8","removed_count":1,"refund_count":1,"removed_condition_count":0,
         "health":{"current":"8","maximum":"10","injury":"2","dead":false},
         "health_recovery":{"period_ticks":"600","elapsed_ticks":"12","stopped":false},
@@ -179,6 +179,7 @@ fn owner_advancement_named_map_contract_rejects_ordered_positional_aliases() {
         (
             "/page/entries/0/value",
             vec![
+                "strength_acquired",
                 "proposal",
                 "resulting_build_epoch",
                 "removed_count",
@@ -226,6 +227,7 @@ fn owner_advancement_named_map_contract_rejects_ordered_positional_aliases() {
         (
             "/page/entries/0/value",
             vec![
+                "strength_acquired",
                 "starting_skills",
                 "points",
                 "timings",
@@ -1069,4 +1071,32 @@ fn intellect_expertise_pages_keep_the_shared_entry_and_full_frame_budgets() {
     assert!(
         matches!(decode_response(&oversized.to_string()), Err(tor_protocol::DecodeError::TooLarge { limit }) if limit == 32 * 1024)
     );
+}
+
+#[test]
+fn permanent_potion_strength_is_required_bounded_and_not_a_refund_row() {
+    for mut page in [
+        overview_page(),
+        response(
+            json!({"kind":"preview","basis":basis(),"proposal":proposal(),"section":"summary","offset":0}),
+            json!([summary()]),
+            1,
+            None,
+        ),
+    ] {
+        for count in [0, 3, 7] {
+            page["page"]["entries"][0]["value"]["strength_acquired"] = json!(count);
+            decode_response(&page.to_string()).unwrap();
+        }
+        for invalid in [json!(8), json!(-1), json!("1"), Value::Null] {
+            let mut bad = page.clone();
+            bad["page"]["entries"][0]["value"]["strength_acquired"] = invalid;
+            assert!(decode_response(&bad.to_string()).is_err());
+        }
+        page["page"]["entries"][0]["value"]
+            .as_object_mut()
+            .unwrap()
+            .remove("strength_acquired");
+        assert!(decode_response(&page.to_string()).is_err());
+    }
 }

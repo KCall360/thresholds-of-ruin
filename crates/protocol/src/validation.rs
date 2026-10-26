@@ -11,6 +11,8 @@ pub enum InvalidState {
     DuplicateActor,
     DuplicatePlace,
     InvalidItem,
+    InvalidPresentation,
+    InvalidChart,
     ConflictingItemLocation,
     InvalidCombat,
     InvalidMotion,
@@ -58,6 +60,9 @@ impl StateView {
     /// portal graph, or hidden state are needed to check these invariants.
     pub fn validate(&self) -> Result<(), InvalidState> {
         let o = &self.observation;
+        if crate::chart_pages::validate_summaries(&o.charts).is_err() {
+            return Err(InvalidState::InvalidChart);
+        }
         if o.linked_holds.len() > crate::MAX_LINKED_HOLDS
             || !unique(o.linked_holds.iter().map(|hold| hold.target))
             || o.linked_holds.iter().any(|hold| {
@@ -69,6 +74,13 @@ impl StateView {
             || (o.combat.as_ref().is_some_and(|combat| combat.dead) && !o.linked_holds.is_empty())
         {
             return Err(InvalidState::InvalidLinkedHold);
+        }
+        if o.visible_cells
+            .iter()
+            .any(|cell| !cell.valid_presentation())
+            || o.ground_items.iter().any(|item| !item.valid_presentation())
+        {
+            return Err(InvalidState::InvalidPresentation);
         }
         if !unique(o.visible_cells.iter().map(|cell| cell.position)) {
             return Err(InvalidState::DuplicateCell);
@@ -170,7 +182,12 @@ impl StateView {
             let inventory: std::collections::HashMap<_, _> =
                 o.inventory.iter().map(|item| (item.id, item)).collect();
             let mut equipped = HashSet::new();
-            if interactions.curse_blocked.len() > 4096
+            if interactions.refused.len() > 4096
+                || interactions
+                    .refused
+                    .iter()
+                    .any(|refusal| !matches!(refusal.action, crate::Action::Zap { .. }))
+                || interactions.curse_blocked.len() > 4096
                 || interactions.slots.len() > crate::MAX_EQUIPMENT_SLOTS
                 || interactions.slots.iter().any(|slot| !slot.valid())
                 || interactions.completed.iter().any(|action| {
@@ -181,6 +198,8 @@ impl StateView {
                             | crate::Action::Drink { .. }
                             | crate::Action::Eat { .. }
                             | crate::Action::Read { .. }
+                            | crate::Action::Ignite { .. }
+                            | crate::Action::Extinguish { .. }
                             | crate::Action::Zap { .. }
                     )
                 })
@@ -202,9 +221,24 @@ impl StateView {
                     let Some(item) = inventory.get(&interaction.item) else {
                         return true;
                     };
-                    (!item.identified
-                        && (interaction.known_equipment.is_some()
-                            || interaction.known_projectile_bonus.is_some()))
+                    (interaction.zappable != interaction.device_activation.is_some())
+                        || interaction.portable_light.as_ref().is_some_and(|light| {
+                            !light.valid()
+                                || item.class != crate::ItemClass::Tool
+                                || item.quantity != 1
+                                || interaction
+                                    .slot
+                                    .as_ref()
+                                    .is_none_or(|slot| slot.id != "held_light")
+                                || ((light.lit || light.ignitable || light.extinguishable)
+                                    && interaction.equipped_slot.is_none())
+                        })
+                        || (!item.identified
+                            && interaction.device_activation
+                                == Some(crate::DeviceActivation::SelfTarget))
+                        || (!item.identified
+                            && (interaction.known_equipment.is_some()
+                                || interaction.known_projectile_bonus.is_some()))
                         || interaction
                             .known_projectile_bonus
                             .as_ref()
@@ -254,6 +288,8 @@ impl StateView {
                         | crate::Action::Drink { item }
                         | crate::Action::Eat { item }
                         | crate::Action::Read { item }
+                        | crate::Action::Ignite { item }
+                        | crate::Action::Extinguish { item }
                         | crate::Action::Zap { item, .. } => !inventory.contains_key(item),
                         _ => true,
                     }

@@ -58,6 +58,7 @@ struct ItemDefinition {
     readable: Option<ReadableSpec>,
     ground_scare: Option<tor_simulation::control_scrolls::ScareSpec>,
     device: Option<DeviceSpec>,
+    held_light: Option<HeldLightSpec>,
     edible: Option<EdibleSpec>,
     supply: Option<String>,
     #[serde(default)]
@@ -118,6 +119,7 @@ fn normalize_catalog_views(
                     readable: item.readable,
                     ground_scare: item.ground_scare,
                     device: item.device,
+                    held_light: item.held_light,
                     edible: item.edible,
                     supply: item.supply,
                     magical: item.magical,

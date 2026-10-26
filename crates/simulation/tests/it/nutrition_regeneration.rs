@@ -30,12 +30,14 @@ fn creature(policy: Value) -> CreatureState {
 fn creature_with(policy: Value, edit: impl FnOnce(&mut Value)) -> CreatureState {
     let mut species = fixture::species();
     species.modifiers.push(Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Flag {
             flag: tor_simulation::content_ids::FlagId::new("magical").unwrap(),
         },
     });
     species.modifiers.push(Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Set {
             stat: Stat::HealthRecoveryPeriod,

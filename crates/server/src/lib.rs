@@ -6,6 +6,7 @@ mod advancement_adapter;
 mod advancement_page;
 #[cfg(test)]
 mod advancement_test_support;
+mod chart_view;
 pub mod creature_authoring;
 mod creature_view;
 mod developer;

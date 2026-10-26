@@ -155,7 +155,8 @@ A readable authors exactly one of a nonempty immediate `effects` list or an
 an `ability` reference and `initial_charges = { minimum = 3, maximum = 7 }`;
 its range is bounded to `u16`, permits zero for empty fixtures, and must be ordered.
 Devices are single non-stackable instances. Their ability must be a strict
-single-strike directional ray with no resource, finite-supply or cooldown cost;
+single-strike directional ray or checkless non-hostile self ability, with no
+resource, finite-supply or cooldown cost;
 item ownership supplies invocation authority without permanently granting it.
 Initial charges are sampled once when each instance is created, while remaining
 charges are mutable state and never part of the archetype or appearance mapping.
@@ -249,7 +250,7 @@ semantic hashes or validator evidence cannot bypass header validation.
 The optional fields include `themes`, `zones`, `archetypes`, `appearance_pools`,
 `creatures`, `factions`, `ai_profiles`, `arena`, `objective`, `assets`, `terrain`,
 `generation_recipes`, `generation_groups`, `procedural_worlds`, `stair_pairs`,
-`capabilities` and `floor_activation`. These organize content,
+`capabilities`, `floor_activation` and `spatial_scopes`. These organize content,
 run policy and structural generation; unknown fields are rejected. This is a
 navigation guide rather than a duplicate schema: [Manifest](../../crates/server/src/scenario_package.rs)
 and the complete [first-dungeon](../../scenarios/first-dungeon/scenario.toml) and
@@ -279,6 +280,54 @@ are explicit. Physical portal declarations connect authored regions; targeting a
 procedural family is rejected in version 1. Use `stair_pairs` for authored/generated
 composition. Validation constructs authored geometry and bounded procedural samples
 before checking their supported connections.
+
+### Canonical room and passage metadata
+
+An optional root `spatial_scopes` map describes authored room membership independently
+of storage regions, population and lighting. Omission is legal; `null`, duplicate
+keys, unknown fields and positional object encodings are rejected. Each scope has
+all four fields: `members`, `rooms`, `passages`, and `doorways`. For an otherwise
+valid open 7×5×2 chamber in region 1:
+
+```toml
+[spatial_scopes.study]
+members = [1]
+rooms = { "1" = [{ region = 1, min = [0, 0, 0], max = [6, 4, 1] }] }
+passages = []
+doorways = []
+```
+
+Room keys are numeric IDs local to the scope; each value is a union of inclusive
+3D boxes `{ region, min, max }`. Passage rows are inclusive x-runs
+`{ region, z, y, first_x, last_x }`. Doorway rows have those same fields plus
+`room`. Members are unique authored region IDs, canonicalized into sorted order. A declared member region has one primary
+scope, and every traversable member cell needs exactly one primary room or passage
+assignment. Same-room boxes may overlap; conflicting owners may not. Exterior
+doorways need a unique physically adjacent ordinary-room owner: several adjacent
+cells of that room are valid, but two different room owners are not.
+
+Authors do not supply passage IDs, illumination surfaces or a second portal graph.
+The compiler uses actual walls/openings and World portal transforms to derive
+passage components and room surfaces: room interiors, their six-axis solid faces,
+and source-owned door closure faces. Diagonal shell corners and arbitrary open
+neighbors are not room surfaces. A real solid face across a physical portal may
+be a surface-only dependency in another region; this grants neither primary
+membership nor actor activation. Door state and initial light do not repartition
+the immutable room topology. Generated scopes derive from the actual generation
+pass, preserving omitted-room and maze decisions rather than guessing rectangles.
+
+Reachable `room_light` effects require canonical metadata for authored regions;
+merely importing an unused Light definition does not enable the requirement or
+add loot. Validation follows actual item/grant sources and conservatively includes
+available future purchases, not just currently active modifiers. Source expansion
+and terrain work are bounded before allocation; encoded retained registries share
+the existing archive budget, with no special 64-member scope limit.
+
+A scope is installed when its first primary member is prepared, without waking
+other members. Surface dependencies load only as needed. Current and every
+retained historical root are checked against the saved canonical source and their
+own prepared members on restore, including whole-scope omissions. Saved spatial
+fields are required in the current format; reopening does not reread source files.
 
 ### Selected-character starting loadout
 
@@ -705,7 +754,7 @@ The manifest’s `ruleset = "rules.toml"` names a relative TOML file inside the
 package. Ordinary scenarios import the general rules rather than copy them:
 
 ```toml
-import = "interactions-v52"
+import = "interactions-v53"
 
 [[overrides]]
 op = "set"
@@ -777,13 +826,30 @@ Its exact value vocabulary is `normal`, `haste`, `slow`; other scopes and enum
 object/array spellings reject. [Source folding](creature-rules.md#derivation-and-sources)
 defines cancellation and rounding without modifying Speed.
 
-Abilities may select `invocation = "directional_contact_ray"` for bounded,
-non-bouncing first-creature delivery. It retains the directional ray's one
-target-owned opposed named-skill check and empty success branch, while permitting
-component damage and condition application/removal on failure. It stops even on
-a dodge or immunity. [Ray contracts](creature-rules.md#shared-ability-rules)
-define frozen source operands and live physical traversal. Device capabilities
-may reference either supported directional ray kind under their existing cost limits.
+Abilities may select `invocation = "directional_contact_ray"` for non-bouncing
+first-creature delivery. Existing bounded Sight rays retain one target-owned
+opposed named-skill check and empty success branch, permitting component damage
+and condition application/removal on failure. UntilObstruction reach instead
+follows physical geometry to the first body or obstruction; it supports the
+opposed Missile profile or the checkless Cancellation profile. A dodge or
+immunity still stops delivery. [Ray contracts](creature-rules.md#shared-ability-rules)
+define exact source restrictions, frozen operands and live physical traversal.
+Device capabilities retain their existing cost limits.
+
+Cancellation metadata is explicit and defaults false in authored source. The
+Rogue package marks its special ability definitions and individual special
+contributors; it does not modify the shared base rules or blanket-tag physical
+traits. Package-local theft ability overrides leave the independent
+`theft_vanish` contributor and owned talent intact.
+
+When Cancellation is reachable from enabled scenario sources, validation rejects
+reachable conditions that combine invisibility with unrelated behavior, including
+invisibility implied by flags. This lets cancellation remove a current pure
+invisibility condition without erasing an unrelated modifier or restriction.
+Unused imported definitions do not enable this policy, and Cancellation alone
+does not require room/passage spatial metadata. Existing current/future grants,
+items, creatures, traps and rider effects participate in the source closure;
+retained packages are revalidated on source-free restoration.
 
 Consumables use the same effect vocabulary as abilities. Fixed healing is
 `{ kind = "heal", amount = { kind = "fixed", amount = 5 } }`. Damage uses a

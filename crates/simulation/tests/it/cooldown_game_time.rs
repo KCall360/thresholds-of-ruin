@@ -422,12 +422,14 @@ fn rebuild_and_grant_loss_keep_the_settled_cooldown_and_original_deadline() {
         .modifiers
         .extend([
             Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::GrantAbility {
                     ability: bolt.clone(),
                 },
             },
             Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Add {
                     stat: Stat::Attribute {
@@ -503,6 +505,7 @@ fn lethal_condition_expiry_stops_cooldowns_at_the_game_death_boundary() {
         .unwrap()
         .modifiers
         .push(Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Add {
                 stat: Stat::Health,

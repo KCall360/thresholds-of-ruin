@@ -111,6 +111,7 @@ pub(super) fn equipment_sources(
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CreatureState {
+    cancelled: bool,
     build: Shared<CreatureBuild>,
     build_epoch: BuildEpoch,
     earned_progress: crate::earned_growth::EarnedProgress,
@@ -162,7 +163,13 @@ impl CreatureState {
             super::derive::PermanentCreature::compile(&build).map_err(CreatureStateError::Build)?,
         );
         let derived = permanent
-            .fold(&build, &BTreeMap::new(), &[], RestorableLosses::default())
+            .fold(
+                &build,
+                &BTreeMap::new(),
+                &[],
+                RestorableLosses::default(),
+                false,
+            )
             .map_err(CreatureStateError::Build)?;
         let health = Health::new(derived.maximum_health);
         let health_recovery = HealthRecovery::new(derived.quiet_health_recovery_period);
@@ -176,6 +183,7 @@ impl CreatureState {
             build_epoch: BuildEpoch::INITIAL,
             earned_progress,
             restorable_losses: RestorableLosses::default(),
+            cancelled: false,
             baseline: Shared::new(derived.clone()),
             derived: Shared::new(derived),
             extra_sources: BTreeMap::new(),
@@ -214,6 +222,7 @@ impl CreatureState {
             dead,
             conditions,
             equipment,
+            false,
             |_, _| Ok(costs),
         )
     }
@@ -229,6 +238,7 @@ impl CreatureState {
         dead: bool,
         conditions: ConditionState,
         equipment: Vec<EquipmentSource>,
+        cancelled: bool,
         restore_costs: impl FnOnce(
             crate::resources::ResourceMaxima,
             &crate::rules::Ruleset,
@@ -245,7 +255,13 @@ impl CreatureState {
             condition_sources(&build, &extra_sources, &ConditionState::default());
         let baseline = Shared::new(
             permanent
-                .fold(&build, &baseline_sources, &equipment, restorable_losses)
+                .fold(
+                    &build,
+                    &baseline_sources,
+                    &equipment,
+                    restorable_losses,
+                    cancelled,
+                )
                 .map_err(CreatureStateError::Build)?,
         );
         let extra_sources = condition_sources(&build, &extra_sources, &conditions);
@@ -254,7 +270,13 @@ impl CreatureState {
         } else {
             Shared::new(
                 permanent
-                    .fold(&build, &extra_sources, &equipment, restorable_losses)
+                    .fold(
+                        &build,
+                        &extra_sources,
+                        &equipment,
+                        restorable_losses,
+                        cancelled,
+                    )
                     .map_err(CreatureStateError::Build)?,
             )
         };
@@ -284,6 +306,7 @@ impl CreatureState {
             build_epoch,
             earned_progress,
             restorable_losses,
+            cancelled,
             derived,
             extra_sources,
             equipment,
@@ -299,6 +322,75 @@ impl CreatureState {
             conditions,
             cooldowns: Cooldowns::default(),
         })
+    }
+
+    pub fn cancelled(&self) -> bool {
+        self.cancelled
+    }
+
+    /// Exact candidate refold; caller publishes this through normal lifecycle.
+    /// Ownership, HD and purchases remain; only pure current invisibility
+    /// conditions are removed, without a veto on later independent applications.
+    pub(crate) fn cancel_specials(&mut self) -> Result<bool, CreatureStateError> {
+        let mut invisible = std::collections::BTreeSet::new();
+        for entry in self.conditions.instances() {
+            match self
+                .build
+                .ruleset()
+                .cancellation_invisibility_shape(&entry.condition)
+                .map_err(|_| CreatureStateError::Inconsistent)?
+            {
+                crate::rules::CancellationInvisibilityShape::Absent => {}
+                crate::rules::CancellationInvisibilityShape::Pure => {
+                    invisible.insert(entry.condition.clone());
+                }
+                crate::rules::CancellationInvisibilityShape::Mixed => {
+                    return Err(CreatureStateError::Inconsistent)
+                }
+            }
+        }
+        if self.cancelled && invisible.is_empty() {
+            return Ok(false);
+        }
+        let mut candidate = self.clone();
+        candidate.cancelled = true;
+        for id in invisible {
+            candidate.conditions.remove(&id);
+        }
+        let baseline_sources = condition_sources(
+            &candidate.build,
+            &candidate.extra_sources,
+            &ConditionState::default(),
+        );
+        let baseline = candidate
+            .permanent
+            .fold(
+                &candidate.build,
+                &baseline_sources,
+                &candidate.equipment,
+                candidate.restorable_losses,
+                true,
+            )
+            .map_err(CreatureStateError::Build)?;
+        candidate.extra_sources = condition_sources(
+            &candidate.build,
+            &candidate.extra_sources,
+            &candidate.conditions,
+        );
+        let derived = candidate
+            .permanent
+            .fold(
+                &candidate.build,
+                &candidate.extra_sources,
+                &candidate.equipment,
+                candidate.restorable_losses,
+                true,
+            )
+            .map_err(CreatureStateError::Build)?;
+        candidate.baseline = Shared::new(baseline);
+        candidate.replace_derived(derived);
+        *self = candidate;
+        Ok(true)
     }
 
     pub fn build(&self) -> &CreatureBuild {
@@ -534,6 +626,7 @@ impl CreatureState {
                 &baseline_sources,
                 &candidate.equipment,
                 losses,
+                self.cancelled,
             )
             .map_err(CreatureStateError::Build)?;
         let derived = if candidate.conditions.is_empty() {
@@ -548,6 +641,7 @@ impl CreatureState {
                     &candidate.extra_sources,
                     &candidate.equipment,
                     losses,
+                    self.cancelled,
                 )
                 .map_err(CreatureStateError::Build)?
         };
@@ -867,6 +961,42 @@ impl CreatureState {
             .map_err(CreatureStateError::Growth)
     }
 
+    /// A dose restores one actual deficit OR acquires one permanent point.
+    pub(crate) fn stage_gain_strength(
+        &mut self,
+    ) -> Result<crate::abilities::StrengthGain, CreatureStateError> {
+        use crate::abilities::StrengthGain;
+        use crate::attributes::Attribute;
+        if self.restorable_losses.attributes.strength > 0 {
+            self.restore_attribute(Attribute::Strength, 1)?;
+            return Ok(StrengthGain::Restored);
+        }
+        let mut build = (*self.build).clone();
+        if !build
+            .acquire_strength()
+            .map_err(CreatureStateError::Build)?
+        {
+            return Ok(StrengthGain::Unchanged);
+        }
+        self.stage_rebuild(build)?;
+        Ok(StrengthGain::Acquired)
+    }
+
+    /// Fund one additional ordinary obligation beyond all currently banked XP.
+    /// Actual HD application remains the ordinary owning Game finalizer's job.
+    pub(crate) fn stage_raise_level(&mut self) -> Result<u64, CreatureStateError> {
+        let current = self.build.ledger().total_hd();
+        let policy = &self.build.ruleset().document().growth;
+        let amount = self
+            .earned_progress
+            .next_unfunded_credit(current, policy)
+            .map_err(CreatureStateError::Growth)?;
+        self.earned_progress
+            .award_wide(amount, current, policy)
+            .map_err(CreatureStateError::Growth)?;
+        Ok(amount)
+    }
+
     fn growth_pending(&self) -> Result<bool, CreatureStateError> {
         // Temporary actual-row admission guard. Funded scalar projection is
         // independent of this limit; archive/disclosure widening will remove it.
@@ -1083,7 +1213,13 @@ impl CreatureState {
         );
         let sources = condition_sources(&build, &self.extra_sources, &ConditionState::default());
         let baseline = permanent
-            .fold(&build, &sources, &self.equipment, self.restorable_losses)
+            .fold(
+                &build,
+                &sources,
+                &self.equipment,
+                self.restorable_losses,
+                self.cancelled,
+            )
             .map_err(CreatureStateError::Build)?;
         let mut earned_progress = self.earned_progress.clone();
         let threat = permanent.threat_tier();
@@ -1151,6 +1287,7 @@ impl CreatureState {
                 &baseline_sources,
                 &equipment,
                 self.restorable_losses,
+                self.cancelled,
             )
             .map_err(CreatureStateError::Build)?;
         self.extra_sources = sources;
@@ -1192,6 +1329,7 @@ impl CreatureState {
                     &self.extra_sources,
                     &self.equipment,
                     self.restorable_losses,
+                    self.cancelled,
                 )
                 .map_err(CreatureStateError::Build)?;
             if !self
@@ -1236,6 +1374,7 @@ impl CreatureState {
                 &self.extra_sources,
                 &self.equipment,
                 self.restorable_losses,
+                self.cancelled,
             ) {
                 Ok(derived) => {
                     if !self
@@ -1333,6 +1472,25 @@ impl CreatureState {
             canceled,
         }
     }
+    /// Direct life loss shares injury/death cleanup and advancement bookkeeping,
+    /// while the lifecycle publication boundary owns its once-per-bundle reset.
+    pub(crate) fn direct_loss_without_reset(&mut self, amount: u64) -> u64 {
+        let alive = !self.health.dead();
+        let applied = self.health.direct_loss(amount);
+        if applied > 0 {
+            self.received_health_loss_remaining = self
+                .build
+                .ruleset()
+                .document()
+                .advancement
+                .received_loss_interval;
+        }
+        if alive && self.health.dead() {
+            let _ = self.clear_dead_state();
+        }
+        applied
+    }
+
     pub fn restore_resource(&mut self, resource: Resource, amount: u32) -> u32 {
         if self.health.dead() {
             0
@@ -1464,6 +1622,7 @@ impl CreatureState {
                     &sources,
                     &self.equipment,
                     self.restorable_losses,
+                    self.cancelled,
                 )
                 .map_err(|_| ConditionError::InvalidModifiers)?;
             self.conditions = conditions;
@@ -1536,6 +1695,7 @@ impl CreatureState {
                 &sources,
                 &self.equipment,
                 self.restorable_losses,
+                self.cancelled,
             )
             .map_err(|_| ConditionError::InvalidModifiers)?;
         self.conditions = conditions;
@@ -1566,6 +1726,7 @@ impl CreatureState {
                     &sources,
                     &self.equipment,
                     self.restorable_losses,
+                    self.cancelled,
                 )
                 .map_err(|_| ConditionError::InvalidModifiers)?;
             self.conditions = conditions;
@@ -1890,6 +2051,7 @@ mod compiled_tests {
                     )),
                     modifiers: vec![
                         Modifier {
+                            cancellable: false,
                             scope: Scope::Always,
                             op: if set {
                                 ModifierOp::Set {
@@ -1904,6 +2066,7 @@ mod compiled_tests {
                             },
                         },
                         Modifier {
+                            cancellable: false,
                             scope: Scope::Always,
                             op: ModifierOp::Add {
                                 stat: Stat::Attribute {

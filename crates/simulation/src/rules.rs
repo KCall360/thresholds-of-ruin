@@ -1,8 +1,12 @@
 //! Validated immutable content. TOML parsing and content hashing belong to the host.
 use crate::HdCount;
 mod advancement;
+mod cancellation;
+pub(crate) use cancellation::expand_cancellable_source;
+pub use cancellation::CancellationInvisibilityShape;
 mod forms;
 mod growth;
+mod hallucination;
 mod interaction;
 mod strikes;
 pub use advancement::AdvancementPolicy;
@@ -623,6 +627,8 @@ pub enum Scope {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Modifier {
+    #[serde(default)]
+    pub cancellable: bool,
     pub scope: Scope,
     pub op: ModifierOp,
 }
@@ -635,6 +641,8 @@ pub struct AbilityTagDef {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AbilityDef {
+    #[serde(default)]
+    pub cancellable: bool,
     pub interaction: Interaction,
     #[serde(default)]
     pub invocation: crate::abilities::InvocationKind,
@@ -662,6 +670,8 @@ impl<'de> serde::Deserialize<'de> for AbilityDef {
         #[derive(serde::Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Fields {
+            #[serde(default)]
+            cancellable: bool,
             interaction: Interaction,
             id: AbilityId,
             #[serde(default)]
@@ -683,6 +693,7 @@ impl<'de> serde::Deserialize<'de> for AbilityDef {
         }
         let fields: Fields = crate::bounded::named_map(deserializer)?;
         Ok(Self {
+            cancellable: fields.cancellable,
             interaction: fields.interaction,
             invocation: fields.invocation,
             id: fields.id,
@@ -838,6 +849,8 @@ pub enum Reach {
     MutualSight {
         range: u16,
     },
+    /// Complete physical contact flight; independent of sight radius.
+    UntilObstruction,
     SelfOnly,
     SelfOrAlly {
         range: AllyRange,
@@ -852,6 +865,7 @@ impl<'de> Deserialize<'de> for Reach {
             Projectile {},
             Sight { range: u16 },
             MutualSight { range: u16 },
+            UntilObstruction {},
             SelfOnly,
             SelfOrAlly { range: AllyRange },
         }
@@ -860,6 +874,7 @@ impl<'de> Deserialize<'de> for Reach {
             Fields::Projectile {} => Self::Projectile,
             Fields::Sight { range } => Self::Sight { range },
             Fields::MutualSight { range } => Self::MutualSight { range },
+            Fields::UntilObstruction {} => Self::UntilObstruction,
             Fields::SelfOnly => Self::SelfOnly,
             Fields::SelfOrAlly { range } => Self::SelfOrAlly { range },
         })
@@ -1050,6 +1065,22 @@ pub enum Effect {
     RestoreHitDie,
     TeleportRandom,
     TeleportToRayOrigin,
+    RoomLight,
+    DetectMonsters {
+        condition: ConditionId,
+    },
+    DetectFood,
+    MapTopology,
+    DetectMagic,
+    DrainLife,
+    GainStrength,
+    RaiseLevel,
+    /// Target-only permanent special suppression and current concealment cleanup.
+    CancelSpecials,
+    HasteDose {
+        condition: ConditionId,
+        rest: ConditionId,
+    },
     ArrestDescent,
     StepSelfOneCell,
     PushTargetOneCell {
@@ -1118,7 +1149,13 @@ pub enum Effect {
 impl Effect {
     pub fn recipient(&self) -> EffectRecipient {
         match self {
-            Self::AlterEquipment { .. }
+            Self::RoomLight
+            | Self::DetectMonsters { .. }
+            | Self::DetectFood
+            | Self::MapTopology
+            | Self::DetectMagic
+            | Self::DrainLife
+            | Self::AlterEquipment { .. }
             | Self::SearchAdjacentGuises
             | Self::ObservePublicPlan
             | Self::ApplyQualifiedConditionToSource { .. } => EffectRecipient::Source,
@@ -1156,6 +1193,21 @@ impl<'de> Deserialize<'de> for Effect {
             RestoreHitDie {},
             TeleportRandom {},
             TeleportToRayOrigin {},
+            RoomLight {},
+            DetectMonsters {
+                condition: ConditionId,
+            },
+            DetectFood {},
+            MapTopology {},
+            DetectMagic {},
+            DrainLife {},
+            GainStrength {},
+            RaiseLevel {},
+            CancelSpecials {},
+            HasteDose {
+                condition: ConditionId,
+                rest: ConditionId,
+            },
             ArrestDescent {},
             StepSelfOneCell {},
             PushTargetOneCell {
@@ -1245,6 +1297,16 @@ impl<'de> Deserialize<'de> for Effect {
             Fields::RestoreHitDie {} => Self::RestoreHitDie,
             Fields::TeleportRandom {} => Self::TeleportRandom,
             Fields::TeleportToRayOrigin {} => Self::TeleportToRayOrigin,
+            Fields::RoomLight {} => Self::RoomLight,
+            Fields::DetectMonsters { condition } => Self::DetectMonsters { condition },
+            Fields::DetectFood {} => Self::DetectFood,
+            Fields::MapTopology {} => Self::MapTopology,
+            Fields::DetectMagic {} => Self::DetectMagic,
+            Fields::DrainLife {} => Self::DrainLife,
+            Fields::GainStrength {} => Self::GainStrength,
+            Fields::RaiseLevel {} => Self::RaiseLevel,
+            Fields::CancelSpecials {} => Self::CancelSpecials,
+            Fields::HasteDose { condition, rest } => Self::HasteDose { condition, rest },
             Fields::ArrestDescent {} => Self::ArrestDescent,
             Fields::StepSelfOneCell {} => Self::StepSelfOneCell,
             Fields::PushTargetOneCell { direction } => Self::PushTargetOneCell { direction },
@@ -1304,6 +1366,10 @@ impl<'de> Deserialize<'de> for Effect {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConditionDef {
+    /// Pure, temporary current-floor monster-chart capability.
+    pub detecting_monsters: bool,
+    /// Opt-in pure, target-wide temporary visual disorientation.
+    pub hallucinating: bool,
     pub id: ConditionId,
     pub family: ConditionFamilyId,
     pub lifecycle: ConditionLifecycle,
@@ -1342,6 +1408,10 @@ impl<'de> Deserialize<'de> for ConditionDef {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Fields {
+            #[serde(default)]
+            detecting_monsters: bool,
+            #[serde(default)]
+            hallucinating: bool,
             id: ConditionId,
             family: ConditionFamilyId,
             lifecycle: ConditionLifecycle,
@@ -1357,6 +1427,8 @@ impl<'de> Deserialize<'de> for ConditionDef {
         }
         let fields: Fields = crate::bounded::named_map(deserializer)?;
         Ok(Self {
+            detecting_monsters: fields.detecting_monsters,
+            hallucinating: fields.hallucinating,
             id: fields.id,
             family: fields.family,
             lifecycle: fields.lifecycle,
@@ -1401,6 +1473,8 @@ impl<'de> Deserialize<'de> for ConditionTicks {
 pub enum ConditionTiming {
     /// No clock advances this condition; only an explicit ending removes it.
     UntilRemoved,
+    /// Explicit Timed+Keep opt-in: finite actor-active removal or no expiry.
+    ActorActiveOrUntilRemoved,
     ActorActive {
         on_expiry: ConditionExpiry,
     },
@@ -1411,9 +1485,16 @@ impl ConditionTiming {
             on_expiry: ConditionExpiry::Remove,
         }
     }
+    pub const fn permits_finite(self) -> bool {
+        !matches!(self, Self::UntilRemoved)
+    }
+    pub const fn permits_persistent(self) -> bool {
+        matches!(self, Self::UntilRemoved | Self::ActorActiveOrUntilRemoved)
+    }
     pub(crate) fn protection(self) -> Option<ConditionTicks> {
         match self {
             Self::UntilRemoved
+            | Self::ActorActiveOrUntilRemoved
             | Self::ActorActive {
                 on_expiry: ConditionExpiry::Remove,
             } => None,
@@ -1429,10 +1510,12 @@ impl<'de> Deserialize<'de> for ConditionTiming {
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
             UntilRemoved {},
+            ActorActiveOrUntilRemoved {},
             ActorActive { on_expiry: ConditionExpiry },
         }
         Ok(match crate::bounded::named_map(deserializer)? {
             Fields::UntilRemoved {} => Self::UntilRemoved,
+            Fields::ActorActiveOrUntilRemoved {} => Self::ActorActiveOrUntilRemoved,
             Fields::ActorActive { on_expiry } => Self::ActorActive { on_expiry },
         })
     }
@@ -1801,10 +1884,13 @@ impl Ruleset {
         let subtypes = catalog!(subtypes);
         let classes = catalog!(classes);
         let conditions = catalog!(conditions);
+        hallucination::validate_hallucination_conditions(&document.conditions)?;
+        crate::detection_lifecycle::validate_conditions(&document.conditions)?;
+        let condition_definitions = document.conditions.clone();
         let persistent_conditions = document
             .conditions
             .iter()
-            .filter(|condition| condition.timing == ConditionTiming::UntilRemoved)
+            .filter(|condition| condition.timing.permits_persistent())
             .map(|condition| condition.id.clone())
             .collect();
         let qualified_conditions = document
@@ -1837,6 +1923,7 @@ impl Ruleset {
             talents: &talents,
             classes: &classes,
             conditions: &conditions,
+            condition_definitions: &condition_definitions,
             qualified_conditions: &qualified_conditions,
             persistent_conditions: &persistent_conditions,
             descriptors: &descriptors,
@@ -2009,7 +2096,7 @@ impl Ruleset {
         for d in &mut document.conditions {
             d.family.intern(&mut pool);
             bound(
-                d.timing != ConditionTiming::UntilRemoved
+                !d.timing.permits_persistent()
                     || (d.lifecycle == ConditionLifecycle::Timed && d.stacking == Stacking::Keep),
                 "persistent_condition_shape",
             )?;
@@ -2043,7 +2130,8 @@ impl Ruleset {
                                     scope: Scope::Always,
                                     op: ModifierOp::Locomotion {
                                         value: crate::locomotion::LocomotionValue::Confused { .. }
-                                    }
+                                    },
+                                    ..
                                 }
                             )
                         })),
@@ -2111,6 +2199,119 @@ impl Ruleset {
         )?;
         for d in &mut document.abilities {
             bound(d.spatial_shape_valid(), "ability_spatial_shape")?;
+            let detects = match &d.strikes {
+                StrikeSource::Authored { strikes } => strikes
+                    .iter()
+                    .flat_map(|strike| {
+                        strike
+                            .on_success
+                            .iter()
+                            .chain(&strike.on_failure)
+                            .chain(strike.riders.iter().flat_map(|rider| &rider.effects))
+                    })
+                    .any(crate::detection_lifecycle::is_effect),
+                StrikeSource::NaturalMelee { additional_riders } => additional_riders
+                    .iter()
+                    .flat_map(|rider| &rider.effects)
+                    .any(crate::detection_lifecycle::is_effect),
+                StrikeSource::SelectedMelee | StrikeSource::Projectile { .. } => false,
+            };
+            bound(
+                !detects
+                    || (d.invocation == crate::abilities::InvocationKind::ActorTarget
+                        && d.reach == Reach::SelfOnly
+                        && d.interaction == Interaction::NonHostile
+                        && matches!(&d.strikes, StrikeSource::Authored { strikes }
+                    if matches!(strikes.as_slice(), [StrikeDef { offset:0, unlock:None, check:None,
+                        on_success, on_failure, riders, .. }] if on_success.len() == 1
+                            && on_success.iter().all(crate::detection_lifecycle::is_effect)
+                            && on_failure.is_empty() && riders.is_empty()))),
+                "detection_self_only",
+            )?;
+            let lights = match &d.strikes {
+                StrikeSource::Authored { strikes } => strikes.iter().any(|strike| {
+                    strike
+                        .on_success
+                        .iter()
+                        .chain(&strike.on_failure)
+                        .chain(strike.riders.iter().flat_map(|rider| &rider.effects))
+                        .any(|effect| matches!(effect, Effect::RoomLight))
+                }),
+                StrikeSource::NaturalMelee { additional_riders } => additional_riders
+                    .iter()
+                    .flat_map(|rider| &rider.effects)
+                    .any(|effect| matches!(effect, Effect::RoomLight)),
+                StrikeSource::SelectedMelee | StrikeSource::Projectile { .. } => false,
+            };
+            bound(
+                !lights
+                    || (d.invocation == crate::abilities::InvocationKind::ActorTarget
+                        && d.reach == Reach::SelfOnly
+                        && d.interaction == Interaction::NonHostile),
+                "room_light_self_only",
+            )?;
+            bound(
+                !lights
+                    || matches!(&d.strikes, StrikeSource::Authored { strikes }
+                if matches!(strikes.as_slice(), [StrikeDef { offset: 0, unlock: None, check: None, on_failure, riders, .. }]
+                    if on_failure.is_empty() && riders.is_empty())),
+                "room_light_checkless",
+            )?;
+            let drains = match &d.strikes {
+                StrikeSource::Authored { strikes } => strikes
+                    .iter()
+                    .flat_map(|s| {
+                        s.on_success
+                            .iter()
+                            .chain(&s.on_failure)
+                            .chain(s.riders.iter().flat_map(|r| &r.effects))
+                    })
+                    .any(|effect| matches!(effect, Effect::DrainLife)),
+                StrikeSource::NaturalMelee { additional_riders } => additional_riders
+                    .iter()
+                    .flat_map(|r| &r.effects)
+                    .any(|effect| matches!(effect, Effect::DrainLife)),
+                StrikeSource::SelectedMelee | StrikeSource::Projectile { .. } => false,
+            };
+            bound(
+                !drains
+                    || (d.invocation == crate::abilities::InvocationKind::ActorTarget
+                        && d.reach == Reach::SelfOnly
+                        && d.interaction == Interaction::NonHostile
+                        && matches!(&d.strikes, StrikeSource::Authored { strikes }
+                    if matches!(strikes.as_slice(), [StrikeDef { offset:0, unlock:None, check:None, on_success, on_failure, riders, .. }]
+                        if matches!(on_success.as_slice(), [Effect::DrainLife]) && on_failure.is_empty() && riders.is_empty()))),
+                "drain_life_self_only",
+            )?;
+            // Haste overdose is a self-consumption consequence, not a route
+            // around direct-harm validation for targeted restrictions. Keep the
+            // dose in the existing ordered checkless authored self payload.
+            let haste_dose = match &d.strikes {
+                StrikeSource::Authored { strikes } => strikes
+                    .iter()
+                    .flat_map(|s| {
+                        s.on_success
+                            .iter()
+                            .chain(&s.on_failure)
+                            .chain(s.riders.iter().flat_map(|r| &r.effects))
+                    })
+                    .any(|effect| matches!(effect, Effect::HasteDose { .. })),
+                StrikeSource::NaturalMelee { additional_riders } => additional_riders
+                    .iter()
+                    .flat_map(|r| &r.effects)
+                    .any(|effect| matches!(effect, Effect::HasteDose { .. })),
+                StrikeSource::SelectedMelee | StrikeSource::Projectile { .. } => false,
+            };
+            bound(
+                !haste_dose
+                    || (d.invocation == crate::abilities::InvocationKind::ActorTarget
+                        && d.reach == Reach::SelfOnly
+                        && d.interaction == Interaction::NonHostile
+                        && matches!(&d.strikes, StrikeSource::Authored { strikes }
+                    if matches!(strikes.as_slice(), [StrikeDef { offset:0, unlock:None, check:None, on_success, on_failure, riders, .. }]
+                        if on_success.iter().any(|effect| matches!(effect, Effect::HasteDose { .. })) && on_failure.is_empty() && riders.is_empty()))),
+                "haste_dose_self_only",
+            )?;
             let searches = match &d.strikes {
                 StrikeSource::Authored { strikes } => strikes.iter().any(|strike| {
                     strike
@@ -2161,6 +2362,33 @@ impl Ruleset {
                     "timing_adjustment",
                 )?;
             }
+            bound(
+                d.reach != Reach::UntilObstruction
+                    || (d.invocation == crate::abilities::InvocationKind::DirectionalContactRay
+                        && crate::abilities::ray_definition_shape_valid(d)),
+                "until_obstruction_delivery",
+            )?;
+            let cancellation = match &d.strikes {
+                StrikeSource::Authored { strikes } => strikes.iter().any(|strike| {
+                    strike
+                        .on_success
+                        .iter()
+                        .chain(&strike.on_failure)
+                        .chain(strike.riders.iter().flat_map(|rider| &rider.effects))
+                        .any(|effect| matches!(effect, Effect::CancelSpecials))
+                }),
+                StrikeSource::NaturalMelee { additional_riders } => additional_riders
+                    .iter()
+                    .flat_map(|rider| &rider.effects)
+                    .any(|effect| matches!(effect, Effect::CancelSpecials)),
+                _ => false,
+            };
+            bound(
+                !cancellation
+                    || (d.reach == Reach::UntilObstruction
+                        && crate::abilities::ray_definition_shape_valid(d)),
+                "cancellation_contact_source",
+            )?;
             bound(
                 d.tags.len() <= crate::limits::TAGS_PER_ABILITY,
                 "ability_tags",
@@ -2454,6 +2682,7 @@ struct References<'a> {
     talents: &'a BTreeSet<TalentId>,
     classes: &'a BTreeSet<ClassId>,
     conditions: &'a BTreeSet<ConditionId>,
+    condition_definitions: &'a [ConditionDef],
     qualified_conditions: &'a BTreeSet<ConditionId>,
     persistent_conditions: &'a BTreeSet<ConditionId>,
     descriptors: &'a BTreeSet<DescriptorId>,
@@ -2732,6 +2961,36 @@ impl References<'_> {
                         field: "heal_per_hit_die".into(),
                     })?;
                 }
+                Effect::DetectMonsters { condition } => {
+                    reference(self.conditions, condition, "monster_detection_condition")?;
+                    bound(
+                        self.condition_definitions.iter().any(|definition| {
+                            &definition.id == condition && definition.detecting_monsters
+                        }),
+                        "monster_detection_condition",
+                    )?;
+                    condition.intern(pool);
+                }
+                Effect::HasteDose { condition, rest } => {
+                    reference(self.conditions, condition, "haste_condition")?;
+                    reference(self.conditions, rest, "rest_condition")?;
+                    bound(
+                        self.condition_definitions
+                            .iter()
+                            .find(|definition| &definition.id == condition)
+                            .zip(
+                                self.condition_definitions
+                                    .iter()
+                                    .find(|definition| &definition.id == rest),
+                            )
+                            .is_some_and(|(haste, rest)| {
+                                crate::abilities::haste_dose_conditions_valid(haste, rest)
+                            }),
+                        "haste_dose_conditions",
+                    )?;
+                    condition.intern(pool);
+                    rest.intern(pool);
+                }
                 Effect::ApplyConditionForTurns {
                     condition,
                     duration,
@@ -2739,7 +2998,9 @@ impl References<'_> {
                     reference(self.conditions, condition, "condition")?;
                     condition.intern(pool);
                     bound(
-                        !self.persistent_conditions.contains(condition),
+                        self.condition_definitions.iter().any(|definition| {
+                            &definition.id == condition && definition.timing.permits_finite()
+                        }),
                         "condition_timing",
                     )?;
                     bound(positive_duration_shape(duration), "condition_duration")?;
@@ -2785,7 +3046,9 @@ impl References<'_> {
                     reference(self.conditions, condition, "condition")?;
                     condition.intern(pool);
                     bound(
-                        !self.persistent_conditions.contains(condition),
+                        self.condition_definitions.iter().any(|definition| {
+                            &definition.id == condition && definition.timing.permits_finite()
+                        }),
                         "condition_timing",
                     )?;
                     bound(
@@ -2799,6 +3062,14 @@ impl References<'_> {
                 | Effect::RestoreHitDie
                 | Effect::TeleportRandom
                 | Effect::TeleportToRayOrigin
+                | Effect::RoomLight
+                | Effect::DetectFood
+                | Effect::MapTopology
+                | Effect::DetectMagic
+                | Effect::DrainLife
+                | Effect::GainStrength
+                | Effect::RaiseLevel
+                | Effect::CancelSpecials
                 | Effect::ArrestDescent => {}
             }
             if let Effect::ApplyQualifiedConditionToSource {
@@ -3129,7 +3400,7 @@ impl Ruleset {
             .document
             .conditions
             .iter()
-            .filter(|condition| condition.timing == ConditionTiming::UntilRemoved)
+            .filter(|condition| condition.timing.permits_persistent())
             .map(|condition| condition.id.clone())
             .collect();
         let qualified_conditions = self
@@ -3160,6 +3431,7 @@ impl Ruleset {
             talents: &talents,
             classes: &classes,
             conditions: &conditions,
+            condition_definitions: &self.document.conditions,
             qualified_conditions: &qualified_conditions,
             persistent_conditions: &persistent_conditions,
             descriptors: &descriptors,
@@ -3270,6 +3542,7 @@ impl Ruleset {
         Ok(count)
     }
     pub fn validate_effects(&self, effects: &[Effect]) -> Result<(), RulesetError> {
+        crate::detection_lifecycle::validate_sole_effects(effects)?;
         bound(
             !effects
                 .iter()
@@ -3287,7 +3560,7 @@ impl Ruleset {
             .document
             .conditions
             .iter()
-            .filter(|condition| condition.timing == ConditionTiming::UntilRemoved)
+            .filter(|condition| condition.timing.permits_persistent())
             .map(|condition| condition.id.clone())
             .collect();
         let qualified_conditions = self
@@ -3318,6 +3591,7 @@ impl Ruleset {
             talents: &talents,
             classes: &classes,
             conditions: &conditions,
+            condition_definitions: &self.document.conditions,
             qualified_conditions: &qualified_conditions,
             persistent_conditions: &persistent_conditions,
             descriptors: &descriptors,
@@ -3338,7 +3612,7 @@ impl Ruleset {
             .document
             .conditions
             .iter()
-            .filter(|condition| condition.timing == ConditionTiming::UntilRemoved)
+            .filter(|condition| condition.timing.permits_persistent())
             .map(|condition| condition.id.clone())
             .collect();
         let qualified_conditions = self
@@ -3369,6 +3643,7 @@ impl Ruleset {
             talents: &talents,
             classes: &classes,
             conditions: &conditions,
+            condition_definitions: &self.document.conditions,
             qualified_conditions: &qualified_conditions,
             persistent_conditions: &persistent_conditions,
             descriptors: &descriptors,
@@ -3428,6 +3703,7 @@ impl Effect {
             Self::CorrodeArmor { amount, .. } => {
                 (1..=crate::limits::NUMERIC as u32).contains(amount)
             }
+            Self::HasteDose { condition, rest } => condition != rest,
             Self::ApplyLinkedHold { policy } => policy.valid(),
             Self::HoldDamage { .. } => true,
             Self::StepSelfOneCell
@@ -3436,6 +3712,15 @@ impl Effect {
             | Self::RestoreHitDie
             | Self::TeleportRandom
             | Self::TeleportToRayOrigin
+            | Self::RoomLight
+            | Self::DetectMonsters { .. }
+            | Self::DetectFood
+            | Self::MapTopology
+            | Self::DetectMagic
+            | Self::DrainLife
+            | Self::GainStrength
+            | Self::RaiseLevel
+            | Self::CancelSpecials
             | Self::ArrestDescent => true,
             Self::HealPerHitDie { sides, bonus, .. } => DicePool::new(1, *sides, *bonus).is_ok(),
             Self::ApplyConditionForTurns { duration, .. } => positive_duration_shape(duration),
@@ -3505,6 +3790,7 @@ mod tests {
         if matches!(doc.abilities[index].strikes, StrikeSource::SelectedMelee) {
             doc.abilities[index].strikes = StrikeSource::Authored {
                 strikes: vec![StrikeDef {
+                    cancellable: false,
                     offset: 0,
                     unlock: None,
                     check: None,
@@ -3526,6 +3812,8 @@ mod tests {
     fn repeatable_restriction_document() -> RulesetDocument {
         let mut document = document();
         document.conditions.push(ConditionDef {
+            detecting_monsters: false,
+            hallucinating: false,
             id: ConditionId::new("fixture_repeatable_lock").unwrap(),
             family: ConditionFamilyId::new("fixture_repeatable_lock").unwrap(),
             lifecycle: ConditionLifecycle::Timed,
@@ -3559,6 +3847,7 @@ mod tests {
                 1 => definition.lifecycle = ConditionLifecycle::NextCheck,
                 2 => {
                     definition.modifiers.push(Modifier {
+                        cancellable: false,
                         scope: Scope::Always,
                         op: ModifierOp::Add {
                             stat: Stat::Health,
@@ -3604,6 +3893,7 @@ mod tests {
     #[test]
     fn unsupported_scoped_modifiers_and_flag_implications_reject() {
         let invalid = Modifier {
+            cancellable: false,
             scope: Scope::VersusSource,
             op: ModifierOp::Add {
                 stat: Stat::Health,
@@ -3612,6 +3902,7 @@ mod tests {
         };
         assert!(validate_modifier_shapes(&[invalid]).is_err());
         let scoped = Modifier {
+            cancellable: false,
             scope: Scope::VersusSource,
             op: ModifierOp::Add {
                 stat: Stat::Edge,
@@ -3643,6 +3934,7 @@ mod tests {
             name: "Many edges".into(),
             modifiers: vec![
                 Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Add {
                         stat: Stat::Edge,
@@ -3653,6 +3945,8 @@ mod tests {
             ],
         });
         doc.conditions.push(ConditionDef {
+            detecting_monsters: false,
+            hallucinating: false,
             id: ConditionId::new("marked").unwrap(),
             family: crate::content_ids::ConditionFamilyId::new("marked").unwrap(),
             lifecycle: crate::rules::ConditionLifecycle::Timed,
@@ -3661,6 +3955,7 @@ mod tests {
             preparation: tor_simulation::rules::ConditionPreparation::Preserve,
             name: "Marked".into(),
             modifiers: vec![Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Flag { flag },
             }],
@@ -3683,6 +3978,7 @@ mod tests {
             name: "Many edges".into(),
             modifiers: vec![
                 Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Add {
                         stat: Stat::Edge,
@@ -3694,11 +3990,13 @@ mod tests {
         });
         let rules = Ruleset::validate(doc).unwrap();
         let mut source = vec![Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Flag { flag },
         }];
         source.extend(vec![
             Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Add {
                     stat: Stat::Edge,
@@ -3738,6 +4036,7 @@ mod tests {
                 requirements: vec![],
             },
             modifiers: vec![Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Add {
                     stat: Stat::Health,
@@ -3764,6 +4063,7 @@ mod tests {
             })
         ));
         let bad = Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::GrantAbility {
                 ability: AbilityId::new("missing").unwrap(),
@@ -3803,6 +4103,7 @@ mod tests {
     fn implied_flag_cycles_are_rejected() {
         let mut doc = document();
         doc.flags[0].modifiers.push(Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Flag {
                 flag: FlagId::new("mindless").unwrap(),
@@ -3832,8 +4133,8 @@ mod tests {
         ));
         assert!(
             toml::from_str::<RulesetDocument>(&DEFAULT_RULESET_TOML.replace(
-                "id = \"interactions-v52\"",
-                "id = \"interactions-v52\"\nunknown = true"
+                "id = \"interactions-v53\"",
+                "id = \"interactions-v53\"\nunknown = true"
             ))
             .is_err()
         );
@@ -3881,6 +4182,7 @@ mod tests {
             Err(RulesetError::Bound { .. })
         ));
         let invalid = Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Add {
                 stat: Stat::Ability {
@@ -3938,6 +4240,7 @@ mod tests {
             matches!(Ruleset::validate(doc), Err(RulesetError::Bound { field }) if field == "ability_tags")
         );
         let invalid = Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Add {
                 stat: Stat::AbilityTag {
@@ -4142,6 +4445,7 @@ mod edge_source_validation_tests {
                     let mut document: RulesetDocument =
                         toml::from_str(DEFAULT_RULESET_TOML).unwrap();
                     let mut modifier = Modifier {
+                        cancellable: false,
                         scope: Scope::Always,
                         op: ModifierOp::Set {
                             stat: stat.clone(),
@@ -4156,6 +4460,7 @@ mod edge_source_validation_tests {
                             modifiers: vec![modifier],
                         });
                         modifier = Modifier {
+                            cancellable: false,
                             scope: Scope::Always,
                             op: ModifierOp::Flag { flag },
                         };
@@ -4230,6 +4535,7 @@ mod edge_source_validation_tests {
     fn talent_flat_check_bonuses_are_rejected_by_the_loader() {
         let mut document: RulesetDocument = toml::from_str(DEFAULT_RULESET_TOML).unwrap();
         document.talents[0].modifiers.push(Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Add {
                 stat: Stat::Ability {
@@ -4250,6 +4556,7 @@ mod edge_source_validation_tests {
                 id: id.clone(),
                 name: "Accuracy loophole".into(),
                 modifiers: vec![Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Set {
                         stat: Stat::AbilityTag {
@@ -4261,6 +4568,7 @@ mod edge_source_validation_tests {
                 }],
             });
             let modifier = Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Flag { flag: id },
             };
@@ -4276,6 +4584,7 @@ mod edge_source_validation_tests {
     fn condition_flat_check_bonuses_are_rejected_by_the_loader() {
         let mut document: RulesetDocument = toml::from_str(DEFAULT_RULESET_TOML).unwrap();
         document.conditions[0].modifiers.push(Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Add {
                 stat: Stat::Ability {

@@ -180,6 +180,7 @@ fn form_registry_and_choice_references_are_validated_before_publication() {
 fn form_root_reserves_capacity_for_one_grant_without_restricting_ordinary_roots() {
     let mut document = document();
     let modifier = Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::GrantAbility {
             ability: AbilityId::new("basic_melee").unwrap(),

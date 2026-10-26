@@ -1,4 +1,4 @@
-import = "interactions-v52"
+import = "interactions-v53"
 
 # Equipment expertise is an ordinary HD-point or earned Intellect choice.
 # No preset, species, NPC or default talent receives a free expertise grant.
@@ -65,7 +65,7 @@ value = { id = "rogue.frozen", family = "rogue.frozen", lifecycle = "timed", nam
 [[overrides]]
 op = "add"
 path = ["abilities", "rogue.freezing_touch"]
-value = { id = "rogue.freezing_touch", name = "Freezing Touch", interaction = "hostile_to_target", tags = ["attack"], basic_attack = false, invocation = "actor_target", timing = { source = { kind = "fixed", prepare = 100, recover = 100 }, scaled_by = "speed" }, reach = { kind = "melee" }, strikes = { kind = "natural_melee", additional_riders = [{ trigger = "success", check = { skill = { kind = "natural_attack" }, defense = "physical" }, effects = [{ kind = "apply_condition", condition = "rogue.frozen", duration = 200 }], descriptors = ["cold"] }] }, ai = { priority = 20, hostile = true, minimum_resource_percent = 0, range_preference = "any" } }
+value = { cancellable = true, id = "rogue.freezing_touch", name = "Freezing Touch", interaction = "hostile_to_target", tags = ["attack"], basic_attack = false, invocation = "actor_target", timing = { source = { kind = "fixed", prepare = 100, recover = 100 }, scaled_by = "speed" }, reach = { kind = "melee" }, strikes = { kind = "natural_melee", additional_riders = [{ trigger = "success", check = { skill = { kind = "natural_attack" }, defense = "physical" }, effects = [{ kind = "apply_condition", condition = "rogue.frozen", duration = 200 }], descriptors = ["cold"] }] }, ai = { priority = 20, hostile = true, minimum_resource_percent = 0, range_preference = "any" } }
 
 [[overrides]]
 op = "add"
@@ -78,7 +78,7 @@ value = { id = "rogue.freezing_touch", name = "Freezing Touch", prerequisites = 
 [[overrides]]
 op = "add"
 path = ["abilities", "rogue.drain_vitality"]
-value = { id = "rogue.drain_vitality", name = "Drain Vitality", interaction = "hostile_to_target", tags = ["attack"], basic_attack = false, invocation = "actor_target", timing = { source = { kind = "fixed", prepare = 100, recover = 100 }, scaled_by = "speed" }, reach = { kind = "melee" }, strikes = { kind = "natural_melee", additional_riders = [{ trigger = "success", check = { skill = { kind = "natural_attack" }, defense = "spiritual" }, effects = [{ kind = "lose_maximum_health", amount = { kind = "rolled", dice = { count = 1, sides = 3, bonus = 0 } } }], descriptors = [] }] }, ai = { priority = 20, hostile = true, minimum_resource_percent = 0, range_preference = "any" } }
+value = { cancellable = true, id = "rogue.drain_vitality", name = "Drain Vitality", interaction = "hostile_to_target", tags = ["attack"], basic_attack = false, invocation = "actor_target", timing = { source = { kind = "fixed", prepare = 100, recover = 100 }, scaled_by = "speed" }, reach = { kind = "melee" }, strikes = { kind = "natural_melee", additional_riders = [{ trigger = "success", check = { skill = { kind = "natural_attack" }, defense = "spiritual" }, effects = [{ kind = "lose_maximum_health", amount = { kind = "rolled", dice = { count = 1, sides = 3, bonus = 0 } } }], descriptors = [] }] }, ai = { priority = 20, hostile = true, minimum_resource_percent = 0, range_preference = "any" } }
 
 [[overrides]]
 op = "add"
@@ -113,7 +113,7 @@ value = { id = "poison", name = "Poison", resistance = { skill = "athletics", di
 [[overrides]]
 op = "add"
 path = ["abilities", "rogue.venomous_bite"]
-value = { id = "rogue.venomous_bite", name = "Venomous Bite", interaction = "hostile_to_target", tags = ["attack"], basic_attack = false, invocation = "actor_target", timing = { source = { kind = "fixed", prepare = 100, recover = 100 }, scaled_by = "speed" }, reach = { kind = "melee" }, strikes = { kind = "natural_melee", additional_riders = [{ trigger = "success", effects = [{ kind = "lose_attribute", attribute = "strength", amount = { kind = "fixed", amount = 1 } }], descriptors = ["poison"] }] }, ai = { priority = 20, hostile = true, minimum_resource_percent = 0, range_preference = "any" } }
+value = { cancellable = true, id = "rogue.venomous_bite", name = "Venomous Bite", interaction = "hostile_to_target", tags = ["attack"], basic_attack = false, invocation = "actor_target", timing = { source = { kind = "fixed", prepare = 100, recover = 100 }, scaled_by = "speed" }, reach = { kind = "melee" }, strikes = { kind = "natural_melee", additional_riders = [{ trigger = "success", effects = [{ kind = "lose_attribute", attribute = "strength", amount = { kind = "fixed", amount = 1 } }], descriptors = ["poison"] }] }, ai = { priority = 20, hostile = true, minimum_resource_percent = 0, range_preference = "any" } }
 
 [[overrides]]
 op = "add"
@@ -125,7 +125,7 @@ value = { id = "rogue.venomous_bite", name = "Venomous Bite", prerequisites = []
 [[overrides]]
 op = "add"
 path = ["abilities", "rogue.energy_drain"]
-value = { id = "rogue.energy_drain", name = "Energy Drain", interaction = "hostile_to_target", tags = ["attack"], basic_attack = false, invocation = "actor_target", timing = { source = { kind = "fixed", prepare = 100, recover = 100 }, scaled_by = "speed" }, reach = { kind = "melee" }, strikes = { kind = "natural_melee", additional_riders = [{ trigger = "success", check = { skill = { kind = "natural_attack" }, defense = "spiritual" }, effects = [{ kind = "drain_latest_hit_die" }], descriptors = [] }] }, ai = { priority = 20, hostile = true, minimum_resource_percent = 0, range_preference = "any" } }
+value = { cancellable = true, id = "rogue.energy_drain", name = "Energy Drain", interaction = "hostile_to_target", tags = ["attack"], basic_attack = false, invocation = "actor_target", timing = { source = { kind = "fixed", prepare = 100, recover = 100 }, scaled_by = "speed" }, reach = { kind = "melee" }, strikes = { kind = "natural_melee", additional_riders = [{ trigger = "success", check = { skill = { kind = "natural_attack" }, defense = "spiritual" }, effects = [{ kind = "drain_latest_hit_die" }], descriptors = [] }] }, ai = { priority = 20, hostile = true, minimum_resource_percent = 0, range_preference = "any" } }
 
 [[overrides]]
 op = "add"
@@ -148,7 +148,7 @@ value = { id = "rogue.confused", family = "rogue.confused", lifecycle = "timed",
 [[overrides]]
 op = "add"
 path = ["abilities", "rogue.confusing_gaze"]
-value = { id = "rogue.confusing_gaze", name = "Confusing Gaze", interaction = "hostile_to_target", tags = ["attack"], basic_attack = false, invocation = "actor_target", timing = { source = { kind = "fixed", prepare = 100, recover = 100 } }, cooldown = 700, reach = { kind = "mutual_sight", range = 4 }, strikes = { kind = "authored", strikes = [{ offset = 0, check = { actor = "user", skill = { kind = "named", skill = "spellcasting" }, against = { kind = "defense", defense = "spiritual" } }, on_success = [{ kind = "apply_condition", condition = "rogue.confused", duration = 300 }], on_failure = [], descriptors = [], riders = [] }] }, ai = { priority = 20, hostile = true, minimum_resource_percent = 0, range_preference = "any" } }
+value = { cancellable = true, id = "rogue.confusing_gaze", name = "Confusing Gaze", interaction = "hostile_to_target", tags = ["attack"], basic_attack = false, invocation = "actor_target", timing = { source = { kind = "fixed", prepare = 100, recover = 100 } }, cooldown = 700, reach = { kind = "mutual_sight", range = 4 }, strikes = { kind = "authored", strikes = [{ offset = 0, check = { actor = "user", skill = { kind = "named", skill = "spellcasting" }, against = { kind = "defense", defense = "spiritual" } }, on_success = [{ kind = "apply_condition", condition = "rogue.confused", duration = 300 }], on_failure = [], descriptors = [], riders = [] }] }, ai = { priority = 20, hostile = true, minimum_resource_percent = 0, range_preference = "any" } }
 
 [[overrides]]
 op = "add"
@@ -162,12 +162,12 @@ value = { id = "rogue.confusing_gaze", name = "Confusing Gaze", prerequisites = 
 [[overrides]]
 op = "add"
 path = ["talents", "rogue.object_guise"]
-value = { id = "rogue.object_guise", name = "Object Guise", prerequisites = [], requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 1 }, { kind = "subtype_in", subtypes = ["shapechanger"] }] }, form_choices = [], modifiers = [{ scope = "always", op = { kind = "perception", value = { kind = "object_guise", skill = "stealth", edge = 0, appearance = { name = "mace", description = "", class = "weapon", asset = "item.weapon.mace" } } } }, { scope = "always", op = { kind = "perception", value = { kind = "readied_touch_ambush", enabled = true } } }] }
+value = { id = "rogue.object_guise", name = "Object Guise", prerequisites = [], requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 1 }, { kind = "subtype_in", subtypes = ["shapechanger"] }] }, form_choices = [], modifiers = [{ cancellable = true, scope = "always", op = { kind = "perception", value = { kind = "object_guise", skill = "stealth", edge = 0, appearance = { name = "mace", description = "", class = "weapon", asset = "item.weapon.mace" } } } }, { cancellable = true, scope = "always", op = { kind = "perception", value = { kind = "readied_touch_ambush", enabled = true } } }] }
 
 [[overrides]]
 op = "add"
 path = ["talents", "rogue.ambush_from_guise"]
-value = { id = "rogue.ambush_from_guise", name = "Ambush From Guise", prerequisites = ["rogue.object_guise"], requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 6 }, { kind = "subtype_in", subtypes = ["shapechanger"] }] }, form_choices = [], modifiers = [{ scope = "always", op = { kind = "perception", value = { kind = "ambush_from_guise", enabled = true } } }] }
+value = { id = "rogue.ambush_from_guise", name = "Ambush From Guise", prerequisites = ["rogue.object_guise"], requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 6 }, { kind = "subtype_in", subtypes = ["shapechanger"] }] }, form_choices = [], modifiers = [{ cancellable = true, scope = "always", op = { kind = "perception", value = { kind = "ambush_from_guise", enabled = true } } }] }
 
 # Ordinary paid Search is available to every creature in this package. Discovery
 # is a guaranteed bounded physical-contact query, not a free observation mutation.
@@ -191,7 +191,7 @@ value = { id = "corrosive", name = "Corrosive", modifiers = [] }
 [[overrides]]
 op = "add"
 path = ["abilities", "rogue.corrode"]
-value = { id = "rogue.corrode", name = "Corrode", interaction = "hostile_to_target", tags = ["attack"], basic_attack = false, invocation = "actor_target", timing = { source = { kind = "fixed", prepare = 100, recover = 100 }, scaled_by = "speed" }, reach = { kind = "melee" }, strikes = { kind = "natural_melee", additional_riders = [{ trigger = "success", condition = { kind = "sequence_successful_hits", minimum = 1 }, effects = [{ kind = "corrode_armor", slot = "body_armor", amount = 1 }], descriptors = [] }] }, ai = { priority = 20, hostile = true, minimum_resource_percent = 0, range_preference = "any" } }
+value = { cancellable = true, id = "rogue.corrode", name = "Corrode", interaction = "hostile_to_target", tags = ["attack"], basic_attack = false, invocation = "actor_target", timing = { source = { kind = "fixed", prepare = 100, recover = 100 }, scaled_by = "speed" }, reach = { kind = "melee" }, strikes = { kind = "natural_melee", additional_riders = [{ trigger = "success", condition = { kind = "sequence_successful_hits", minimum = 1 }, effects = [{ kind = "corrode_armor", slot = "body_armor", amount = 1 }], descriptors = [] }] }, ai = { priority = 20, hostile = true, minimum_resource_percent = 0, range_preference = "any" } }
 
 [[overrides]]
 op = "add"
@@ -205,7 +205,7 @@ value = { id = "rogue.corrode", name = "Corrode", prerequisites = [], requiremen
 [[overrides]]
 op = "add"
 path = ["abilities", "rogue.breath_weapon"]
-value = { id = "rogue.breath_weapon", name = "Breath Weapon", interaction = "hostile_to_target", tags = ["attack"], basic_attack = false, invocation = "directional_ray", timing = { source = { kind = "fixed", prepare = 100, recover = 100 } }, cooldown = 2000, reach = { kind = "sight", range = 6 }, strikes = { kind = "authored", strikes = [{ offset = 0, check = { actor = "target", skill = { kind = "named", skill = "agility" }, against = { kind = "opposed", skill = { kind = "named", skill = "breath" } } }, on_success = [], on_failure = [{ kind = "damage", damage = { kind = "components", components = [{ category = "energy", descriptor = "fire", amount = { kind = "rolled", dice = { count = 6, sides = 6, bonus = 0 } } }] } }], descriptors = [], riders = [] }] }, ai = { priority = 20, hostile = true, minimum_resource_percent = 0, range_preference = "any" } }
+value = { cancellable = true, id = "rogue.breath_weapon", name = "Breath Weapon", interaction = "hostile_to_target", tags = ["attack"], basic_attack = false, invocation = "directional_ray", timing = { source = { kind = "fixed", prepare = 100, recover = 100 } }, cooldown = 2000, reach = { kind = "sight", range = 6 }, strikes = { kind = "authored", strikes = [{ offset = 0, check = { actor = "target", skill = { kind = "named", skill = "agility" }, against = { kind = "opposed", skill = { kind = "named", skill = "breath" } } }, on_success = [], on_failure = [{ kind = "damage", damage = { kind = "components", components = [{ category = "energy", descriptor = "fire", amount = { kind = "rolled", dice = { count = 6, sides = 6, bonus = 0 } } }] } }], descriptors = [], riders = [] }] }, ai = { priority = 20, hostile = true, minimum_resource_percent = 0, range_preference = "any" } }
 
 [[overrides]]
 op = "add"
@@ -271,7 +271,7 @@ value = { id = "rogue.invisible", family = "rogue.invisible", lifecycle = "timed
 [[overrides]]
 op = "add"
 path = ["conditions", "rogue.hasted"]
-value = { id = "rogue.hasted", family = "rogue.hasted", lifecycle = "timed", name = "Hasted", modifiers = [{ scope = "always", op = { kind = "action_duration", value = "haste" } }], stacking = { kind = "keep" }, source_scoped = false, descriptors = [], capacity = "reject", timing = { kind = "until_removed" }, restrictions = [], preparation = "preserve" }
+value = { id = "rogue.hasted", family = "rogue.hasted", lifecycle = "timed", name = "Hasted", modifiers = [{ scope = "always", op = { kind = "action_duration", value = "haste" } }], stacking = { kind = "keep" }, source_scoped = false, descriptors = [], capacity = "reject", timing = { kind = "actor_active_or_until_removed" }, restrictions = [], preparation = "preserve" }
 
 [[overrides]]
 op = "add"
@@ -327,3 +327,64 @@ value = { id = "rogue.held", family = "rogue.held", lifecycle = "timed", name = 
 op = "add"
 path = ["conditions", "rogue.scared"]
 value = { id = "rogue.scared", family = "rogue.scared", lifecycle = "timed", name = "Scared", modifiers = [], stacking = { kind = "keep" }, source_scoped = false, descriptors = ["mind_affecting"], capacity = "reject", timing = { kind = "actor_active", on_expiry = { kind = "remove" } }, restrictions = [], preparation = "preserve" }
+
+# A real self-device activation with no check or effect; ordinary item timing
+# and exact instance charge payment remain owned by the shared device executor.
+[[overrides]]
+op = "add"
+path = ["abilities", "rogue.wand_nothing"]
+value = { id = "rogue.wand_nothing", name = "Nothing", interaction = "non_hostile", tags = [], basic_attack = false, invocation = "actor_target", timing = { source = { kind = "fixed", prepare = 100, recover = 100 } }, reach = { kind = "self_only" }, strikes = { kind = "authored", strikes = [{ offset = 0, on_success = [], on_failure = [], descriptors = [], riders = [] }] }, ai = { priority = 0, hostile = false, minimum_resource_percent = 0, range_preference = "any" } }
+
+# Original paid room illumination; passage/already-lit outcomes still identify.
+[[overrides]]
+op = "add"
+path = ["abilities", "rogue.wand_light"]
+value = { id = "rogue.wand_light", name = "Room Light", interaction = "non_hostile", tags = [], basic_attack = false, invocation = "actor_target", timing = { source = { kind = "fixed", prepare = 100, recover = 100 } }, reach = { kind = "self_only" }, strikes = { kind = "authored", strikes = [{ offset = 0, on_success = [{ kind = "room_light" }], on_failure = [], descriptors = [], riders = [] }] }, ai = { priority = 0, hostile = false, minimum_resource_percent = 0, range_preference = "any" } }
+
+# Original fixed-health Drain Life; using it does not identify the device.
+[[overrides]]
+op = "add"
+path = ["abilities", "rogue.wand_drain_life"]
+value = { id = "rogue.wand_drain_life", name = "Drain Life", interaction = "non_hostile", tags = [], basic_attack = false, invocation = "actor_target", timing = { source = { kind = "fixed", prepare = 100, recover = 100 } }, reach = { kind = "self_only" }, strikes = { kind = "authored", strikes = [{ offset = 0, on_success = [{ kind = "drain_life" }], on_failure = [], descriptors = [], riders = [] }] }, ai = { priority = 0, hostile = false, minimum_resource_percent = 0, range_preference = "any" } }
+
+[[overrides]]
+op = "add"
+path = ["abilities", "rogue.wand_cancellation"]
+value = { id = "rogue.wand_cancellation", name = "Cancellation", interaction = "hostile_to_target", tags = [], basic_attack = false, invocation = "directional_contact_ray", timing = { source = { kind = "fixed", prepare = 100, recover = 100 } }, reach = { kind = "until_obstruction" }, strikes = { kind = "authored", strikes = [{ offset = 0, on_success = [{ kind = "cancel_specials" }], on_failure = [], descriptors = [], riders = [] }] }, ai = { priority = 0, hostile = true, minimum_resource_percent = 0, range_preference = "any" } }
+
+[[overrides]]
+op = "add"
+path = ["abilities", "rogue.wand_magic_missile"]
+value = { id = "rogue.wand_magic_missile", name = "Magic Missile", interaction = "hostile_to_target", tags = ["attack"], basic_attack = false, invocation = "directional_contact_ray", timing = { source = { kind = "fixed", prepare = 100, recover = 100 } }, reach = { kind = "until_obstruction" }, strikes = { kind = "authored", strikes = [{ offset = 0, check = { actor = "target", skill = { kind = "named", skill = "agility" }, against = { kind = "opposed", skill = { kind = "named", skill = "lore" } } }, on_success = [], on_failure = [{ kind = "damage", damage = { kind = "components", components = [{ category = "energy", amount = { kind = "rolled", dice = { count = 1, sides = 4, bonus = 1 } } }] } }], descriptors = [], riders = [] }] }, ai = { priority = 0, hostile = true, minimum_resource_percent = 0, range_preference = "any" } }
+
+# Rogue-only cancellation marking; shared import remains unchanged.
+[[overrides]]
+op = "add"
+path = ["abilities", "filch_gold", "cancellable"]
+value = true
+
+# Rogue-only cancellation marking; shared import remains unchanged.
+[[overrides]]
+op = "add"
+path = ["abilities", "filch_charm", "cancellable"]
+value = true
+
+# Dedicated Haste overdose rest: no sleep/waking or cure semantics are borrowed.
+[[overrides]]
+op = "add"
+path = ["conditions", "rogue.haste_exhaustion"]
+value = { id = "rogue.haste_exhaustion", family = "rogue.haste_exhaustion", lifecycle = "timed", name = "Exhausted", modifiers = [], stacking = { kind = "keep" }, source_scoped = false, descriptors = [], capacity = "reject", timing = { kind = "actor_active", on_expiry = { kind = "remove" } }, restrictions = ["voluntary_actions"], preparation = "pause" }
+
+# Shared pure visual condition. Repeated doses extend lifetime without resetting
+# the observer's captured base-turn cosmetic cadence.
+[[overrides]]
+op = "add"
+path = ["conditions", "rogue.hallucinating"]
+value = { id = "rogue.hallucinating", family = "rogue.hallucinating", lifecycle = "timed", name = "Hallucinating", hallucinating = true, modifiers = [], stacking = { kind = "extend" }, source_scoped = false, descriptors = [], capacity = "reject", timing = { kind = "actor_active", on_expiry = { kind = "remove" } }, restrictions = [], preparation = "preserve" }
+
+# Whole-floor monster sense is one pure, target-wide fixed-20-base-turn Refresh
+# marker. The dedicated effect owns duration and admitted-chart identification.
+[[overrides]]
+op = "add"
+path = ["conditions", "rogue.detecting_monsters"]
+value = { id = "rogue.detecting_monsters", family = "rogue.detecting_monsters", lifecycle = "timed", name = "Monster detection", detecting_monsters = true, modifiers = [], stacking = { kind = "refresh" }, source_scoped = false, descriptors = [], capacity = "reject", timing = { kind = "actor_active", on_expiry = { kind = "remove" } }, restrictions = [], preparation = "preserve" }

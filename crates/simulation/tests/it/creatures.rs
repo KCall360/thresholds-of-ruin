@@ -36,6 +36,7 @@ fn zombie() -> Template {
     value.adjustments.speed = -1;
     value.overrides.intellect = Some(0);
     value.modifiers.push(Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Flag {
             flag: FlagId::new("mindless").unwrap(),
@@ -48,6 +49,7 @@ fn build(sources: &[HdSource]) -> CreatureBuild {
 }
 fn add(stat: Stat, value: i64) -> Modifier {
     Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Add { stat, value },
     }
@@ -122,6 +124,7 @@ fn type_invalidated_choices_remain_owned_and_reactivate() {
     let mut technique = fixture::talent(
         "fixture_living_technique",
         vec![Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::GrantAbility {
                 ability: ability("rattling_blow"),
@@ -176,6 +179,7 @@ fn type_invalidated_choices_remain_owned_and_reactivate() {
 fn independent_immunity_sources_survive_template_removal() {
     let mut definition = species();
     definition.modifiers.push(Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Immunity { selector: fear() },
     });
@@ -489,6 +493,7 @@ fn aggregate_protection_limits_are_validated_during_build_derivation() {
     };
     let mut definition = species();
     definition.modifiers.push(Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Reduction {
             selector: selector.clone(),
@@ -497,6 +502,7 @@ fn aggregate_protection_limits_are_validated_during_build_derivation() {
     });
     let mut excessive = Template::new(template("excessive"), 0);
     excessive.modifiers.push(Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Reduction {
             selector,
@@ -1103,6 +1109,7 @@ fn tag_and_specific_ability_override_conflicts_report_modifier_error_atomically(
     document.talents.push(fixture::talent(
         "fixture_ability_override",
         vec![Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Set {
                 stat: Stat::Ability {
@@ -1115,6 +1122,7 @@ fn tag_and_specific_ability_override_conflicts_report_modifier_error_atomically(
     ));
     let mut species = species();
     species.modifiers.push(Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Set {
             stat: Stat::AbilityTag {

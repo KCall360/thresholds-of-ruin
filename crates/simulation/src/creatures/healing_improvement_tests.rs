@@ -440,6 +440,7 @@ fn masked_owned_credit_is_acquisition_capped_and_returns_when_override_ends() {
         let id = crate::content_ids::TemplateId::new("fixture_health_mask").unwrap();
         let mut mask = super::Template::new(id.clone(), 0);
         mask.modifiers.push(crate::rules::Modifier {
+            cancellable: false,
             scope: crate::rules::Scope::Always,
             op: crate::rules::ModifierOp::Set {
                 stat: crate::rules::Stat::Health,

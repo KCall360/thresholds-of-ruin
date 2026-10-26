@@ -791,6 +791,7 @@ fn phase5_purchase_reduced_maximum_death_uses_one_lifecycle_boundary() {
             minimum: tor_simulation::HdCount(1),
         },
         modifiers: vec![Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Add {
                 stat: Stat::Health,
@@ -841,6 +842,7 @@ pub(super) fn game_with_runtime_sources() -> Game {
         rules::{Modifier, ModifierOp, Requirement, Scope, Selector, Stat, TalentDef},
     };
     let add = |stat, value| Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Add { stat, value },
     };
@@ -880,6 +882,7 @@ pub(super) fn game_with_runtime_sources() -> Game {
         },
         modifiers: vec![
             Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Immunity {
                     selector: Selector::Descriptor {
@@ -888,6 +891,7 @@ pub(super) fn game_with_runtime_sources() -> Game {
                 },
             },
             Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Set {
                     stat: Stat::ResourceMax {

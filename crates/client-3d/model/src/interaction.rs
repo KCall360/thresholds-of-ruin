@@ -148,7 +148,14 @@ pub fn describe(view: &View, at: Position) -> (String, String, Option<Intent>) {
             } else {
                 Some(Intent::Travel(cell.key.to_owned()))
             };
-            (name.into(), String::new(), intent)
+            (
+                cell.object_presentation.map_or_else(
+                    || name.into(),
+                    |p| capitalise(tor_client_common::items::object_name(p)),
+                ),
+                String::new(),
+                intent,
+            )
         }
         Some(cell) if !cell.wall && !here => (
             "Cave floor".into(),

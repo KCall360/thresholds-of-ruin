@@ -20,6 +20,24 @@ thread_local! {
     static EDGE_SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
+/// Ordinary allocation/choice validation remains separate (normally <= 5).
+/// Consumable points raise only the pre-innate natural Strength subtotal to 7.
+pub(super) fn with_acquired_strength(
+    ordinary: Attributes,
+    acquired: u8,
+) -> Result<Attributes, BuildError> {
+    let mut values = ordinary.values();
+    let total = values
+        .strength
+        .checked_add(u16::from(acquired))
+        .ok_or(BuildError::Arithmetic)?;
+    if acquired > 7 || (acquired > 0 && total > 7) {
+        return Err(BuildError::AttributeCap);
+    }
+    values.strength = total;
+    Attributes::new(values).map_err(|_| BuildError::AttributeCap)
+}
+
 /// Thread-local deltas isolate deterministic work assertions from parallel tests.
 #[cfg(test)]
 pub(super) fn fold_count() -> usize {
@@ -910,7 +928,7 @@ pub(crate) fn derive_with_losses(
     equipment: &[EquipmentSource],
     losses: super::RestorableLosses,
 ) -> Result<DerivedCreature, BuildError> {
-    PermanentCreature::compile(build)?.fold(build, extra, equipment, losses)
+    PermanentCreature::compile(build)?.fold(build, extra, equipment, losses, false)
 }
 
 /// Immutable permanent inputs, deliberately not a condition-free *effective*
@@ -938,6 +956,7 @@ impl PermanentCreature {
         extra: &BTreeMap<SourceId, Vec<Modifier>>,
         equipment: &[EquipmentSource],
         losses: super::RestorableLosses,
+        cancelled: bool,
     ) -> Result<DerivedCreature, BuildError> {
         if !losses.valid() {
             return Err(BuildError::InvalidDefinition);
@@ -1034,7 +1053,12 @@ impl PermanentCreature {
                 build.ruleset(),
             )?;
         }
-        fold(&mut derived, build, losses)?;
+        if cancelled {
+            for modifiers in derived.sources.values_mut() {
+                modifiers.retain(|modifier| !modifier.cancellable);
+            }
+        }
+        fold(&mut derived, build, losses, cancelled)?;
         if derived.total_hd() == HdCount::ZERO {
             derived.maximum_health = 0;
             derived.abilities.clear();
@@ -1076,6 +1100,7 @@ fn compile_permanent(build: &CreatureBuild) -> Result<DerivedCreature, BuildErro
         .collect::<Result<_, _>>()?;
     let (mut attributes, skills, selected) = advancement_facts(build, build.initial_attributes())?;
     let advancement_attributes = attributes;
+    attributes = with_acquired_strength(attributes, build.strength_acquired())?;
     let mut kind = species.kind.clone();
     let mut subtypes = species.subtypes.clone();
     apply_templates(&templates, &mut kind, &mut subtypes, &mut attributes)?;
@@ -1293,6 +1318,7 @@ fn compile_permanent(build: &CreatureBuild) -> Result<DerivedCreature, BuildErro
             // original root source and uses the ordinary ability grant pipeline.
             let definition = rules.form(form).ok_or(BuildError::InvalidTalentForm)?;
             modifiers.to_mut().push(Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::GrantAbility {
                     ability: definition.ability.clone(),
@@ -1324,21 +1350,8 @@ pub(super) fn add_source(
         rules.validate_modifiers(modifiers)
     })
     .map_err(|_| BuildError::InvalidDefinition)?;
-    let mut expanded = modifiers.to_vec();
-    let mut seen = BTreeSet::new();
-    let mut cursor = 0;
-    while cursor < expanded.len() {
-        if let ModifierOp::Flag { flag } = &expanded[cursor].op {
-            if seen.insert(flag.clone()) {
-                let implied = &rules
-                    .flag(flag)
-                    .ok_or(BuildError::InvalidDefinition)?
-                    .modifiers;
-                expanded.extend(implied.iter().cloned());
-            }
-        }
-        cursor += 1;
-    }
+    let expanded = crate::rules::expand_cancellable_source(modifiers, rules)
+        .map_err(|_| BuildError::InvalidDefinition)?;
     sources.insert(source, expanded);
     Ok(())
 }
@@ -1814,6 +1827,7 @@ fn fold(
     derived: &mut DerivedCreature,
     build: &CreatureBuild,
     losses: super::RestorableLosses,
+    cancelled: bool,
 ) -> Result<(), BuildError> {
     let rules = build.ruleset();
     let values = collect_stats(&derived.sources, rules)?;
@@ -2040,6 +2054,13 @@ fn fold(
         Some(DefenseKind::Spiritual),
     ] {
         derived.incoming_check_edge(rules, crate::ActorId(0), defense)?;
+    }
+    if cancelled {
+        derived.abilities.retain(|id| {
+            rules
+                .ability(id)
+                .is_some_and(|ability| !ability.cancellable)
+        });
     }
     derived.weapon_abilities.clear();
     for ability in &derived.abilities {
@@ -2529,6 +2550,7 @@ mod edge_tests {
                 (
                     SourceId::Talent(TalentId::new("incoming").unwrap()),
                     vec![Modifier {
+                        cancellable: false,
                         scope: Scope::Always,
                         op: ModifierOp::Add {
                             stat: Stat::IncomingEdge { defense: None },
@@ -2542,6 +2564,7 @@ mod edge_tests {
                         target,
                     ),
                     vec![Modifier {
+                        cancellable: false,
                         scope: Scope::Always,
                         op: ModifierOp::Add {
                             stat: Stat::IncomingEdge {
@@ -2591,6 +2614,7 @@ mod edge_tests {
 
     fn modifier(scope: Scope, set: bool, value: i64) -> Modifier {
         Modifier {
+            cancellable: false,
             scope,
             op: if set {
                 ModifierOp::Set {
@@ -2646,6 +2670,7 @@ mod edge_tests {
                 attack: None,
                 modifiers: vec![
                     Modifier {
+                        cancellable: false,
                         scope: Scope::Always,
                         op: ModifierOp::Add {
                             stat: Stat::CheckEdge,
@@ -2687,6 +2712,7 @@ mod edge_tests {
                 let id = ability.id.clone();
                 document.abilities.push(ability);
                 Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::GrantAbility { ability: id },
                 }
@@ -2752,6 +2778,7 @@ mod edge_tests {
                     item: crate::ItemId(value),
                     socket: crate::EquipmentSlotId(value as u16),
                     modifiers: vec![Modifier {
+                        cancellable: false,
                         scope: Scope::Always,
                         op: ModifierOp::Set {
                             stat: stat.clone(),
@@ -2858,6 +2885,7 @@ mod edge_tests {
             (
                 SourceId::Talent(TalentId::new("conditional").unwrap()),
                 vec![Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Add {
                         stat: Stat::Ability {
@@ -2898,6 +2926,7 @@ mod edge_tests {
                 vec![
                     modifier(Scope::Always, true, 1),
                     Modifier {
+                        cancellable: false,
                         scope: Scope::Always,
                         op: ModifierOp::Set {
                             stat: Stat::Ability {
@@ -2917,6 +2946,7 @@ mod edge_tests {
             &BTreeMap::from([(
                 SourceId::Equipment(crate::ItemId(11)),
                 vec![Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Set {
                         stat: Stat::IncomingEdge { defense: None },
@@ -2973,6 +3003,7 @@ mod edge_tests {
             &BTreeMap::from([(
                 SourceId::Talent(TalentId::new("incoming").unwrap()),
                 vec![Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Add {
                         stat: Stat::IncomingEdge { defense: None },
@@ -3013,6 +3044,7 @@ mod edge_tests {
             (
                 fear,
                 vec![Modifier {
+                    cancellable: false,
                     scope: Scope::VersusSource,
                     op: ModifierOp::Add {
                         stat: Stat::CheckEdge,
@@ -3164,6 +3196,7 @@ mod loss_fold_tests {
             &BTreeMap::from([(
                 SourceId::Equipment(crate::ItemId(1)),
                 vec![Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Add {
                         stat: Stat::Health,
@@ -3307,6 +3340,7 @@ mod worn_modifier_tests {
             SourceId::Equipment(crate::ItemId(1)),
             ops.into_iter()
                 .map(|op| Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op,
                 })
@@ -3507,6 +3541,7 @@ mod worn_modifier_tests {
                 item: crate::ItemId(1),
                 socket: crate::EquipmentSlotId(1),
                 modifiers: vec![Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::SustainAttribute {
                         attribute: Attribute::Strength,

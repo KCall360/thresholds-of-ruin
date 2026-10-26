@@ -21,6 +21,20 @@ const ANSWER: Duration = Duration::from_secs(10);
 /// The connection a turn runs over. Tests use scripted links.
 #[allow(async_fn_in_trait)]
 pub trait Link {
+    fn chart_request(
+        &mut self,
+        _input: tor_client_common::charts::ChartInput,
+    ) -> Result<Option<Request>, String> {
+        Err("Chart presentation is unavailable on this connection.".into())
+    }
+    fn chart_lines(&self) -> Vec<String> {
+        Vec::new()
+    }
+    fn chart_loading(&self) -> bool {
+        false
+    }
+    fn cancel_chart(&mut self) {}
+
     fn advancement_request(
         &mut self,
         _input: tor_client_common::advancement::AdvancementInput,
@@ -52,6 +66,22 @@ pub trait Link {
 }
 
 impl Link for Connection {
+    fn chart_request(
+        &mut self,
+        input: tor_client_common::charts::ChartInput,
+    ) -> Result<Option<Request>, String> {
+        self.charts.request(input, &self.state)
+    }
+    fn chart_lines(&self) -> Vec<String> {
+        self.charts.lines(&self.state)
+    }
+    fn chart_loading(&self) -> bool {
+        self.charts.loading()
+    }
+    fn cancel_chart(&mut self) {
+        self.cancel_charts();
+    }
+
     fn advancement_request(
         &mut self,
         input: tor_client_common::advancement::AdvancementInput,
@@ -97,6 +127,69 @@ impl Link for Connection {
             Err(_) => Ok(None),
         }
     }
+}
+
+/// Hydrate a whole selected chart through pure queries; never send a command or
+/// turn disclosed chart coordinates into scenery/action referents.
+pub async fn chart(
+    link: &mut impl Link,
+    chronicler: &mut Chronicler,
+    record: &mut Record,
+    input: tor_client_common::charts::ChartInput,
+) -> Result<(), Error> {
+    let request = match link.chart_request(input) {
+        Ok(request) => request,
+        Err(reason) => {
+            record.say(reason);
+            return Ok(());
+        }
+    };
+    if let Some(request) = request {
+        if !link.is_synchronized() || !link.role().permits(&request) {
+            link.cancel_chart();
+            record.say("Chart view is not synchronized; no query was sent.");
+            return Ok(());
+        }
+        link.send(request).await?;
+        let deadline = tokio::time::Instant::now() + ANSWER;
+        let mut reader = Reader {
+            chronicler,
+            beats: Vec::new(),
+            pages: Vec::new(),
+            resynced: false,
+            waiting: None,
+        };
+        while link.chart_loading() {
+            let before = link.client().state().clone();
+            let Some(message) = link
+                .next(deadline.saturating_duration_since(tokio::time::Instant::now()))
+                .await?
+            else {
+                link.cancel_chart();
+                record.say("Chart display timed out; no action was sent.");
+                break;
+            };
+            reader.record(&before, link, &message);
+            if !link.is_synchronized() {
+                link.cancel_chart();
+                record.say("Chart view changed; stale rows are withheld.");
+                break;
+            }
+            if tokio::time::Instant::now() >= deadline && link.chart_loading() {
+                link.cancel_chart();
+                record.say("Chart display timed out; no action was sent.");
+                break;
+            }
+        }
+        if !reader.beats.is_empty() {
+            record.entries.push(Entry::Beats(reader.beats));
+        }
+        if !reader.pages.is_empty() {
+            record.say(reader.pages.join("\n"));
+        }
+    }
+    record.say(link.chart_lines().join("\n"));
+    Ok(())
 }
 
 /// Query one complete selected action without executing it. Invalidated replies
@@ -627,7 +720,10 @@ fn step(goal: &Goal, scene: &Scene, acted: bool, approached: bool) -> Step {
         Goal::MagicItem { action } => {
             let view = &scene.state.observation;
             let current = match action {
-                Action::Zap { item, direction } => tor_client_common::items::zap_action(view, *item, *direction),
+                Action::Zap { item, aim } => match aim {
+                    tor_protocol::DeviceAim::Direction { direction } => tor_client_common::items::zap_action(view, *item, *direction),
+                    tor_protocol::DeviceAim::SelfTarget {} => tor_client_common::items::item_action(view, *item, tor_client_common::items::ItemOperation::Zap),
+                },
                 Action::Identify { choice, item } => tor_client_common::items::identification_action(view, *item).and_then(|current| {
                     if matches!(&current, Action::Identify { choice: active, .. } if active == choice) { Ok(current) } else { Err("That identification choice is no longer available.".into()) }
                 }),

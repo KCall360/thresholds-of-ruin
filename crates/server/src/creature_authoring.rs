@@ -92,6 +92,8 @@ pub(crate) fn expertise(value: &str, rules: &s::rules::Ruleset) -> Result<Expert
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Modifier {
+    #[serde(default)]
+    pub cancellable: bool,
     pub scope: Scope,
     pub op: Op,
 }
@@ -568,9 +570,36 @@ impl BehaviorPolicy {
     }
 }
 
+/// Optional explicit detection label. Omission never falls back to personal names.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DetectionAppearance {
+    pub name: String,
+    pub asset: Option<String>,
+}
+impl<'de> Deserialize<'de> for DetectionAppearance {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            name: String,
+            #[serde(default)]
+            asset: Option<String>,
+        }
+        let fields: Fields = named_map(d)?;
+        let value = Self {
+            name: fields.name,
+            asset: fields.asset,
+        };
+        // The shared immutable Content constructor owns the exact grammar.
+        Ok(value)
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Species {
+    #[serde(default)]
+    pub detection_appearance: Option<DetectionAppearance>,
     pub behavior: BehaviorPolicy,
     #[serde(default)]
     pub displacement: Option<DisplacementProfile>,
@@ -589,6 +618,8 @@ impl<'de> Deserialize<'de> for Species {
         #[serde(deny_unknown_fields)]
         struct Fields {
             #[serde(default)]
+            detection_appearance: Option<DetectionAppearance>,
+            #[serde(default)]
             behavior: BehaviorPolicy,
             #[serde(default)]
             displacement: Option<DisplacementProfile>,
@@ -603,6 +634,7 @@ impl<'de> Deserialize<'de> for Species {
         }
         let fields: Fields = named_map(d)?;
         Ok(Self {
+            detection_appearance: fields.detection_appearance,
             behavior: fields.behavior,
             displacement: fields.displacement,
             kind: fields.kind,
@@ -930,6 +962,21 @@ impl Catalog {
         }
         let content = s::creatures::Content::new(rules, catalog)
             .map_err(|error| invalid(format!("Invalid creature catalog: {error:?}")))?;
+        let mut appearances = BTreeMap::new();
+        for (id, species) in &self.species {
+            if let Some(label) = &species.detection_appearance {
+                let id = SpeciesId::new(id).map_err(|_| invalid("Invalid detection species"))?;
+                appearances.insert(
+                    id,
+                    s::appearance_catalog::CreatureAppearance {
+                        name: Arc::from(label.name.as_str()),
+                        asset: label.asset.as_deref().map(Arc::from),
+                    },
+                );
+            }
+        }
+        let content = s::creatures::Content::with_detection_appearances(&content, appearances)
+            .map_err(|error| invalid(format!("Invalid species detection appearance: {error:?}")))?;
         Ok(CompiledCatalog { content })
     }
 }
@@ -940,6 +987,13 @@ pub struct Recipe {
     nutrition: s::nutrition::NutritionRequirement,
 }
 impl CompiledCatalog {
+    pub(crate) fn with_presentation_catalog(
+        mut self,
+        catalog: Arc<s::appearance_catalog::PresentationCatalog>,
+    ) -> Self {
+        self.content = s::creatures::Content::with_presentation_catalog(&self.content, catalog);
+        self
+    }
     pub(crate) fn with_trap_ammunition(
         mut self,
         ammunition: BTreeMap<String, s::ItemSpec>,
@@ -1155,6 +1209,7 @@ mod strict_stat_tests {
                 json
             );
             Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: Op::Add { stat, value: 1 },
             }
@@ -1196,14 +1251,14 @@ mod strict_stat_tests {
 mod ordered_strike_authoring_tests {
     use super::*;
     use serde_json::{json, Value};
-    fn source() -> Value {
+    pub(super) fn source() -> Value {
         json!({"species": {"sequence_test": {"kind": "humanoid", "behavior": {"disposition":"mean","idle":"explore","memory_ticks":1000},
             "attributes": {"strength": 1, "speed": 1, "intellect": 1, "willpower": 1, "awareness": 1, "presence": 1},
             "melee": {"skill": "heavy_weaponry", "bonus": 0, "wind_up": 10, "recovery": 20,
                 "strikes": [{"offset": 0, "unlock": null, "check": null, "on_success": [], "on_failure": [], "descriptors": [], "riders": []}]}
         }}, "templates": {}})
     }
-    fn rules() -> Arc<s::rules::Ruleset> {
+    pub(super) fn rules() -> Arc<s::rules::Ruleset> {
         s::rules::Ruleset::validate(toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap())
             .unwrap()
     }
@@ -1290,12 +1345,15 @@ mod ordered_strike_authoring_tests {
     }
     #[test]
     fn ordered_strike_content_authoring_accepts_checkless_natural_source_and_retains_identity() {
-        let value = source();
+        let mut value = source();
         let catalog: Catalog =
             serde_json::from_value(value.clone()).expect("natural strike syntax must decode");
         catalog
             .compile(rules())
             .expect("a no-damage natural source is valid");
+        assert!(!catalog.species["sequence_test"].melee.strikes[0].cancellable);
+        value["species"]["sequence_test"]["melee"]["strikes"][0]["cancellable"] =
+            serde_json::json!(false);
         let decoded = serde_json::to_value(&catalog).unwrap();
         assert_eq!(
             decoded["species"]["sequence_test"]["melee"],
@@ -1456,11 +1514,16 @@ mod action_duration_authoring_tests {
             let value = json!(rate);
             let decoded: ActionDuration = serde_json::from_value(value.clone()).unwrap();
             assert_eq!(serde_json::to_value(decoded).unwrap(), value);
-            let modifier = json!({
+            let mut modifier = json!({
                 "scope":"always", "op":{"kind":"action_duration","value":rate}
             });
             let decoded: Modifier = serde_json::from_value(modifier.clone()).unwrap();
             assert!(decoded.compile().is_ok());
+            assert!(
+                !decoded.cancellable,
+                "omitted source metadata defaults false"
+            );
+            modifier["cancellable"] = json!(false);
             assert_eq!(serde_json::to_value(decoded).unwrap(), modifier);
             let authored: Modifier = toml::from_str(&format!(
                 "scope = 'always'\nop = {{ kind = 'action_duration', value = '{rate}' }}"
@@ -1578,6 +1641,7 @@ mod wearable_modifier_tests {
         ];
         for op in ops {
             let modifier = Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op,
             };
@@ -1603,8 +1667,13 @@ mod awareness_authoring_tests {
             json!({"kind":"continual_stealth","edge":1}),
             json!({"kind":"aggravation","interval":500,"chance_denominator":3,"stealth_disadvantage":1}),
         ] {
-            let modifier = json!({"scope":"always","op":{"kind":"perception","value":good}});
+            let mut modifier = json!({"scope":"always","op":{"kind":"perception","value":good}});
             let authored: Modifier = serde_json::from_value(modifier.clone()).unwrap();
+            assert!(
+                !authored.cancellable,
+                "omitted source metadata defaults false"
+            );
+            modifier["cancellable"] = json!(false);
             assert_eq!(serde_json::to_value(&authored).unwrap(), modifier);
             assert!(authored.compile().is_ok());
             for field in good.as_object().unwrap().keys() {
@@ -1631,3 +1700,6 @@ mod awareness_authoring_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod detection_tests;

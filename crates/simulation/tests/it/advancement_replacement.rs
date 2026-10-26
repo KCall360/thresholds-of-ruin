@@ -575,6 +575,7 @@ fn replacement_preserves_health_work_and_nutrition_while_rephasing_periods() {
                 .unwrap()
                 .modifiers
                 .push(Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Add {
                         stat: Stat::HealthRecoveryPeriodPercent,

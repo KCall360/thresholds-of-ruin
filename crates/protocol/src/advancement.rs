@@ -224,6 +224,7 @@ record!(AdvancementRation {
     access: SupplyAccess,
 });
 record!(AdvancementOverview {
+    strength_acquired: u8,
     starting_skills: [AdvancementContentRef; 2], points: AdvancementPoints,
     timings: AdvancementTimings, ration: AdvancementRation, growth: AdvancementGrowth,
     #[serde(with = "crate::integers::unsigned")]
@@ -318,6 +319,7 @@ record!(AdvancementResources {
     mana: AdvancementResourceRow
 });
 record!(AdvancementSummary {
+    strength_acquired: u8,
     proposal: AdvancementProposal,
     #[serde(with = "crate::integers::unsigned")]
     resulting_build_epoch: u64,
@@ -658,7 +660,8 @@ impl Checked for AdvancementRation {
 }
 impl Checked for AdvancementOverview {
     fn checked(&self) -> bool {
-        self.starting_skills.iter().all(Checked::checked)
+        self.strength_acquired <= 7
+            && self.starting_skills.iter().all(Checked::checked)
             && self.starting_skills[0].id != self.starting_skills[1].id
             && self.points.checked()
             && self.growth.checked()
@@ -779,7 +782,8 @@ impl Checked for AdvancementResources {
 }
 impl Checked for AdvancementSummary {
     fn checked(&self) -> bool {
-        self.proposal.checked()
+        self.strength_acquired <= 7
+            && self.proposal.checked()
             && self.resulting_build_epoch > 0
             && usize::from(self.removed_count) <= MAX_ADVANCEMENT_LEDGER_ROWS
             && usize::from(self.refund_count) <= MAX_ADVANCEMENT_LEDGER_ROWS

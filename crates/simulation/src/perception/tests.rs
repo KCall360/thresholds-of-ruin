@@ -3,6 +3,7 @@ use crate::rules::{Modifier, ModifierOp, Scope};
 
 fn modifier(value: PerceptionValue) -> Modifier {
     Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Perception { value },
     }

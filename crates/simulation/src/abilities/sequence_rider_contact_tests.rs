@@ -20,6 +20,7 @@ fn damage(category: DamageType, amount: u32) -> Effect {
 
 fn rider(minimum: Option<u16>, amount: u32) -> RiderDef {
     RiderDef {
+        cancellable: false,
         trigger: RiderTrigger::Success,
         condition: minimum.map(|minimum| RiderCondition::SequenceSuccessfulHits { minimum }),
         check: None,
@@ -30,6 +31,7 @@ fn rider(minimum: Option<u16>, amount: u32) -> RiderDef {
 
 fn strike(index: usize, hit: bool) -> StrikeDef {
     StrikeDef {
+        cancellable: false,
         offset: index as u64 * 10,
         unlock: None,
         check: Some(CheckDef {
@@ -74,6 +76,7 @@ fn natural_game(
             )
             .unwrap();
             species.modifiers.push(Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Set {
                     stat: Stat::Defense {
@@ -222,6 +225,7 @@ fn sequence_rider_equal_offsets_preserve_order_once_and_residual_edge() {
     let mut game = natural_game(strikes, vec![conditional], |_, species| {
         for (stat, value) in [(Stat::Edge, 5), (Stat::CheckEdge, -6)] {
             species.modifiers.push(Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Add { stat, value },
             });
@@ -307,6 +311,7 @@ fn sequence_rider_zero_post_protection_primary_damage_still_qualifies() {
                     category: DamageType::Impact,
                 };
                 species.modifiers.push(Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: if immune_component {
                         ModifierOp::Immunity { selector }
@@ -378,6 +383,7 @@ fn exclude(strike: &mut StrikeDef, kind: Nonqualifying) {
 
 fn fire_immunity(_: &mut RulesetDocument, species: &mut crate::creatures::Species) {
     species.modifiers.push(Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Immunity {
             selector: Selector::Descriptor {
@@ -539,6 +545,7 @@ fn sequence_rider_attempt_is_consumed_by_checked_failure_protection_or_whole_imm
                 fire_immunity(rules, species);
                 if mode == "full_protection" {
                     species.modifiers.push(Modifier {
+                        cancellable: false,
                         scope: Scope::Always,
                         op: ModifierOp::Reduction {
                             selector: Selector::Category {

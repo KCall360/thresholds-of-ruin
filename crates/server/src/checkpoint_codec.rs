@@ -5,7 +5,7 @@ use flate2::{write::ZlibEncoder, Compression, Decompress, FlushDecompress, Statu
 use serde::Serialize;
 use std::io::{self, Write};
 
-pub(crate) const LIMIT: usize = 64 * 1024 * 1024;
+pub(crate) const LIMIT: usize = tor_simulation::checkpoint::ARCHIVE_BYTE_LIMIT;
 const HEADER: &[u8; 8] = b"TORC\x01\x00\x00\x00";
 const OVERHEAD: usize = 12;
 
@@ -139,6 +139,15 @@ pub(crate) fn decode(bytes: &[u8]) -> io::Result<Vec<u8>> {
             return Err(invalid());
         }
     }
+}
+
+#[cfg(test)]
+pub(super) fn write_json_with_test_limit<T: Serialize, W: Write>(
+    value: &T,
+    output: W,
+    limit: usize,
+) -> io::Result<W> {
+    write_limited(value, output, limit)
 }
 
 #[cfg(test)]

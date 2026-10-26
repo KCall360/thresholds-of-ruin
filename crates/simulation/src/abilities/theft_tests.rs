@@ -105,6 +105,7 @@ fn theft_game_with_sources(
             for strike in strikes {
                 strike.on_success.clear();
                 strike.riders = vec![RiderDef {
+                    cancellable: false,
                     trigger: RiderTrigger::Success,
                     condition: None,
                     check: Some(RiderCheckDef {
@@ -129,6 +130,7 @@ fn theft_game_with_sources(
             // Riders target defenses rather than authored difficulty formulas.
             // This synthetic defense guarantees success but still rolls the check.
             species.modifiers.push(Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Set {
                     stat: Stat::Defense {
@@ -145,6 +147,7 @@ fn theft_game_with_sources(
             });
             if relocate {
                 species.modifiers.push(Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Flag { flag },
                 });
@@ -585,6 +588,7 @@ fn tr3_flag_gain_or_loss_does_not_rewrite_prepared_optional_relocation() {
                         minimum: crate::HdCount(3),
                     },
                     modifiers: vec![Modifier {
+                        cancellable: false,
                         scope: Scope::Always,
                         op: ModifierOp::Flag { flag: flag.clone() },
                     }],

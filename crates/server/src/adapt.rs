@@ -297,6 +297,12 @@ pub fn action(action: &a::Action) -> s::Action {
         a::Action::Unequip { item } => s::Action::Unequip {
             item: s::ItemId(*item),
         },
+        a::Action::Ignite { item } => s::Action::Ignite {
+            item: s::ItemId(*item),
+        },
+        a::Action::Extinguish { item } => s::Action::Extinguish {
+            item: s::ItemId(*item),
+        },
         a::Action::Drink { item } => s::Action::Drink {
             item: s::ItemId(*item),
         },
@@ -306,9 +312,9 @@ pub fn action(action: &a::Action) -> s::Action {
         a::Action::Read { item } => s::Action::Read {
             item: s::ItemId(*item),
         },
-        a::Action::Zap { item, direction } => s::Action::Zap {
+        a::Action::Zap { item, aim } => s::Action::Zap {
             item: s::ItemId(*item),
-            direction: step_direction(*direction),
+            aim: device_aim(*aim),
         },
         a::Action::Identify { choice, item } => s::Action::Identify {
             choice: *choice,
@@ -355,6 +361,12 @@ pub fn work(action: &a::Action) -> Option<s::Work> {
         a::Action::Unequip { item } => s::Work::Unequip {
             item: s::ItemId(*item),
         },
+        a::Action::Ignite { item } => s::Work::Ignite {
+            item: s::ItemId(*item),
+        },
+        a::Action::Extinguish { item } => s::Work::Extinguish {
+            item: s::ItemId(*item),
+        },
         a::Action::Drink { item } => s::Work::Drink {
             item: s::ItemId(*item),
         },
@@ -364,9 +376,9 @@ pub fn work(action: &a::Action) -> Option<s::Work> {
         a::Action::Read { item } => s::Work::Read {
             item: s::ItemId(*item),
         },
-        a::Action::Zap { item, direction } => s::Work::Zap {
+        a::Action::Zap { item, aim } => s::Work::Zap {
             item: s::ItemId(*item),
-            direction: step_direction(*direction),
+            aim: device_aim(*aim),
         },
         a::Action::Identify { .. }
         | a::Action::ExamineTrap { .. }
@@ -520,12 +532,14 @@ pub fn recorded_action(action: s::Action) -> Option<a::Action> {
             slot: slot.0,
         },
         s::Action::Unequip { item } => a::Action::Unequip { item: item.0 },
+        s::Action::Ignite { item } => a::Action::Ignite { item: item.0 },
+        s::Action::Extinguish { item } => a::Action::Extinguish { item: item.0 },
         s::Action::Drink { item } => a::Action::Drink { item: item.0 },
         s::Action::Eat { item } => a::Action::Eat { item: item.0 },
         s::Action::Read { item } => a::Action::Read { item: item.0 },
-        s::Action::Zap { item, direction } => a::Action::Zap {
+        s::Action::Zap { item, aim } => a::Action::Zap {
             item: item.0,
-            direction: recorded_step_direction(direction),
+            aim: recorded_device_aim(aim),
         },
         s::Action::Identify { choice, item } => a::Action::Identify {
             choice,
@@ -631,6 +645,27 @@ pub(crate) fn door_appearance(secret: bool) -> (&'static str, &'static str) {
     }
 }
 
+/// Convert only the core-selected closed cosmetic payload. No palette selection,
+/// live identity lookup or presentation cadence enters the wire adapter.
+pub(crate) fn object_presentation(
+    value: &s::appearance_catalog::ObjectPresentation,
+) -> p::ObjectPresentation {
+    p::ObjectPresentation {
+        name: value.name.to_string(),
+        asset: value.asset.as_deref().map(str::to_owned),
+        kind: match value.kind {
+            s::appearance_catalog::ObjectPresentationKind::Item { class } => {
+                p::ObjectPresentationKind::Item {
+                    class: item_class(class),
+                }
+            }
+            s::appearance_catalog::ObjectPresentationKind::Stairs => {
+                p::ObjectPresentationKind::Stairs
+            }
+        },
+    }
+}
+
 pub fn observation(
     view: s::Observation,
     scene: Vec<w::SightCell>,
@@ -665,6 +700,10 @@ pub fn observation(
         };
         let [floor, wall, door_asset] = terrain(cell.location.region);
         visible_cells.push(p::CellView {
+            object_presentation: visible
+                .object_presentation
+                .as_ref()
+                .map(object_presentation),
             lit: visible.lit,
             asset: if visible.wall { wall } else { floor },
             door: visible.door.map(|door| p::DoorView {
@@ -705,6 +744,7 @@ pub fn observation(
             .filter(|item| item.location == cell.location)
         {
             ground_items.push(p::GroundItemView {
+                presentation: item.presentation.as_ref().map(object_presentation),
                 item: p::ItemView {
                     corpse: item.corpse.as_ref().map(|source| p::CreatureAppearance {
                         seed: targets.appearance_seed(source.actor),
@@ -735,6 +775,7 @@ pub fn observation(
             .filter(|object| object.location == cell.location)
         {
             ground_items.push(p::GroundItemView {
+                presentation: object.presentation.as_ref().map(object_presentation),
                 item: p::ItemView {
                     corpse: None,
                     class: item_class(object.appearance.class),
@@ -759,9 +800,18 @@ pub fn observation(
             .filter(|actor| actor.location == cell.location)
         {
             visible_actors.push(p::ActorView {
-                name: actor.name.clone(),
-                appearance_seed: (actor.disclosure == s::perception::ActorDisclosure::Creature)
-                    .then(|| targets.appearance_seed(actor.id)),
+                name: actor
+                    .presentation
+                    .as_ref()
+                    .map_or_else(|| actor.name.clone(), |value| value.name.to_string()),
+                appearance_seed: actor
+                    .presentation
+                    .as_ref()
+                    .map(|_| p::AppearanceSeed::from_digest([0; 32]))
+                    .or_else(|| {
+                        (actor.disclosure == s::perception::ActorDisclosure::Creature)
+                            .then(|| targets.appearance_seed(actor.id))
+                    }),
                 description: String::new(),
                 id: targets.actor_reference(
                     actor.id,
@@ -771,7 +821,10 @@ pub fn observation(
                         .expect("selectable actor disclosure"),
                 ),
                 position: offset(cell.offset),
-                asset: actor.asset.clone(),
+                asset: actor.presentation.as_ref().map_or_else(
+                    || actor.asset.clone(),
+                    |value| value.asset.as_deref().map(str::to_owned),
+                ),
             });
         }
         if cell.location == view.location && cell.offset != (w::Position { x: 0, y: 0, z: 0 }) {
@@ -797,6 +850,7 @@ pub fn observation(
         })
         .collect();
     p::Observation {
+        charts: vec![],
         self_appearance: Some(p::CreatureAppearance {
             seed: targets.appearance_seed(view.actor),
             asset: view.asset.clone(),
@@ -818,6 +872,19 @@ pub fn observation(
                 .curse_blocked
                 .into_iter()
                 .map(|item| targets.item(item))
+                .collect(),
+            refused: interaction
+                .refused
+                .into_iter()
+                .map(|refusal| p::ItemRefusalView {
+                    action: crate::wire_adapter::encode_action(
+                        &recorded_action(refusal.work.action()).expect("refused item action"),
+                        targets,
+                    ),
+                    reason: match refusal.reason {
+                        s::ItemRefusal::TooWeak => p::ItemRefusalReason::TooWeak,
+                    },
+                })
                 .collect(),
             completed: interaction
                 .completed
@@ -870,10 +937,20 @@ pub fn observation(
                                 .collect(),
                         })
                     }),
+                    portable_light: item.portable_light.map(|light| p::PortableLightView {
+                        remaining: light.remaining,
+                        lit: light.lit,
+                        ignitable: light.ignitable,
+                        extinguishable: light.extinguishable,
+                    }),
                     drinkable: item.drinkable,
                     edible: item.edible,
                     readable: item.readable,
                     zappable: item.zappable,
+                    device_activation: item.device_activation.map(|activation| match activation {
+                        s::DeviceActivation::Direction => p::DeviceActivation::Direction,
+                        s::DeviceActivation::SelfTarget => p::DeviceActivation::SelfTarget,
+                    }),
                     charges: item.charges,
                 })
                 .collect(),
@@ -1212,5 +1289,38 @@ fn recorded_step_direction(direction: s::abilities::StepDirection) -> a::Directi
         s::abilities::StepDirection::NorthWest => a::Direction::NorthWest,
         s::abilities::StepDirection::Up => a::Direction::Up,
         s::abilities::StepDirection::Down => a::Direction::Down,
+    }
+}
+
+pub fn device_aim(aim: a::DeviceAim) -> s::DeviceAim {
+    match aim {
+        a::DeviceAim::Direction { direction } => s::DeviceAim::Direction {
+            direction: step_direction(direction),
+        },
+        a::DeviceAim::SelfTarget {} => s::DeviceAim::SelfTarget {},
+    }
+}
+pub fn recorded_device_aim(aim: s::DeviceAim) -> a::DeviceAim {
+    match aim {
+        s::DeviceAim::Direction { direction } => a::DeviceAim::Direction {
+            direction: recorded_step_direction(direction),
+        },
+        s::DeviceAim::SelfTarget {} => a::DeviceAim::SelfTarget {},
+    }
+}
+pub fn requested_device_aim(aim: p::DeviceAim) -> a::DeviceAim {
+    match aim {
+        p::DeviceAim::Direction { direction } => a::DeviceAim::Direction {
+            direction: requested_direction(direction),
+        },
+        p::DeviceAim::SelfTarget {} => a::DeviceAim::SelfTarget {},
+    }
+}
+pub fn wire_device_aim(aim: a::DeviceAim) -> p::DeviceAim {
+    match aim {
+        a::DeviceAim::Direction { direction } => p::DeviceAim::Direction {
+            direction: wire_direction(direction),
+        },
+        a::DeviceAim::SelfTarget {} => p::DeviceAim::SelfTarget {},
     }
 }

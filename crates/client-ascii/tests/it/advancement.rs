@@ -93,6 +93,7 @@ fn page(context: &ReplyContext) -> AdvancementPage {
         next: None,
         entries: vec![AdvancementEntry::Overview {
             value: Box::new(AdvancementOverview {
+                strength_acquired: 0,
                 growth: AdvancementGrowth {
                     highest_applied_tier: 2,
                     restorable_hit_dice: 0,

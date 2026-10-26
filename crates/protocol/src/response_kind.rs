@@ -219,3 +219,8 @@ pub(super) fn advancement_page(text: &str) -> Result<bool, DecodeError> {
 pub(super) fn map_page(text: &str) -> Result<bool, DecodeError> {
     root_kind(text, b"map_page", false)
 }
+
+/// Select the chart cap before allocating any component/occurrence DTOs.
+pub(super) fn chart_page(text: &str) -> Result<bool, DecodeError> {
+    root_kind(text, b"chart_page", false)
+}

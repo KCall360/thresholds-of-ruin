@@ -2,6 +2,11 @@
 //! regions, actor tables, map-owner directories, intentions and population states
 //! are encoded once across rewind boundaries.
 //! This module does not perform storage or I/O.
+/// Existing whole-archive raw/compressed ceiling, shared with server storage.
+pub const ARCHIVE_BYTE_LIMIT: usize = 64 * 1024 * 1024;
+/// Current archive envelope: 256 retained boundaries plus current snapshot.
+pub const MAX_CHECKPOINT_ROOTS: usize = 257;
+
 use crate::actor_record::ActorRecord;
 use crate::creatures::Content;
 use crate::explored_map::ExploredMap;
@@ -22,6 +27,7 @@ pub enum PersistError {
     },
     Navigation,
     ExploredMap,
+    ChartHistory,
     /// Includes missing catalog references and invalid mutable creature state.
     CreatureRecord {
         actor: ActorId,
@@ -49,6 +55,7 @@ pub enum PersistError {
     Population,
     Retrieval,
     Physics,
+    Spatial,
     RunState,
     Schedule,
     World,
@@ -72,6 +79,9 @@ pub struct Snapshot {
     world: usize,
     navigation: BTreeMap<ActorId, usize>,
     explored_maps: usize,
+    chart_history: usize,
+    #[serde(with = "crate::spatial_scope::retention::root_index")]
+    spatial: usize,
     seed: u64,
     tick: u64,
     actors: usize,
@@ -169,6 +179,8 @@ impl<'de> Deserialize<'de> for RetrievalSnapshot {
 #[derive(Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SharedState {
+    chart_history: crate::chart_history::StoredPool,
+    spatial: crate::spatial_scope::retention::PoolState,
     #[serde(with = "tor_world::checkpoint_worlds")]
     worlds: Vec<World>,
     #[serde(with = "navigation_regions")]
@@ -256,6 +268,66 @@ mod explored_map_owners {
 }
 
 impl SharedState {
+    /// Prepare a decoded pool for strict canonical-shape serialization using the
+    /// current snapshot and every retained history snapshot. This is not restore
+    /// authority: each RestoreContext must still bind its actual roots. Callers
+    /// must reprepare if the enclosing snapshot/root list changes; a failed
+    /// preparation clears the prior serialization witness. Capture into decoded
+    /// state remains unsupported and poisons complete serialization.
+    pub fn prepare_spatial_serialization(
+        &mut self,
+        snapshots: &[&Snapshot],
+    ) -> Result<(), PersistError> {
+        // Even rejection before the codec sees roots must revoke prior proof.
+        self.spatial.clear_serialization_witness();
+        if snapshots.len() > MAX_CHECKPOINT_ROOTS {
+            return Err(PersistError::Spatial);
+        }
+        let roots: Vec<_> = snapshots
+            .iter()
+            .map(|snapshot| snapshot.spatial)
+            .chain(self.chart_history.spatial_indices())
+            .collect();
+        self.spatial
+            .prepare_serialization(roots.into_iter())
+            .map_err(|_| PersistError::Spatial)
+    }
+
+    pub fn chart_history_references_valid<'a>(
+        &self,
+        snapshots: impl IntoIterator<Item = &'a Snapshot>,
+    ) -> bool {
+        let snapshots: Vec<_> = snapshots.into_iter().collect();
+        if snapshots.iter().any(|snapshot| {
+            let Some(actors) = self.actors.get(snapshot.actors) else {
+                return true;
+            };
+            self.chart_history
+                .owner_ids(snapshot.chart_history)
+                .is_none_or(|mut owners| owners.any(|id| !actors.contains_key(&id)))
+        }) {
+            return false;
+        }
+        self.chart_history
+            .references_valid(snapshots.iter().map(|s| (s.chart_history, s.tick)))
+    }
+    pub fn world_references_valid<'a>(
+        &self,
+        snapshots: impl IntoIterator<Item = &'a Snapshot>,
+    ) -> bool {
+        let snapshots: Vec<_> = snapshots.into_iter().collect();
+        if !self.chart_history_references_valid(snapshots.iter().copied()) {
+            return false;
+        }
+        let used: BTreeSet<_> = snapshots
+            .iter()
+            .map(|s| s.world)
+            .chain(self.chart_history.world_indices())
+            .collect();
+        used.len() == self.worlds.len()
+            && used.iter().all(|index| *index < self.worlds.len())
+            && !self.worlds.is_empty()
+    }
     pub fn valid_world_count(&self, maximum: usize) -> bool {
         !self.worlds.is_empty() && self.worlds.len() <= maximum
     }
@@ -305,8 +377,12 @@ impl SharedState {
 /// references; restored games retain only the definitions they actually use.
 pub struct RestoreContext<'a> {
     shared: &'a SharedState,
+    spatial: Option<crate::spatial_scope::codec::ValidatedPool>,
+    spatial_roots: BTreeMap<usize, Shared<crate::spatial_scope::registry::Registry>>,
     content: Arc<Content>,
     worlds: BTreeMap<usize, Shared<World>>,
+    chart_history: crate::chart_history::RestoreCache,
+    validated_chart_worlds: BTreeSet<usize>,
     navigation: BTreeMap<usize, Shared<Navigation>>,
     /// Validation is reusable only for these immutable decoded pool entries.
     validated_navigation: BTreeSet<(usize, usize)>,
@@ -326,11 +402,55 @@ pub struct RestoreContext<'a> {
 }
 
 impl<'a> RestoreContext<'a> {
+    pub fn bind_spatial_roots(&mut self, snapshots: &[&Snapshot]) -> Result<(), PersistError> {
+        if self.spatial.is_some() || snapshots.len() > MAX_CHECKPOINT_ROOTS {
+            return Err(PersistError::Spatial);
+        }
+        if !self
+            .shared
+            .chart_history_references_valid(snapshots.iter().copied())
+        {
+            return Err(PersistError::ChartHistory);
+        }
+        let roots: Vec<_> = snapshots
+            .iter()
+            .map(|s| s.spatial)
+            .chain(self.shared.chart_history.spatial_indices())
+            .collect();
+        let pool = self
+            .shared
+            .spatial
+            .bind(roots.into_iter())
+            .map_err(|_| PersistError::Spatial)?;
+        self.spatial = Some(pool);
+        Ok(())
+    }
+    fn spatial_root(
+        &mut self,
+        index: usize,
+    ) -> Result<Shared<crate::spatial_scope::registry::Registry>, PersistError> {
+        if let Some(root) = self.spatial_roots.get(&index) {
+            return Ok(root.clone());
+        }
+        let root = self
+            .spatial
+            .as_ref()
+            .ok_or(PersistError::Spatial)?
+            .registry(index)
+            .ok_or(PersistError::Spatial)?;
+        self.spatial_roots.insert(index, root.clone());
+        Ok(root)
+    }
+
     pub fn new(shared: &'a SharedState, content: Arc<Content>) -> Self {
         Self {
             shared,
+            spatial: None,
+            spatial_roots: BTreeMap::new(),
             content,
             worlds: BTreeMap::new(),
+            chart_history: crate::chart_history::RestoreCache::default(),
+            validated_chart_worlds: BTreeSet::new(),
             navigation: BTreeMap::new(),
             validated_navigation: BTreeSet::new(),
             validated_population_plans: BTreeSet::new(),
@@ -424,6 +544,40 @@ impl<'a> RestoreContext<'a> {
         Some(navigation)
     }
 
+    fn chart_history(
+        &mut self,
+        index: usize,
+        actors: usize,
+        tick: u64,
+    ) -> Result<Shared<BTreeMap<ActorId, crate::chart_history::Owner>>, PersistError> {
+        let shared = self.shared;
+        let actors = shared
+            .actors
+            .get(actors)
+            .ok_or(PersistError::ChartHistory)?;
+        let mut cache = std::mem::take(&mut self.chart_history);
+        let mut validated_worlds = std::mem::take(&mut self.validated_chart_worlds);
+        let result = shared.chart_history.restore(
+            index,
+            tick,
+            |id| actors.contains_key(&id),
+            &mut cache,
+            &mut validated_worlds,
+            |world, spatial| {
+                Ok(crate::chart_history::AcquisitionAuthority {
+                    world: self
+                        .world(world)
+                        .ok_or(crate::chart_history::Error::Reference)?,
+                    registry: self
+                        .spatial_root(spatial)
+                        .map_err(|_| crate::chart_history::Error::Reference)?,
+                })
+            },
+        );
+        self.chart_history = cache;
+        self.validated_chart_worlds = validated_worlds;
+        result.map_err(|_| PersistError::ChartHistory)
+    }
     fn explored_maps(
         &mut self,
         index: usize,
@@ -460,8 +614,9 @@ impl<'a> RestoreContext<'a> {
 
     fn explored_map(&mut self, index: usize, world: usize) -> Option<Shared<ExploredMap>> {
         if self.explored_maps.is_none() {
-            self.explored_maps = Some(explored_map_regions::RestoreValidation::new(
+            self.explored_maps = Some(explored_map_regions::RestoreValidation::new_with_catalog(
                 &self.shared.explored_maps,
+                self.content.presentation_catalog(),
             )?);
         }
         self.explored_maps
@@ -567,6 +722,11 @@ impl Game {
                 worlds.push((*self.world).clone());
                 worlds.len() - 1
             });
+        let chart_history = shared.chart_history.capture(
+            &self.chart_history,
+            &mut shared.worlds,
+            &mut shared.spatial,
+        );
         let actor_records: BTreeMap<_, _> = self
             .actors
             .iter()
@@ -588,6 +748,8 @@ impl Game {
             })
             .collect();
         Snapshot {
+            spatial: shared.spatial.capture_snapshot(&self.spatial_registry),
+            chart_history,
             combat: self.combat.clone(),
             rules_rng: self.rules_rng,
             events: self.event_log.clone(),
@@ -691,7 +853,9 @@ impl Game {
         shared: &SharedState,
         content: Arc<Content>,
     ) -> Result<Self, PersistError> {
-        RestoreContext::new(shared, content).restore(snapshot)
+        let mut context = RestoreContext::new(shared, content);
+        context.bind_spatial_roots(&[&snapshot])?;
+        context.restore(snapshot)
     }
 
     fn restore_with_context(
@@ -727,7 +891,13 @@ impl Game {
                 snapshot.actors,
                 snapshot.world,
             )?,
+            chart_history: context.chart_history(
+                snapshot.chart_history,
+                snapshot.actors,
+                snapshot.tick,
+            )?,
             map_validation: Default::default(),
+            spatial_registry: context.spatial_root(snapshot.spatial)?,
             seed: snapshot.seed,
             tick: snapshot.tick,
             actors: context.actors(snapshot.actors, snapshot.items)?,
@@ -770,6 +940,8 @@ impl Game {
             population_entry_boundary: None,
             preparation_region_boundary: None,
             trap_region_boundary: None,
+            light_region_boundary: None,
+            light_settled_witness: None,
             trap_resolution: None,
             host_region_continuation: false,
             lifecycle: match snapshot.lifecycle {
@@ -882,6 +1054,7 @@ impl Game {
     /// attaching a stored region gives its actors the same.
     pub(crate) fn actor_state_valid(&self, id: ActorId, actor: &Actor) -> bool {
         id.0 != 0
+            && crate::hallucination_clock::valid_for(actor)
             && actor.periodic_relocations.valid_for(actor, &self.items)
             && actor
                 .guise
@@ -1079,6 +1252,7 @@ impl Game {
             && item.holds_valid()
             && (item.spec.stackable || item.quantity == 1)
             && item.spec.valid()
+            && crate::portable_light::valid_item(item)
             && item.corpse.as_ref().is_none_or(|corpse| {
                 item.spec.class == crate::ItemClass::Corpse
                     && !item.spec.stackable
@@ -1092,7 +1266,10 @@ impl Game {
             && item.orientation < 24
             && match item.location {
                 ItemLocation::Ground(location) => self.world.contains(location),
-                ItemLocation::Carried(actor) => self.actors.contains_key(&actor),
+                ItemLocation::Carried(actor) => self.actors.get(&actor).is_some_and(|owner| {
+                    !item.fuel.is_some_and(|fuel| fuel.lit)
+                        || (owner.alive() && owner.equipment.values().any(|held| *held == id))
+                }),
             }
     }
 
@@ -1170,6 +1347,9 @@ mod tests {
         let index = other_actor.navigation.remove(&actor).unwrap();
         other_actor.navigation.insert(ActorId(999), index);
         let mut context = RestoreContext::new(&shared, game.content().clone());
+        context
+            .bind_spatial_roots(&[&valid, &other_world, &other_actor])
+            .unwrap();
         assert!(context.restore(valid).is_ok());
         assert!(context.restore(other_world).is_err());
         assert!(context.restore(other_actor).is_err());
@@ -1219,6 +1399,9 @@ mod tests {
         let (snapshots, shared): (Vec<Snapshot>, SharedState) =
             serde_json::from_slice(&bytes).unwrap();
         let mut context = RestoreContext::new(&shared, game.content().clone());
+        context
+            .bind_spatial_roots(&snapshots.iter().collect::<Vec<_>>())
+            .unwrap();
         let mut restored: Vec<_> = snapshots
             .into_iter()
             .map(|snapshot| context.restore(snapshot).unwrap())
@@ -1290,6 +1473,9 @@ mod tests {
             let (snapshots, shared): (Vec<Snapshot>, SharedState) =
                 serde_json::from_slice(&bytes).unwrap();
             let mut context = RestoreContext::new(&shared, queued.content().clone());
+            context
+                .bind_spatial_roots(&snapshots.iter().collect::<Vec<_>>())
+                .unwrap();
             let mut restored: Vec<_> = snapshots
                 .into_iter()
                 .map(|s| context.restore(s).unwrap())
@@ -1389,6 +1575,7 @@ mod tests {
             slot: crate::EquipmentSlot::new("body_armor").unwrap(),
             attack: None,
             modifiers: vec![Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::GrantAbility {
                     ability: AbilityId::new("missing_ability").unwrap(),
@@ -1552,6 +1739,9 @@ mod tests {
         let (snapshots, shared): (Vec<Snapshot>, SharedState) =
             serde_json::from_slice(&bytes).unwrap();
         let mut context = RestoreContext::new(&shared, game.content().clone());
+        context
+            .bind_spatial_roots(&snapshots.iter().collect::<Vec<_>>())
+            .unwrap();
         let mut restored: Vec<_> = snapshots
             .into_iter()
             .map(|s| context.restore(s).unwrap())
@@ -1606,6 +1796,9 @@ mod tests {
         let (snapshots, shared): (Vec<Snapshot>, SharedState) =
             serde_json::from_slice(&bytes).unwrap();
         let mut context = RestoreContext::new(&shared, game.content().clone());
+        context
+            .bind_spatial_roots(&snapshots.iter().collect::<Vec<_>>())
+            .unwrap();
         let mut restored: Vec<_> = snapshots
             .into_iter()
             .map(|s| context.restore(s).unwrap())
@@ -1699,6 +1892,7 @@ mod tests {
             .eye = [1, 0, 0];
         let valid = game.checkpoint(&mut shared);
         let mut context = RestoreContext::new(&shared, game.content().clone());
+        context.bind_spatial_roots(&[&broken, &valid]).unwrap();
         assert!(context.restore(broken).is_err());
         assert_eq!(context.restore(valid), Ok(game));
     }
@@ -2949,7 +3143,19 @@ mod explored_map_regions {
         pub(super) fn new(maps: &[Shared<ExploredMap>]) -> Option<Self> {
             Self::from_saved(collect(maps))
         }
+        pub(super) fn new_with_catalog(
+            maps: &[Shared<ExploredMap>],
+            catalog: &crate::appearance_catalog::PresentationCatalog,
+        ) -> Option<Self> {
+            Self::from_saved_with_catalog(collect(maps), Some(catalog))
+        }
         fn from_saved(saved: Regions) -> Option<Self> {
+            Self::from_saved_with_catalog(saved, None)
+        }
+        fn from_saved_with_catalog(
+            saved: Regions,
+            catalog: Option<&crate::appearance_catalog::PresentationCatalog>,
+        ) -> Option<Self> {
             let directories = directories(&saved)?;
             let mut valid_appearances = BTreeSet::new();
             for bucket in &saved.cells {
@@ -2957,7 +3163,9 @@ mod explored_map_regions {
                     visit!(appearance_cells);
                     if valid_appearances.insert(std::ptr::from_ref::<MapAppearance>(appearance)) {
                         visit!(@local appearance_payloads);
-                        if !appearance.valid() {
+                        if !appearance.valid()
+                            || catalog.is_some_and(|catalog| !appearance.valid_for_catalog(catalog))
+                        {
                             return None;
                         }
                     }
@@ -3291,6 +3499,7 @@ mod explored_map_tests {
 
     fn appearance(material: &str) -> Shared<MapAppearance> {
         Shared::new(MapAppearance {
+            object_presentation: None,
             wall: true,
             material: material.into(),
             asset: Some("wall/remembered".into()),
@@ -3305,6 +3514,7 @@ mod explored_map_tests {
                 asset: Some("door/closed".into()),
             }),
             ground_items: vec![MapItemAppearance {
+                presentation: None,
                 class: crate::ItemClass::Potion,
                 description: "a blue bottle".into(),
                 name: "blue potion".into(),
@@ -3650,6 +3860,9 @@ mod explored_map_tests {
         reset_work_counts();
         crate::reset_map_work_counts();
         let mut context = RestoreContext::new(&decoded, game.content().clone());
+        context
+            .bind_spatial_roots(&snapshots.iter().collect::<Vec<_>>())
+            .unwrap();
         for snapshot in snapshots {
             let restored = context.restore(snapshot).unwrap();
             assert!(restored
@@ -3708,6 +3921,7 @@ mod explored_map_tests {
             .push(BTreeMap::from([(actor, shared.explored_maps.len() - 1)]));
         super::explored_map_regions::reset_work_counts();
         let mut context = RestoreContext::new(&shared, game.content().clone());
+        context.bind_spatial_roots(&[&forged]).unwrap();
         assert!(context.restore(forged).is_err());
         assert_eq!(
             super::explored_map_regions::work_counts().appearance_cells,
@@ -4292,6 +4506,16 @@ mod explored_map_tests {
         assert!(!shared.explored_map_references_valid([&wrong_index]));
         assert!(!shared.explored_map_references_valid([&missing_directory]));
         let mut context = RestoreContext::new(&shared, game.content().clone());
+        context
+            .bind_spatial_roots(&[
+                &valid,
+                &zero_actor,
+                &wrong_membership,
+                &wrong_actor,
+                &wrong_index,
+                &missing_directory,
+            ])
+            .unwrap();
         super::explored_map_regions::reset_work_counts();
         assert_eq!(context.restore(zero_actor), Err(PersistError::ExploredMap));
         assert_eq!(
@@ -4345,6 +4569,9 @@ mod explored_map_tests {
         let (snapshots, decoded): (Vec<Snapshot>, SharedState) =
             serde_json::from_slice(&bytes).unwrap();
         let mut context = RestoreContext::new(&decoded, game.content().clone());
+        context
+            .bind_spatial_roots(&snapshots.iter().collect::<Vec<_>>())
+            .unwrap();
         let restored: Vec<_> = snapshots
             .into_iter()
             .map(|s| context.restore(s).unwrap())
@@ -4425,6 +4652,9 @@ mod explored_map_tests {
         let (snapshots, decoded): (Vec<Snapshot>, SharedState) =
             serde_json::from_slice(&bytes).unwrap();
         let mut context = RestoreContext::new(&decoded, game.content().clone());
+        context
+            .bind_spatial_roots(&snapshots.iter().collect::<Vec<_>>())
+            .unwrap();
         let restored: Vec<_> = snapshots
             .into_iter()
             .map(|snapshot| context.restore(snapshot).unwrap())

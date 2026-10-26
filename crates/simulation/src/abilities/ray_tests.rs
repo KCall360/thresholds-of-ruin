@@ -60,6 +60,7 @@ pub(super) fn fixture_with(
         condition.source_scoped = true;
         condition.lifecycle = ConditionLifecycle::Timed;
         condition.modifiers = vec![Modifier {
+            cancellable: false,
             scope,
             op: ModifierOp::Add { stat, value },
         }];
@@ -91,6 +92,7 @@ pub(super) fn fixture_with(
         condition.lifecycle = lifecycle;
         condition.source_scoped = false;
         condition.modifiers = vec![Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Add { stat, value },
         }];
@@ -107,6 +109,7 @@ pub(super) fn fixture_with(
     ward.name = "Ray ward".into();
     ward.lifecycle = ConditionLifecycle::Timed;
     ward.modifiers = vec![Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Reduction {
             selector: Selector::Category {
@@ -137,6 +140,7 @@ pub(super) fn fixture_with(
     };
     ray.strikes = StrikeSource::Authored {
         strikes: vec![StrikeDef {
+            cancellable: false,
             offset: 0,
             unlock: None,
             check: Some(CheckDef {
@@ -173,6 +177,7 @@ pub(super) fn fixture_with(
     let mut species = crate::test_creatures::species();
     species.modifiers.extend([
         Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Set {
                 stat: Stat::Health,
@@ -180,6 +185,7 @@ pub(super) fn fixture_with(
             },
         },
         Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::GrantAbility {
                 ability: ray.id.clone(),
@@ -248,6 +254,25 @@ fn outcomes(game: &Game) -> Vec<&Outcome> {
         .collect()
 }
 
+fn source_bonus(ray: &RayPlan) -> i64 {
+    let super::RayResolution::Opposed { source_bonus, .. } = &ray.resolution else {
+        panic!("fixture must capture a genuine opposed ray");
+    };
+    *source_bonus
+}
+fn source_edge(ray: &RayPlan) -> i64 {
+    let super::RayResolution::Opposed { source_edge, .. } = &ray.resolution else {
+        panic!("fixture must capture a genuine opposed ray");
+    };
+    *source_edge
+}
+fn incoming(ray: &RayPlan) -> &[super::ray::RayIncomingSource] {
+    let super::RayResolution::Opposed { incoming, .. } = &ray.resolution else {
+        panic!("fixture must capture a genuine opposed ray");
+    };
+    incoming
+}
+
 #[test]
 fn directional_plan_is_strict_targetless_and_freezes_source_only() {
     let mut game = fixture();
@@ -271,16 +296,10 @@ fn directional_plan_is_strict_targetless_and_freezes_source_only() {
         "origin",
         "direction",
         "launch_footprint",
-        "clear_visits",
-        "source_skill",
-        "target_skill",
-        "source_bonus",
-        "source_edge",
-        "effect_edge",
-        "incoming",
+        "traversal",
+        "resolution",
         "effects",
         "descriptors",
-        "tokens",
         "preparation",
         "recovery",
         "cost",
@@ -306,7 +325,10 @@ fn directional_plan_is_strict_targetless_and_freezes_source_only() {
         );
     }
     buff(&mut game, ActorId(1), "ray_strong", ActorId(1));
-    assert_ne!(plan(&game).as_ray().unwrap().source_bonus, ray.source_bonus);
+    assert_ne!(
+        source_bonus(plan(&game).as_ray().unwrap()),
+        source_bonus(ray)
+    );
     assert_eq!(serde_json::to_value(ray).unwrap(), value);
 }
 
@@ -389,6 +411,7 @@ fn first_contact_whole_payload_immunity_stops_without_target_roll_or_token_spend
             duration: 500,
         }];
         species.modifiers.push(Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Immunity {
                 selector: Selector::Descriptor { descriptor: fire },
@@ -534,6 +557,7 @@ fn encounters_are_contiguous_passes_and_source_can_be_hit_after_exit() {
 fn repeat_disadvantage_cancels_advantage_before_the_existing_six_dice_cap() {
     let game = fixture_with(|_, _, species| {
         species.modifiers.push(Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Add {
                 stat: Stat::CheckEdge,
@@ -551,7 +575,7 @@ fn repeat_disadvantage_cancels_advantage_before_the_existing_six_dice_cap() {
             ActorId(2),
             ActorId(1),
             &ray.ability,
-            &ray.incoming,
+            incoming(ray),
             true,
             &[],
         )
@@ -578,8 +602,8 @@ fn targetless_launch_ignores_both_signs_of_opponent_qualified_source_edges() {
         buff(&mut game, ActorId(1), condition, ActorId(2));
         let after = plan(&game);
         assert_eq!(
-            before.as_ray().unwrap().source_edge,
-            after.as_ray().unwrap().source_edge
+            source_edge(before.as_ray().unwrap()),
+            source_edge(after.as_ray().unwrap())
         );
         let mut a = 11;
         let mut b = 11;
@@ -617,7 +641,7 @@ fn incoming_source_predicates_are_frozen_but_bound_to_the_real_recipient() {
                 ActorId(2),
                 ActorId(1),
                 &ray.ability,
-                &ray.incoming,
+                incoming(ray),
                 true,
                 &[],
             )
@@ -629,7 +653,7 @@ fn incoming_source_predicates_are_frozen_but_bound_to_the_real_recipient() {
                 ActorId(3),
                 ActorId(1),
                 &ray.ability,
-                &ray.incoming,
+                incoming(ray),
                 true,
                 &[],
             )
@@ -1079,6 +1103,7 @@ fn failed_dodge_against_fire_component_immunity_still_checks_and_intercepts() {
         };
         components[0].descriptor = Some(crate::content_ids::DescriptorId::new("fire").unwrap());
         species.modifiers.push(Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Immunity {
                 selector: Selector::Descriptor {
@@ -1365,8 +1390,8 @@ fn opponent_qualified_tokens_of_both_signs_are_not_launch_operands_or_claims() {
         );
         let after = plan(&game);
         assert_eq!(
-            before.as_ray().unwrap().source_edge,
-            after.as_ray().unwrap().source_edge
+            source_edge(before.as_ray().unwrap()),
+            source_edge(after.as_ray().unwrap())
         );
         assert!(after.tokens().next().is_none());
         let mut a = 77;
@@ -1403,6 +1428,7 @@ fn opposition_immunity_fixture(payload_immune: bool) -> Game {
             document.conditions.push(condition);
         }
         species.modifiers.push(Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Immunity {
                 selector: Selector::Descriptor {

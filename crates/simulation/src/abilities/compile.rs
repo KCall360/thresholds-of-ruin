@@ -689,6 +689,7 @@ impl Game {
                         return Err(invalid());
                     };
                     let strike = StrikeDef {
+                        cancellable: false,
                         offset: 0,
                         unlock: None,
                         check: Some(CheckDef {

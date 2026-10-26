@@ -21,6 +21,7 @@ fn at(region: u64, x: i32) -> Location {
 }
 fn context_modifier() -> Modifier {
     Modifier {
+        cancellable: false,
         scope: Scope::WhileNoSensedHostile,
         op: ModifierOp::Add {
             stat: Stat::HealthRecoveryPeriodPercent,
@@ -45,6 +46,8 @@ fn game_with_context(hostile_present: bool, contextual: bool) -> Game {
     template.modifiers.push(context_modifier());
     let mut document = fixture::ruleset().document().clone();
     document.conditions.push(ConditionDef {
+        detecting_monsters: false,
+        hallucinating: false,
         id: ConditionId::new("quiet_recovery").unwrap(),
         family: ConditionFamilyId::new("quiet_recovery").unwrap(),
         lifecycle: ConditionLifecycle::Timed,
@@ -68,6 +71,8 @@ fn game_with_context(hostile_present: bool, contextual: bool) -> Game {
         ("borrowed_vitality", Scope::Always, Stat::Health, 100),
     ] {
         document.conditions.push(ConditionDef {
+            detecting_monsters: false,
+            hallucinating: false,
             id: ConditionId::new(id).unwrap(),
             family: ConditionFamilyId::new(id).unwrap(),
             lifecycle: ConditionLifecycle::Timed,
@@ -76,6 +81,7 @@ fn game_with_context(hostile_present: bool, contextual: bool) -> Game {
             preparation: tor_simulation::rules::ConditionPreparation::Preserve,
             name: id.into(),
             modifiers: vec![Modifier {
+                cancellable: false,
                 scope,
                 op: ModifierOp::Add { stat, value },
             }],

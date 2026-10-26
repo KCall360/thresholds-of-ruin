@@ -283,7 +283,9 @@ impl IntellectLearning {
         rows: &[u16],
         witness: &IntellectSources,
     ) -> Result<u16, BuildError> {
-        if rows.len() > crate::limits::HIT_DICE {
+        if rows.len() > crate::limits::HIT_DICE
+            || witness.strength_acquired > build.strength_acquired()
+        {
             return Err(BuildError::InvalidOwnership);
         }
         let choices = rows
@@ -331,6 +333,7 @@ impl IntellectLearning {
             build,
             self.birth.attributes,
             &self.birth.templates,
+            witness.strength_acquired,
             choices.iter().copied(),
         )?;
         if &actual != witness {
@@ -344,7 +347,9 @@ impl IntellectLearning {
         )
     }
     pub fn validate(&self, build: &CreatureBuild) -> Result<(), BuildError> {
-        if self.birth.attributes != build.initial_attributes() {
+        if self.birth.attributes != build.initial_attributes()
+            || self.birth.sources.strength_acquired != 0
+        {
             return Err(BuildError::InvalidOwnership);
         }
         if self.thresholds.len() > usize::from(crate::limits::DERIVED_ATTRIBUTE)
@@ -371,7 +376,19 @@ impl IntellectLearning {
         {
             return Err(BuildError::InvalidOwnership);
         }
+        let mut prior_strength = 0;
         for (index, receipt) in self.acquisitions.iter().enumerate() {
+            let before_strength = receipt.before.strength_acquired;
+            let after_strength = receipt.after.strength_acquired;
+            if before_strength < prior_strength
+                || after_strength < before_strength
+                || (after_strength != before_strength
+                    && (before_strength.checked_add(1) != Some(after_strength)
+                        || receipt.before_choices != receipt.after_choices))
+            {
+                return Err(BuildError::InvalidOwnership);
+            }
+            prior_strength = after_strength;
             if receipt.after_choices.len() < receipt.before_choices.len()
                 || receipt.after_choices.len() > receipt.before_choices.len() + 1
             {

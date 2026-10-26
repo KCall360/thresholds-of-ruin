@@ -10,6 +10,7 @@ use tor_simulation::rules::{Modifier, ModifierOp, Scope, Stat};
 fn build() -> CreatureBuild {
     let mut template = Template::new(TemplateId::new("armored").unwrap(), 0);
     template.modifiers.push(Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Add {
             stat: Stat::Health,

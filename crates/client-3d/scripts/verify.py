@@ -7,6 +7,8 @@ source fingerprint, profile, toolchain and command configuration.
 import argparse
 from datetime import datetime, timezone
 import hashlib
+import importlib.util
+import unittest
 import json
 import os
 from pathlib import Path
@@ -19,6 +21,22 @@ CLIENT = Path(__file__).resolve().parents[1]
 ROOT = CLIENT.parents[1]
 MANIFEST = str(CLIENT / "Cargo.toml")
 TARGET = Path(os.environ.get("CARGO_TARGET_DIR", CLIENT / "target")).resolve()
+
+# Load the maintained core accounting implementation under an unambiguous name.
+sys.path.insert(0, str(ROOT / "scripts"))
+import graphical_waiver
+_spec = importlib.util.spec_from_file_location("_core_verifier_for_3d", ROOT / "scripts/verify.py")
+_core_verifier = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_core_verifier)
+
+
+def waiver_plan(path):
+    manifest = graphical_waiver.read_manifest(path)
+    suite = unittest.defaultTestLoader.discover(str(CLIENT / "scripts"), pattern="test_*process.py")
+    # Exact current discovery, not a count cap or a broad class exclusion.
+    with graphical_waiver.apply(suite, manifest["tests"], manifest["reason"]):
+        pass
+    return manifest
 
 # Explicit non-credential inputs: a DX12 run is different evidence from a
 # platform-default run, as are compiler/profile overrides.
@@ -73,10 +91,22 @@ def source_identity():
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--profile", choices=("debug", "release"), default="debug")
+    parser.add_argument("--waive-local-graphical", metavar="MANIFEST")
     args = parser.parse_args(argv)
+    graphical = None
+    if args.waive_local_graphical:
+        if os.environ.get("CI"):
+            parser.error("--waive-local-graphical is local only")
+        try:
+            graphical = waiver_plan(args.waive_local_graphical)
+        except (OSError, ValueError) as error:
+            parser.error(str(error))
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     logs = ROOT / ".local" / "verify-3d" / f"{stamp}-{args.profile}"
     logs.mkdir(parents=True)
+    graphical_path = logs / "graphical-waiver.json"
+    if graphical is not None:
+        graphical_path.write_text(json.dumps(graphical, indent=2) + "\n", encoding="utf-8")
     temporary = ROOT / ".local" / "client-3d-tmp"
     temporary.mkdir(parents=True, exist_ok=True)
     environment = {**os.environ, "CARGO_BUILD_JOBS": "2", "CARGO_PROFILE_DEV_DEBUG": "0", "PYTHONUTF8": "1",
@@ -90,10 +120,11 @@ def main(argv=None):
         owner = lock.open("x", encoding="utf-8")
     except FileExistsError:
         parser.error(f"target directory already has a verification owner: {lock}; verify its process before recovery")
-    receipt = {"schema": "tor-client-3d-verification-v2", "profile": args.profile,
+    receipt = {"schema": "tor-client-3d-verification-v3", "profile": args.profile,
                "platform": sys.platform, "python": sys.version,
                "environment": {name: environment.get(name) for name in CONFIGURATION},
-               "steps": [], "passed": False}
+               "steps": [], "passed": False, "gate_passed": False, "clean_passed": False,
+               "graphical_waiver": graphical, "waived_tests": []}
     try:
         with owner:
             owner.write(str(os.getpid()))
@@ -101,6 +132,11 @@ def main(argv=None):
         receipt["toolchain"] = {name: subprocess.check_output([name, "--version"], text=True).strip()
                                 for name in ("cargo", "rustc")}
         for name, command in steps(args.profile):
+            if name == "process-tests" and graphical is not None:
+                command = [sys.executable, str(ROOT / "scripts/test_runner.py"),
+                           "--waive-local-graphical", str(graphical_path),
+                           *command[3:]]
+                environment["TOR_TEST_TIMINGS"] = str(logs / "process-tests-tests.jsonl")
             started = time.monotonic()
             log = logs / f"{name}.log"
             try:
@@ -110,6 +146,13 @@ def main(argv=None):
                 code = result.returncode
             except subprocess.TimeoutExpired:
                 code = 124
+            if name == "process-tests" and graphical is not None:
+                try:
+                    receipt["waived_tests"] = _core_verifier.graphical_waiver_evidence(
+                        environment["TOR_TEST_TIMINGS"], graphical["tests"])
+                except (OSError, ValueError, TypeError, KeyError) as error:
+                    code = code or 2
+                    print(f"FAIL: graphical waiver accounting: {error}")
             receipt["steps"].append({"name": name, "command": command, "exit_code": code,
                                      "seconds": time.monotonic() - started, "log": str(log)})
             print(f"{name}: {'PASS' if code == 0 else 'FAIL'}", flush=True)
@@ -117,10 +160,13 @@ def main(argv=None):
                 print("\n".join(log.read_text(encoding="utf-8", errors="replace").splitlines()[-55:]))
                 return 1
         receipt["final_source"] = source_identity()
-        receipt["passed"] = receipt["source"] == receipt["final_source"]
-        if not receipt["passed"]:
+        receipt["gate_passed"] = (receipt["source"] == receipt["final_source"]
+                                  and (graphical is None or receipt["waived_tests"] == graphical["tests"]))
+        receipt["clean_passed"] = receipt["gate_passed"] and graphical is None
+        receipt["passed"] = receipt["clean_passed"]  # Conservative legacy readers.
+        if receipt["source"] != receipt["final_source"]:
             print("FAIL: checked inputs changed during verification")
-        return 0 if receipt["passed"] else 1
+        return 0 if receipt["gate_passed"] else 1
     finally:
         (logs / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
         lock.unlink()

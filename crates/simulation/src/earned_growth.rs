@@ -257,19 +257,65 @@ impl EarnedProgress {
         }
         Ok(projected)
     }
+    pub(crate) fn next_unfunded_credit(
+        &self,
+        current: HdCount,
+        policy: &GrowthPolicy,
+    ) -> Result<u64, GrowthError> {
+        let lost = self
+            .highest_applied_tier
+            .checked_sub(current)
+            .ok_or(GrowthError::InvalidRecord)?
+            .get();
+        let price = self.next_threshold(policy)?;
+        if price == 0 {
+            return Err(GrowthError::InvalidRecord);
+        }
+        if self.held_xp / price < lost {
+            // Earlier funded regrowth ordinals all have this same current price.
+            return Ok(price - self.held_xp % price);
+        }
+        let regrowth = lost.checked_mul(price).ok_or(GrowthError::Arithmetic)?;
+        let forward_xp = self
+            .held_xp
+            .checked_sub(regrowth)
+            .ok_or(GrowthError::InvalidRecord)?;
+        let funded = self.projected_tier(current, policy)?;
+        funded.checked_add(1).ok_or(GrowthError::Arithmetic)?;
+        let forward_cost = policy
+            .threshold_sum(self.highest_applied_tier, funded)
+            .ok_or(GrowthError::Arithmetic)?;
+        let residual = forward_xp
+            .checked_sub(forward_cost)
+            .ok_or(GrowthError::InvalidRecord)?;
+        let next = policy.threshold(funded).ok_or(GrowthError::Arithmetic)?;
+        next.checked_sub(residual)
+            .filter(|credit| *credit > 0)
+            .ok_or(GrowthError::InvalidRecord)
+    }
+
     pub(crate) fn award(
         &mut self,
         amount: u32,
         current: HdCount,
         policy: &GrowthPolicy,
     ) -> Result<(), GrowthError> {
+        self.award_wide(u64::from(amount), current, policy)
+    }
+
+    pub(crate) fn award_wide(
+        &mut self,
+        amount: u64,
+        current: HdCount,
+        policy: &GrowthPolicy,
+    ) -> Result<(), GrowthError> {
         let earned = self
             .earned_xp
-            .checked_add(u64::from(amount))
+            .checked_add(amount)
             .ok_or(GrowthError::Arithmetic)?;
         let held = self
             .held_xp
-            .checked_add(u64::from(amount))
+            .checked_add(amount)
             .ok_or(GrowthError::Arithmetic)?;
         let mut candidate = self.clone();
         candidate.earned_xp = earned;
@@ -490,6 +536,58 @@ mod tests {
     }
 
     #[test]
+    fn raise_funding_covers_partial_regrowth_then_successive_forward_obligations() {
+        let policy = crate::test_creatures::ruleset().document().growth.clone();
+        let applied = HdCount(4);
+        let current = HdCount(2);
+        assert_eq!(policy.threshold(applied), Some(400));
+        for (held, expected) in [
+            (0, 400),
+            (399, 1),
+            (400, 400),
+            (799, 1),
+            (800, 400),
+            (1199, 1),
+            (1200, 500),
+            (1707, 593),
+        ] {
+            let mut account = EarnedProgress::new(applied, 1);
+            account.award_wide(held, current, &policy).unwrap();
+            account.validate(current, &policy).unwrap();
+            assert_eq!(account.next_unfunded_credit(current, &policy), Ok(expected));
+            account.award_wide(expected, current, &policy).unwrap();
+            account.validate(current, &policy).unwrap();
+            assert_eq!(account.held_xp(), held + expected);
+            assert_eq!(account.spent_xp(), 0);
+        }
+    }
+
+    #[test]
+    fn raise_funding_is_full_width_and_account_overflow_is_atomic() {
+        let policy = crate::test_creatures::ruleset().document().growth.clone();
+        let current = HdCount(1);
+        let funded = HdCount(50_000_000);
+        let held = policy.threshold_sum(current, funded).unwrap();
+        let mut account = EarnedProgress::new(current, 1);
+        account.award_wide(held, current, &policy).unwrap();
+        account.validate(current, &policy).unwrap();
+        let credit = account.next_unfunded_credit(current, &policy).unwrap();
+        assert_eq!(credit, 5_000_000_000);
+        assert!(credit > u64::from(u32::MAX));
+        account.award_wide(credit, current, &policy).unwrap();
+        assert_eq!(
+            account.highest_earned_tier(),
+            funded.checked_add(1).unwrap()
+        );
+        let before = account.clone();
+        assert_eq!(
+            account.award_wide(u64::MAX, current, &policy),
+            Err(GrowthError::Arithmetic)
+        );
+        assert_eq!(account, before);
+    }
+
+    #[test]
     fn wide_scalar_analytical_projection_and_sums_match_the_iterative_oracle_exhaustively() {
         let mut policy = crate::test_creatures::ruleset().document().growth.clone();
         for base in 1..=4 {
@@ -674,6 +772,7 @@ mod tests {
             .unwrap()
             .modifiers
             .push(Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::GrantAbility {
                     ability: ability_id,
@@ -699,6 +798,21 @@ mod tests {
             .unwrap();
         let mut state = CreatureState::new(build).unwrap();
         state.lose_attribute(Attribute::Speed, 1).unwrap();
+        // The same genuinely valid temporary fold obstruction also retains
+        // successive Raise Level obligations, without bypassing the fold.
+        let mut potion = state.clone();
+        assert_eq!(potion.stage_raise_level().unwrap(), 100);
+        potion.rebuild(potion.build().clone()).unwrap();
+        assert_eq!(potion.build().ledger().total_hd().get(), 1);
+        assert_eq!(potion.earned_progress().held_xp(), 100);
+        assert_eq!(potion.stage_raise_level().unwrap(), 200);
+        potion.rebuild(potion.build().clone()).unwrap();
+        assert_eq!(potion.build().ledger().total_hd().get(), 1);
+        assert_eq!(potion.earned_progress().held_xp(), 300);
+        potion.restore_attribute(Attribute::Speed, 1).unwrap();
+        potion.rebuild(potion.build().clone()).unwrap();
+        assert_eq!(potion.build().ledger().total_hd().get(), 3);
+        assert_eq!(potion.earned_progress().held_xp(), 0);
         state.award_xp(100).unwrap();
         assert_eq!(state.build().ledger().total_hd().get(), 1);
         assert_eq!(state.earned_progress().held_xp(), 100);
@@ -1234,6 +1348,7 @@ mod source_tests {
                 socket: crate::EquipmentSlotId(0),
                 attack: None,
                 modifiers: vec![crate::rules::Modifier {
+                    cancellable: false,
                     scope: crate::rules::Scope::Always,
                     op: crate::rules::ModifierOp::Add {
                         stat: crate::rules::Stat::Health,

@@ -5,6 +5,48 @@ use serde::{Deserialize, Serialize};
 const MAX_KNOWN_CHARGES: usize = 4096;
 pub const MAX_IDENTIFICATION_ITEMS: usize = 64;
 
+/// Requested input is distinct from the device's frozen delivery.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum DeviceAim {
+    Direction {
+        direction: crate::abilities::StepDirection,
+    },
+    SelfTarget {},
+}
+impl<'de> Deserialize<'de> for DeviceAim {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            Direction {
+                direction: crate::abilities::StepDirection,
+            },
+            SelfTarget {},
+        }
+        Ok(match crate::bounded::named_map(d)? {
+            Fields::Direction { direction } => Self::Direction { direction },
+            Fields::SelfTarget {} => Self::SelfTarget {},
+        })
+    }
+}
+/// Disclosed input permission, never an unknown item's hidden delivery profile.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeviceActivation {
+    Direction,
+    SelfTarget,
+}
+impl<'de> Deserialize<'de> for DeviceActivation {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match String::deserialize(d)?.as_str() {
+            "direction" => Ok(Self::Direction),
+            "self_target" => Ok(Self::SelfTarget),
+            _ => Err(serde::de::Error::custom("invalid device activation")),
+        }
+    }
+}
+
 /// Recognition requires an authored trigger and a committed owner witness.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]

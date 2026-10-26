@@ -8,7 +8,9 @@ Rerun this when the protocol version changes and review the diff:
 
     python scripts/record_wire_samples.py
 """
+import argparse
 import copy
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -63,6 +65,54 @@ def utility_wands_recording_case():
     from test_rogue_utility_wands_process import RogueUtilityWandsProcesses
     return RogueUtilityWandsProcesses(
         "test_persistent_first_contact_utility_state_displays_in_text_and_reopens_without_source")
+
+
+def self_device_recording_case():
+    """Reuse real Text Nothing/Identify/self-aim acceptance and its raw snapshot."""
+    from test_magic_items_process import MagicItemProcesses
+    return MagicItemProcesses("test_text_nothing_unknown_direction_and_identified_self_skip")
+
+
+def drain_refusal_recording_case():
+    """Reuse actual imported Drain Text refusal; never synthesize wire facts."""
+    from test_magic_items_process import MagicItemProcesses
+    return MagicItemProcesses("test_imported_drain_weak_text_attempt_spends_time_not_charge_or_identity")
+
+
+def first_contact_recording_case():
+    """Reuse the actual paid device and privileged capture, not synthetic DTOs."""
+    from test_magic_items_process import MagicItemProcesses
+    return MagicItemProcesses("test_imported_cancellation_privileged_capture_records_actual_reach_and_effect")
+
+
+def hallucination_recording_case():
+    """Reuse the genuine Text/cadence/source-free case and its raw snapshots."""
+    from test_magic_items_process import MagicItemProcesses
+    return MagicItemProcesses("test_imported_hallucination_text_visual_cadence_and_source_free_reopen")
+
+
+def detection_recording_case():
+    """Genuine paid Detection/Mapping and source-deleted spectator recovery."""
+    from test_magic_items_process import MagicItemProcesses
+    return MagicItemProcesses("test_imported_detection_history_empty_retention_source_free_spectator")
+
+
+def growth_recording_case():
+    """Actual granted self-ability diagnostics; production Drinks are separate."""
+    from test_magic_items_process import MagicItemProcesses
+    return MagicItemProcesses("test_growth_self_abilities_privileged_capture_records_actual_acquisition_and_credit")
+
+
+def haste_recording_case():
+    """Actual paid self-ability outcomes; production potion acceptance is separate."""
+    from test_magic_items_process import MagicItemProcesses
+    return MagicItemProcesses("test_haste_self_ability_privileged_capture_records_both_real_branches")
+
+
+def torch_recording_case():
+    """Actual adventure control and fuel states, not synthetic server frames."""
+    from test_magic_items_process import MagicItemProcesses
+    return MagicItemProcesses("test_imported_torch_text_explicit_control_fuel_drop_and_source_free_reopen")
 
 
 def discovery_recording_case():
@@ -123,6 +173,7 @@ SAMPLE_ADVANCEMENT_COMMANDS = [
 ]
 
 
+# Maintained schema examples, not captured outbound client transcripts.
 CLIENT = [
     {"type": "hello", "protocol": PROTOCOL, "token": "a-sample-credential", "frontend": "headless"},
     *({"type": "request", "request_id": f"sample-{i}", "request": request} for i, request in enumerate([
@@ -162,7 +213,9 @@ CLIENT = [
                 {"type": "unequip", "item": "i_" + "04" * 32},
                 {"type": "drink", "item": "i_" + "04" * 32},
                 {"type": "read", "item": "i_" + "04" * 32},
-                {"type": "zap", "item": "i_" + "04" * 32, "direction": "east"},
+                {"type": "ignite", "item": "i_" + "04" * 32},
+                {"type": "extinguish", "item": "i_" + "04" * 32},
+                {"type": "zap", "item": "i_" + "04" * 32, "aim": {"kind": "direction", "direction": "east"}},
                 {"type": "identify", "choice": "choice-sample", "item": "i_" + "04" * 32},
                 {"type": "identify", "choice": "choice-sample", "item": None},
                 {"type": "eat", "item": "i_" + "04" * 32},
@@ -219,6 +272,234 @@ class Recorder(ProcessTestCase):
         sample = run_recording_case(amulet_recording_case(), "escape_sample")
         self.assertEqual(sample["type"], "snapshot")
         server_samples["zz.amulet_escape"] = sample
+
+    def record_self_device(self, server_samples):
+        sample = run_recording_case(self_device_recording_case(), "self_device_sample")
+        self.assertEqual(sample["type"], "snapshot")
+        state = sample["snapshot"]["state"]
+        self.assertFalse(state["wizard_game"])
+        rows = state["observation"]["interactions"]["inventory"]
+        self.assertTrue(any(row["device_activation"] == "self_target" for row in rows),
+                        "capture the actual known-self device affordance")
+        server_samples["zz.self_device"] = sample
+
+    def record_drain_refusal(self, server_samples):
+        sample = run_recording_case(drain_refusal_recording_case(), "drain_refusal_sample")
+        self.assertEqual(sample["type"], "snapshot")
+        state = sample["snapshot"]["state"]
+        self.assertFalse(state["wizard_game"])
+        interactions = state["observation"]["interactions"]
+        self.assertTrue(interactions["refused"], "capture a real nonempty paid refusal")
+        self.assertFalse(interactions["completed"], "refusal is not successful completion")
+        for refusal in interactions["refused"]:
+            self.assertEqual(refusal["reason"], "too_weak")
+            self.assertEqual(refusal["action"]["type"], "zap")
+        server_samples["zz.drain_refusal"] = sample
+
+    def record_first_contact(self, server_samples):
+        samples = run_recording_case(first_contact_recording_case(), "first_contact_samples")
+        self.assertEqual(set(samples), {"reach", "effect"})
+        self.assertEqual(samples["reach"]["type"], "snapshot")
+        abilities = samples["reach"]["snapshot"]["state"]["observation"]["combat"]["own_stats"]["abilities"]
+        self.assertTrue(any(row["id"] == "rogue.wand_cancellation"
+                            and row["reach"] == {"kind": "until_obstruction"}
+                            and row["target_kind"] == "directional_ray"
+                            and not row["basic_attack"] and not row["weapon_selection"] for row in abilities))
+        self.assertEqual(samples["effect"]["type"], "combat_diagnostics")
+        self.assertTrue(any(effect.get("type") == "cancel_specials" and effect["changed"]
+                            for record in samples["effect"]["report"]["records"]
+                            for effect in record["outcome"]["effects"]))
+        # Publish both only after cleanup and both source-positive validations.
+        server_samples.update({"zz.first_contact_" + key: value for key, value in samples.items()})
+
+    def record_hallucination(self, server_samples):
+        samples = run_recording_case(hallucination_recording_case(), "hallucination_samples")
+        self.assertEqual(set(samples), {"visual", "extended", "cured"})
+        observations = {}
+        deadlines = {}
+        for stage, sample in samples.items():
+            # Require the actual protocol envelope, not a normalized client
+            # frame or a fabricated partial appearance document.
+            self.assertEqual(sample["type"], "snapshot")
+            self.assertIsInstance(sample["request_id"], str)
+            self.assertTrue(sample["request_id"])
+            observation = sample["snapshot"]["state"]["observation"]
+            observations[stage] = observation
+            encoded = json.dumps(sample)
+            for private in ("remaining_to_shift", "presentation_catalog", "palette_index",
+                            "hallucination_phase", "hallucination"):
+                self.assertNotIn('"' + private + '"', encoded)
+            marked = [row for row in observation["combat"]["own_stats"]["conditions"]
+                      if row["condition"]["id"] == "rogue.hallucinating"]
+            if stage == "cured":
+                self.assertEqual(marked, [])
+            else:
+                self.assertEqual(len(marked), 1)
+                condition = marked[0]
+                self.assertIsInstance(condition["remaining_ticks"], str)
+                self.assertGreater(int(condition["remaining_ticks"]), 0)
+                self.assertIsInstance(observation["tick"], str)
+                deadlines[stage] = int(observation["tick"]) + int(condition["remaining_ticks"])
+            ground, = observation["ground_items"]
+            self.assertEqual(ground["item"]["class"], "coin")
+            self.assertEqual(ground["item"]["quantity"], "7")
+            if stage == "cured":
+                self.assertIsNone(ground["presentation"])
+                self.assertEqual(ground["item"]["name"], "gold coin")
+        self.assertEqual(observations["visual"]["tick"], "100")
+        self.assertEqual(observations["extended"]["tick"], "200")
+        self.assertIn(deadlines["extended"] - deadlines["visual"], range(80800, 89201, 100))
+        for stage, name, asset, object_name, object_asset, cosmetic_class in (
+                ("visual", "emu", "creature.bird.emu", "scroll titled SAH REN", "item.scroll", "scroll"),
+                ("extended", "bat", "creature.bat", "yew wand", "item.wand", "wand")):
+            observation = observations[stage]
+            peers = [row for row in observation["visible_actors"] if row["id"] != observation["self_target"]]
+            # Body cells are separate lawful occurrences of one target. Keep
+            # every raw row while requiring one identity and exact cosmetics.
+            self.assertEqual(len({row["id"] for row in peers}), 1)
+            for peer in peers:
+                self.assertEqual((peer["name"], peer.get("asset"), peer["description"]), (name, asset, ""))
+                self.assertEqual(peer["appearance_seed"], "p_" + "00" * 32)
+            ground, = observation["ground_items"]
+            self.assertEqual(ground["presentation"], {"name": object_name, "asset": object_asset,
+                "kind": {"kind": "item", "class": cosmetic_class}})
+            self.assertEqual((ground["item"]["name"], ground["item"]["appearance"],
+                              ground["item"]["description"]), ("object", "object", ""))
+            self.assertIsNone(ground["item"].get("asset"))
+            self.assertIsNone(ground["item"].get("corpse"))
+        cured = observations["cured"]
+        peers = [row for row in cured["visible_actors"] if row["id"] != cured["self_target"]]
+        self.assertEqual(len({row["id"] for row in peers}), 1)
+        for peer in peers:
+            self.assertEqual((peer["name"], peer.get("asset"), peer["description"]),
+                             ("actual visible peer", None, ""))
+        # Every source-positive frame and cleanup must succeed before publishing
+        # any member. Preserve raw messages byte-semantically, never synthesize.
+        server_samples.update({"zz.hallucination_" + stage: sample for stage, sample in samples.items()})
+
+    def record_detection(self, server_samples):
+        from checkpoint_payload import decode_checkpoint_payload
+        from detection_process_package import historical_payload, validate_pages
+        samples = run_recording_case(detection_recording_case(), "detection_samples")
+        self.assertEqual(set(samples), {"query", "page", "restored_query", "restored_page",
+                                      "mapping", "restored_mapping", "checkpoint_payload"})
+        clients, captured = [], {}
+        for prefix in ("", "restored_"):
+            request, reply = samples[prefix + "query"], samples[prefix + "page"]
+            self.assertEqual(request["type"], "request")
+            self.assertEqual(request["request"]["type"], "chart")
+            self.assertEqual(reply["type"], "chart_page")
+            self.assertEqual(reply["request_id"], request["request_id"])
+            query = request["request"]["query"]
+            self.assertIsNone(query["cursor"])
+            validate_pages([reply["page"]], query)
+            self.assertEqual((reply["page"]["kind"], reply["page"]["mode"]), ("magic", "historical"))
+            self.assertEqual(len([row for row in reply["page"]["records"] if row["record"] == "row"]), 1)
+            clients.append(request)
+            captured["chart_page" if not prefix else "zz.detection_restored"] = reply
+        self.assertEqual(historical_payload([samples["page"]["page"]]),
+                         historical_payload([samples["restored_page"]["page"]]))
+        mapping_payloads = []
+        for stage in ("mapping", "restored_mapping"):
+            exchange = samples[stage]
+            self.assertEqual(set(exchange), {"queries", "pages"})
+            self.assertEqual(len(exchange["queries"]), len(exchange["pages"]))
+            self.assertTrue(exchange["queries"])
+            cursor = None
+            boundary = exchange["queries"][0]["request"]["query"]
+            for index, (request, reply) in enumerate(zip(exchange["queries"], exchange["pages"], strict=True)):
+                self.assertEqual((request["type"], request["request"]["type"], reply["type"]),
+                                 ("request", "chart", "chart_page"))
+                self.assertEqual(reply["request_id"], request["request_id"])
+                actual_query = request["request"]["query"]
+                self.assertEqual(actual_query["cursor"], cursor)
+                self.assertEqual({key: actual_query[key] for key in ("context", "branch", "base", "chart")},
+                                 {key: boundary[key] for key in ("context", "branch", "base", "chart")})
+                self.assertEqual(reply["page"]["kind"], "mapping")
+                cursor = reply["page"]["next"]
+                clients.append(request)
+                captured[f"zz.{stage}.{index:03}"] = reply
+            self.assertIsNone(cursor)
+            pages = [reply["page"] for reply in exchange["pages"]]
+            validate_pages(pages, exchange["queries"][0]["request"]["query"])
+            mapping_payloads.append(historical_payload(pages))
+        self.assertEqual(mapping_payloads[0], mapping_payloads[1])
+        mapping_rows = [row for row in mapping_payloads[0]["records"] if row["record"] == "row"]
+        self.assertEqual(len(mapping_rows), 1024)
+        self.assertTrue(all(row["mark"]["fact"]["kind"] == "wall_face"
+                            and row["mark"]["fact"]["normal"][2] == 0 for row in mapping_rows))
+        self.assertIsInstance(samples["checkpoint_payload"], bytes)
+        saved = json.loads(decode_checkpoint_payload(samples["checkpoint_payload"]))
+        pool = saved["shared"]["chart_history"]
+        bindings = pool["owners"][saved["game"]["chart_history"]]
+        owner, = [row for row in bindings if str(row["actor"]) == "1"]
+        for kind in ("food", "magic", "mapping"):
+            slot = owner["slots"][kind]
+            self.assertIsNotNone(slot["latest"])
+            self.assertEqual(slot["attempt"]["status"], {"kind": "positive" if kind == "mapping" else "empty"})
+            root = pool["roots"][slot["latest"]]
+            self.assertEqual(root["kind"], kind)
+            self.assertTrue(root["points"])
+            self.assertTrue(all((point["mapping"] is not None) == (kind == "mapping") for point in root["points"]))
+        # No partial publication on case/cleanup, page correlation, source-free
+        # equality or genuine production-writer book validation failure.
+        server_samples.update(captured)
+        self.recorded_client_samples = [*getattr(self, "recorded_client_samples", []), *clients]
+        self.detection_checkpoint_payload = samples["checkpoint_payload"]
+
+    def record_growth(self, server_samples):
+        samples = run_recording_case(growth_recording_case(), "growth_samples")
+        self.assertEqual(set(samples), {"gain_strength", "raise_level"})
+        for kind, sample in samples.items():
+            self.assertEqual(sample["type"], "combat_diagnostics")
+            self.assertTrue(sample["report"]["enabled"])
+            record, = [row for row in sample["report"]["records"]
+                       if row.get("ability", {}).get("id") == "fixture." + kind]
+            effect, = [row for row in record["outcome"]["effects"] if row["type"] == kind]
+            self.assertEqual(str(effect["target"]), "1")
+            if kind == "gain_strength":
+                self.assertEqual(effect["change"], "acquired")
+            else:
+                amount = effect["amount"]
+                self.assertIsInstance(amount, str)
+                self.assertEqual(str(int(amount)), amount)
+                self.assertGreater(int(amount), 0)
+                self.assertLessEqual(int(amount), (1 << 64) - 1)
+        # No partial publication if either actual artifact or cleanup is invalid.
+        server_samples.update({"zz.growth_" + key: value for key, value in samples.items()})
+
+    def record_haste(self, server_samples):
+        samples = run_recording_case(haste_recording_case(), "haste_samples")
+        self.assertEqual(set(samples), {"hasted", "overdose"})
+        for branch, sample in samples.items():
+            self.assertEqual(sample["type"], "combat_diagnostics")
+            self.assertTrue(sample["report"]["enabled"])
+            records = [record for record in sample["report"]["records"]
+                       if any(effect["type"] == "haste_dose" and effect["outcome"]["type"] == branch
+                              for effect in record["outcome"]["effects"])]
+            record, = records
+            self.assertEqual(record["ability"]["id"], "fixture.haste_dose")
+            effect, = [effect for effect in record["outcome"]["effects"] if effect["type"] == "haste_dose"]
+            self.assertEqual(str(effect["target"]), "1")
+            self.assertEqual(effect["condition"]["id"], "rogue.hasted")
+            self.assertEqual(effect["rest"]["id"], "rogue.haste_exhaustion")
+            duration = effect["outcome"]["duration" if branch == "hasted" else "rest"]
+            self.assertIsInstance(duration, str)
+            self.assertIn(int(duration), range(400, 701, 100) if branch == "hasted" else range(0, 701, 100))
+        server_samples.update({"zz.haste_" + key: value for key, value in samples.items()})
+
+    def record_torch(self, server_samples):
+        samples = run_recording_case(torch_recording_case(), "torch_samples")
+        self.assertEqual(set(samples), {"lit", "off"})
+        for name, lit, remaining in (("lit", True, "100000"), ("off", False, "99800")):
+            sample = samples[name]
+            self.assertEqual(sample["type"], "snapshot")
+            state = sample["snapshot"]["state"]
+            self.assertFalse(state["wizard_game"])
+            row, = state["observation"]["interactions"]["inventory"]
+            self.assertEqual(row["portable_light"], {"remaining": remaining, "lit": lit,
+                                                    "ignitable": not lit, "extinguishable": lit})
+        server_samples.update({"zz.torch_" + key: value for key, value in samples.items()})
 
     def record_scare_crumble(self, server_samples):
         sample = run_recording_case(scare_pickup_recording_case(), "crumble_sample")
@@ -320,7 +601,7 @@ class Recorder(ProcessTestCase):
             if message and message["type"] == "snapshot")
         current = self.act(player, {"type": "identify", "choice": pending["choice"], "item": wand})
         self.assertIsNone(current["error"])
-        current = self.act(player, {"type": "zap", "item": wand, "direction": "east"})
+        current = self.act(player, {"type": "zap", "item": wand, "aim": {"kind": "direction", "direction": "east"}})
         self.assertIsNone(current["error"])
         rows = current["state"]["observation"]["interactions"]["inventory"]
         self.assertEqual(next(row["charges"] for row in rows if row["item"] == wand), 2)
@@ -623,6 +904,14 @@ class Recorder(ProcessTestCase):
         self.record_public_plan(server_samples)
         self.record_nutrition(server_samples)
         self.record_magic_items(server_samples)
+        self.record_self_device(server_samples)
+        self.record_drain_refusal(server_samples)
+        self.record_first_contact(server_samples)
+        self.record_torch(server_samples)
+        self.record_haste(server_samples)
+        self.record_growth(server_samples)
+        self.record_hallucination(server_samples)
+        self.record_detection(server_samples)
         self.record_personal_conditions(server_samples)
         self.record_persistent_conditions(server_samples)
         self.record_amulet_escape(server_samples)
@@ -631,30 +920,61 @@ class Recorder(ProcessTestCase):
         self.server_samples = server_samples
 
 
-def record_samples(*, output=None):
-    """Publish only complete recordings, including successful process cleanup."""
-    server_samples = run_recording_case(Recorder(), "server_samples")
-    document = json.dumps({
-        "protocol": PROTOCOL, "client": CLIENT,
-        "server": [server_samples[k] for k in sorted(server_samples)],
-    }, indent=1, sort_keys=True) + "\n"
-    output = Path(output) if output is not None else ROOT / f"crates/protocol/tests/fixtures/wire-v{PROTOCOL}.json"
+def publish_bytes(output, payload):
+    """Replace one artifact atomically, only after complete recording validation."""
+    output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
     staged = None
     try:
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="\n",
-                                         dir=output.parent, prefix="." + output.name + ".",
-                                         suffix=".pending", delete=False) as stream:
+        with tempfile.NamedTemporaryFile(mode="wb", dir=output.parent,
+                                         prefix="." + output.name + ".", suffix=".pending",
+                                         delete=False) as stream:
             staged = Path(stream.name)
-            stream.write(document)
+            stream.write(payload)
         os.replace(staged, output)
     finally:
         if staged is not None:
             staged.unlink(missing_ok=True)
+
+
+def record_samples(*, output=None, detection_checkpoint=None):
+    """Publish only complete recordings, including successful process cleanup."""
+    case = Recorder()
+    server_samples = run_recording_case(case, "server_samples")
+    client_samples = [*CLIENT, *copy.deepcopy(case.recorded_client_samples)]
+    document = json.dumps({
+        "protocol": PROTOCOL, "client": client_samples,
+        "server": [server_samples[k] for k in sorted(server_samples)],
+    }, indent=1, sort_keys=True) + "\n"
+    output = Path(output) if output is not None else ROOT / f"crates/protocol/tests/fixtures/wire-v{PROTOCOL}.json"
+    exports = []
+    if detection_checkpoint is not None:
+        from checkpoint_payload import decode_checkpoint_payload
+        # These are the unchanged bytes captured from the production writer in
+        # the successful source-deleted reopen case. Never manufacture save DTOs.
+        raw = case.detection_checkpoint_payload
+        decoded = decode_checkpoint_payload(raw)
+        json.loads(decoded)  # Validate before publishing any output member.
+        target = Path(detection_checkpoint)
+        provenance = {"producer": "MagicItemProcesses.test_imported_detection_history_empty_retention_source_free_spectator",
+                      "raw_bytes": len(raw), "raw_sha256": hashlib.sha256(raw).hexdigest(),
+                      "decoded_bytes": len(decoded), "decoded_sha256": hashlib.sha256(decoded).hexdigest()}
+        exports = [(target, decoded), (Path(str(target) + ".torc"), raw),
+                   (Path(str(target) + ".provenance.json"),
+                    (json.dumps(provenance, indent=2, sort_keys=True) + "\n").encode())]
+    # Each file is atomically replaced. Every case and class cleanup, all book
+    # checks and export decoding precede publication; no partial lifecycle earns
+    # a fixture. A filesystem failure is reported, never called a recording pass.
+    for target, payload in [*exports, (output, document.encode("utf-8"))]:
+        publish_bytes(target, payload)
     shown = output.relative_to(ROOT) if output.is_relative_to(ROOT) else output
-    print(f"{shown}: {len(CLIENT)} client and {len(server_samples)} server samples: "
+    print(f"{shown}: {len(CLIENT)} client schema examples, {len(case.recorded_client_samples)} captured client queries and {len(server_samples)} captured server samples: "
           + ", ".join(sorted(server_samples)))
 
 
 if __name__ == "__main__":
-    record_samples()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--detection-checkpoint", type=Path,
+                        help="also export the genuine decoded Detection/Mapping save plus .torc and SHA256 provenance")
+    arguments = parser.parse_args()
+    record_samples(detection_checkpoint=arguments.detection_checkpoint)

@@ -52,8 +52,13 @@ impl Game {
                 .is_some_and(|actor| actor.alive())
             && self.creature(plan.actor()).map_or_else(
                 || {
-                    matches!(plan, Plan::Equip { .. } | Plan::Unequip { .. })
-                        || matches!(plan, Plan::Drink { effects, .. } if effects.is_empty())
+                    matches!(
+                        plan,
+                        Plan::Equip { .. }
+                            | Plan::Unequip { .. }
+                            | Plan::Ignite { .. }
+                            | Plan::Extinguish { .. }
+                    ) || matches!(plan, Plan::Drink { effects, .. } if effects.is_empty())
                 },
                 |creature| {
                     !creature.health().dead()
@@ -81,6 +86,8 @@ impl Game {
                 ),
                 Plan::Equip { .. }
                 | Plan::Unequip { .. }
+                | Plan::Ignite { .. }
+                | Plan::Extinguish { .. }
                 | Plan::Read { .. }
                 | Plan::Zap { .. }
                 | Plan::Drink { .. }
@@ -131,6 +138,8 @@ impl Game {
             .strikes
             .get(index)
             .ok_or(GameError::Rule(RuleError::InvalidPlan))?;
+        let effective = self.effective_cancelled_strike(ability, strike)?;
+        let strike = effective.strike.as_ref();
         crate::diagnostics::strike_resolution();
         let needs_contact = strike
             .on_success
@@ -270,6 +279,9 @@ impl Game {
                 },
             );
             for (ordinal, rider) in strike.riders.iter().enumerate() {
+                if effective.suppressed_riders.binary_search(&ordinal).is_ok() {
+                    continue;
+                }
                 if rider.trigger != branch {
                     continue;
                 }
@@ -430,6 +442,10 @@ impl Game {
                 disclosure_origin,
             )?
         };
+        // Live effects can refine a pure placeholder (for example room light
+        // or Drain). Downstream receipt checks and rider accounting must use
+        // the committed outcome, while preserving branch/check budget metadata.
+        result.outcome = self.published_resolution(receipt)?.clone();
         Ok((result, receipt))
     }
     #[allow(clippy::too_many_arguments)]
@@ -445,6 +461,14 @@ impl Game {
         budget: &mut resolve::StrikeBudget,
         activity: &mut crate::lifecycle::DamageActivityGuard,
     ) -> Result<Outcome, GameError> {
+        let super::contact_policy::RayResolution::Opposed {
+            incoming,
+            target_skill,
+            ..
+        } = &ray.resolution
+        else {
+            return Err(GameError::Rule(RuleError::InvalidPlan));
+        };
         crate::diagnostics::strike_resolution();
         if self
             .content
@@ -470,7 +494,7 @@ impl Game {
                 target,
                 ray.actor,
                 &ray.ability,
-                &ray.incoming,
+                incoming,
                 first_actual_check,
                 &selected,
             )
@@ -480,7 +504,7 @@ impl Game {
         let check = PlannedCheck {
             actor: crate::rules::CheckActor::Target,
             target_participates: true,
-            bonus: super::ray::named_bonus(creature.derived(), ray.target_skill),
+            bonus: super::ray::named_bonus(creature.derived(), *target_skill),
             threshold: CheckThreshold::Fixed { value: threshold },
             edge,
         };
@@ -744,27 +768,38 @@ impl Game {
             Snapshot::capture(&creature).with_context(self.resolution_context(plan, actor, actor)?);
         let mut rng = self.rules_rng;
         let resolved = resolve::resolve_receipt(plan, &snapshot, &mut rng, &mut (), true)?;
-        let applied = resolved.outcome.result == OutcomeStatus::Applied;
         self.rules_rng = rng;
         self.consume_resistance_tokens(&resolved.resistance_tokens)?;
-        self.apply_outcome(resolved.outcome)?;
-        Ok(applied)
+        let receipt = self.apply_resolved_outcome(
+            resolved.outcome,
+            crate::lifecycle::ResolutionPublication::Standalone,
+            &mut crate::lifecycle::DamageActivityGuard::default(),
+        )?;
+        Ok(self.published_resolution(receipt)?.result == OutcomeStatus::Applied)
     }
     /// The caller has validated and spent the exact finite source in this same
     /// transaction. The frozen effects do not depend on that deleted item.
     pub(crate) fn resolve_consumed_item(
         &mut self,
         preparation: &crate::combat::Preparation,
-    ) -> Result<Outcome, GameError> {
+    ) -> Result<crate::detection_lifecycle::ItemCompletion, GameError> {
         let plan = &preparation.plan;
         let intention = preparation.intention;
         if !matches!(
             plan,
-            Plan::Read { .. } | Plan::Drink { .. } | Plan::Eat { .. }
-        ) || !matches!(
-            preparation.item_payment,
-            crate::supplies::ItemPayment::Settled
-        ) || !self.plan_actor_available(plan)
+            Plan::Read { .. }
+                | Plan::Drink { .. }
+                | Plan::Eat { .. }
+                | Plan::Zap {
+                    delivery: super::DeviceDeliveryPlan::SelfEffect { .. },
+                    ..
+                }
+        ) || matches!(plan, Plan::Zap { charges: 0, .. })
+            || !matches!(
+                preparation.item_payment,
+                crate::supplies::ItemPayment::Settled
+            )
+            || !self.plan_actor_available(plan)
         {
             return Err(GameError::Rule(RuleError::InvalidPlan));
         }
@@ -817,8 +852,13 @@ impl Game {
         outcome.intention = intention;
         self.rules_rng = rng;
         self.consume_resistance_tokens(&resolved.resistance_tokens)?;
-        self.apply_outcome(outcome.clone())?;
+        let receipt = self.apply_resolved_outcome(
+            outcome,
+            crate::lifecycle::ResolutionPublication::Standalone,
+            &mut crate::lifecycle::DamageActivityGuard::default(),
+        )?;
+        let outcome = self.published_resolution(receipt)?.clone();
         self.record_survival(plan.target(), &flow);
-        Ok(outcome)
+        crate::detection_lifecycle::ItemCompletion::new(outcome, receipt.chart_completion())
     }
 }

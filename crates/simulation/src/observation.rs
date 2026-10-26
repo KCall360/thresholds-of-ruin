@@ -6,6 +6,13 @@ use crate::{ActorId, Game, GameError, ItemId, ItemLocation};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SceneWitness {
     world: tor_world::PerceptionSnapshot,
+    emitters: crate::portable_light::EmitterSignature,
+    actor: ActorSceneWitness,
+}
+
+/// Actor-local part of the shared scene dependency proof. No emitter copies.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ActorSceneWitness {
     location: Location,
     orientation: u8,
     body: tor_world::Shared<crate::BodySpec>,
@@ -127,6 +134,7 @@ pub struct ItemView {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GroundItemView {
+    pub presentation: Option<crate::appearance_catalog::ObjectPresentation>,
     pub corpse: Option<CorpseAppearance>,
     pub class: crate::ItemClass,
     pub description: String,
@@ -151,6 +159,7 @@ pub struct KnownPlace {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActorView {
+    pub presentation: Option<crate::appearance_catalog::CreaturePresentation>,
     pub disclosure: crate::perception::ActorDisclosure,
     /// Empty when nothing names it.
     pub name: String,
@@ -193,6 +202,7 @@ pub struct TrapView {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CellView {
+    pub object_presentation: Option<crate::appearance_catalog::ObjectPresentation>,
     /// Illumination of this disclosed occurrence, including dark awareness.
     pub lit: bool,
     pub frame: u8,
@@ -340,6 +350,7 @@ impl Game {
             match item.location {
                 ItemLocation::Ground(location) if visible(location) => {
                     ground_items.push(GroundItemView {
+                        presentation: None,
                         corpse: identified.then(|| item.corpse.clone()).flatten(),
                         class: item.spec.class,
                         description: item_description(name),
@@ -371,6 +382,7 @@ impl Game {
                         || item.spec.device.is_some()
                     {
                         item_interactions.push(crate::interactions::ItemInteractionView {
+                            portable_light: self.portable_light_view(id, item_id),
                             item: item_id,
                             slot: item
                                 .spec
@@ -397,6 +409,19 @@ impl Game {
                             drinkable: item.spec.consumable.is_some(),
                             readable: item.spec.readable.is_some(),
                             zappable: item.spec.device.is_some(),
+                            device_activation: item.spec.device.as_ref().map(|device| {
+                                if identified
+                                    && self
+                                        .content
+                                        .rules
+                                        .ability(&device.ability)
+                                        .is_some_and(crate::abilities::self_device_definition_valid)
+                                {
+                                    crate::DeviceActivation::SelfTarget
+                                } else {
+                                    crate::DeviceActivation::Direction
+                                }
+                            }),
                             charges: actor.known_charges.observed(item_id, item.charges),
                             edible: item.spec.edible.is_some(),
                         });
@@ -437,6 +462,25 @@ impl Game {
                 _ => None,
             })
             .collect();
+        let refused: Vec<_> = self
+            .event_log
+            .iter()
+            .enumerate()
+            .filter_map(|(index, event)| match event {
+                crate::combat::CombatEvent::ItemRefused {
+                    actor,
+                    work,
+                    reason,
+                    ..
+                } if *actor == id && self.owns_event_receipt(id, index) => {
+                    Some(crate::ItemRefusalView {
+                        work: work.clone(),
+                        reason: *reason,
+                    })
+                }
+                _ => None,
+            })
+            .collect();
         let curse_blocked: Vec<_> = self
             .event_log
             .iter()
@@ -464,18 +508,21 @@ impl Game {
                     ))
             })
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(Observation {
+        let portable_lit = self.portable_lit_cells();
+        let mut view = Observation {
             linked_holds: self.linked_holds(id),
             interactions: (!actor.anatomy.slots.is_empty()
                 || actor.pending.is_some()
                 || actor.identification.is_some()
                 || !item_interactions.is_empty()
                 || !completed.is_empty()
-                || !curse_blocked.is_empty())
+                || !curse_blocked.is_empty()
+                || !refused.is_empty())
             .then(|| crate::interactions::InteractionView {
                 identification: self.identification_view(id),
                 completed,
                 curse_blocked,
+                refused,
                 slots,
                 preparation: actor.pending.as_ref().map(|progress| {
                     crate::interactions::PreparationView {
@@ -522,6 +569,7 @@ impl Game {
                     }
                     let state = &self.actors[subject];
                     visible(state.location).then(|| crate::perception::ApparentObjectView {
+                        presentation: None,
                         subject: *subject,
                         location: state.location,
                         appearance: state.guise.appearance().expect("classified guise").clone(),
@@ -531,7 +579,9 @@ impl Game {
             visible_cells: occurrences
                 .iter()
                 .map(|&(location, frame)| CellView {
-                    lit: self.world.is_lit(location) == Some(true),
+                    object_presentation: None,
+                    lit: self.world.is_lit(location) == Some(true)
+                        || portable_lit.contains(&location),
                     frame,
                     door: self.disclosed_door(id, location),
                     door_secret: self.disclosed_door(id, location).is_some()
@@ -592,6 +642,7 @@ impl Game {
                             visible(*at) && (other_id != id || *at != actor.location)
                         })
                         .map(move |(location, _)| ActorView {
+                            presentation: None,
                             disclosure,
                             name: if disclosure == crate::perception::ActorDisclosure::Creature {
                                 projected_actor_name(actor, other).to_owned()
@@ -648,7 +699,9 @@ impl Game {
                         .clone(),
                 })
                 .collect(),
-        })
+        };
+        self.apply_hallucinated_presentation(&mut view, sight)?;
+        Ok(view)
     }
 
     /// Closed undiscovered entrances disclose the same solid appearance as the wall.
@@ -832,9 +885,15 @@ impl Game {
     }
 
     pub(crate) fn scene_witness(&self, id: ActorId) -> Result<SceneWitness, GameError> {
-        let actor = self.actors.get(&id).ok_or(GameError::UnknownActor)?;
         Ok(SceneWitness {
             world: self.world.perception_snapshot(),
+            emitters: self.emitter_signature(),
+            actor: self.actor_scene_witness(id)?,
+        })
+    }
+    pub(crate) fn actor_scene_witness(&self, id: ActorId) -> Result<ActorSceneWitness, GameError> {
+        let actor = self.actors.get(&id).ok_or(GameError::UnknownActor)?;
+        Ok(ActorSceneWitness {
             location: actor.location,
             orientation: actor.orientation,
             body: actor.body.clone(),
@@ -995,8 +1054,7 @@ impl Game {
         // eye-frame offsets are body-frame offsets from the eye cell.
         let [ex, ey, ez] = body.eye;
         let mut scene = if actor.perception().sight {
-            self.world
-                .illuminated_eye_scene(eye, eye_frame, SIGHT_RANGE)
+            self.illuminated_scene(eye, eye_frame, SIGHT_RANGE)
         } else {
             Vec::new()
         };
@@ -1109,11 +1167,15 @@ impl Game {
         let mut origins: Vec<_> = body.cells.iter().copied().zip(occupied).collect();
         origins.sort_by_key(|(offset, _)| *offset);
         let mut result = Vec::new();
+        let portable_lit = self.portable_lit_cells();
         for (offset, (at, frame)) in origins {
             for mut cell in self.world.eye_scene(at, frame, range) {
                 // Usable illuminated sight retains its normal eye-origin gate.
                 // Blindness uses this same range, not a second reduced layer.
-                if sight && self.world.is_lit(cell.location) == Some(true) {
+                if sight
+                    && (self.world.is_lit(cell.location) == Some(true)
+                        || portable_lit.contains(&cell.location))
+                {
                     continue;
                 }
                 cell.offset.x += offset[0];
@@ -1138,6 +1200,16 @@ impl Game {
                     .illuminated_eye_scene_regions(eye, frame, SIGHT_RANGE)
                     .unwrap_or_default(),
             );
+        }
+        if !self.emitter_signature().0.is_empty() {
+            regions.extend(self.light_required_regions());
+            if let Some((eye, frame)) = self.eye(id) {
+                regions.extend(
+                    self.world
+                        .eye_scene_regions(eye, frame, SIGHT_RANGE)
+                        .unwrap_or_default(),
+                );
+            }
         }
         let range = actor.nonvisual_range();
         if range > 1 {

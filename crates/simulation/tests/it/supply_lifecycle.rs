@@ -1469,6 +1469,7 @@ fn phase5_container_checkpoint_rejects_positional_held_item() {
             "condition",
             "charges",
             "relocation_elapsed",
+            "fuel",
             "motion",
             "orientation",
             "spec",
@@ -1551,6 +1552,7 @@ fn phase5_container_checkpoint_rejects_positional_item_spec() {
         spec,
         &[
             "magical",
+            "held_light",
             "currency",
             "equipment",
             "projectile",
@@ -1594,6 +1596,7 @@ fn phase5_container_checkpoint_rejects_positional_creature_record() {
             "build_epoch",
             "earned_progress",
             "restorable_losses",
+            "cancelled",
             "injury",
             "dead",
             "health_recovery",

@@ -196,6 +196,8 @@ pub fn decode_action(
         }
         p::Action::Equip { item, .. }
         | p::Action::Unequip { item }
+        | p::Action::Ignite { item }
+        | p::Action::Extinguish { item }
         | p::Action::Drink { item }
         | p::Action::Eat { item }
         | p::Action::Read { item }
@@ -213,12 +215,14 @@ pub fn decode_action(
                     slot: *slot,
                 },
                 p::Action::Unequip { .. } => a::Action::Unequip { item: identity },
+                p::Action::Ignite { .. } => a::Action::Ignite { item: identity },
+                p::Action::Extinguish { .. } => a::Action::Extinguish { item: identity },
                 p::Action::Drink { .. } => a::Action::Drink { item: identity },
                 p::Action::Eat { .. } => a::Action::Eat { item: identity },
                 p::Action::Read { .. } => a::Action::Read { item: identity },
-                p::Action::Zap { direction, .. } => a::Action::Zap {
+                p::Action::Zap { aim, .. } => a::Action::Zap {
                     item: identity,
-                    direction: crate::adapt::requested_direction(*direction),
+                    aim: crate::adapt::requested_device_aim(*aim),
                 },
                 _ => unreachable!(),
             }
@@ -477,6 +481,12 @@ pub fn encode_action(action: &a::Action, scope: &TargetScope) -> p::Action {
         a::Action::Unequip { item } => p::Action::Unequip {
             item: scope.item(s::ItemId(*item)),
         },
+        a::Action::Ignite { item } => p::Action::Ignite {
+            item: scope.item(s::ItemId(*item)),
+        },
+        a::Action::Extinguish { item } => p::Action::Extinguish {
+            item: scope.item(s::ItemId(*item)),
+        },
         a::Action::Drink { item } => p::Action::Drink {
             item: scope.item(s::ItemId(*item)),
         },
@@ -486,9 +496,9 @@ pub fn encode_action(action: &a::Action, scope: &TargetScope) -> p::Action {
         a::Action::Read { item } => p::Action::Read {
             item: scope.item(s::ItemId(*item)),
         },
-        a::Action::Zap { item, direction } => p::Action::Zap {
+        a::Action::Zap { item, aim } => p::Action::Zap {
             item: scope.item(s::ItemId(*item)),
-            direction: crate::adapt::wire_direction(*direction),
+            aim: crate::adapt::wire_device_aim(*aim),
         },
         a::Action::Identify { choice, item } => p::Action::Identify {
             choice: scope.identification_choice(*choice),

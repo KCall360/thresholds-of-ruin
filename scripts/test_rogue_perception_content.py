@@ -69,7 +69,7 @@ class RoguePerceptionContent(unittest.TestCase):
     def test_phantom_uses_typed_invisibility_and_existing_one_in_five_erratic(self):
         phantom = source("catalog/creatures.toml")["creatures"]["species"]["rogue.phantom"]
         self.assertEqual(phantom["modifiers"], [
-            {"scope": "always", "op": {"kind": "perception", "value": {"kind": "invisible", "enabled": True}}},
+            {"cancellable": True, "scope": "always", "op": {"kind": "perception", "value": {"kind": "invisible", "enabled": True}}},
             {"scope": "always", "op": {"kind": "locomotion", "value": {"kind": "erratic",
                 "chance": {"numerator": 1, "denominator": 5}}}}])
         # Declaring the subtype is not permission for immunity or wall passing.
@@ -91,12 +91,12 @@ class RoguePerceptionContent(unittest.TestCase):
         self.assertEqual(ambush["prerequisites"], ["rogue.object_guise"])
         mace = source("catalog/items.toml")["items"]["rogue.mace"]
         self.assertFalse(mace.get("magical", False))
-        self.assertEqual(guise["modifiers"], [{"scope": "always", "op": {"kind": "perception", "value": {
+        self.assertEqual(guise["modifiers"], [{"cancellable": True, "scope": "always", "op": {"kind": "perception", "value": {
             "kind": "object_guise", "skill": "stealth", "edge": 0, "appearance": {"name": mace["name"], "description": "",
                 "class": mace["class"], "asset": mace["asset"]}}}},
-            {"scope": "always", "op": {"kind": "perception", "value": {
+            {"cancellable": True, "scope": "always", "op": {"kind": "perception", "value": {
                 "kind": "readied_touch_ambush", "enabled": True}}}])
-        self.assertEqual(ambush["modifiers"], [{"scope": "always", "op": {"kind": "perception", "value": {
+        self.assertEqual(ambush["modifiers"], [{"cancellable": True, "scope": "always", "op": {"kind": "perception", "value": {
             "kind": "ambush_from_guise", "enabled": True}}}])
         xeroc = source("catalog/creatures.toml")["creatures"]["species"]["rogue.xeroc"]
         self.assertEqual(xeroc.get("modifiers", []), [], "Guise/ambush must come from exact paid HD rows")

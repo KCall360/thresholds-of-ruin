@@ -344,6 +344,13 @@ pub enum CombatEvent {
         item: crate::ItemId,
         intention: Option<crate::IntentionId>,
     },
+    #[serde(deserialize_with = "deserialize_item_refused")]
+    ItemRefused {
+        actor: ActorId,
+        work: crate::Work,
+        intention: Option<crate::IntentionId>,
+        reason: crate::ItemRefusal,
+    },
     ItemCompleted {
         actor: ActorId,
         work: crate::Work,
@@ -402,6 +409,35 @@ fn deserialize_curse_blocked<'de, D: serde::Deserializer<'de>>(
         return Err(serde::de::Error::custom("invalid blocked equipment"));
     }
     Ok((f.actor, f.item, f.intention))
+}
+
+fn deserialize_item_refused<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<
+    (
+        ActorId,
+        crate::Work,
+        Option<crate::IntentionId>,
+        crate::ItemRefusal,
+    ),
+    D::Error,
+> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Fields {
+        actor: ActorId,
+        work: crate::Work,
+        #[serde(deserialize_with = "deserialize_intention_context")]
+        intention: Option<crate::IntentionId>,
+        reason: crate::ItemRefusal,
+    }
+    let f: Fields = crate::bounded::named_map(d)?;
+    if f.actor.0 == 0
+        || !matches!(&f.work, crate::Work::Zap { item, .. } if item.0 != 0 && item.0 != u64::MAX)
+    {
+        return Err(serde::de::Error::custom("invalid refused device work"));
+    }
+    Ok((f.actor, f.work, f.intention, f.reason))
 }
 
 // A derived externally tagged struct variant accepts positional JSON bytes.

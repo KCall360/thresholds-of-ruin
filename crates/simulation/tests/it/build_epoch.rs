@@ -106,6 +106,7 @@ fn phase5b_temporary_sources_damage_cooldowns_and_time_preserve_build_epoch() {
             item: ItemId(1),
             socket: EquipmentSlotId(0),
             modifiers: vec![Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Add {
                     stat: Stat::Health,

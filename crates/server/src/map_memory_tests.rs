@@ -487,3 +487,79 @@ fn late_storage_rejection_discards_candidate_map_learning_and_retry_still_works(
     assert!(!reopened.map_projection_is_current(actor(), &old));
     reopened.flush().unwrap();
 }
+
+impl Engine {
+    /// Test oracle: bypass only the optimization's selection, not acquisition.
+    /// The actual paid command has already run through normal Engine publication.
+    pub(crate) fn test_conservative_map_reacquisition(&self) -> MapWorkCounts {
+        let mut candidate = Candidate::capture(self);
+        let original = candidate.game.clone();
+        let actors = candidate.actors();
+        assert!(actors.len() >= 2, "multiobserver acquisition witness");
+        let package = self.archive.scenario.package.as_deref();
+        let terrain = |region: tor_world::RegionId| {
+            package
+                .and_then(|p| p.region_terrain(region.0))
+                .map_or([None, None, None], |t| {
+                    [t.floor.clone(), t.wall.clone(), t.door.clone()]
+                })
+        };
+        let public = |candidate: &Candidate, actor: ActorId| {
+            let view = candidate.revision_view(actor).unwrap();
+            adapt::observation(
+                view.observation,
+                view.scene,
+                &self.archive.view_salt,
+                view.ready,
+                &terrain,
+                &self.target_scope(actor),
+            )
+        };
+        let before_views: Vec<_> = actors
+            .iter()
+            .map(|actor| public(&candidate, *actor))
+            .collect();
+        let capture = |candidate: &Candidate| {
+            let mut checkpoint = Checkpoint::capture_candidate(
+                candidate,
+                self.archive.records.len(),
+                self.archive.wizard_game,
+            );
+            if let Some(regions) = &self.regions {
+                checkpoint.add_records(regions, &[]);
+            }
+            serde_json::to_value(checkpoint.encode("map-oracle", 0)).unwrap()
+        };
+        let before_checkpoint = capture(&candidate);
+        reset_map_work_counts();
+        candidate
+            .record_explored_for_actors(
+                actors.iter().map(|actor| SimActor(actor.0)).collect(),
+                &terrain,
+                None,
+            )
+            .unwrap();
+        let work = map_work_counts();
+        assert!(
+            work.observed_cells > 0,
+            "forced conservative acquisition really traversed cells"
+        );
+        assert_eq!(
+            candidate.game, original,
+            "exact Game and remembered knowledge remain identical"
+        );
+        assert_eq!(
+            capture(&candidate),
+            before_checkpoint,
+            "full current/history checkpoint remains identical"
+        );
+        for (actor, before) in actors.iter().zip(before_views) {
+            assert_eq!(
+                public(&candidate, *actor),
+                before,
+                "public observer projection remains identical"
+            );
+        }
+        work
+    }
+}

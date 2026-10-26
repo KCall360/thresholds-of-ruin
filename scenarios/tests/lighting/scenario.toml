@@ -1,4 +1,4 @@
-format = 31
+format = 32
 id = "lighting"
 version = "1.0"
 ruleset = "rules.toml"
