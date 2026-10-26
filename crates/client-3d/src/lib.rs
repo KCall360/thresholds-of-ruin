@@ -538,6 +538,8 @@ struct Game {
     log: VecDeque<String>,
     last_narration: Vec<String>,
     status: String,
+    /// A device or ability waiting for what it is aimed at.
+    aiming: Option<Aim>,
     busy: bool,
     fatal: bool,
     since_send: f32,
@@ -567,6 +569,51 @@ impl Game {
         self.since_send = 0.0;
         self.status.clear();
         true
+    }
+}
+
+/// What a chosen device or ability still needs before it is sent.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Aim {
+    /// A directional device: the next movement input is its direction.
+    Device(tor_protocol::ItemTarget),
+    /// An ability: a direction for steps and rays, a clicked creature otherwise.
+    Ability {
+        id: String,
+        target: tor_protocol::AbilityTargetKind,
+    },
+}
+
+impl Aim {
+    /// The command a movement input completes, if this aim takes directions.
+    fn along(&self, direction: tor_protocol::Direction) -> Option<Cmd> {
+        use tor_protocol::AbilityTargetKind as Kind;
+        match self {
+            Aim::Device(item) => Some(Cmd::Zap(*item, direction)),
+            Aim::Ability {
+                id,
+                target: Kind::SelfStep | Kind::DirectionalRay,
+            } => Some(Cmd::Ability(
+                id.clone(),
+                tor_client_3d_model::AbilityTarget::Direction(direction),
+            )),
+            Aim::Ability { .. } => None,
+        }
+    }
+
+    /// The command a clicked creature completes, if this aim takes one.
+    fn at(&self, actor: tor_protocol::ActorTarget) -> Option<Cmd> {
+        use tor_protocol::AbilityTargetKind as Kind;
+        match self {
+            Aim::Ability {
+                id,
+                target: Kind::Actor | Kind::SelfOrAlly | Kind::SelfOnly,
+            } => Some(Cmd::Ability(
+                id.clone(),
+                tor_client_3d_model::AbilityTarget::Actor(actor),
+            )),
+            _ => None,
+        }
     }
 }
 

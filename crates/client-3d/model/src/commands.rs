@@ -1,6 +1,6 @@
 //! Translate player input using the shared client's current admission authority.
 use tor_client_common::{
-    items::{item_action, ItemOperation},
+    items::{identification_action, item_action, zap_action, ItemOperation},
     ClientState,
 };
 use tor_protocol::*;
@@ -14,12 +14,27 @@ pub enum Cmd {
     Take(ItemTarget),
     Drop(ItemTarget),
     Use(ItemTarget, ItemOperation),
+    /// Zap a device that is aimed along a direction.
+    Zap(ItemTarget, Direction),
+    /// Answer the pending identification choice; `None` declines it.
+    Identify(Option<ItemTarget>),
+    /// Use a granted ability, by its disclosed id, on what it targets.
+    Ability(String, AbilityTarget),
     Door(DoorTarget, bool),
     /// Journey to a known cell, named by its key.
     Travel(String),
 }
 
 /// The immutable disclosure boundary used to interpret this input.
+/// What a granted ability is aimed at, as its target kind requires.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AbilityTarget {
+    /// Yourself, an ally or a foe, as the ability allows.
+    Actor(ActorTarget),
+    /// A step or ray along a direction.
+    Direction(Direction),
+}
+
 pub struct Input {
     pub shown: ReplyContext,
     pub command: Cmd,
@@ -73,6 +88,9 @@ pub fn request(state: &ClientState, command: Cmd) -> Result<Request, String> {
             quantity: None,
         },
         Cmd::Use(item, operation) => item_action(view, item, operation)?,
+        Cmd::Zap(item, direction) => zap_action(view, item, direction)?,
+        Cmd::Identify(item) => identification_action(view, item)?,
+        Cmd::Ability(id, target) => ability_action(view, &id, target)?,
         Cmd::Door(door, open) => Action::SetDoor { door, open },
         Cmd::Travel(destination) => {
             return Ok(state.command_request(Command::Travel {
@@ -106,6 +124,36 @@ pub fn request(state: &ClientState, command: Cmd) -> Result<Request, String> {
         expected_revision: state.state().revision,
         action,
     }))
+}
+
+/// Aim an ability through the shared invocation rules; the server's disclosed
+/// target kind decides how a direction is read.
+fn ability_action(view: &Observation, id: &str, target: AbilityTarget) -> Result<Action, String> {
+    let direction = match target {
+        AbilityTarget::Actor(actor) => {
+            return tor_client_common::abilities::action(view, id, actor)
+        }
+        AbilityTarget::Direction(direction) => direction,
+    };
+    let kind = tor_client_common::abilities::available(view)
+        .iter()
+        .find(|ability| ability.id == id)
+        .map(|ability| ability.target_kind)
+        .ok_or_else(|| format!("You don't have {id}."))?;
+    let aim = match kind {
+        AbilityTargetKind::SelfStep => AbilityAim::SelfStep { direction },
+        AbilityTargetKind::DirectionalRay => AbilityAim::DirectionalRay { direction },
+        _ => return Err("That ability is not aimed along a direction.".into()),
+    };
+    tor_client_common::abilities::invocation_action(
+        view,
+        id,
+        AbilityInvocation {
+            aim,
+            weapon: WeaponSelection::Default,
+        },
+        SupplySelection::Carried,
+    )
 }
 
 pub fn offset(direction: Direction) -> (i32, i32, i32) {

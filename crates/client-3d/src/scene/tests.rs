@@ -709,6 +709,8 @@ fn live_sword_swaps_align_handles_and_clear_unequipped_meshes() {
             drinkable: false,
             edible: false,
             portable_light: None,
+            readable: false,
+            device: None,
         });
     }
     let mut previous = None;

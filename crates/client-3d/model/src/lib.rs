@@ -11,13 +11,13 @@ pub use appearance::{
     actor_model, creature_model, item_model, object_model, wearing, CreatureModel, ItemModel,
     Wearing,
 };
-pub use commands::{offset, request_from, Cmd, Input};
+pub use commands::{offset, request_from, AbilityTarget, Cmd, Input};
 pub use frame::{FrameChange, SceneFrame};
 pub use interaction::{
     describe, describe_focus, direction, known_cells, near_actor, Focus, Intent,
 };
 pub use observation::{
-    happenings, observed_harm, view, Actor, Carried, GroundItem, Happening, Terrain, View,
+    happenings, observed_harm, view, Ability, Actor, Carried, GroundItem, Happening, Terrain, View,
 };
 
 pub use routing::{approach_cells, attack_at_hand, step_toward};

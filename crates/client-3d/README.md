@@ -302,9 +302,20 @@ Objects:
   any known floor cell.
 - G (or `,`) picks up the nearest item within reach; X opens or closes the
   hovered or an adjacent door.
-- I opens the pack: Equip, Remove, Eat, Drink and Drop for carried items, and
-  Take for items within reach. Choices come from the server's disclosed
-  interactions through `tor_client_common::items`, as in the ASCII client.
+- I (or Z) opens the pack. Carried items offer Equip, Remove, Eat, Drink,
+  Read, Zap and Drop, and items within reach offer Take. Choices come from the
+  server's disclosed interactions through `tor_client_common::items`, as in the
+  ASCII client.
+- A device zapped along a direction waits for one: the next movement key aims
+  it, relative to the camera like a step, and Esc stops aiming. A device aimed
+  at yourself is zapped at once.
+- When the server asks which item to identify, the pack opens on that choice:
+  pick one of the offered items, or decline.
+- The pack also lists granted abilities beyond the basic attack, labelled
+  with their cooldowns and supply needs. Self-only abilities act at once.
+  Rays and steps take the next movement key. Abilities aimed at a creature
+  take a click on one (yourself or an ally for supportive abilities). Esc
+  stops aiming. Projectile abilities are not offered yet.
 
 ## How it works
 

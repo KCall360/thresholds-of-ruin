@@ -14,7 +14,7 @@ use tor_client_common::items::ItemOperation;
 use tor_protocol::{ActorTarget, ItemTarget, Position};
 
 use tor_client_3d_model::{
-    approach_cells, attack_at_hand, describe_focus, known_cells, step_toward,
+    approach_cells, attack_at_hand, describe_focus, known_cells, step_toward, Focus,
 };
 pub(crate) use tor_client_3d_model::{direction, Intent};
 
@@ -39,6 +39,8 @@ pub struct Hover {
     pub(super) title: String,
     description: String,
     intent: Option<Intent>,
+    /// What is under the pointer, for aiming abilities at creatures.
+    focus: Option<Focus>,
     over_ui: bool,
 }
 
@@ -101,6 +103,8 @@ enum Goal {
 pub struct Panel {
     pub open: bool,
     built_for: u64,
+    /// Whether the panel was opened for the identification choice now waiting.
+    prompted: bool,
 }
 
 #[derive(Component)]
@@ -126,6 +130,11 @@ pub(crate) enum PanelButton {
     Take(ItemTarget),
     Drop(ItemTarget),
     Use(ItemTarget, ItemOperation),
+    /// Hold a directional device until a direction is chosen.
+    Aim(ItemTarget),
+    Identify(Option<ItemTarget>),
+    /// The view's granted ability at this index.
+    Ability(usize),
 }
 
 const PANEL_WIDTH: f32 = 380.0;
@@ -255,6 +264,7 @@ pub fn hover(
         return;
     }
     hover.cell = Some(cell);
+    hover.focus = Some(focus);
     hover.title = title;
     hover.description = description;
     hover.intent = intent;
@@ -330,6 +340,14 @@ pub fn click(
 ) {
     if !mouse.just_pressed(MouseButton::Left) || hover.over_ui {
         return;
+    }
+    // An ability waiting for a creature takes the clicked one.
+    if let (Some(aim), Some(Focus::Actor(actor))) = (&game.aiming, hover.focus) {
+        if let Some(command) = aim.at(actor) {
+            game.aiming = None;
+            send(&net, &mut game, command);
+            return;
+        }
     }
     *pursuit = Pursuit::default();
     match &hover.intent {
@@ -505,14 +523,16 @@ pub fn keys(
     mut exit: EventWriter<AppExit>,
 ) {
     if keys.just_pressed(KeyCode::Escape) {
-        if panel.open {
+        if game.aiming.take().is_some() {
+            game.status = "You stop aiming.".into();
+        } else if panel.open {
             panel.open = false;
         } else {
             exit.write(AppExit::Success);
         }
         return;
     }
-    if keys.just_pressed(KeyCode::KeyI) {
+    if keys.any_just_pressed([KeyCode::KeyI, KeyCode::KeyZ]) {
         panel.open = !panel.open;
     }
     let Some(view) = &game.view else {
@@ -565,6 +585,13 @@ pub fn panel(
     let Ok((root, mut visibility)) = root.single_mut() else {
         return;
     };
+    // A waiting identification choice opens the pack once, to answer it.
+    let waiting = game.view.as_ref().is_some_and(|v| v.identify.is_some());
+    if waiting && !panel.prompted {
+        panel.open = true;
+        panel.built_for = u64::MAX;
+    }
+    panel.prompted = waiting;
     *visibility = if panel.open {
         Visibility::Visible
     } else {
@@ -579,6 +606,37 @@ pub fn panel(
         return;
     };
     commands.entity(root).with_children(|ui| {
+        if let Some(choices) = &view.identify {
+            heading(ui, "Identify which item?");
+            for item in view.inventory.iter().filter(|i| choices.contains(&i.id)) {
+                row(
+                    ui,
+                    &item.name,
+                    None,
+                    &[("Identify", PanelButton::Identify(Some(item.id)))],
+                );
+            }
+            if choices.is_empty() {
+                note(ui, "Nothing you carry can be identified.");
+            }
+            row(
+                ui,
+                "Leave it",
+                None,
+                &[("Decline", PanelButton::Identify(None))],
+            );
+        }
+        if !view.abilities.is_empty() {
+            heading(ui, "Abilities");
+            for (index, ability) in view.abilities.iter().enumerate() {
+                row(
+                    ui,
+                    &ability.label,
+                    None,
+                    &[("Use", PanelButton::Ability(index))],
+                );
+            }
+        }
         heading(ui, "Pack");
         if view.inventory.is_empty() {
             note(ui, "You carry nothing.");
@@ -616,6 +674,18 @@ pub fn panel(
             if item.drinkable {
                 actions.push(("Drink", PanelButton::Use(item.id, ItemOperation::Drink)));
             }
+            if item.readable {
+                actions.push(("Read", PanelButton::Use(item.id, ItemOperation::Read)));
+            }
+            match item.device {
+                Some(tor_protocol::DeviceActivation::SelfTarget) => {
+                    actions.push(("Zap", PanelButton::Use(item.id, ItemOperation::Zap)));
+                }
+                Some(tor_protocol::DeviceActivation::Direction) => {
+                    actions.push(("Zap", PanelButton::Aim(item.id)));
+                }
+                None => {}
+            }
             if item.equipped.is_none() || item.portable_light.is_some() {
                 actions.push(("Drop", PanelButton::Drop(item.id)));
             }
@@ -633,7 +703,7 @@ pub fn panel(
                 row(ui, &label, None, &[("Take", PanelButton::Take(item.id))]);
             }
         }
-        note(ui, "I or Esc: close");
+        note(ui, "I, Z or Esc: close");
     });
 }
 
@@ -733,7 +803,7 @@ fn row(
 
 pub fn panel_buttons(
     net: Res<Net>,
-    panel: Res<Panel>,
+    mut panel: ResMut<Panel>,
     mut game: ResMut<Game>,
     mut buttons: Query<(&Interaction, &PanelButton, &mut BackgroundColor), Changed<Interaction>>,
 ) {
@@ -747,6 +817,46 @@ pub fn panel_buttons(
                     PanelButton::Take(item) => Cmd::Take(item),
                     PanelButton::Drop(item) => Cmd::Drop(item),
                     PanelButton::Use(item, operation) => Cmd::Use(item, operation),
+                    PanelButton::Identify(item) => Cmd::Identify(item),
+                    PanelButton::Aim(item) => {
+                        // Close the pack so the map takes the direction.
+                        game.aiming = Some(crate::Aim::Device(item));
+                        game.status = "Choose a direction to zap. Esc cancels.".into();
+                        panel.open = false;
+                        continue;
+                    }
+                    PanelButton::Ability(index) => {
+                        let Some(view) = &game.view else { continue };
+                        let Some(ability) = view.abilities.get(index).cloned() else {
+                            continue;
+                        };
+                        let own = view.actors.iter().find(|a| a.is_self).map(|a| a.id);
+                        match (ability.target, own) {
+                            (tor_protocol::AbilityTargetKind::SelfOnly, Some(own)) => Cmd::Ability(
+                                ability.id,
+                                tor_client_3d_model::AbilityTarget::Actor(own),
+                            ),
+                            (target, _) => {
+                                game.status = match target {
+                                    tor_protocol::AbilityTargetKind::SelfStep
+                                    | tor_protocol::AbilityTargetKind::DirectionalRay => format!(
+                                        "Choose a direction for {}. Esc cancels.",
+                                        ability.label
+                                    ),
+                                    _ => format!(
+                                        "Click a creature for {}. Esc cancels.",
+                                        ability.label
+                                    ),
+                                };
+                                game.aiming = Some(crate::Aim::Ability {
+                                    id: ability.id,
+                                    target,
+                                });
+                                panel.open = false;
+                                continue;
+                            }
+                        }
+                    }
                 };
                 send(&net, &mut game, command);
             }

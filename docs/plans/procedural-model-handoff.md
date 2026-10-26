@@ -75,8 +75,8 @@ below were recorded on the earlier base (#171); their source fingerprints descri
 that base, not the rebased commits.
 
 The branch was rebased again onto main at `feae51f2` (#195), which had
-reached protocol 62 with hallucinated presentations. Conflicts were resolved
-as follows:
+already taken its own protocol bump for hallucinated presentations. Conflicts
+were resolved as follows:
 
 - **Worn equipment:** the worn list now bumps the protocol to 63.
 - **Hallucination:** a hallucinated figure carries no worn list, so its true
@@ -86,7 +86,7 @@ as follows:
 
 The local evidence listed below was recorded before this second rebase.
 
-The protocol 61 worn-equipment slice and Rogue armour recipes followed on that
+The worn-equipment slice and Rogue armour recipes followed on that
 base. Local evidence for those commits:
 
 - **3D release suite:** 395 renderer-library, 2 model-library and 31 model

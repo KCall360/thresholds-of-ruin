@@ -340,6 +340,8 @@ mod tests {
                 drinkable: false,
                 portable_light: None,
                 edible: false,
+                readable: false,
+                device: None,
             });
             let game = crate::Game {
                 view: Some(view),
@@ -365,6 +367,85 @@ mod tests {
                 "hidden inventory dispatched an action"
             );
         }
+    }
+
+    #[test]
+    fn each_aim_completes_only_with_what_it_is_aimed_at() {
+        use crate::Aim;
+        use tor_client_3d_model::AbilityTarget;
+        let wand = ItemTarget::from_digest([7; 32]);
+        let foe = ActorTarget::from_digest([8; 32]);
+        let ability = |target| Aim::Ability {
+            id: "spell".into(),
+            target,
+        };
+        assert!(matches!(
+            Aim::Device(wand).along(Direction::East),
+            Some(Cmd::Zap(item, Direction::East)) if item == wand
+        ));
+        assert!(Aim::Device(wand).at(foe).is_none());
+        for kind in [
+            AbilityTargetKind::DirectionalRay,
+            AbilityTargetKind::SelfStep,
+        ] {
+            assert!(matches!(
+                ability(kind).along(Direction::West),
+                Some(Cmd::Ability(id, AbilityTarget::Direction(Direction::West))) if id == "spell"
+            ));
+            assert!(
+                ability(kind).at(foe).is_none(),
+                "{kind:?} is not aimed at creatures"
+            );
+        }
+        for kind in [AbilityTargetKind::Actor, AbilityTargetKind::SelfOrAlly] {
+            assert!(matches!(
+                ability(kind).at(foe),
+                Some(Cmd::Ability(id, AbilityTarget::Actor(target))) if id == "spell" && target == foe
+            ));
+            assert!(
+                ability(kind).along(Direction::North).is_none(),
+                "{kind:?} does not step: movement keeps moving"
+            );
+        }
+    }
+
+    #[test]
+    fn an_aimed_device_takes_the_next_direction_instead_of_a_step() {
+        use bevy::prelude::{App, ButtonInput, KeyCode, Time, Update};
+        let (mut network, mut commands, events) = Network::channels();
+        events.send(Event::Ready).unwrap();
+        network.next_event().unwrap();
+        let net = crate::Net(std::sync::Arc::new(std::sync::Mutex::new(network)));
+        let wand = ItemTarget::from_digest([7; 32]);
+        let mut view = crate::test_support::view(0);
+        view.has_control = true;
+        view.can_act = true;
+        let game = crate::Game {
+            view: Some(view),
+            aiming: Some(crate::Aim::Device(wand)),
+            ..Default::default()
+        };
+        let mut app = App::new();
+        app.insert_resource(net)
+            .insert_resource(game)
+            .insert_resource(crate::CameraRig::default())
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<Time>()
+            .add_event::<bevy::input::mouse::MouseWheel>()
+            .add_systems(Update, crate::camera::input);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyW);
+        app.update();
+        let sent = commands.try_recv().expect("the aim is sent");
+        assert!(
+            matches!(sent.command, Cmd::Zap(item, Direction::North) if item == wand),
+            "forward on an unturned camera aims north"
+        );
+        assert!(
+            app.world().resource::<crate::Game>().aiming.is_none(),
+            "one aim per selection"
+        );
     }
 
     #[test]

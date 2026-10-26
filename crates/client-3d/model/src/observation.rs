@@ -37,6 +37,12 @@ pub struct View {
     pub actors: Vec<Actor>,
     pub items: Vec<GroundItem>,
     pub inventory: Vec<Carried>,
+    /// Granted abilities beyond the basic attack, in the server's order.
+    /// Projectile abilities are left to the projectile choice.
+    pub abilities: Vec<Ability>,
+    /// Carried items the server's pending identification choice accepts;
+    /// `None` when no choice is waiting.
+    pub identify: Option<Vec<ItemTarget>>,
     pub narration: Vec<String>,
     pub hp: Option<(u64, u64)>,
     pub has_control: bool,
@@ -81,6 +87,15 @@ pub struct GroundItem {
     pub reachable: bool,
 }
 
+/// A granted ability as the player chooses it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Ability {
+    pub id: String,
+    /// Its name with cooldown and supply needs, as the shared label reads.
+    pub label: String,
+    pub target: AbilityTargetKind,
+}
+
 /// An item the character carries, with what can be done with it now.
 #[derive(Clone)]
 pub struct Carried {
@@ -96,6 +111,9 @@ pub struct Carried {
     pub drinkable: bool,
     pub portable_light: Option<PortableLightView>,
     pub edible: bool,
+    pub readable: bool,
+    /// How a zappable device is aimed, when it can be zapped now.
+    pub device: Option<DeviceActivation>,
 }
 
 pub fn view(state: &ClientState, palette: &Palette) -> View {
@@ -254,9 +272,35 @@ pub fn view(state: &ClientState, palette: &Palette) -> View {
                     drinkable: affordance.is_some_and(|a| a.drinkable),
                     portable_light: affordance.and_then(|a| a.portable_light.clone()),
                     edible: affordance.is_some_and(|a| a.edible),
+                    readable: affordance.is_some_and(|a| a.readable),
+                    device: affordance
+                        .filter(|a| a.zappable)
+                        .and_then(|a| a.device_activation),
                 }
             })
             .collect(),
+        abilities: tor_client_common::abilities::choices(o)
+            .into_iter()
+            .filter(|ability| ability.target_kind != AbilityTargetKind::DirectionalProjectile)
+            .map(|ability| Ability {
+                label: tor_client_common::abilities::ability_label(&ability),
+                id: ability.id,
+                target: ability.target_kind,
+            })
+            .collect(),
+        identify: o
+            .interactions
+            .as_ref()
+            .and_then(|i| i.identification.as_ref())
+            .map(|pending| {
+                o.inventory
+                    .iter()
+                    .filter(|item| {
+                        pending.items.contains(&item.id) && pending.classes.contains(&item.class)
+                    })
+                    .map(|item| item.id)
+                    .collect()
+            }),
         narration: state.narration().to_vec(),
         hp: o.combat.as_ref().map(|c| (c.hp, c.max_hp)),
         has_control: state.has_control(),

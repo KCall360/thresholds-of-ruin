@@ -107,6 +107,17 @@ pub(super) fn input(
             _ => None,
         }
     };
+    let aimed = match (&command, &game.aiming) {
+        (Some(Cmd::Move(direction)), Some(aim)) => aim.along(*direction),
+        _ => None,
+    };
+    let command = match aimed {
+        Some(aimed) => {
+            game.aiming = None;
+            Some(aimed)
+        }
+        None => command,
+    };
     if let Some(command) = command {
         game.send(&net, command);
     }
