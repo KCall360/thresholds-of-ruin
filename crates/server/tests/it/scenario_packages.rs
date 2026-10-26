@@ -432,6 +432,7 @@ fn rogue_projectile_content_is_default_available_and_expertise_is_an_ordinary_ch
     use tor_simulation::{
         abilities::InvocationKind,
         content_ids::{AbilityId, ExpertiseId},
+        creatures::composition::HdOwner,
         expertise::ExpertiseCategory,
         projectile_profiles::ProjectileDeliveryKind,
         rules::{Reach, StrikeSource, ThreatSource, TimingSource},
@@ -468,6 +469,16 @@ fn rogue_projectile_content_is_default_available_and_expertise_is_an_ordinary_ch
             .instantiate(42)
             .unwrap();
         assert_eq!(initial.unspent_points(), 1);
+        assert_eq!(initial.ledger().entries().len(), 2);
+        assert_eq!(initial.personal_hd_count().get(), 1);
+        assert!(matches!(
+            initial.ledger().entries()[0].owner(),
+            Some(HdOwner::Body { ordinal: 0, .. })
+        ));
+        assert!(matches!(
+            initial.ledger().entries()[1].owner(),
+            Some(HdOwner::Personal { .. })
+        ));
         for ability in ["rogue.throw", "rogue.launch", "rogue.search"] {
             assert!(initial
                 .derive()
@@ -491,7 +502,7 @@ fn rogue_projectile_content_is_default_available_and_expertise_is_an_ordinary_ch
             );
             assert!(!initial.derive().unwrap().expertises.owns(&id));
             let mut paid = initial.clone();
-            paid.select_expertise(HdIndex(0), id.clone()).unwrap();
+            paid.select_expertise(HdIndex(1), id.clone()).unwrap();
             assert_eq!(paid.unspent_points(), 0);
             assert!(paid.derive().unwrap().expertises.active(&id));
             let mut intellect = initial.clone();

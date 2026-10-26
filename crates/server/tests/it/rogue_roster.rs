@@ -28,7 +28,7 @@ pub(super) fn catalog() -> (
 
 // Deliberate source variants author a matching immutable package as well as the
 // actor, so prerequisite tests do not fail early on package mismatch.
-fn prepare_roster_variant(
+pub(super) fn prepare_roster_variant(
     catalog: &tor_server::creature_authoring::CompiledCatalog,
     manifest: &tor_server::scenario_package::Manifest,
     spec: &tor_server::creature_authoring::BuildSpec,
@@ -1013,6 +1013,9 @@ fn production_combat_fixture(name: &str) -> (Game, ActorId, ActorId) {
     let holder = game
         .spawn_actor(at(2), NonZeroU64::new(recipe.turn_ticks.unwrap()).unwrap())
         .unwrap();
+    // Owned birth admission requires the authored whole-body geometry first.
+    game.set_body(holder, recipe.body.clone().unwrap().into())
+        .unwrap();
     game.configure_creature(
         holder,
         CreatureIdentity {
@@ -1026,11 +1029,11 @@ fn production_combat_fixture(name: &str) -> (Game, ActorId, ActorId) {
             .unwrap(),
     )
     .unwrap();
-    game.set_body(holder, recipe.body.clone().unwrap().into())
-        .unwrap();
     let subject_spec = manifest.characters[0].creature.as_ref().unwrap();
     let subject = game
         .spawn_actor(at(3), NonZeroU64::new(100).unwrap())
+        .unwrap();
+    game.set_body(subject, manifest.characters[0].body.clone().unwrap().into())
         .unwrap();
     game.configure_creature(
         subject,
@@ -1045,8 +1048,6 @@ fn production_combat_fixture(name: &str) -> (Game, ActorId, ActorId) {
             .unwrap(),
     )
     .unwrap();
-    game.set_body(subject, manifest.characters[0].body.clone().unwrap().into())
-        .unwrap();
     (game, holder, subject)
 }
 
