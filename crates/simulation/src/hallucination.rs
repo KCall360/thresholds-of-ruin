@@ -135,6 +135,8 @@ impl Game {
             {
                 actor.name = presentation.name.to_string();
                 actor.asset = presentation.asset.as_ref().map(ToString::to_string);
+                // A hallucinated figure shows no true gear: that would betray it.
+                actor.worn.clear();
                 actor.presentation = Some(presentation);
             }
         }

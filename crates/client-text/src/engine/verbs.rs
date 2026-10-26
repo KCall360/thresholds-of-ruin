@@ -1691,6 +1691,9 @@ pub fn examine(r: &Referent, scene: &Scene) -> String {
             if let Some(hurt) = injury(r, scene) {
                 sentences.push(hurt.replacen(&prose::capitalize(&r.the()), "It", 1));
             }
+            if let Some(attire) = attire(r, scene) {
+                sentences.push(attire);
+            }
             sentences.push(match r.hostile {
                 Some(true) => "It means you harm.".into(),
                 Some(false) => "It doesn't seem hostile.".into(),
@@ -1764,6 +1767,26 @@ fn kind_of_thing(r: &Referent) -> String {
 }
 
 /// How a figure stands beside the character: "stands about your height".
+/// What a figure visibly wears and holds, in the order the server gave it:
+/// "It wears ring mail and holds a mace." Absent when nothing is disclosed,
+/// which says nothing about what it may be wearing out of sight.
+fn attire(r: &Referent, scene: &Scene) -> Option<String> {
+    let Key::Actor(id) = r.key else {
+        return None;
+    };
+    let o = &scene.state.observation;
+    let actor = o.visible_actors.iter().find(|a| a.id == id)?;
+    let attire = narration::Attire::of(&actor.worn);
+    // Armour names are mass nouns ("ring mail"); weapons are counted.
+    let held: Vec<String> = attire.holds.iter().map(|name| prose::indefinite(name)).collect();
+    let clauses: Vec<String> = [("wears", attire.wears), ("holds", held)]
+        .into_iter()
+        .filter(|(_, items)| !items.is_empty())
+        .map(|(verb, items)| format!("{verb} {}", prose::and_list(&items)))
+        .collect();
+    (!clauses.is_empty()).then(|| format!("It {}.", prose::and_list(&clauses)))
+}
+
 fn stature(r: &Referent, scene: &Scene) -> Option<&'static str> {
     let o = &scene.state.observation;
     let mine = o

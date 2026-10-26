@@ -116,6 +116,7 @@ mod tests {
         let holder = ActorTarget::from_digest([4; 32]);
         view.visible_actors.push(ActorView {
             appearance_seed: None,
+            worn: Vec::new(),
             id: holder,
             name: "Fly\ntrap".into(),
             description: String::new(),

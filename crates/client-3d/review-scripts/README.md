@@ -38,7 +38,9 @@ its exact requested position at that timestamp, with no extra movement step:
   Existing velocity is retained.
 - `dress`: `outfit` selects a wardrobe while retaining explicit equipment.
 - `equipment`: `items` replaces the explicit loadout while retaining wardrobe.
-  Supported pieces are `helm`, `boots`, `cloak`, and `breastplate`. An empty list
+  Supported pieces are `helm`, `boots`, `cloak`, and one body armour:
+  `leather`, `studded-leather`, `ring-mail`, `scale-mail`, `chain-mail`,
+  `splint-mail`, `banded-mail` or `breastplate` (plate mail's torso). An empty list
   restores the wardrobe's own pieces. Unsupported anatomy is rejected.
 
 Capture records name a tick and camera. Names contain only ASCII letters,

@@ -391,7 +391,7 @@ pub(super) fn place_profiled(
             &part.triangles,
             &edges,
             &part.influence,
-            &hair.support,
+            &|p| hair.support.distance(p),
         );
         record_stage(&mut profile, 2, started);
         let started = profile.as_ref().map(|_| std::time::Instant::now());
@@ -430,7 +430,7 @@ fn constrain_faces(
     triangles: &[[usize; 3]],
     edges: &[(usize, usize, f32)],
     influence: &[f32],
-    support: &super::visual_contact::Scene,
+    distance: &impl Fn(Vec3) -> f32,
 ) {
     const SAMPLES: [[f32; 3]; 4] = [
         [1.0 / 3.0; 3],
@@ -438,23 +438,35 @@ fn constrain_faces(
         [0.0, 0.5, 0.5],
         [0.5, 0.0, 0.5],
     ];
+    // A sample's field value is reused while its position keeps the same bits:
+    // later passes requery only faces that contact or stretching moved.
+    let mut known: Vec<Option<([u32; 3], f32)>> = vec![None; triangles.len() * SAMPLES.len()];
     for _ in 0..24 {
         let mut corrected = false;
         // Edge relaxation is cheap relative to support queries. Diffuse the
         // displacement through the mesh before the next collision sweep.
         for _ in 0..8 {
-            corrected |= limit_stretch(points, edges, influence, support);
+            corrected |= limit_stretch(points, edges, influence, distance);
         }
-        for tri in triangles {
-            for weights in SAMPLES {
+        for (index, tri) in triangles.iter().enumerate() {
+            for (sample, weights) in SAMPLES.into_iter().enumerate() {
                 let p = points[tri[0]] * weights[0]
                     + points[tri[1]] * weights[1]
                     + points[tri[2]] * weights[2];
                 if !(0.04..0.60).contains(&p.y) {
                     continue;
                 }
-                let distance = support.distance(p);
-                if distance >= 0.006 {
+                let bits = p.to_array().map(f32::to_bits);
+                let slot = &mut known[index * SAMPLES.len() + sample];
+                let gap = match *slot {
+                    Some((seen, gap)) if seen == bits => gap,
+                    _ => {
+                        let gap = distance(p);
+                        *slot = Some((bits, gap));
+                        gap
+                    }
+                };
+                if gap >= 0.006 {
                     continue;
                 }
                 let mobility: f32 = (0..3)
@@ -465,12 +477,12 @@ fn constrain_faces(
                 }
                 let e = 0.001;
                 let gradient = Vec3::new(
-                    support.distance(p + Vec3::X * e) - support.distance(p - Vec3::X * e),
-                    support.distance(p + Vec3::Y * e) - support.distance(p - Vec3::Y * e),
-                    support.distance(p + Vec3::Z * e) - support.distance(p - Vec3::Z * e),
+                    distance(p + Vec3::X * e) - distance(p - Vec3::X * e),
+                    distance(p + Vec3::Y * e) - distance(p - Vec3::Y * e),
+                    distance(p + Vec3::Z * e) - distance(p - Vec3::Z * e),
                 )
                 .normalize_or_zero();
-                let correction = gradient * (0.006 - distance).min(0.03);
+                let correction = gradient * (0.006 - gap).min(0.03);
                 for i in 0..3 {
                     if influence[tri[i]] > 0.0 {
                         points[tri[i]] += correction * (weights[i] * influence[tri[i]] / mobility);
@@ -483,7 +495,7 @@ fn constrain_faces(
         // each iteration by distributing that displacement through the edges;
         // otherwise the final collision sample leaves an unchecked stretch.
         for _ in 0..64 {
-            let stretched = limit_stretch(points, edges, influence, support);
+            let stretched = limit_stretch(points, edges, influence, distance);
             corrected |= stretched;
             if !stretched {
                 break;
@@ -501,7 +513,7 @@ fn limit_stretch(
     points: &mut [Vec3],
     edges: &[(usize, usize, f32)],
     influence: &[f32],
-    support: &super::visual_contact::Scene,
+    distance: &impl Fn(Vec3) -> f32,
 ) -> bool {
     let mut changed = false;
     for &(a, b, rest) in edges {
@@ -514,14 +526,14 @@ fn limit_stretch(
         }
         let direction = delta / length;
         let slide = |p: Vec3, desired: Vec3| {
-            if support.distance(p) >= 0.008 {
+            if distance(p) >= 0.008 {
                 return desired;
             }
             let e = 0.001;
             let normal = Vec3::new(
-                support.distance(p + Vec3::X * e) - support.distance(p - Vec3::X * e),
-                support.distance(p + Vec3::Y * e) - support.distance(p - Vec3::Y * e),
-                support.distance(p + Vec3::Z * e) - support.distance(p - Vec3::Z * e),
+                distance(p + Vec3::X * e) - distance(p - Vec3::X * e),
+                distance(p + Vec3::Y * e) - distance(p - Vec3::Y * e),
+                distance(p + Vec3::Z * e) - distance(p - Vec3::Z * e),
             )
             .normalize_or_zero();
             desired - normal * desired.dot(normal).min(0.0)
@@ -971,5 +983,35 @@ mod tests {
             previous_vertices = vertices;
             assert!(checked > 20, "tick={tick}: front witnesses={checked}");
         }
+    }
+}
+
+#[cfg(test)]
+mod face_constraint_tests {
+    use super::*;
+    use std::cell::Cell;
+
+    #[test]
+    fn unmoved_far_faces_are_queried_once_while_contact_continues() {
+        // One triangle presses into a wall at x = 0; another hangs far away.
+        let mut points = vec![
+            Vec3::new(-0.01, 0.1, 0.0),
+            Vec3::new(-0.01, 0.2, 0.05),
+            Vec3::new(-0.01, 0.2, -0.05),
+            Vec3::new(10.0, 0.1, 0.0),
+            Vec3::new(10.0, 0.2, 0.05),
+            Vec3::new(10.0, 0.2, -0.05),
+        ];
+        let triangles = [[0, 1, 2], [3, 4, 5]];
+        let far = Cell::new(0usize);
+        let field = |p: Vec3| {
+            if p.x > 5.0 {
+                far.set(far.get() + 1);
+            }
+            p.x
+        };
+        constrain_faces(&mut points, &triangles, &[], &[1.0; 6], &field);
+        assert!(points[0].x >= 0.0, "the pressed face is cleared: {points:?}");
+        assert_eq!(far.get(), 4, "each unmoved far sample is queried once");
     }
 }

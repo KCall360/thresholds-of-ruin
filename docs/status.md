@@ -6,7 +6,7 @@ record accepted work that is not yet complete. “Implemented” describes code 
 this tree, not a promise that every related product or performance goal is closed.
 Every change still requires the [testing policy](development/testing.md).
 
-**Current formats:** protocol **62**, save format **60**, scenario format **32**, ruleset
+**Current formats:** protocol **63**, save format **60**, scenario format **32**, ruleset
 **`interactions-v53`**, scenario validator **`tor-scenario-44`**. Unsupported
 protocol/save/rules identities are rejected rather than migrated. Other current
 guides refer here instead of copying these identities.
@@ -633,6 +633,13 @@ checks do not replace the current
   ASCII map/look/inventory redraw on palette changes and recover safely.
   Shared creature seeds and captured corpse appearance support the optional,
   independently maintained [3D prototype](../crates/client-3d/README.md).
+  Protocol 63 adds each disclosed creature's visibly worn weapons and armour,
+  and the observer's own, as a bounded `worn` list. That list is projected after
+  observer disclosure and carries no more than the items show on the ground; see
+  the [first slice](plans/appearance-composition-contract.md#implemented-first-slice-protocol-63).
+  Text examination and the ASCII look line name the visible gear. The 3D client
+  dresses bodies from it: each of Rogue's eight body armours now has its own
+  asset and torso recipe, following the maintainer's style guide.
   The prototype adds shared body/fitting dimensions, correlated build silhouettes,
   fitted garment surfaces, an offline swappable wardrobe with garment-owned
   feminine necklines and lower-panel construction, outfit-owned torso ornaments

@@ -1,5 +1,6 @@
 //! Independently selected visual pieces composed over a wardrobe preset.
-//! Offline recipes only; gameplay equipment remains server-owned.
+//! Offline previews select them by name; live play selects them from the
+//! server's disclosed worn equipment, which stays server-owned.
 use super::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -10,9 +11,62 @@ pub(crate) enum HeadItem {
 pub(crate) enum FootItem {
     LeatherBoots,
 }
+/// Torso armour, one recipe per Rogue body armour in the style guide's order.
+/// The steel breastplate is plate mail's torso.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum BodyItem {
+    Leather,
+    StuddedLeather,
+    RingMail,
+    ScaleMail,
+    ChainMail,
+    SplintMail,
+    BandedMail,
+    /// The plate torso alone, for fitting studies.
     SteelBreastplate,
+    /// Plate mail as Rogue wears it: the plate torso with articulated arms
+    /// and plated legs.
+    PlateMail,
+}
+
+impl BodyItem {
+    /// Preview names, as `--wear` and review scripts spell them.
+    pub const NAMES: [(&'static str, Self); 9] = [
+        ("leather", Self::Leather),
+        ("studded-leather", Self::StuddedLeather),
+        ("ring-mail", Self::RingMail),
+        ("scale-mail", Self::ScaleMail),
+        ("chain-mail", Self::ChainMail),
+        ("splint-mail", Self::SplintMail),
+        ("banded-mail", Self::BandedMail),
+        ("breastplate", Self::SteelBreastplate),
+        ("plate-mail", Self::PlateMail),
+    ];
+
+    /// Leather and mail give a little with the body; scales and plates do not.
+    pub fn flexible(self) -> bool {
+        matches!(
+            self,
+            Self::Leather | Self::StuddedLeather | Self::RingMail | Self::ChainMail
+        )
+    }
+
+    /// The recipe for a disclosed armour model; unrecognised armour keeps the
+    /// generic plate rather than guessing a lighter style.
+    pub fn of(model: tor_client_3d_model::ItemModel) -> Self {
+        use tor_client_3d_model::ItemModel as M;
+        match model {
+            M::LeatherArmor => Self::Leather,
+            M::StuddedLeather => Self::StuddedLeather,
+            M::RingMail => Self::RingMail,
+            M::ScaleMail => Self::ScaleMail,
+            M::ChainMail => Self::ChainMail,
+            M::SplintMail => Self::SplintMail,
+            M::BandedMail => Self::BandedMail,
+            M::PlateMail => Self::PlateMail,
+            _ => Self::SteelBreastplate,
+        }
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum BackItem {
@@ -53,23 +107,54 @@ impl Equipment {
         self == Self::default()
     }
 
+    /// The pieces this renderer can fit for disclosed visible equipment. Each
+    /// disclosed region gets its one current recipe; undisclosed regions keep
+    /// the body's own costume rather than being stripped.
+    pub fn disclosed(wearing: &tor_client_3d_model::Wearing) -> Self {
+        Self {
+            head: wearing.head.map(|_| HeadItem::SteelHelm),
+            feet: wearing.feet.map(|_| FootItem::LeatherBoots),
+            back: wearing.back.map(|_| BackItem::TravelCloak),
+            body: wearing.body.map(BodyItem::of),
+        }
+    }
+
     pub fn select(&mut self, name: &str) -> Result<(), String> {
         match name {
             "helm" => self.head = Some(HeadItem::SteelHelm),
             "boots" => self.feet = Some(FootItem::LeatherBoots),
-            "breastplate" => self.body = Some(BodyItem::SteelBreastplate),
             "cloak" => self.back = Some(BackItem::TravelCloak),
-            _ => {
-                return Err(format!(
-                    "unknown equipment {name}; expected helm, boots, cloak or breastplate"
-                ))
-            }
+            _ => match BodyItem::NAMES.iter().find(|(spelled, _)| *spelled == name) {
+                Some(&(_, item)) => self.body = Some(item),
+                None => {
+                    return Err(format!(
+                        "unknown equipment {name}; expected helm, boots, cloak or body armour ({})",
+                        BodyItem::NAMES.map(|(spelled, _)| spelled).join(", ")
+                    ))
+                }
+            },
         }
         Ok(())
     }
 
     pub(super) fn compose(self, mut base: Outfit) -> Outfit {
-        if let Some(BodyItem::SteelBreastplate) = self.body {
+        if let Some(item) = self.body {
+            // Lighter armours add bracers over the sleeves; splinted, banded
+            // and plate armour arm the limbs as well, as on the style sheets.
+            match item {
+                BodyItem::Leather | BodyItem::StuddedLeather | BodyItem::RingMail => {
+                    base.cuffs = Some(Vec3::new(0.43, 0.24, 0.12));
+                }
+                BodyItem::ScaleMail | BodyItem::ChainMail => {
+                    base.cuffs = Some(Vec3::new(0.55, 0.56, 0.6));
+                }
+                BodyItem::SplintMail | BodyItem::BandedMail | BodyItem::PlateMail => {
+                    base.arms = Arms::Plate;
+                    base.legs = Legs::Plate;
+                    base.cuffs = None;
+                }
+                BodyItem::SteelBreastplate => {}
+            }
             // An overlaid plate covers sewn bodice ornaments; independent
             // neck jewelry and straps are fitted onto the resolved exterior.
             base.torso_ornament = None;

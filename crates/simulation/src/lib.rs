@@ -153,7 +153,7 @@ pub use travel::TravelStep;
 
 pub use observation::{
     ActorView, CellView, CorpseAppearance, ExitView, GroundItemView, ItemView, KnownPlace,
-    Observation, SupplyView, TrapView,
+    Observation, SupplyView, TrapView, WornView,
 };
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -1340,3 +1340,6 @@ mod behavior_tests;
 
 #[cfg(test)]
 mod discovery_time_tests;
+
+#[cfg(test)]
+mod worn_view_tests;

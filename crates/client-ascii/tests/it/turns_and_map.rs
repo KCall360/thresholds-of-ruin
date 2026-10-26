@@ -729,6 +729,36 @@ fn letters_stay_with_items_and_choose_from_menus() {
 }
 
 #[test]
+fn look_names_what_a_creature_visibly_wears_and_holds() {
+    let mut app = app();
+    update(&mut app, 1, |o| {
+        let piece = |slot: &str, class, appearance: &str| WornView {
+            slot: slot.into(),
+            occurrence: 0,
+            class,
+            appearance: appearance.into(),
+            asset: None,
+        };
+        for actor in &mut o.visible_actors {
+            if actor.name == "ruin scout" {
+                actor.worn = vec![
+                    piece("body_armor", ItemClass::Armor, "ring mail"),
+                    piece("weapon", ItemClass::Weapon, "axe"),
+                ];
+            }
+        }
+    });
+    app.input(Input::Key { key: Key::Look });
+    app.input(Input::Key { key: Key::Right });
+    app.input(Input::Key { key: Key::Right });
+    app.input(Input::Key { key: Key::Look });
+    assert_eq!(
+        app.messages.text(),
+        "& - a ruin scout (hostile, wounded), wearing ring mail, holding an axe."
+    );
+}
+
+#[test]
 fn look_names_a_creature_and_travel_jumps_to_stairs_without_time() {
     let mut app = app();
     assert_eq!(app.input(Input::Key { key: Key::Look }), Effect::None);
@@ -1076,6 +1106,7 @@ fn bump_actor(view: &mut Observation, id: u64, z: i32, hostile: bool) {
     let kestrel = id == 2;
     view.visible_actors.push(ActorView {
         appearance_seed: None,
+        worn: Vec::new(),
         asset: Some(
             if kestrel {
                 "creature.bird.kestrel"

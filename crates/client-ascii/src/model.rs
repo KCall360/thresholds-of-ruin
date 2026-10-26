@@ -1054,6 +1054,7 @@ impl App {
                         0,
                         ActorView {
                             appearance_seed: None,
+                            worn: Vec::new(),
                             asset: None,
                             id: view.self_target,
                             name: "yourself".into(),
@@ -3780,6 +3781,13 @@ pub fn describe(
                 },
                 tor_client_common::narration::injury(combat.injury)
             ));
+        }
+        let attire = tor_client_common::narration::Attire::of(&actor.worn);
+        let held: Vec<String> = attire.holds.iter().map(|name| item_phrase(name, 1)).collect();
+        for (verb, names) in [("wearing", &attire.wears), ("holding", &held)] {
+            if !names.is_empty() {
+                text.push_str(&format!(", {verb} {}", names.join(" and ")));
+            }
         }
         if !actor.description.trim().is_empty() {
             text.push_str(&format!(". {}", actor.description.trim()));

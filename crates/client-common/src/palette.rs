@@ -215,6 +215,7 @@ mod tests {
         };
         let appearance = |asset: &str| CreatureAppearance {
             seed: AppearanceSeed::from_digest([7; 32]),
+            worn: Vec::new(),
             asset: Some(asset.into()),
         };
         let corpse = |id, asset| ItemView {

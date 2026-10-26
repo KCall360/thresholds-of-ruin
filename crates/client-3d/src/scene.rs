@@ -555,7 +555,10 @@ fn build_actors(
                 crate::picking::Pick(tor_client_3d_model::Focus::Actor(actor.id)),
             ));
             if let Ok(mut body) = bodies.get_mut(entity) {
-                if body.model == actor.model && body.appearance_seed == actor.appearance_seed {
+                if body.model == actor.model
+                    && body.appearance_seed == actor.appearance_seed
+                    && body.wearing == actor.wearing
+                {
                     body.goal = goal;
                     if body.name != actor.name || body.hostile != actor.hostile {
                         body.name.clone_from(&actor.name);
@@ -577,7 +580,8 @@ fn build_actors(
             game.hands.remove(&entity);
         }
         let individual = creatures::individual(actor.appearance_seed);
-        let look = Look::of(actor.model, individual);
+        let look = Look::of(actor.model, individual)
+            .equipped(creatures::Equipment::disclosed(&actor.wearing));
         let name = if actor.is_self {
             String::new()
         } else {
@@ -617,6 +621,7 @@ fn build_actors(
                     appearance_seed: actor.appearance_seed,
                     appearance_key: look.key.clone(),
                     model: actor.model,
+                    wearing: actor.wearing,
                     hostile: actor.hostile,
                     goal,
                     label,

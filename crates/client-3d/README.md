@@ -118,7 +118,11 @@ and stops it on exit. Other options:
   Automatic wardrobe cycling follows that same presented lineup clock, so slow
   model rebuilds and readbacks do not skip through outfits between captures.
 - Independent equipment preview: repeat `--wear helm`, `--wear boots`, and
-  `--wear cloak`, and `--wear breastplate` with `--bestiary` or `--lineups`. For example,
+  `--wear cloak`, and one body armour, with `--bestiary` or `--lineups`. Body
+  armours follow the Rogue style guide: `leather`, `studded-leather`, `ring-mail`,
+  `scale-mail`, `chain-mail`, `splint-mail`, `banded-mail` and `breastplate`.
+  In live play, the server's disclosed `worn` list selects the same pieces:
+  each Rogue armour asset maps to its own torso recipe. For example,
   `--lineups --family Warrior,Mage --outfit royal-princess --wear helm --wear boots
   --wear cloak --wear breastplate --capture DIR` combines the preset with a steel
   helm, leather boots, a travel cloak and a fitted breastplate. These pieces override only their own regions and

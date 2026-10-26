@@ -8,7 +8,8 @@ mod observation;
 mod routing;
 
 pub use appearance::{
-    actor_model, creature_model, item_model, object_model, CreatureModel, ItemModel,
+    actor_model, creature_model, item_model, object_model, wearing, CreatureModel, ItemModel,
+    Wearing,
 };
 pub use commands::{offset, request_from, Cmd, Input};
 pub use frame::{FrameChange, SceneFrame};

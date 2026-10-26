@@ -54,6 +54,7 @@ fn escape_selects_a_single_hold_and_preserves_directional_sequence_escape() {
     let west = ActorTarget::from_digest([77; 32]);
     state.observation.visible_actors.push(ActorView {
         appearance_seed: None,
+        worn: Vec::new(),
         id: west,
         name: "West".into(),
         description: String::new(),

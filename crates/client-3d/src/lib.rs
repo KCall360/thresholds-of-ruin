@@ -611,6 +611,8 @@ struct ActorBody {
     appearance_seed: Option<tor_protocol::AppearanceSeed>,
     appearance_key: String,
     model: CreatureModel,
+    /// Disclosed equipment it was built wearing; a change rebuilds it.
+    wearing: tor_client_3d_model::Wearing,
     hostile: bool,
     goal: Vec3,
     label: Entity,

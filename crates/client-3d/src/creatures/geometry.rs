@@ -3,7 +3,7 @@ use super::anatomy::{
 };
 use super::animation::ease;
 use super::outfit::{
-    Arms, Baldric, Bodice, BodyItem, Composition, Cover, Feet, Headwear, Hem, Legs, NeckDrape,
+    Arms, Baldric, Bodice, Composition, Cover, Feet, Headwear, Hem, Legs, NeckDrape,
     Neckline, Outer, Outfit, ShellOpening, Shoes, Skirt, SleeveCut, Straps, Support, TorsoOrnament,
 };
 use super::outfit::{Heraldry, Pattern};
@@ -5535,13 +5535,15 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
         }
         plate
     });
-    let equipped_plate = composition.body.map(|item| match item {
-        BodyItem::SteelBreastplate => armor_parts::shell(
+    // Every torso armour shares one fitted shell; its recipe dresses the surface.
+    let armor_item = composition.body;
+    let equipped_plate = armor_item.map(|_| {
+        armor_parts::shell(
             body,
             native_plate.as_ref().or(shell_shape.as_ref()),
             trim_neck,
             if cuirass { EMBLEM_FIELD_OFFSET } else { 0.0 },
-        ),
+        )
     });
     let mut waist_support = torso_shape(body, cuirass.then_some(TorsoMaterial::Plate), trim_neck);
     if let Some(shell) = &shell_shape {
@@ -6203,8 +6205,12 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
         }
         // Her chest gives as she moves, less under structured leather and
         // not at all under plate; a fuller chest gives more.
-        let support = if equipped_plate.is_some() {
-            0.0
+        let support = if let Some(item) = armor_item {
+            if item.flexible() {
+                Support::Structured.give()
+            } else {
+                0.0
+            }
         } else {
             match outfit.outer {
                 Some(Outer::Cuirass) => 0.0,
@@ -6477,8 +6483,8 @@ fn biped(kit: &mut Kit, lift: Entity, look: &Look) {
         if let Some(baldric) = outfit.baldric {
             fitted_baldric(p, garment, body, baldric, accessory_overlay);
         }
-        if let Some(armor) = &equipped_plate {
-            armor_parts::emit(p, armor, body);
+        if let (Some(item), Some(armor)) = (armor_item, &equipped_plate) {
+            armor_parts::emit(p, armor, body, item);
         }
         if let Some(ornament) = outfit.torso_ornament {
             ornament_parts::emit(p, ornament, body, garment, &body_shape, neckline);

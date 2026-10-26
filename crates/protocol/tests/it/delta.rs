@@ -37,6 +37,7 @@ fn appearance_and_corpse_disclosures_survive_full_and_delta_round_trips() {
     next.revision += 1;
     let appearance = CreatureAppearance {
         seed: AppearanceSeed::from_digest([19; 32]),
+        worn: Vec::new(),
         asset: Some("creature.equine".into()),
     };
     next.observation.self_appearance = Some(appearance.clone());
@@ -813,6 +814,7 @@ fn collection_view(count: usize) -> StateView {
         });
         state.observation.visible_actors.push(ActorView {
             appearance_seed: None,
+            worn: Vec::new(),
             name: format!("actor {index}"),
             description: "disclosed actor appearance".repeat(4),
             id: ActorTarget::from_digest(synthetic_digest(index as u64 + 10)),

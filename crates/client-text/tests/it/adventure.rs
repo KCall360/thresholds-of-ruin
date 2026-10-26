@@ -163,6 +163,7 @@ fn ability_verbs_select_disclosed_figures_and_keep_unfunded_admission_possible()
     let target = super::actor_target(42);
     s.observation.visible_actors.push(ActorView {
         appearance_seed: None,
+        worn: Vec::new(),
         asset: None,
         id: target,
         name: "goblin".into(),
@@ -321,6 +322,7 @@ fn actors_occupying_several_cells_are_described_once_by_size() {
     s.observation.visible_actors.extend([
         ActorView {
             appearance_seed: None,
+            worn: Vec::new(),
             id: super::actor_target(1),
             name: "delver".into(),
             description: "Your own physical body.".into(),
@@ -329,6 +331,7 @@ fn actors_occupying_several_cells_are_described_once_by_size() {
         },
         ActorView {
             appearance_seed: None,
+            worn: Vec::new(),
             id: super::actor_target(1),
             name: "delver".into(),
             description: "Your own physical body.".into(),
@@ -340,6 +343,7 @@ fn actors_occupying_several_cells_are_described_once_by_size() {
     s.observation.visible_actors.extend([
         ActorView {
             appearance_seed: None,
+            worn: Vec::new(),
             id: super::actor_target(2),
             name: "scout".into(),
             description: "A nimble scout.".into(),
@@ -348,6 +352,7 @@ fn actors_occupying_several_cells_are_described_once_by_size() {
         },
         ActorView {
             appearance_seed: None,
+            worn: Vec::new(),
             id: super::actor_target(2),
             name: "scout".into(),
             description: "A nimble scout.".into(),
@@ -359,6 +364,7 @@ fn actors_occupying_several_cells_are_described_once_by_size() {
     s.observation.visible_actors.extend([
         ActorView {
             appearance_seed: None,
+            worn: Vec::new(),
             id: super::actor_target(3),
             name: "giant".into(),
             description: "A huge giant.".into(),
@@ -367,6 +373,7 @@ fn actors_occupying_several_cells_are_described_once_by_size() {
         },
         ActorView {
             appearance_seed: None,
+            worn: Vec::new(),
             id: super::actor_target(3),
             name: "giant".into(),
             description: "A huge giant.".into(),
@@ -375,6 +382,7 @@ fn actors_occupying_several_cells_are_described_once_by_size() {
         },
         ActorView {
             appearance_seed: None,
+            worn: Vec::new(),
             id: super::actor_target(3),
             name: "giant".into(),
             description: "A huge giant.".into(),
@@ -386,6 +394,7 @@ fn actors_occupying_several_cells_are_described_once_by_size() {
     s.observation.visible_actors.extend([
         ActorView {
             appearance_seed: None,
+            worn: Vec::new(),
             id: super::actor_target(4),
             name: "beast".into(),
             description: "A wide beast.".into(),
@@ -394,6 +403,7 @@ fn actors_occupying_several_cells_are_described_once_by_size() {
         },
         ActorView {
             appearance_seed: None,
+            worn: Vec::new(),
             id: super::actor_target(4),
             name: "beast".into(),
             description: "A wide beast.".into(),
@@ -423,6 +433,7 @@ fn your_own_body_is_omitted_but_seen_through_a_portal() {
     s.observation.visible_actors.extend([
         ActorView {
             appearance_seed: None,
+            worn: Vec::new(),
             id: super::actor_target(1),
             name: "delver".into(),
             description: "Your own body.".into(),
@@ -431,6 +442,7 @@ fn your_own_body_is_omitted_but_seen_through_a_portal() {
         },
         ActorView {
             appearance_seed: None,
+            worn: Vec::new(),
             id: super::actor_target(1),
             name: "delver".into(),
             description: "Your own body.".into(),
@@ -442,6 +454,7 @@ fn your_own_body_is_omitted_but_seen_through_a_portal() {
     s.observation.visible_actors.extend([
         ActorView {
             appearance_seed: None,
+            worn: Vec::new(),
             id: super::actor_target(1),
             name: "delver".into(),
             description: "You recognize your own appearance from another angle.".into(),
@@ -450,6 +463,7 @@ fn your_own_body_is_omitted_but_seen_through_a_portal() {
         },
         ActorView {
             appearance_seed: None,
+            worn: Vec::new(),
             id: super::actor_target(1),
             name: "delver".into(),
             description: "You recognize your own appearance from another angle.".into(),
@@ -499,6 +513,7 @@ fn carrying(s: &mut StateView) {
 fn goblin(s: &mut StateView) {
     s.observation.visible_actors.push(ActorView {
         appearance_seed: None,
+        worn: Vec::new(),
         id: super::actor_target(42),
         name: "goblin sentry".into(),
         position: Position { x: 1, y: 0, z: 0 },
@@ -652,6 +667,7 @@ fn attacks_choose_figures_and_never_an_unseen_id() {
     for id in [2, 3] {
         s.observation.visible_actors.push(ActorView {
             appearance_seed: None,
+            worn: Vec::new(),
             asset: None,
             id: super::actor_target(id),
             name: "ruin guard".into(),
@@ -713,6 +729,7 @@ fn surfaces_and_unnamed_figures_use_asset_words_the_palette_holds() {
     ]);
     s.observation.visible_actors.push(ActorView {
         appearance_seed: None,
+        worn: Vec::new(),
         name: String::new(),
         description: String::new(),
         id: super::actor_target(2),
@@ -754,6 +771,7 @@ fn shared_asset_nouns_preserve_authored_names_and_parser_handles() {
     let mut s = state();
     s.observation.visible_actors.push(ActorView {
         appearance_seed: None,
+        worn: Vec::new(),
         name: String::new(),
         description: String::new(),
         id: super::actor_target(2),
@@ -1625,6 +1643,7 @@ fn an_arbitrary_disclosed_ability_needs_no_lexicon_entry() {
     let target = super::actor_target(42);
     s.observation.visible_actors.push(ActorView {
         appearance_seed: None,
+        worn: Vec::new(),
         asset: None,
         id: target,
         name: "sentinel".into(),
@@ -1680,6 +1699,7 @@ fn phase5_supportive_verbs_select_self_or_an_explicit_disclosed_ally() {
     for (id, name) in [(ally, "companion"), (neutral, "stranger")] {
         s.observation.visible_actors.push(ActorView {
             appearance_seed: None,
+            worn: Vec::new(),
             asset: None,
             id,
             name: name.into(),
@@ -2320,4 +2340,30 @@ fn fake_ground_stairs_are_an_object_not_a_way_and_known_stairs_stay_factual() {
             direction: Direction::Down
         }]
     );
+fn examining_a_figure_names_only_its_disclosed_visible_equipment() {
+    let mut s = state();
+    let piece = |slot: &str, class, appearance: &str| WornView {
+        slot: slot.into(),
+        occurrence: 0,
+        class,
+        appearance: appearance.into(),
+        asset: None,
+    };
+    s.observation.visible_actors.push(ActorView {
+        appearance_seed: None,
+        worn: vec![
+            piece("body_armor", ItemClass::Armor, "ring mail"),
+            piece("weapon", ItemClass::Weapon, "mace"),
+        ],
+        asset: None,
+        id: super::actor_target(2),
+        name: "goblin".into(),
+        description: String::new(),
+        position: Position { x: 3, y: 0, z: 0 },
+    });
+    let text = said("x goblin", &s);
+    assert!(text.contains("It wears ring mail and holds a mace."), "{text}");
+    s.observation.visible_actors[0].worn.clear();
+    let text = said("x goblin", &s);
+    assert!(!text.contains("wears") && !text.contains("holds"), "{text}");
 }

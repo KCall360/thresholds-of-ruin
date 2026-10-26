@@ -4,10 +4,21 @@ use tor_protocol::{ItemClass, ItemTarget, ItemView, Snapshot, StreamContext, Str
 
 #[test]
 fn upper_body_and_portal_images_do_not_replace_the_players_known_foot_position() {
-    use tor_protocol::{AppearanceSeed, CreatureAppearance, Position};
+    use tor_protocol::{AppearanceSeed, CreatureAppearance, Position, WornView};
     let mut observed = observation();
     let seed = AppearanceSeed::from_digest([27; 32]);
-    observed.self_appearance = Some(CreatureAppearance { seed, asset: None });
+    // The own body outside the eye scene still wears what it discloses.
+    observed.self_appearance = Some(CreatureAppearance {
+        seed,
+        asset: None,
+        worn: vec![WornView {
+            slot: "body_armor".into(),
+            occurrence: 0,
+            class: ItemClass::Armor,
+            appearance: "ring mail".into(),
+            asset: None,
+        }],
+    });
     let mut upper = observed.visible_actors[0].clone();
     upper.id = observed.self_target;
     upper.appearance_seed = Some(seed);
@@ -30,6 +41,11 @@ fn upper_body_and_portal_images_do_not_replace_the_players_known_foot_position()
         .find(|actor| actor.is_self && actor.position == feet)
         .expect("own location remains known when an upper cell or portal image is visible");
     assert_eq!(own.appearance_seed, Some(seed));
+    assert_eq!(
+        own.wearing.body,
+        Some(ItemModel::RingMail),
+        "undrawn palette assets fall back by disclosed class"
+    );
     assert_eq!(
         projected.actors[0].position, feet,
         "the primary representation must precede its aliases"
@@ -75,6 +91,7 @@ fn own_body_and_corpses_use_disclosed_appearance_without_parsing_names() {
     };
     let appearance = CreatureAppearance {
         seed: AppearanceSeed::from_digest([23; 32]),
+        worn: Vec::new(),
         asset: Some("creature.equine.authored".into()),
     };
     let mut observed = observation();

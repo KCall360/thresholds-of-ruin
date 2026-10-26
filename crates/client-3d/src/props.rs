@@ -786,7 +786,14 @@ fn build_item(kind: Kind, name: &str) -> Parts {
         ),
         Kind::Mace => mace(&mut p),
         Kind::Greatsword | Kind::ShortSword => sword(&mut p, sword_scale(kind).unwrap()),
-        Kind::RingMail => ring_mail(&mut p),
+        Kind::LeatherArmor
+        | Kind::StuddedLeather
+        | Kind::RingMail
+        | Kind::ScaleMail
+        | Kind::ChainMail
+        | Kind::SplintMail
+        | Kind::BandedMail
+        | Kind::PlateMail => body_armor(&mut p, kind),
         Kind::Bandage => bandage(&mut p),
         Kind::Ration => ration(&mut p),
         Kind::Corpse => corpse(&mut p, name),
@@ -917,37 +924,112 @@ fn sword(p: &mut Parts, scale: f32) {
 }
 
 /// A ring-mail shirt laid flat, its rows of rings catching the light.
-fn ring_mail(p: &mut Parts) {
-    p.metal.extrude(
-        &[
-            Vec2::new(-0.17, -0.25),
-            Vec2::new(0.17, -0.25),
-            Vec2::new(0.18, 0.06),
-            Vec2::new(0.3, 0.1),
-            Vec2::new(0.28, 0.2),
-            Vec2::new(0.1, 0.25),
-            Vec2::new(0.0, 0.2),
-            Vec2::new(-0.1, 0.25),
-            Vec2::new(-0.28, 0.2),
-            Vec2::new(-0.3, 0.1),
-            Vec2::new(-0.18, 0.06),
-        ],
+/// Body armour laid flat, its style read from the surface: the same vest
+/// outline as worn armour, in leather, iron or steel with its own detailing.
+fn body_armor(p: &mut Parts, kind: Kind) {
+    const OUTLINE: [Vec2; 11] = [
+        Vec2::new(-0.17, -0.25),
+        Vec2::new(0.17, -0.25),
+        Vec2::new(0.18, 0.06),
+        Vec2::new(0.3, 0.1),
+        Vec2::new(0.28, 0.2),
+        Vec2::new(0.1, 0.25),
+        Vec2::new(0.0, 0.2),
+        Vec2::new(-0.1, 0.25),
+        Vec2::new(-0.28, 0.2),
+        Vec2::new(-0.3, 0.1),
+        Vec2::new(-0.18, 0.06),
+    ];
+    let leathern = matches!(
+        kind,
+        Kind::LeatherArmor | Kind::StuddedLeather | Kind::RingMail | Kind::SplintMail
+    );
+    let base = match kind {
+        Kind::LeatherArmor | Kind::StuddedLeather => LEATHER * 1.15,
+        Kind::RingMail | Kind::SplintMail => LEATHER * 0.85,
+        Kind::ChainMail => IRON * 0.95,
+        Kind::PlateMail => STEEL,
+        _ => IRON * 0.8,
+    };
+    let body = if leathern { &mut p.matte } else { &mut p.metal };
+    body.extrude(
+        &OUTLINE,
         Vec3::new(0.0, 0.025, 0.0),
         Vec3::X,
         Vec3::NEG_Z,
         0.05,
-        IRON * 0.8,
+        base,
     );
-    for row in 0..6 {
-        for col in 0..5 {
-            let x = -0.13 + col as f32 * 0.065 + if row % 2 == 1 { 0.032 } else { 0.0 };
-            if x > 0.15 {
-                continue;
+    let top = 0.052;
+    let grid = |rows: usize, cols: usize, dx: f32, dz: f32| {
+        (0..rows).flat_map(move |row| {
+            (0..cols).filter_map(move |col| {
+                let x = -0.13 + col as f32 * dx + if row % 2 == 1 { dx * 0.5 } else { 0.0 };
+                (x <= 0.15).then(|| Vec2::new(x, 0.18 - row as f32 * dz))
+            })
+        })
+    };
+    match kind {
+        Kind::RingMail => {
+            for at in grid(6, 5, 0.065, 0.062) {
+                p.metal
+                    .torus(Vec3::new(at.x, top, at.y), Vec3::Y, 0.024, 0.0045, 10, 4, STEEL);
             }
-            let z = 0.18 - row as f32 * 0.062;
-            p.metal
-                .torus(Vec3::new(x, 0.052, z), Vec3::Y, 0.024, 0.0045, 10, 4, STEEL);
         }
+        Kind::StuddedLeather => {
+            for at in grid(8, 6, 0.054, 0.048) {
+                let at = Vec3::new(at.x, top - 0.002, at.y);
+                p.metal.prism(at, at + Vec3::Y * 0.008, 0.008, 0.006, 8, BRONZE, 0.0);
+            }
+        }
+        Kind::ScaleMail => {
+            for at in grid(9, 6, 0.054, 0.045) {
+                p.metal.extrude(
+                    &[
+                        Vec2::new(-0.024, 0.02),
+                        Vec2::new(0.024, 0.02),
+                        Vec2::new(0.02, -0.012),
+                        Vec2::new(0.0, -0.03),
+                        Vec2::new(-0.02, -0.012),
+                    ],
+                    Vec3::new(at.x, top + 0.002, at.y),
+                    Vec3::X,
+                    Vec3::NEG_Z,
+                    0.004,
+                    STEEL * (0.9 + 0.1 * (at.y * 40.0).sin().abs()),
+                );
+            }
+        }
+        Kind::SplintMail => {
+            for k in 0..6 {
+                let x = -0.125 + k as f32 * 0.05;
+                p.metal.cuboid(
+                    Vec3::new(x, top + 0.003, -0.03),
+                    Vec3::new(0.018, 0.004, 0.17),
+                    Quat::IDENTITY,
+                    STEEL,
+                );
+            }
+        }
+        Kind::BandedMail => {
+            for k in 0..7 {
+                p.metal.cuboid(
+                    Vec3::new(0.0, top + 0.003 + 0.002 * k as f32, 0.15 - k as f32 * 0.058),
+                    Vec3::new(0.17, 0.004, 0.032),
+                    Quat::IDENTITY,
+                    STEEL * (1.0 - 0.03 * k as f32),
+                );
+            }
+        }
+        Kind::PlateMail => {
+            p.metal.cuboid(
+                Vec3::new(0.0, top + 0.003, -0.24),
+                Vec3::new(0.17, 0.005, 0.012),
+                Quat::IDENTITY,
+                GOLD,
+            );
+        }
+        _ => {}
     }
     p.matte.cuboid(
         Vec3::new(0.0, 0.054, 0.17),

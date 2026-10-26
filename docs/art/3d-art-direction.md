@@ -232,6 +232,37 @@ silhouette and expressive sleeves. Vampires can lean further into an elegant,
 dramatic figure, shaped bodice, high boots and sweeping cloak. Creature families
 retain their own anatomy and character alongside these styling choices.
 
+### Rogue armor style guide
+
+The maintainer supplied Bold Storybook sheets (2026-10-25) for an unarmored human
+and all eight Rogue body armors. Each sheet shows male and female figures in
+front three-quarter, side and back views, with a material close-up. The images
+are maintainer reference material and are not committed. This section records
+their construction so each armor reads at the gameplay camera.
+
+**Shared base.** Every sheet dresses the same base: a green short-sleeved shirt
+with a collar and an open V-neck, dark brown trousers, a broad brown belt with a
+brass buckle, and tall brown boots with a turned-down cuff. Below the belt, the
+green shirt hangs as split front and back tails. Armor sits over this base and
+never replaces the trousers or boots. The female neckline opens deeper in every
+armor, and the armor's front follows the bust contours. The male front is broad
+and flat.
+
+| Armor | Torso | Shoulders and arms | Hips and legs | Material read |
+| --- | --- | --- | --- | --- |
+| Leather | Boiled-leather vest with a center seam; flexible laced sides with two buckled straps | Layered leather shoulder caps; leather bracers | Split leather tassets over the green tails | Mid brown, cream stitched seams |
+| Ring mail | Leather vest covered in a staggered grid of separate iron rings, each held by a leather tab | Ring-covered shoulder caps and bracers | Ringed split tassets | Dark leather, bright iron rings |
+| Studded leather | Leather vest in vertical panels with a regular grid of brass rivet heads | Studded shoulder caps; studded bracers | Studded split tassets | Brown leather, gold rivets, stitched edges |
+| Scale mail | Overlapping pointed steel scales over the chest, back and tassets; leather strap yoke | Scale shoulder caps; scaled bracers with fingerless leather gloves | Scaled split tassets | Bright steel scales, brass top-edge rivets |
+| Chain mail | Short-sleeved mail shirt to mid-thigh, split at the front, with leather edging | Mail short sleeves over quilted green padding; mail bracers and fingerless gloves | Mail skirt with leather hem | Fine grey links, leather trim |
+| Splint mail | Vertical steel splints riveted to a leather backing, gathered by a leather waist band | Splinted shoulder caps; mail sleeves at the elbows; splinted vambraces | Splinted tassets; splinted greaves over the boots | Steel strips, brown leather, round rivets |
+| Banded mail | Horizontal overlapping steel bands on the torso, with brass rivets and side buckles | Banded pauldrons; mail sleeves; banded vambraces | Banded tassets; banded knee and shin guards | Steel bands over leather and mail backing |
+| Plate mail | Shaped breastplate with gilt edge trim; a contoured female front | Layered pauldrons, articulated arm plates, mail gussets and gauntlets | Plate tassets, cuisses, knee cops, greaves and sabatons | Polished steel, gilt borders, brown buckles |
+
+Protection, and so visual coverage, grows through the list. Leather, ring and
+studded armor leave the shirt sleeves and lower arms visible. Mail adds sleeves
+or gloves. Splint and banded add leg pieces. Plate encloses the whole body.
+
 The fantasy emphasis should read at the normal gameplay camera as well as in a
 portrait. Review front, side and back silhouettes, bust/waist/hip transitions,
 cloth and armor clearance during actions, and the supporting stance. Maintain

@@ -749,6 +749,7 @@ pub fn observation(
                     corpse: item.corpse.as_ref().map(|source| p::CreatureAppearance {
                         seed: targets.appearance_seed(source.actor),
                         asset: source.asset.clone(),
+                        worn: Vec::new(),
                     }),
                     class: item_class(item.class),
                     quantity: item.quantity,
@@ -825,6 +826,7 @@ pub fn observation(
                     || actor.asset.clone(),
                     |value| value.asset.as_deref().map(str::to_owned),
                 ),
+                worn: worn_views(&actor.worn),
             });
         }
         if cell.location == view.location && cell.offset != (w::Position { x: 0, y: 0, z: 0 }) {
@@ -835,6 +837,7 @@ pub fn observation(
                 id: targets.actor(view.actor),
                 position: offset(cell.offset),
                 asset: view.asset.clone(),
+                worn: worn_views(&view.worn),
             });
         }
     }
@@ -854,6 +857,7 @@ pub fn observation(
         self_appearance: Some(p::CreatureAppearance {
             seed: targets.appearance_seed(view.actor),
             asset: view.asset.clone(),
+            worn: worn_views(&view.worn),
         }),
         linked_holds,
         interactions: view.interactions.map(|interaction| p::InteractionView {
@@ -1019,6 +1023,7 @@ pub fn observation(
                 corpse: item.corpse.as_ref().map(|source| p::CreatureAppearance {
                     seed: targets.appearance_seed(source.actor),
                     asset: source.asset.clone(),
+                    worn: Vec::new(),
                 }),
                 class: item_class(item.class),
                 quantity: item.quantity,
@@ -1151,6 +1156,19 @@ fn currency_kind(currency: s::CurrencyKind) -> p::CurrencyKind {
     match currency {
         s::CurrencyKind::Gold => p::CurrencyKind::Gold,
     }
+}
+
+/// Visible equipment, already in the simulation's canonical order.
+fn worn_views(worn: &[s::WornView]) -> Vec<p::WornView> {
+    worn.iter()
+        .map(|w| p::WornView {
+            slot: w.slot.as_str().to_owned(),
+            occurrence: w.occurrence,
+            class: item_class(w.class),
+            appearance: w.appearance.clone(),
+            asset: w.asset.clone(),
+        })
+        .collect()
 }
 
 pub(crate) fn item_class(class: s::ItemClass) -> p::ItemClass {

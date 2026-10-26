@@ -1,5 +1,8 @@
 //! A renderer-independent projection of disclosed client state.
-use crate::{actor_model, creature_model, item_model, object_model, CreatureModel, ItemModel};
+use crate::{
+    actor_model, creature_model, item_model, object_model, wearing, CreatureModel, ItemModel,
+    Wearing,
+};
 use tor_client_common::{ClientState, Palette};
 use tor_protocol::*;
 
@@ -8,6 +11,8 @@ use tor_protocol::*;
 pub struct Actor {
     pub appearance_seed: Option<AppearanceSeed>,
     pub model: CreatureModel,
+    /// Disclosed visible equipment; empty when none is disclosed.
+    pub wearing: Wearing,
     pub id: ActorTarget,
     pub name: String,
     pub description: String,
@@ -106,6 +111,7 @@ pub fn view(state: &ClientState, palette: &Palette) -> View {
         .map(|a| Actor {
             appearance_seed: a.appearance_seed,
             model: actor_model(palette, a),
+            wearing: wearing(palette, &a.worn),
             id: a.id,
             name: a.name.clone(),
             description: a.description.clone(),
@@ -137,6 +143,12 @@ pub fn view(state: &ClientState, palette: &Palette) -> View {
                         .as_ref()
                         .and_then(|appearance| appearance.asset.as_deref()),
                 ),
+                wearing: o
+                    .self_appearance
+                    .as_ref()
+                    .map_or_else(Wearing::default, |appearance| {
+                        wearing(palette, &appearance.worn)
+                    }),
                 id: o.self_target,
                 name: String::new(),
                 description: String::new(),

@@ -166,6 +166,53 @@ pub struct ActorView {
     pub id: ActorId,
     pub location: Location,
     pub asset: Option<String>,
+    /// Visibly worn and held items; empty unless its true form is disclosed.
+    pub worn: Vec<WornView>,
+}
+
+/// One equipped item as any onlooker sees it worn or held: no more than it
+/// would show lying on the ground. Weapons and armour are disclosed; rings,
+/// amulets and other small or concealable things never are, so wearing them
+/// changes nothing an observer receives.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct WornView {
+    pub slot: crate::content_ids::EquipmentSlot,
+    /// Which of the wearer's sockets of that slot, counted in anatomy order.
+    pub occurrence: u8,
+    pub class: crate::ItemClass,
+    pub appearance: String,
+    pub asset: Option<String>,
+}
+
+/// Classes whose equipped items are visible on the body.
+fn worn_visibly(class: crate::ItemClass) -> bool {
+    matches!(class, crate::ItemClass::Weapon | crate::ItemClass::Armor)
+}
+
+impl Game {
+    /// A wearer's visible equipment in canonical order, independent of
+    /// inventory order, item identity and anything known only privately.
+    pub(crate) fn worn_view(&self, wearer: &crate::Actor) -> Vec<WornView> {
+        let slots = &wearer.anatomy.slots;
+        let mut worn: Vec<WornView> = wearer
+            .equipment
+            .iter()
+            .filter_map(|(socket, item)| {
+                let index = usize::from(socket.0);
+                let slot = slots.get(index)?;
+                let item = &self.items.get(item)?.spec;
+                worn_visibly(item.class).then(|| WornView {
+                    slot: slot.clone(),
+                    occurrence: slots[..index].iter().filter(|s| *s == slot).count() as u8,
+                    class: item.class,
+                    appearance: item.appearance.clone(),
+                    asset: item.asset.clone(),
+                })
+            })
+            .collect();
+        worn.sort();
+        worn
+    }
 }
 
 /// Name projection after the caller establishes visible-actor eligibility.
@@ -237,6 +284,8 @@ pub struct Observation {
     pub region: Region,
     /// The observer's own asset, for views of itself from another angle.
     pub asset: Option<String>,
+    /// What the observer visibly wears and holds, as onlookers see it.
+    pub worn: Vec<WornView>,
     pub visible_cells: Vec<CellView>,
     pub ground_items: Vec<GroundItemView>,
     pub apparent_objects: Vec<crate::perception::ApparentObjectView>,
@@ -553,6 +602,7 @@ impl Game {
             tick: self.tick,
             location: actor.location,
             asset: actor.asset.clone(),
+            worn: self.worn_view(actor),
             region: self
                 .world
                 .region(actor.location.region)
@@ -634,6 +684,11 @@ impl Game {
                     let other_id = *other_id;
                     let other = &self.actors[&other_id];
                     let disclosure = perceived.disclosure;
+                    let worn = if disclosure == crate::perception::ActorDisclosure::Creature {
+                        self.worn_view(other)
+                    } else {
+                        Vec::new()
+                    };
                     perceived
                         .body
                         .iter()
@@ -654,6 +709,7 @@ impl Game {
                             asset: (disclosure == crate::perception::ActorDisclosure::Creature)
                                 .then(|| other.asset.clone())
                                 .flatten(),
+                            worn: worn.clone(),
                         })
                 })
                 .collect(),

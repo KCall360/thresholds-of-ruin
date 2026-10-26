@@ -341,6 +341,35 @@ pub fn objective(kind: ObjectiveKind) -> &'static str {
     }
 }
 
+/// A figure's disclosed visible equipment, as display names in the server's
+/// canonical order: armour it wears and weapons it holds. Both are empty when
+/// nothing is disclosed, which says nothing about what is out of sight.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Attire {
+    pub wears: Vec<String>,
+    pub holds: Vec<String>,
+}
+
+impl Attire {
+    pub fn of(worn: &[WornView]) -> Self {
+        let names = |class: ItemClass| {
+            worn.iter()
+                .filter(|piece| piece.class == class)
+                .map(|piece| label(&piece.appearance, ""))
+                .filter(|name| !name.trim().is_empty())
+                .collect()
+        };
+        Self {
+            wears: names(ItemClass::Armor),
+            holds: names(ItemClass::Weapon),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.wears.is_empty() && self.holds.is_empty()
+    }
+}
+
 /// An injury level as an adjective phrase.
 pub fn injury(injury: Injury) -> &'static str {
     match injury {
@@ -643,6 +672,26 @@ pub fn action(event: &Event, view: &Observation) -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn attire_names_visible_armour_and_weapons_without_control_text() {
+        let piece = |slot: &str, class, appearance: &str| WornView {
+            slot: slot.into(),
+            occurrence: 0,
+            class,
+            appearance: appearance.into(),
+            asset: None,
+        };
+        let attire = Attire::of(&[
+            piece("body_armor", ItemClass::Armor, "ring\u{1b} mail"),
+            piece("weapon", ItemClass::Weapon, "mace"),
+            piece("weapon", ItemClass::Weapon, "  "),
+            piece("amulet", ItemClass::Amulet, "unplaced"),
+        ]);
+        assert_eq!(attire.wears, ["ring mail"]);
+        assert_eq!(attire.holds, ["mace"]);
+        assert!(Attire::of(&[]).is_empty());
+    }
+
     fn observation() -> Observation {
         Observation {
             self_appearance: None,
@@ -670,6 +719,7 @@ mod tests {
         let mut after = before.clone();
         let actor = ActorView {
             appearance_seed: None,
+            worn: Vec::new(),
             asset: None,
             id: tor_protocol::ActorTarget::from_digest([2; 32]),
             name: "figure".into(),
@@ -1000,6 +1050,7 @@ mod tests {
         let mut view = observation();
         view.visible_actors.push(ActorView {
             appearance_seed: None,
+            worn: Vec::new(),
             asset: None,
             id: tor_protocol::ActorTarget::from_digest([2; 32]),
             name: "ruin scout".into(),
@@ -1083,6 +1134,7 @@ mod tests {
         before.ready = false;
         before.visible_actors.push(ActorView {
             appearance_seed: None,
+            worn: Vec::new(),
             asset: None,
             id: scout,
             name: "ruin scout".into(),

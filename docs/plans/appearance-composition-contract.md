@@ -1,8 +1,11 @@
 # Observer-facing appearance composition proposal
 
-Status: proposal for refactor review, not an implemented wire format. The maintainer
-must approve the compatibility decision before protocol/save/content changes begin.
-The current [format identities](../status.md) and strict rejection policy still apply.
+Status: the maintainer authorized protocol and server revisions for worn and
+equipped appearance, and protocol 63 implements the
+[first slice](#implemented-first-slice-protocol-63) under the recommended defaults
+below. Everything beyond that slice remains a proposal. Save and content formats are
+unchanged, and the current [format identities](../status.md) and strict rejection
+policy still apply.
 This document makes the [procedural handoff](procedural-model-handoff.md) concrete;
 it does not mark the broader refactor complete.
 
@@ -250,6 +253,37 @@ field names. The next developer should not have to infer them from renderer code
 | Repeated anatomy | Address an attachment by a public body-catalog role plus occurrence, stable within that apparent body recipe | Dynamic attachment namespaces or private limb/entity IDs |
 | Record and updates | One shared appearance value for body, disclosed coverage and visible components; replace complete actor entries atomically in the existing observation transaction | Independent component event streams, component revision numbers and incremental mesh instructions |
 | Catalog lifetime | Use immutable package/region catalog content under the existing palette lifecycle | Runtime recipe creation and independent catalog revisions |
+
+### Implemented first slice (protocol 63)
+
+Under the maintainer's authorization, the four defaults above are adopted for this
+slice. Each disclosed creature carries a bounded, canonically ordered `worn` list on
+its actor entry, and the observer's own `self_appearance` carries the same list.
+Corpses carry an empty list. Each entry names the rules slot, its occurrence among
+that body's sockets of the slot, the disclosed item class, the unidentified
+appearance name and the palette asset. That is no more than the item would show
+lying on the ground.
+
+- **Visibility.** Only equipped weapons and armour are disclosed. Rings, amulets
+  and every other class stay hidden, so wearing or removing them changes nothing
+  an observer receives. There is no coverage rule yet: a cloak does not hide body
+  armour. Visibility is derived from the item class, so neither rules nor saves
+  gained a field. Per-slot visibility and coverage would need a content and save
+  decision.
+- **Disclosure.** The list exists only for the Creature disclosure. Anonymous
+  contacts, guises and less-disclosed figures carry none. Private facts, such as
+  enchantment, curse, true name or which of two identical-looking items is worn,
+  cannot change the record.
+- **Updates.** The list is part of the actor entry, so existing deltas replace it
+  atomically with the actor. No component events or revisions were added.
+- **Clients.** Text describes a figure's visible armour and weapons on
+  examination, ASCII adds them to the look line, headless reports the record, and
+  3D maps slots onto its independent equipment preview pieces. An empty list
+  means nothing is disclosed: the 3D client then keeps the body's own costume
+  instead of inferring absence.
+
+Remembered apparel, coverage, unsupported-body capability errors and catalog
+revisions remain deferred.
 
 An occurrence is a semantic position in the apparent body recipe, not an index in
 an inventory or in whatever meshes a renderer happens to create. For example,

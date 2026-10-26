@@ -170,6 +170,7 @@ fn update(sequence: u64, names: &[&str], carrier: Carrier) -> ServerMessage {
         state.observation.visible_cells.clear();
         let body = CreatureAppearance {
             seed: AppearanceSeed::from_digest([9; 32]),
+            worn: Vec::new(),
             asset: Some(names[0].into()),
         };
         if matches!(carrier, Carrier::SelfBody) {

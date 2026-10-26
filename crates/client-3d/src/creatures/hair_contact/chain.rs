@@ -132,6 +132,18 @@ mod transport_tests {
     }
 
     #[test]
+    fn unobstructed_contact_move_queries_its_start_once() {
+        use std::cell::Cell;
+        let queries = Cell::new(0usize);
+        let moved = move_with_contact(Vec3::ZERO, Vec3::new(0.3, 0.2, 0.1), 0.02, &|_| {
+            queries.set(queries.get() + 1);
+            10.0
+        });
+        assert_eq!(moved, Vec3::new(0.3, 0.2, 0.1));
+        assert_eq!(queries.get(), 1, "the clear start is queried once");
+    }
+
+    #[test]
     fn unobstructed_attachment_transport_reaches_its_destination() {
         let result = transport(
             &[Vec3::ZERO],
@@ -258,9 +270,19 @@ fn apply_movement(
 /// Initial overlaps still need depenetration; moving-collider sweeps are separate.
 fn move_with_contact(from: Vec3, to: Vec3, radius: f32, distance: &impl Fn(Vec3) -> f32) -> Vec3 {
     let mut point = from;
+    // The field at `point` when depenetration last queried it there. The
+    // sweep's first step reuses it instead of asking again for the same bits.
+    let mut known = None;
     for _ in 0..8 {
-        let correction = contact(point, radius, distance);
+        let field = distance(point);
+        let gap = field - radius;
+        let correction = if gap >= 0.0 {
+            Vec3::ZERO
+        } else {
+            contact_normal(point, distance) * (-gap + 0.0001)
+        };
         if correction.length_squared() < 1e-12 {
+            known = Some(field);
             break;
         }
         point += correction;
@@ -274,7 +296,7 @@ fn move_with_contact(from: Vec3, to: Vec3, radius: f32, distance: &impl Fn(Vec3)
         let direction = delta.normalize();
         let mut hit = false;
         for _ in 0..512 {
-            let gap = distance(point) - radius;
+            let gap = known.take().unwrap_or_else(|| distance(point)) - radius;
             if gap < 0.00001 {
                 hit = true;
                 break;

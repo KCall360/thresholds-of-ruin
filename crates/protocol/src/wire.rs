@@ -5,7 +5,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-pub const PROTOCOL_VERSION: u32 = 62;
+pub const PROTOCOL_VERSION: u32 = 63;
 /// The maximum disclosed primary strike ordinal plus one.
 pub const MAX_SEQUENCE_STRIKES: u16 = 16;
 
@@ -496,6 +496,41 @@ pub struct CreatureAppearance {
     pub seed: crate::AppearanceSeed,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub asset: Option<String>,
+    /// What it visibly wears and holds; always empty for remains.
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "read_worn"
+    )]
+    pub worn: Vec<WornView>,
+}
+
+/// At most one entry per equipment socket the rules allow a body.
+pub const MAX_WORN: usize = 64;
+
+/// One visibly worn or held item, disclosing no more than the item would lying
+/// on the ground. Weapons and armour only: rings and other small things are
+/// never sent. An empty list means nothing is disclosed, not that the body is
+/// bare. Entries arrive in canonical slot order.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WornView {
+    /// The rules' slot, such as "body_armor" or "weapon".
+    pub slot: String,
+    /// Which of the body's sockets of that slot, in anatomy order.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub occurrence: u8,
+    pub class: ItemClass,
+    /// The item's unidentified look.
+    pub appearance: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset: Option<String>,
+}
+fn is_zero(value: &u8) -> bool {
+    *value == 0
+}
+pub(crate) fn read_worn<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<WornView>, D::Error> {
+    crate::bounded::bounded::<D, WornView, MAX_WORN>(d)
 }
 
 /// Disclosed currency identity; stack quantity counts units of this currency.
@@ -661,6 +696,13 @@ pub struct ActorView {
     /// scenario names none; clients then fall back to their own look.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub asset: Option<String>,
+    /// What it visibly wears and holds, the same on every cell of its body.
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "read_worn"
+    )]
+    pub worn: Vec<WornView>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

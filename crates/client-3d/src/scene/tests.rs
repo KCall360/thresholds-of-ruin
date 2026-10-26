@@ -183,6 +183,7 @@ fn app(model: CreatureModel) -> App {
         appearance_seed: None,
         id: ActorTarget::from_digest([4; 32]),
         model,
+        wearing: Default::default(),
         name: "first name".into(),
         description: String::new(),
         position: Position { x: 1, y: 0, z: 0 },
@@ -687,4 +688,39 @@ fn live_sword_swaps_align_handles_and_clear_unequipped_meshes() {
     app.update();
     assert!(app.world().resource::<Game>().held.is_none());
     assert!(app.world().get_entity(previous.unwrap()).is_err());
+}
+
+#[test]
+fn disclosed_equipment_changes_rebuild_the_rig_and_removal_restores_the_costume() {
+    let mut app = app(CreatureModel::Human);
+    let rendered = |app: &mut App, wearing: tor_client_3d_model::Wearing| {
+        app.world_mut().resource_mut::<Fixture>().0.actors[0].wearing = wearing;
+        app.update();
+        let entity = *app
+            .world()
+            .resource::<Game>()
+            .actors
+            .values()
+            .next()
+            .unwrap();
+        let key = app
+            .world()
+            .get::<ActorBody>(entity)
+            .unwrap()
+            .appearance_key
+            .clone();
+        (entity, key)
+    };
+    let (plain, costume) = rendered(&mut app, Default::default());
+    let armoured = tor_client_3d_model::Wearing {
+        body: Some(tor_client_3d_model::ItemModel::RingMail),
+        ..Default::default()
+    };
+    let (rebuilt, worn) = rendered(&mut app, armoured);
+    assert_ne!(rebuilt, plain, "a disclosed change rebuilds the rig");
+    assert_ne!(worn, costume, "the worn piece is part of the composition");
+    let (same, again) = rendered(&mut app, armoured);
+    assert_eq!((same, &again), (rebuilt, &worn), "an unchanged view reuses it");
+    let (_, restored) = rendered(&mut app, Default::default());
+    assert_eq!(restored, costume, "removal restores the body's own costume");
 }

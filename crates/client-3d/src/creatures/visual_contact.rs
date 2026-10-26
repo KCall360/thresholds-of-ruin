@@ -3,6 +3,17 @@ use super::*;
 use bevy::asset::RenderAssetUsages;
 use bevy::render::mesh::VertexAttributeValues;
 
+/// The nearer of two signed distances, keeping `best` on a tie. Unlike
+/// `f32::min`, whose choice between -0 and +0 is unspecified, the result is
+/// the same bits on every build: the hair solver stops on exact fixed points.
+fn nearer(best: f32, candidate: f32) -> f32 {
+    if candidate < best {
+        candidate
+    } else {
+        best
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct Cylinder {
     center: Vec3,
@@ -57,7 +68,7 @@ impl Cylinder {
     fn nearest_local(&self, p: Vec3, best: f32) -> f32 {
         let offset = p - self.center;
         if self.may_improve(offset, best) {
-            best.min(self.local_distance(offset))
+            nearer(best, self.local_distance(offset))
         } else {
             best
         }
@@ -288,7 +299,7 @@ mod tests {
                         let point = Vec3::new(x as f32, y as f32, z as f32) * 0.11;
                         let expected = posed
                             .iter()
-                            .fold(scene.body.distance(point), |d, c| d.min(c.distance(point)));
+                            .fold(scene.body.distance(point), |d, c| nearer(d, c.distance(point)));
                         assert_eq!(
                             scene.distance(point).to_bits(),
                             expected.to_bits(),
@@ -298,6 +309,15 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn nearer_keeps_the_current_best_on_ties_including_signed_zero() {
+        assert_eq!(nearer(-0.0, 0.0).to_bits(), (-0.0f32).to_bits());
+        assert_eq!(nearer(0.0, -0.0).to_bits(), 0.0f32.to_bits());
+        assert_eq!(nearer(0.5, 0.25), 0.25);
+        assert_eq!(nearer(0.25, 0.5), 0.25);
+        assert_eq!(nearer(f32::INFINITY, -1.0), -1.0);
     }
 
     #[test]
@@ -350,7 +370,7 @@ mod tests {
                             ] {
                                 assert_eq!(
                                     cylinder.nearest(p, best).to_bits(),
-                                    best.min(expected).to_bits(),
+                                    nearer(best, expected).to_bits(),
                                     "nearest at {p:?}, best {best}"
                                 );
                             }
@@ -374,7 +394,7 @@ mod tests {
             let p = Vec3::splat(magnitude);
             let expected = c.distance(p);
             for best in [0.0, expected, expected * 0.99, expected * 1.01] {
-                assert_eq!(c.nearest(p, best).to_bits(), best.min(expected).to_bits());
+                assert_eq!(c.nearest(p, best).to_bits(), nearer(best, expected).to_bits());
             }
         }
     }

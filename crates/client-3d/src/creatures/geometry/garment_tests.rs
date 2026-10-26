@@ -1162,3 +1162,65 @@ fn loose_front_locks_clear_equipped_torso_surface() {
     }
     assert!(checked > 20, "front hair must be checked, count={checked}");
 }
+
+#[test]
+fn every_rogue_body_armour_builds_its_own_torso_on_both_sexes() {
+    use super::super::outfit::BodyItem;
+    for woman in [false, true] {
+        let base = Look::with_choice(
+            CreatureModel::Human,
+            7,
+            Some(Variant {
+                woman,
+                bust: 3,
+                ..default()
+            }),
+        )
+        .dressed(Wardrobe::Commoner);
+        let bare = torso(&base);
+        let mut seen = std::collections::HashSet::new();
+        for (name, item) in BodyItem::NAMES {
+            let mut equipment = Equipment::default();
+            equipment.select(name).unwrap();
+            assert_eq!(equipment.body, Some(item));
+            let triangles = torso(&base.clone().equipped(equipment));
+            let metal = triangles.iter().filter(|t| t.metal).count();
+            let matte = triangles.len() - metal;
+            assert!(
+                triangles.len() > bare.len(),
+                "{name} (woman={woman}) adds armour to the torso"
+            );
+            // Leather armours are leather; the rest are mostly metal.
+            let leathern = matches!(
+                item,
+                BodyItem::Leather | BodyItem::StuddedLeather | BodyItem::RingMail | BodyItem::SplintMail
+            );
+            let bare_metal = bare.iter().filter(|t| t.metal).count();
+            if item == BodyItem::Leather {
+                assert!(
+                    metal - bare_metal < 200,
+                    "leather is not metal-shelled: {} metal triangles",
+                    metal - bare_metal
+                );
+            } else if !leathern {
+                assert!(metal - bare_metal > 1000, "{name} has a metal surface");
+            }
+            let armoured = base.clone().equipped(equipment);
+            let limbs = super::super::outfit::Composition::resolve(&armoured).outfit;
+            if item == BodyItem::PlateMail {
+                // Plate mail shares the breastplate's torso and arms the limbs.
+                assert!(matches!(limbs.arms, Arms::Plate) && matches!(limbs.legs, Legs::Plate));
+                continue;
+            }
+            assert_eq!(
+                matches!(limbs.arms, Arms::Plate),
+                matches!(item, BodyItem::SplintMail | BodyItem::BandedMail),
+                "{name}: only splint and banded armour arm the limbs here"
+            );
+            assert!(
+                seen.insert((metal, matte)),
+                "{name} (woman={woman}) is indistinguishable from another armour"
+            );
+        }
+    }
+}
