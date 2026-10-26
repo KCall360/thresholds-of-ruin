@@ -73,6 +73,18 @@ def self_device_recording_case():
     return MagicItemProcesses("test_text_nothing_unknown_direction_and_identified_self_skip")
 
 
+def polymorph_recording_case():
+    """Reuse actual Text self-Zap, source deletion and exact request replay."""
+    from test_magic_items_process import MagicItemProcesses
+    return MagicItemProcesses("test_text_paid_self_polymorph_reopens_and_retries_without_source_or_private_ledger")
+
+
+def polymorph_diagnostic_recording_case():
+    """Minimal authored self-ability witness for the privileged effect variant."""
+    from test_magic_items_process import MagicItemProcesses
+    return MagicItemProcesses("test_polymorph_self_ability_privileged_capture_has_changed_only_effect")
+
+
 def drain_refusal_recording_case():
     """Reuse actual imported Drain Text refusal; never synthesize wire facts."""
     from test_magic_items_process import MagicItemProcesses
@@ -283,6 +295,35 @@ class Recorder(ProcessTestCase):
                         "capture the actual known-self device affordance")
         server_samples["zz.self_device"] = sample
 
+    def record_polymorph(self, server_samples):
+        ordinary = run_recording_case(polymorph_recording_case(), "polymorph_samples")
+        diagnostic = run_recording_case(polymorph_diagnostic_recording_case(), "polymorph_diagnostic_sample")
+        self.assertEqual(set(ordinary), {"affordance", "request"})
+        sample, request = ordinary["affordance"], ordinary["request"]
+        self.assertEqual(sample["type"], "snapshot")
+        state = sample["snapshot"]["state"]
+        self.assertFalse(state["wizard_game"])
+        self.assertEqual(request["type"], "request")
+        self.assertEqual(request["request"]["type"], "command")
+        command = request["request"]["command"]
+        self.assertEqual(command["type"], "act")
+        action = command["action"]
+        self.assertEqual(action["type"], "zap")
+        self.assertEqual(action["aim"], {"kind": "self_target"})
+        row, = [row for row in state["observation"]["interactions"]["inventory"] if row["item"] == action["item"]]
+        self.assertEqual(row["device_activation"], "direction_or_self")
+        self.assertEqual(diagnostic["type"], "combat_diagnostics")
+        self.assertTrue(diagnostic["report"]["enabled"])
+        record, = [row for row in diagnostic["report"]["records"] if row.get("ability", {}).get("id") == "fixture.polymorph"]
+        effect, = [row for row in record["outcome"]["effects"] if row["type"] == "baleful_polymorph"]
+        self.assertEqual(effect, {"type": "baleful_polymorph", "target": "1", "changed": True})
+        for secret in ("private.body.birth", "private.body.changed", "body_build", "personal_seed_offset", "purchase_highwater"):
+            self.assertNotIn(secret, json.dumps([sample, request, diagnostic]))
+        # Validate both genuine cases and every cleanup before publishing either
+        # server sample or the captured request (never a handcrafted envelope).
+        self.recorded_client_samples = [*getattr(self, "recorded_client_samples", []), request]
+        server_samples.update({"zz.polymorph_affordance": sample, "zz.polymorph_effect": diagnostic})
+
     def record_drain_refusal(self, server_samples):
         sample = run_recording_case(drain_refusal_recording_case(), "drain_refusal_sample")
         self.assertEqual(sample["type"], "snapshot")
@@ -350,8 +391,8 @@ class Recorder(ProcessTestCase):
         self.assertEqual(observations["extended"]["tick"], "200")
         self.assertIn(deadlines["extended"] - deadlines["visual"], range(80800, 89201, 100))
         for stage, name, asset, object_name, object_asset, cosmetic_class in (
-                ("visual", "emu", "creature.bird.emu", "scroll titled SAH REN", "item.scroll", "scroll"),
-                ("extended", "bat", "creature.bat", "yew wand", "item.wand", "wand")):
+                ("visual", "emu", "creature.bird.emu", "smoky potion", "item.potion", "potion"),
+                ("extended", "bat", "creature.bat", "ivory ring", "item.ring", "ring")):
             observation = observations[stage]
             peers = [row for row in observation["visible_actors"] if row["id"] != observation["self_target"]]
             # Body cells are separate lawful occurrences of one target. Keep
@@ -905,6 +946,7 @@ class Recorder(ProcessTestCase):
         self.record_nutrition(server_samples)
         self.record_magic_items(server_samples)
         self.record_self_device(server_samples)
+        self.record_polymorph(server_samples)
         self.record_drain_refusal(server_samples)
         self.record_first_contact(server_samples)
         self.record_torch(server_samples)

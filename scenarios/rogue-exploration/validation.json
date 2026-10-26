@@ -1,20 +1,21 @@
 {
-  "validator": "tor-scenario-44",
-  "ruleset": "interactions-v53",
-  "ruleset_hash": "63217eca5432891c63421b59da7712887b8eaa9e1928fb36fa4d9f47cbfe5cea",
+  "validator": "tor-scenario-45",
+  "ruleset": "interactions-v54",
+  "ruleset_hash": "371fb62b2717b0fdd6d3e85879fee331bcfbd0706ca839509ec787b007fea88d",
   "ruleset_dependencies": {
-    "interactions-v53": "78c83cdf72d1c3901963028d99db3e97981b584b178f44ad1110ac8afbb869ca"
+    "interactions-v54": "f9dbd45087a583b1dcad03bd84ae08bb3c7d97cd5d2b8be0bf1c6169c2c6ad60"
   },
-  "content_hash": "7d9b8123180a11d8e5a51487f8a5d40477293300d2c40c216427e042f4455339",
+  "content_hash": "d0380d3518d1f3a62dedf892e2f2c0da021568fa420e05f609137ff53d5a5682",
   "files": {
-    "catalog/actors.toml": "da841b457cfaa355c1ad0347a5d7bcbb66f7047bcb3901ae479dea11c4f17700",
+    "catalog/actors.toml": "25cdbb1b0810e8252644051cafe9d275eba0b2e27ad4f30c89097e4fcbc35c61",
+    "catalog/bodies.toml": "bbe18281cf810fcc7bf158de7ca07f153114c980c166cada9a4c83e108f8a16f",
     "catalog/creatures.toml": "9f5bd274a631b2982d05ab80c24279fb560798a0e678084d722b99e051b9b46e",
-    "catalog/items.toml": "421c3ad8e4182da4ab3d4d1507435ee4d44d449bf7fb11306c2ee34ce7b55297",
+    "catalog/items.toml": "27cad4c36627240d735939a954c33534cbaaf01c4210985604d54d4a054bf6b2",
     "index.json": "9bcdcd8e7340350480abf05c4edbe9b8a8ef04e77258d462167b598589354902",
-    "rules.toml": "0f1d2f50b0be186af4c571dc05ff6be5d42dd334ff3db6e5718b4e7dfb6a8768",
-    "scenario.toml": "b46e55f5de8713bb7fe71187c8810f88ee669d73491c78df32fdf20ce5d31cd2"
+    "rules.toml": "d98d8e04517b402018a0cdc438ff0b39181218df5dd66b04254882537e7fb77e",
+    "scenario.toml": "5cd952e111c55a56affb71d548fb113d918f8af653656db55a8ebc32ccb436d6"
   },
   "regions": 0,
-  "model_hash": "58ee5567ad79059def4725fa5abd95246e0a628f2d0d93561ba72dad8c2a1ec1",
+  "model_hash": "9408740f640fdf69baaceef54c5b389b1ead80171aaba77f72c53bb113c78cb1",
   "coverage": "all authored regions and character starts; descriptor structural bounds; deterministic sampled groups at seeds 0, 1, 42 under explicit work budget; no all-seed or winnability proof"
 }

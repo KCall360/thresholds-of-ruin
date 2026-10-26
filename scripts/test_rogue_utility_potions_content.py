@@ -82,7 +82,8 @@ class RogueUtilityPotionsContent(unittest.TestCase):
         data = fixture()
         manifest = data["manifest"]
         self.assertEqual(data["rules"], (PACKAGE / "rules.toml").read_text(encoding="utf-8"))
-        self.assertEqual(manifest["creatures"], source("catalog/creatures.toml")["creatures"])
+        self.assertEqual(manifest["creatures"], {**source("catalog/creatures.toml")["creatures"],
+                         **source("catalog/bodies.toml")["creatures"]})
         for identity, item in source("catalog/items.toml")["items"].items():
             self.assertEqual(manifest["archetypes"][identity], item)
         phantom = source("catalog/actors.toml")["actors"]["rogue.phantom"]

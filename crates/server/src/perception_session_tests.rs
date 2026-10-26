@@ -71,9 +71,31 @@ fn scenario(xeroc: bool) -> crate::Scenario {
     };
     character["creature"]["nutrition"] = json!({"kind":"exempt"});
     character["creature"]["future_growth"] = json!({"kind":"disabled"});
+    // These template-bearing observers are synthetic unowned perception probes,
+    // not Polymorph subjects. Keep the current authored racial + personal class
+    // rows and every purchase; only opt out of body-package ownership, whose
+    // deliberate mixed-template rejection must remain strict in production.
+    let observer_build = &mut character["creature"];
+    assert_eq!(observer_build["species"], json!("rogue.human"));
+    let observer_rows = observer_build["hit_dice"].clone();
+    assert_eq!(observer_rows.as_array().unwrap().len(), 2);
+    assert_eq!(observer_rows[0]["source"], json!("racial"));
+    assert_eq!(observer_rows[1]["source"], json!("warrior"));
+    assert_eq!(observer_rows[0]["purchases"], json!([]));
+    assert_eq!(observer_rows[1]["purchases"], json!([]));
+    assert_eq!(
+        observer_build
+            .as_object_mut()
+            .unwrap()
+            .remove("body_package"),
+        Some(json!("rogue.body.human"))
+    );
+    assert_eq!(observer_build["hit_dice"], observer_rows);
     character["creature"]["templates"] = json!(["fixture_probes"]);
     let mut witness = character["creature"].clone();
     witness["name"] = json!("fixture witness");
+    assert!(witness.get("body_package").is_none());
+    assert_eq!(witness["hit_dice"], observer_rows);
     let body = character["body"].clone();
     for key in [
         "procedural_worlds",

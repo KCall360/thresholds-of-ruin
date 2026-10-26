@@ -117,6 +117,9 @@ pub fn item_action(
                     item,
                     aim: tor_protocol::DeviceAim::SelfTarget {},
                 }),
+                Some(tor_protocol::DeviceActivation::DirectionOrSelf) => {
+                    Err("Choose a direction or yourself to zap.".into())
+                }
                 Some(tor_protocol::DeviceActivation::Direction) => {
                     Err("Choose a direction to zap.".into())
                 }
@@ -170,6 +173,33 @@ pub fn zap_action(
     Ok(Action::Zap {
         item,
         aim: tor_protocol::DeviceAim::Direction { direction },
+    })
+}
+
+/// Explicit self aim is offered only by the current disclosed capability.
+pub fn zap_self_action(view: &Observation, item: ItemTarget) -> Result<Action, String> {
+    if view.combat.is_none()
+        || !item_choices(view, ItemOperation::Zap).any(|candidate| candidate.id == item)
+    {
+        return Err("You can't zap that item.".into());
+    }
+    let mode = view
+        .interactions
+        .as_ref()
+        .and_then(|interactions| interactions.inventory.iter().find(|row| row.item == item))
+        .and_then(|row| row.device_activation);
+    if !matches!(
+        mode,
+        Some(
+            tor_protocol::DeviceActivation::SelfTarget
+                | tor_protocol::DeviceActivation::DirectionOrSelf
+        )
+    ) {
+        return Err("That device does not offer self targeting.".into());
+    }
+    Ok(Action::Zap {
+        item,
+        aim: tor_protocol::DeviceAim::SelfTarget {},
     })
 }
 

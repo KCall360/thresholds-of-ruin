@@ -994,3 +994,6 @@ fn encoded_unknown_ray_self_aim_rejects_without_payment_and_direction_retries_on
 
 #[path = "self_device_session_tests.rs"]
 mod self_devices;
+
+#[path = "polymorph_session_tests.rs"]
+mod polymorph;

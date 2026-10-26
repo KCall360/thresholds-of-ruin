@@ -152,17 +152,83 @@ class PopulationGrowthProcesses(ProcessTestCase):
         build = born["build"]
         self.assertEqual(len(build["hd"]), expected_hd)
         self.assertEqual([row["source"] for row in build["hd"]], [{"kind": "racial"}] * expected_hd)
-        recipe = encounter_sources()["actors"][foe]["creature"]
-        expected_choices = [{"purchases": row["purchases"], "attribute": row.get("attribute")}
-                            for row in recipe["hit_dice"]]
-        expected_choices += [{"purchases": [], "attribute": None}] * (expected_hd - len(expected_choices))
+        source = encounter_sources()
+        recipe = source["actors"][foe]["creature"]
+        # Authored native counts are7/8; the eighth/ninth effective HD is a
+        # separately funded personal racial row, not a larger monster package.
+        native_count, health_kind, health_die = {
+            "rogue.black_unicorn": (7, "magical_beast", 10),
+            "rogue.vampire": (8, "undead", 12),
+        }[foe]
+        form = recipe["body_package"]
+        self.assertEqual(form, "rogue.body." + foe.removeprefix("rogue."))
+        body_recipe = source["body_packages"][form]
+        self.assertEqual(len(body_recipe["hit_dice"]), native_count)
+        self.assertEqual(body_recipe["hit_dice"], recipe["hit_dice"])
+        self.assertEqual(recipe.get("personal_body_grants", []), [])
+        self.assertEqual(expected_hd, native_count + 1)
+        owners = [{"kind": "body", "form": form, "ordinal": ordinal}
+                  for ordinal in range(native_count)] + [{"kind": "personal", "id": 1}]
+        expected_choices = [{
+            "purchase_highwater": len(row["purchases"]),
+            "purchases": [dict(purchase, id={"owner": owners[ordinal], "serial": serial})
+                          for serial, purchase in enumerate(row["purchases"], 1)],
+            "attribute": row.get("attribute"),
+        } for ordinal, row in enumerate(body_recipe["hit_dice"])]
+        personal_empty = {"purchase_highwater": 0, "purchases": [], "attribute": None}
+        expected_choices.append(personal_empty)
         self.assertEqual(build["choices"], expected_choices)
-        self.assertEqual(build["restoration"], {"kind": "authored", "entries": [
-            {"source": {"kind": "racial"}, "choices": choice} for choice in expected_choices]})
-        for seed in [build["health_root_seed"], *(row["health_seed"] for row in build["hd"])]:
-            self.assertIs(type(seed), int)
-            self.assertGreaterEqual(seed, 0)
-            self.assertLess(seed, 1 << 64)
+        self.assertEqual(build["restoration"], {"kind": "choose_again"})
+        self.assertIsNone(build["health_root_seed"])
+        self.assertEqual(build["drained_hd"], [])
+        body = build["body_build"]
+        self.assertEqual(body["base"], body["active"])
+        self.assertEqual(body["base"]["id"], form)
+        self.assertEqual(body["base"]["species"], recipe["species"])
+        self.assertEqual(body["base"]["body"], body_recipe["body"])
+        self.assertEqual(body["base"]["advancement"], [{
+            "source": {"kind": "racial"}, "choices": {
+                "purchase_highwater": 0,
+                "purchases": [dict(purchase, id=None) for purchase in row["purchases"]],
+                "attribute": row.get("attribute"),
+            }} for row in body_recipe["hit_dice"]])
+        self.assertEqual(body["personal_seed_offset"], native_count)
+        self.assertEqual(body["birth_personal_count"], 1)
+        self.assertEqual(body["next_personal_id"], 2)
+        self.assertEqual(body["personal_restoration"], {"kind": "authored", "entries": [
+            {"id": 1, "source": {"kind": "racial"}, "choices": personal_empty}]})
+        self.assertEqual(body["personal_body_grants"], [])
+        self.assertEqual(body["inactive"], [])
+        self.assertEqual(body["drained"], [])
+        self.assertEqual(body["acquisition_species"],
+                         [{"owner": owner, "species": recipe["species"]} for owner in owners])
+        root_seed = body["health_root"]
+        self.assertIs(type(root_seed), int)
+        self.assertGreaterEqual(root_seed, 0)
+        self.assertLess(root_seed, 1 << 64)
+        # Independent SplitMix64 root/ordinal stream: neither ownership changes
+        # nor the one personal appended row can reroll a native Health seed.
+        expected_rows = []
+        mask = (1 << 64) - 1
+        for ordinal, owner in enumerate(owners):
+            word = (root_seed + 0x9e3779b97f4a7c15 * (ordinal + 1)) & mask
+            word = ((word ^ (word >> 30)) * 0xbf58476d1ce4e5b9) & mask
+            word = ((word ^ (word >> 27)) * 0x94d049bb133111eb) & mask
+            expected_rows.append({
+                "source": {"kind": "racial"}, "owner": owner,
+                "health_seed": word ^ (word >> 31),
+                "health_policy": "maximized" if ordinal == 0 else "seeded",
+                "health_origin": {"templates": [], "kind": health_kind, "die": health_die},
+                "health_improvement": 0,
+            })
+        self.assertEqual(build["hd"], expected_rows)
+        # Born depth rows establish PERSONAL milestone1; combat threat still
+        # counts effective8/9HD plus2 trained skills and2 native talents.
+        # Canonical weights70HD+5rank+10species+10type+10talent yield tier7.
+        self.assertEqual(born["earned_progress"], {
+            "authored_baseline": 1, "highest_applied_tier": 1, "highest_earned_tier": 1,
+            "peak_threat": 7, "earned_xp": 0, "spent_xp": 0, "held_xp": 0,
+        })
         before = self.request(player, {"type": "snapshot"})
         player.stop(); server.stop()
         shutil.rmtree(package)

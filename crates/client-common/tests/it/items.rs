@@ -444,3 +444,45 @@ fn portable_light_completion_narration_is_explicit_and_not_repeated_on_fuel_upda
         ["You finish extinguishing the torch."]
     );
 }
+
+#[test]
+fn dual_device_discloses_both_aims_only_when_identified() {
+    let source = paired_equipment(equipment_slot("ring", "on a finger", false));
+    let mut view = tor_client_common::test_support::observation();
+    view.inventory = source.inventory;
+    view.interactions = source.interactions;
+    view.interactions.as_mut().unwrap().slots.clear();
+    for row in &mut view.interactions.as_mut().unwrap().inventory {
+        row.slot = None;
+        row.equipped_slot = None;
+    }
+    view.inventory[1].class = ItemClass::Wand;
+    view.inventory[1].identified = true;
+    let row = &mut view.interactions.as_mut().unwrap().inventory[1];
+    row.zappable = true;
+    row.device_activation = Some(DeviceActivation::DirectionOrSelf);
+    let valid = StateView {
+        revision: 0,
+        wizard_game: false,
+        observation: view.clone(),
+    };
+    assert!(valid.validate().is_ok());
+    assert!(item_action(&view, target(2), ItemOperation::Zap)
+        .unwrap_err()
+        .contains("yourself"));
+    assert_eq!(
+        tor_client_common::items::zap_self_action(&view, target(2)).unwrap(),
+        Action::Zap {
+            item: target(2),
+            aim: DeviceAim::SelfTarget {}
+        }
+    );
+    assert!(tor_client_common::items::zap_action(&view, target(2), Direction::East).is_ok());
+    let mut unknown = valid.clone();
+    unknown.observation.inventory[1].identified = false;
+    assert!(unknown.validate().is_err());
+    unknown.observation.interactions.as_mut().unwrap().inventory[1].device_activation =
+        Some(DeviceActivation::Direction);
+    assert!(unknown.validate().is_ok());
+    assert!(tor_client_common::items::zap_self_action(&unknown.observation, target(2)).is_err());
+}

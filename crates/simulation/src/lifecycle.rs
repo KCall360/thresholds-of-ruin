@@ -106,6 +106,8 @@ pub(crate) struct ActorOutcome {
     pub(crate) entry_cause: crate::floor_activation::EntryCause,
     pub(crate) spent_items: Option<crate::supplies::PreparationLineage>,
     pub(crate) nutrition_empty_depletion: bool,
+    /// Item-owned changes staged with an atomic body/equipment candidate.
+    pub(crate) extinguish_lights: std::collections::BTreeSet<ItemId>,
     pub(crate) survival: crate::survival_diagnostics::SurvivalFlows,
     events: Vec<CombatEvent>,
     disclosure_origin: Option<crate::event_history::EventOrigin>,
@@ -271,6 +273,7 @@ impl Game {
             state,
             spent_items: None,
             nutrition_empty_depletion: false,
+            extinguish_lights: Default::default(),
             survival: Default::default(),
             events: vec![],
             disclosure_origin: None,
@@ -861,25 +864,49 @@ impl Game {
                 .combat
                 .as_ref()
                 .map(|combat| combat.creature().nutrition());
-            let Some(mut applied) = transition
-                .state
-                .combat
-                .as_mut()
-                .ok_or(GameError::Rule(RuleError::InvalidDefinition))?
-                .apply_effect(
-                    outcome.actor,
-                    effect,
-                    &mut transition.state.public_plan,
-                    &mut placement,
-                    context,
-                )?
-            else {
+            let cancellation_return = if matches!(effect, ResolvedEffect::CancelSpecials { .. }) {
+                transition.state.location = placement.location;
+                transition.state.orientation = placement.orientation;
+                self.stage_cancellation_return(&mut transition)?
+            } else {
+                None
+            };
+            let applied = if let Some(changed) = cancellation_return {
+                Some(ResolvedEffect::CancelSpecials { changed })
+            } else {
+                transition
+                    .state
+                    .combat
+                    .as_mut()
+                    .ok_or(GameError::Rule(RuleError::InvalidDefinition))?
+                    .apply_effect(
+                        outcome.actor,
+                        effect,
+                        &mut transition.state.public_plan,
+                        &mut placement,
+                        context,
+                    )?
+            };
+            let Some(mut applied) = applied else {
                 continue;
             };
+            if let ResolvedEffect::BalefulPolymorph { form, changed } = &mut applied {
+                *changed = false;
+                if let Some(form) = form {
+                    let package = self.content.polymorph_body_package(form).cloned().ok_or(
+                        GameError::Build(crate::creatures::BuildError::InvalidDefinition),
+                    )?;
+                    transition.state.location = placement.location;
+                    transition.state.orientation = placement.orientation;
+                    *changed = self.stage_body_transition(&mut transition, package)?
+                        == crate::BodyTransitionResult::Changed;
+                }
+            }
             if let ResolvedEffect::CancelSpecials { changed } = &mut applied {
                 let before = transition.state.guise.clone();
                 transition.state.guise.reveal();
                 *changed |= transition.state.guise != before;
+                *changed |= self.stage_polymorph_return(&mut transition)?;
                 // Normal commit reconciles exactly those reciprocal linked
                 // holds whose explicitly tagged sustaining flag disappeared.
             }
@@ -1260,6 +1287,9 @@ impl Game {
             outcome.state.behavior.engagement =
                 outcome.state.engagement_at(self.actor_clock(outcome.id));
         }
+        if !outcome.state.alive() {
+            self.set_return_pending(&mut outcome, false)?;
+        }
         let died = before.alive() && !outcome.state.alive();
         if let Some(horizon) = outcome
             .state
@@ -1400,9 +1430,11 @@ impl Game {
         } = prepared;
         let id = outcome.id;
         let from = self.actors[&id].location;
+        let from_orientation = self.actors[&id].orientation;
         let to = outcome.state.location;
         let ground_contact_changed = from != to
             || self.actors[&id].orientation != outcome.state.orientation
+            || self.actors[&id].body != outcome.state.body
             || self.actors[&id].locomotion().hovers() != outcome.state.locomotion().hovers();
         let entry_cause = outcome.entry_cause;
         // Capture private prior knowledge before publishing the destination:
@@ -1498,6 +1530,10 @@ impl Game {
         }
         self.publish_relocation_sources(&outcome)?;
         self.actors.insert(id, outcome.state);
+        self.relocate_body_return_authority(id, from, from_orientation);
+        for item in outcome.extinguish_lights {
+            self.set_item_light(item, false)?;
+        }
         self.reconcile_holds_for_actor(id)?;
         self.reconcile_spatial_condition_anchors(id)?;
         self.suspend_condition_denied_continuation(id);
@@ -1582,7 +1618,7 @@ impl Game {
             self.accepted_region_entry(id, from, to, entry_cause)?;
         }
         if ground_contact_changed {
-            if self.actor_frozen(id) {
+            if self.actor_frozen(id) && !self.body_return_continuation_authorized(id) {
                 // Trusted relocation can move a frozen actor. Old contact
                 // identity must not follow it, and an active destination must
                 // thaw before its new contact is evaluated.
@@ -1594,6 +1630,7 @@ impl Game {
             }
             self.reconcile_trap_contacts_after_entry(id, None, avoidable_traps)?;
         }
+        self.finish_pending_body_return(id)?;
         self.refresh_light_boundary();
         Ok(())
     }
@@ -1634,7 +1671,7 @@ impl Game {
             charges: None,
             corpse: Some(crate::CorpseAppearance {
                 actor: outcome.id,
-                asset: actor.asset.clone(),
+                asset: actor.current_body_asset(),
             }),
             holds: vec![],
             spec: tor_world::Shared::new(spec),
@@ -1679,7 +1716,7 @@ impl Game {
         );
         let mut checked = owner.earned_progress().clone();
         checked
-            .award(amount, owner.build().ledger().total_hd(), policy)
+            .award(amount, owner.build().personal_hd_count(), policy)
             .map_err(|error| {
                 GameError::Creature(crate::creatures::CreatureStateError::Growth(error))
             })?;
@@ -1802,6 +1839,111 @@ mod tests {
             .unwrap();
         }
         game
+    }
+
+    #[test]
+    fn equipment_refresh_validates_candidate_anatomy_without_publishing_it() {
+        use crate::{AnatomySpec, EquipmentSlotId, EquipmentSpec, ItemSpec};
+        use std::collections::BTreeMap;
+        use tor_world::Shared;
+
+        let content = game().content().clone();
+        let mut game = Game::two_room_in_stone(42, content);
+        let at = tor_world::Location {
+            region: tor_world::RegionId(1),
+            position: tor_world::Position { x: 1, y: 1, z: 0 },
+        };
+        let actor = game
+            .spawn_actor(at, std::num::NonZeroU64::new(100).unwrap())
+            .unwrap();
+        let anatomy = AnatomySpec::from_rules(game.content().rules());
+        game.configure_anatomy(actor, anatomy.clone()).unwrap();
+        let ring = crate::EquipmentSlot::new("ring").unwrap();
+        let existing_socket =
+            EquipmentSlotId(anatomy.slots.iter().position(|slot| *slot == ring).unwrap() as u16);
+        let mut spec = ItemSpec::ordinary("candidate ring".into());
+        spec.class = crate::ItemClass::Ring;
+        spec.equipment = Some(EquipmentSpec {
+            periodic_relocation: None,
+            slot: ring.clone(),
+            armor: None,
+            attack: None,
+            weapon_profile: None,
+            modifiers: vec![],
+            potency_modifiers: vec![],
+        });
+        let item = game
+            .place_item_stack(game.next_item_id, at, Some(actor), 1, spec)
+            .unwrap();
+        let before = game.clone();
+        let mut unchanged = game.settled_actor_outcome(actor).unwrap();
+        game.refresh_equipment_outcome(&mut unchanged, BTreeMap::from([(existing_socket, item)]))
+            .unwrap();
+        let mut removed = game.settled_actor_outcome(actor).unwrap();
+        removed.state.anatomy = Shared::new(AnatomySpec::default());
+        assert!(
+            game.refresh_equipment_outcome(&mut removed, BTreeMap::from([(existing_socket, item)]))
+                .is_err(),
+            "an old socket must not validate after its removal"
+        );
+        assert!(removed.state.equipment.is_empty());
+        let mut added = game.settled_actor_outcome(actor).unwrap();
+        let mut expanded = anatomy;
+        let new_socket = EquipmentSlotId(expanded.slots.len() as u16);
+        expanded.slots.push(ring);
+        assert!(expanded.valid(game.content().rules()));
+        added.state.anatomy = Shared::new(expanded);
+        game.refresh_equipment_outcome(&mut added, BTreeMap::from([(new_socket, item)]))
+            .unwrap();
+        assert_eq!(added.state.equipment.get(&new_socket), Some(&item));
+        assert_eq!(
+            game, before,
+            "candidate validation does not mutate the live actor"
+        );
+    }
+
+    #[test]
+    fn same_anchor_body_changes_reconcile_new_and_removed_trap_contacts() {
+        let mut game = game();
+        let actor = ActorId(1);
+        let at = game.actors[&actor].location;
+        let extra = tor_world::Location {
+            region: at.region,
+            position: tor_world::Position {
+                x: at.position.x,
+                y: at.position.y + 1,
+                z: at.position.z,
+            },
+        };
+        game.place_trap(
+            extra,
+            tor_world::Trap {
+                id: 1,
+                dc: 99,
+                avoidance_dc: None,
+                kind: tor_world::TrapKind::Mysterious {},
+            },
+        )
+        .unwrap();
+        assert!(game.actors[&actor].trap_contacts.ids().next().is_none());
+        let original_body = game.actors[&actor].body.clone();
+        let mut expanded = (*original_body).clone();
+        expanded.cells.push([0, 1, 0]);
+        assert!(game.body_fits(actor, at, game.actors[&actor].orientation, &expanded));
+        let mut outcome = game.settled_actor_outcome(actor).unwrap();
+        outcome.state.body = tor_world::Shared::new(expanded);
+        game.commit_actor_outcome(outcome).unwrap();
+        assert_eq!(game.actors[&actor].location, at);
+        assert_eq!(
+            game.actors[&actor].trap_contacts.ids().collect::<Vec<_>>(),
+            vec![1]
+        );
+        assert!(game.feature_family_known(actor, tor_world::ConcealedFeatureId::Trap(1)));
+        let mut outcome = game.settled_actor_outcome(actor).unwrap();
+        outcome.state.body = original_body;
+        game.commit_actor_outcome(outcome).unwrap();
+        assert!(game.actors[&actor].trap_contacts.ids().next().is_none());
+        assert_eq!(game.actors[&actor].location, at);
     }
 
     fn prepared_game_with_token(token: bool) -> Game {

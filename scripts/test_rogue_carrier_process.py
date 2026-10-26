@@ -125,14 +125,93 @@ class RogueCarrierProcesses(ProcessTestCase):
             current = self.execute(player, {"type": "wait"})
             before = checkpoint(self, player)
         creature = actor_creature(before, actor_id)
-        recipe = encounter_sources()["actors"]["rogue." + species]["creature"]
-        self.assertEqual(creature["build"]["species"], "rogue." + species)
-        self.assertEqual(len(creature["build"]["hd"]), len(recipe["hit_dice"]))
-        sources = [{"kind": "racial"} if row["source"] == "racial" else
-                   {"kind": "class", "id": row["source"]} for row in recipe["hit_dice"]]
-        self.assertEqual([row["source"] for row in creature["build"]["hd"]], sources)
-        self.assertEqual(creature["build"]["choices"], [
-            {"purchases": row["purchases"], "attribute": row.get("attribute")} for row in recipe["hit_dice"]])
+        source = encounter_sources()
+        recipe = source["actors"]["rogue." + species]["creature"]
+        build = creature["build"]
+        body_count, personal_count, health_kind, threat = {
+            "centaur": (1, 4, "monstrous_humanoid", 5),
+            "yeti": (4, 0, "giant", 4),
+            "troll": (6, 0, "giant", 5),
+            "jabberwock": (15, 0, "aberration", 11),
+        }[species]
+        form = "rogue.body." + species
+        self.assertEqual(recipe["body_package"], form)
+        body_recipe = source["body_packages"][form]
+        self.assertEqual(len(body_recipe["hit_dice"]), body_count)
+        self.assertEqual(body_recipe["hit_dice"], recipe["hit_dice"][:body_count])
+        self.assertEqual(len(recipe["hit_dice"]), body_count + personal_count)
+        self.assertEqual(recipe.get("personal_body_grants", []), [])
+        self.assertEqual(build["species"], "rogue." + species)
+        self.assertEqual(len(build["hd"]), body_count + personal_count)
+        sources = ([{"kind": "racial"}] * body_count +
+                   [{"kind": "class", "id": "warrior"}] * personal_count)
+        self.assertEqual([row["source"] for row in recipe["hit_dice"]],
+                         ["racial"] * body_count + ["warrior"] * personal_count)
+        owners = ([{"kind": "body", "form": form, "ordinal": ordinal}
+                   for ordinal in range(body_count)] +
+                  [{"kind": "personal", "id": ordinal + 1} for ordinal in range(personal_count)])
+        expected_choices = [{
+            "purchase_highwater": len(row["purchases"]),
+            "purchases": [dict(purchase, id={"owner": owners[ordinal], "serial": serial})
+                          for serial, purchase in enumerate(row["purchases"], 1)],
+            "attribute": row.get("attribute"),
+        } for ordinal, row in enumerate(recipe["hit_dice"])]
+        self.assertEqual(build["choices"], expected_choices)
+        self.assertEqual(build["restoration"], {"kind": "choose_again"})
+        self.assertIsNone(build["health_root_seed"])
+        self.assertEqual(build["drained_hd"], [])
+        body = build["body_build"]
+        self.assertEqual(body["base"], body["active"])
+        self.assertEqual(body["base"]["id"], form)
+        self.assertEqual(body["base"]["species"], recipe["species"])
+        self.assertEqual(body["base"]["body"], body_recipe["body"])
+        self.assertEqual(body["base"]["advancement"], [{
+            "source": {"kind": "racial"}, "choices": {
+                "purchase_highwater": 0,
+                "purchases": [dict(purchase, id=None) for purchase in row["purchases"]],
+                "attribute": row.get("attribute"),
+            }} for row in body_recipe["hit_dice"]])
+        self.assertEqual(body["personal_seed_offset"], body_count)
+        self.assertEqual(body["birth_personal_count"], personal_count)
+        self.assertEqual(body["next_personal_id"], personal_count + 1)
+        self.assertEqual(body["personal_restoration"], {"kind": "authored", "entries": [
+            {"id": ordinal + 1, "source": sources[body_count + ordinal],
+             "choices": expected_choices[body_count + ordinal]} for ordinal in range(personal_count)]})
+        self.assertEqual(body["personal_body_grants"], [])
+        self.assertEqual(body["inactive"], [])
+        self.assertEqual(body["drained"], [])
+        self.assertEqual(body["acquisition_species"],
+                         [{"owner": owner, "species": recipe["species"]} for owner in owners])
+        root_seed = body["health_root"]
+        self.assertIs(type(root_seed), int)
+        self.assertGreaterEqual(root_seed, 0)
+        self.assertLess(root_seed, 1 << 64)
+        # Pin the approved composition: Centaur has a new maximized d8 body
+        # plus4 seeded Warrior d10 rows; Y/T/J keep their racial d8 streams.
+        # Do not alter encounter seeds or retaliation/death work budgets.
+        mask = (1 << 64) - 1
+        expected_rows = []
+        for ordinal, owner in enumerate(owners):
+            word = (root_seed + 0x9e3779b97f4a7c15 * (ordinal + 1)) & mask
+            word = ((word ^ (word >> 30)) * 0xbf58476d1ce4e5b9) & mask
+            word = ((word ^ (word >> 27)) * 0x94d049bb133111eb) & mask
+            expected_rows.append({
+                "source": sources[ordinal], "owner": owner,
+                "health_seed": word ^ (word >> 31),
+                "health_policy": "maximized" if ordinal == 0 else "seeded",
+                "health_origin": {"templates": [], "kind": health_kind,
+                                  "die": 8 if ordinal < body_count else 10},
+                "health_improvement": 0,
+            })
+        self.assertEqual(build["hd"], expected_rows)
+        # Centaur retains4 personal Warrior milestones, whereas Y/T/J have0.
+        # Threat includes full effective HD, talents, Yeti's subtype and the
+        # Centaur's single distinct class contribution (410points -> tier5).
+        self.assertEqual(creature["earned_progress"], {
+            "authored_baseline": personal_count, "highest_applied_tier": personal_count,
+            "highest_earned_tier": personal_count,
+            "peak_threat": threat, "earned_xp": 0, "spent_xp": 0, "held_xp": 0,
+        })
         self.assertEqual(before["items"][item_id]["location"], {"Carried": actor_id})
         self.assertEqual(before["items"][item_id]["quantity"], 1)
         self.assertEqual({identity for identity, item in before["items"].items()

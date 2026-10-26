@@ -37,7 +37,7 @@ pub mod scope_projection;
 mod search_clock;
 pub mod spatial_scope;
 mod traps;
-pub use traps::{trap_kind_valid, TrapRegionBoundary};
+pub use traps::{trap_kind_valid, TrapRegionBoundary, TrapRegionPhase};
 pub mod weapon_profiles;
 pub use linked_hold::HoldId;
 pub mod escape;
@@ -88,7 +88,9 @@ pub use intention::{
 pub mod locomotion;
 pub mod perception;
 mod physics;
+mod polymorph;
 pub use physics::{BodySpec, Impact, MotionState, PhysicsEntity};
+pub use polymorph::BodyTransitionResult;
 mod armor;
 mod item_store;
 pub use armor::{ArmorMaterial, ArmorSpec};
@@ -658,6 +660,7 @@ pub struct Game {
     light_region_boundary: Option<portable_light::LightRegionBoundary>,
     light_settled_witness: Option<portable_light::LightOpticalWitness>,
     trap_resolution: Option<traps::TrapResolution>,
+    body_return_finalization: polymorph::BodyReturnFinalization,
     host_region_continuation: bool,
 }
 impl Clone for Game {
@@ -698,6 +701,7 @@ impl Clone for Game {
             light_region_boundary: self.light_region_boundary.clone(),
             light_settled_witness: self.light_settled_witness.clone(),
             trap_resolution: self.trap_resolution.clone(),
+            body_return_finalization: self.body_return_finalization.clone(),
             host_region_continuation: self.host_region_continuation,
         }
     }
@@ -874,6 +878,7 @@ impl Game {
             light_region_boundary: None,
             light_settled_witness: None,
             trap_resolution: None,
+            body_return_finalization: Default::default(),
             host_region_continuation: false,
         }
     }
@@ -1070,9 +1075,10 @@ impl Game {
             || population_entry
             || changes_lifecycle
             || prepared.emits_events()
-            || prepared
-                .creature()
-                .is_some_and(|creature| creature.derived().contextual_health_recovery());
+            || prepared.creature().is_some_and(|creature| {
+                creature.derived().contextual_health_recovery()
+                    || creature.polymorph_return_pending()
+            });
         self.with_recovery_transition(requires_candidate, |candidate| {
             if !candidate.host_region_continuation {
                 candidate.begin_retrieval_transaction();

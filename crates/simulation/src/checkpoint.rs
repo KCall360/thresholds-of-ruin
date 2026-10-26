@@ -710,6 +710,7 @@ impl Game {
         assert!(
             !self.region_transition_pending()
                 && self.trap_resolution.is_none()
+                && self.body_return_finalization.settled()
                 && !self.host_region_continuation
                 && !self.event_observations_open(),
             "a private host candidate must settle and seal events before checkpoint capture"
@@ -943,6 +944,7 @@ impl Game {
             light_region_boundary: None,
             light_settled_witness: None,
             trap_resolution: None,
+            body_return_finalization: Default::default(),
             host_region_continuation: false,
             lifecycle: match snapshot.lifecycle {
                 None => Lifecycle::default(),
@@ -1108,6 +1110,19 @@ impl Game {
                 .map(|combat| combat.creature())
                 .is_none_or(|creature| {
                     creature.derived().anatomy == *actor.anatomy
+                        && creature.build().authored_body_packages_valid()
+                        && creature
+                            .build()
+                            .active_body_package()
+                            .is_none_or(|package| package.body == *actor.body)
+                        && (!creature.polymorph_return_pending()
+                            || (creature.cancelled()
+                                && !creature.health().dead()
+                                && creature
+                                    .build()
+                                    .base_body_package()
+                                    .zip(creature.build().active_body_package())
+                                    .is_some_and(|(base, active)| base.id != active.id)))
                         && match actor.pending.as_ref() {
                             Some(preparation) => {
                                 let plan = &preparation.plan;

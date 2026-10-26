@@ -55,7 +55,7 @@ class RoguePlayableStudyProcesses(ProcessTestCase):
             actors = {row["actor"]: row for row in run["report"]["participants"]}
             self.assertEqual(set(actors), {selected, "3"})
             self.assertEqual(actors[selected]["name"], "Warrior" if selected == "1" else "Mage")
-            self.assertEqual(u64(actors[selected]["hit_dice"]), 1)
+            self.assertEqual(u64(actors[selected]["hit_dice"]), 2)
             self.assertEqual(actors[selected]["faction"], "delvers")
             self.assertEqual(actors["3"]["faction"], "dungeon_foes")
         shutil.rmtree(inputs)

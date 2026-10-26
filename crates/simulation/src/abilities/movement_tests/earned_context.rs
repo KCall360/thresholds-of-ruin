@@ -77,7 +77,9 @@ fn context_growth_game_with_rules(
     )
     .unwrap();
     let choice = HdChoices {
+        purchase_highwater: 0,
         purchases: vec![AdvancementPurchase {
+            id: None,
             pool: crate::content_ids::PointPoolId::new("advancement").unwrap(),
             selection: PurchaseSelection::Talent(talent),
         }],

@@ -323,3 +323,135 @@ fn learned_baseline_allows_identical_values_but_rejects_unrelated_attribute_rewr
     );
     assert_eq!(build, original);
 }
+
+fn body_learning_fixture() -> (CreatureBuild, Arc<BodyPackage>, Arc<BodyPackage>) {
+    let mut build = fixture(2);
+    let mut catalog = build.content().catalog().clone();
+    let mut other = build.species().clone();
+    other.id = crate::content_ids::SpeciesId::new("learning_other_body").unwrap();
+    other.default_attributes = Attributes::new(ByAttribute {
+        strength: 3,
+        speed: 2,
+        intellect: 4,
+        ..ByAttribute::default()
+    })
+    .unwrap();
+    other.modifiers.push(crate::test_creatures::add(
+        Stat::Attribute {
+            attribute: Attribute::Intellect,
+        },
+        4,
+    ));
+    let other_species = other.id.clone();
+    catalog.species.insert(other.id.clone(), other);
+    build.content = Content::new(build.content().rules().clone(), catalog).unwrap();
+    let base = Arc::new(BodyPackage {
+        id: crate::content_ids::BodyFormId::new("learning_base").unwrap(),
+        species: build.species_id().clone(),
+        body: crate::BodySpec::default(),
+        advancement: vec![PlannedAdvancement {
+            source: HdSource::Racial,
+            choices: HdChoices::default(),
+        }],
+    });
+    let other = Arc::new(BodyPackage {
+        id: crate::content_ids::BodyFormId::new("learning_other").unwrap(),
+        species: other_species,
+        body: crate::BodySpec::default(),
+        advancement: vec![
+            PlannedAdvancement {
+                source: HdSource::Racial,
+                choices: HdChoices::default()
+            };
+            3
+        ],
+    });
+    (
+        build.with_body_package(base.clone(), 42).unwrap(),
+        base,
+        other,
+    )
+}
+
+#[test]
+fn body_package_intellect_does_not_create_personal_learning_or_replace_birth_identity() {
+    let (mut build, base, other) = body_learning_fixture();
+    build.select_intellect_expertise(1, id("knife")).unwrap();
+    let original_learning = build.intellect_learning.clone();
+    let transformed = build.replace_body_package(other).unwrap();
+    assert_eq!(transformed.initial_attributes().get(Attribute::Strength), 3);
+    assert_eq!(
+        transformed.initial_attributes().get(Attribute::Intellect),
+        1
+    );
+    let derived = transformed.derive().unwrap();
+    assert_eq!(derived.attributes.get(Attribute::Intellect), 5);
+    assert_eq!(derived.intellect_capacity, 1);
+    assert_eq!(transformed.intellect_learning, original_learning);
+    transformed
+        .intellect_learning
+        .as_ref()
+        .unwrap()
+        .validate(&transformed)
+        .unwrap();
+    let encoded = serde_json::to_value(record::BuildRecord::capture(&transformed)).unwrap();
+    let restored = serde_json::from_value::<record::BuildRecord>(encoded.clone())
+        .unwrap()
+        .restore(transformed.content().clone())
+        .unwrap();
+    assert_eq!(restored, transformed);
+    let mut forged = encoded;
+    forged["intellect_learning"]["birth"]["attributes"]["strength"] = serde_json::json!(3);
+    assert!(serde_json::from_value::<record::BuildRecord>(forged)
+        .unwrap()
+        .restore(transformed.content().clone())
+        .is_err());
+    let returned = transformed.replace_body_package(base).unwrap();
+    assert_eq!(returned.intellect_learning, original_learning);
+}
+
+#[test]
+fn personal_intellect_earned_in_another_body_retains_one_threshold_and_stable_receipts() {
+    let (build, base, other) = body_learning_fixture();
+    let mut transformed = build.replace_body_package(other).unwrap();
+    // Three package rows precede the same original personal HD.
+    transformed
+        .increase_attribute(crate::HdIndex(3), Attribute::Intellect)
+        .unwrap();
+    assert_eq!(transformed.derive().unwrap().intellect_capacity, 2);
+    transformed
+        .select_intellect_expertise(2, id("navigation"))
+        .unwrap();
+    transformed
+        .intellect_learning
+        .as_ref()
+        .unwrap()
+        .validate(&transformed)
+        .unwrap();
+    let returned = transformed.replace_body_package(base).unwrap();
+    assert_eq!(returned.derive().unwrap().intellect_capacity, 2);
+    assert_eq!(returned.intellect_expertise_choices().count(), 2);
+    assert!(returned
+        .derive()
+        .unwrap()
+        .expertises
+        .active(&id("navigation")));
+    let record = record::BuildRecord::capture(&transformed);
+    assert_eq!(
+        record.restore(transformed.content().clone()).unwrap(),
+        transformed
+    );
+    let mut forged = serde_json::to_value(record).unwrap();
+    let history = forged["intellect_learning"]["history"]
+        .as_array_mut()
+        .unwrap();
+    let personal = history
+        .iter_mut()
+        .find(|row| row["ownership"]["kind"] == "personal")
+        .unwrap();
+    personal["ownership"]["id"] = serde_json::json!(99);
+    assert!(serde_json::from_value::<record::BuildRecord>(forged)
+        .unwrap()
+        .restore(transformed.content().clone())
+        .is_err());
+}

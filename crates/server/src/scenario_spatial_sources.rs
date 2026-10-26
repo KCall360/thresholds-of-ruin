@@ -13,6 +13,7 @@ use tor_simulation::rules as r;
 enum Source {
     Item(String),
     Species(String),
+    BodyPackage(String),
     Template(String),
     Type(String),
     Subtype(String),
@@ -67,6 +68,9 @@ impl Sources<'_> {
     fn build(&mut self, build: &a::BuildSpec) {
         let rules = self.rules;
         self.add(Source::Species(build.species.clone()));
+        if let Some(body) = &build.body_package {
+            self.add(Source::BodyPackage(body.clone()));
+        }
         for template in &build.templates {
             self.add(Source::Template(template.clone()));
         }
@@ -77,6 +81,9 @@ impl Sources<'_> {
                 self.add(Source::Class(hd.source.clone()));
             }
             self.purchases(&hd.purchases);
+        }
+        for grant in &build.personal_body_grants {
+            self.purchases(&grant.purchases);
         }
         match &build.future_growth {
             a::FutureGrowth::Selected {
@@ -130,6 +137,11 @@ impl Sources<'_> {
                     self.light = true;
                     self.add(Source::Condition(condition.clone()));
                 }
+                Effect::BalefulPolymorph { forms } => {
+                    for form in forms {
+                        self.add(Source::BodyPackage(form.clone()));
+                    }
+                }
                 Effect::CancelSpecials => self.cancellation = true,
                 Effect::HasteDose { condition, rest } => {
                     self.add(Source::Condition(condition.clone()));
@@ -155,6 +167,11 @@ impl Sources<'_> {
                 r::Effect::DetectMonsters { condition } => {
                     self.light = true;
                     self.add(Source::Condition(condition.to_string()));
+                }
+                r::Effect::BalefulPolymorph { forms } => {
+                    for form in forms {
+                        self.add(Source::BodyPackage(form.to_string()));
+                    }
                 }
                 r::Effect::CancelSpecials => self.cancellation = true,
                 r::Effect::HasteDose { condition, rest } => {
@@ -235,6 +252,18 @@ impl Sources<'_> {
                     if let Some(equipment) = &item.equipment {
                         self.author_modifiers(&equipment.modifiers);
                         self.author_modifiers(&equipment.potency_modifiers);
+                    }
+                }
+                Source::BodyPackage(id) => {
+                    let body = package
+                        .manifest
+                        .creatures
+                        .body_packages
+                        .get(&id)
+                        .ok_or_else(|| fail("Unknown body package spatial source"))?;
+                    self.add(Source::Species(body.species.clone()));
+                    for hd in &body.hit_dice {
+                        self.purchases(&hd.purchases);
                     }
                 }
                 Source::Species(id) => {
@@ -384,6 +413,7 @@ pub(super) fn spatial_effect_enabled(package: &Package) -> Result<bool, Failure>
                             r::Effect::RoomLight
                                 | r::Effect::DrainLife
                                 | r::Effect::CancelSpecials
+                                | r::Effect::BalefulPolymorph { .. }
                                 | r::Effect::DetectMonsters { .. }
                                 | r::Effect::DetectFood
                                 | r::Effect::DetectMagic
@@ -399,6 +429,7 @@ pub(super) fn spatial_effect_enabled(package: &Package) -> Result<bool, Failure>
                         r::Effect::RoomLight
                             | r::Effect::DrainLife
                             | r::Effect::CancelSpecials
+                            | r::Effect::BalefulPolymorph { .. }
                             | r::Effect::DetectMonsters { .. }
                             | r::Effect::DetectFood
                             | r::Effect::DetectMagic
@@ -417,6 +448,7 @@ pub(super) fn spatial_effect_enabled(package: &Package) -> Result<bool, Failure>
                     Effect::RoomLight
                         | Effect::DrainLife
                         | Effect::CancelSpecials
+                        | Effect::BalefulPolymorph { .. }
                         | Effect::DetectMonsters { .. }
                         | Effect::DetectFood
                         | Effect::DetectMagic
@@ -436,6 +468,7 @@ pub(super) fn spatial_effect_enabled(package: &Package) -> Result<bool, Failure>
                         Effect::RoomLight
                             | Effect::DrainLife
                             | Effect::CancelSpecials
+                            | Effect::BalefulPolymorph { .. }
                             | Effect::DetectMonsters { .. }
                             | Effect::DetectFood
                             | Effect::DetectMagic

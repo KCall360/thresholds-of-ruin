@@ -91,10 +91,20 @@ impl SpatialConditionAnchors {
     }
 }
 
-/// Private host continuation: no contact mutation, discovery, roll or lid opening
-/// occurs until every member is resident. Not an ordinary saved event queue.
+/// Private host phases never replay a selected movement, contact, or draw.
+/// They are not an ordinary saved event queue.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum TrapRegionPhase {
+    Contacts,
+    /// The moved form has completed its ordinary contacts. Only now may a
+    /// pending base return occur, identically for resident and missing slices.
+    PostContactBodyReturn,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TrapRegionBoundary {
+    pub phase: TrapRegionPhase,
+    pub active_clock: Option<u64>,
     pub actor: ActorId,
     pub location: Location,
     pub orientation: u8,
@@ -219,6 +229,14 @@ impl Game {
             loaded.extend(boundary.members.iter().copied());
         }
     }
+    pub(crate) fn trap_contacts_unsettled(&self) -> bool {
+        self.trap_region_boundary.is_some()
+            || self
+                .trap_resolution
+                .as_ref()
+                .is_some_and(|chain| chain.processing || !chain.pending.is_empty())
+    }
+
     pub(crate) fn resume_trap_region_boundary(&mut self) -> Result<bool, GameError> {
         let Some(boundary) = self.trap_region_boundary.take() else {
             return Ok(false);
@@ -230,11 +248,52 @@ impl Game {
         {
             return Err(GameError::InvalidLocation);
         }
-        self.reconcile_trap_contacts_after_entry(
-            boundary.actor,
-            boundary.imposed_normal,
-            boundary.avoidable_traps,
-        )?;
+        match boundary.phase {
+            TrapRegionPhase::Contacts => {
+                if let Some(clock) = boundary.active_clock {
+                    if self.alive(boundary.actor) {
+                        self.with_body_return_authority(boundary.actor, clock, true, |game| {
+                            game.reconcile_trap_contacts_after_entry(
+                                boundary.actor,
+                                boundary.imposed_normal,
+                                boundary.avoidable_traps,
+                            )
+                        })?;
+                    } else if clock != self.tick {
+                        return Err(GameError::InvalidLocation);
+                    }
+                } else {
+                    self.reconcile_trap_contacts_after_entry(
+                        boundary.actor,
+                        boundary.imposed_normal,
+                        boundary.avoidable_traps,
+                    )?;
+                }
+            }
+            TrapRegionPhase::PostContactBodyReturn => {
+                if boundary.active_clock != Some(self.tick)
+                    || !boundary.avoidable_traps.is_empty()
+                    || boundary.imposed_normal.is_some()
+                    || !boundary.members.contains(&boundary.location.region)
+                {
+                    return Err(GameError::InvalidLocation);
+                }
+                if self.alive(boundary.actor) {
+                    let current = self.pending_body_return_at_current_regions(boundary.actor);
+                    // Loading may expose another bounded offset edge. Retained
+                    // dependencies must remain valid; newly exposed ones yield
+                    // another load-only phase without replaying the move/contact.
+                    if !boundary.members.is_subset(&current) {
+                        return Err(GameError::InvalidLocation);
+                    }
+                    let clock = boundary.active_clock.ok_or(GameError::InvalidLocation)?;
+                    self.with_body_return_authority(boundary.actor, clock, false, |game| {
+                        game.finish_pending_body_return(boundary.actor)
+                    })?;
+                }
+            }
+        }
+        self.flush_pending_body_returns()?;
         Ok(true)
     }
 
@@ -332,9 +391,21 @@ impl Game {
         imposed_normal: Option<[i64; 3]>,
         avoidable_traps: BTreeSet<u64>,
     ) -> Result<(), GameError> {
+        self.reconcile_trap_contacts_only_after_entry(id, imposed_normal, avoidable_traps)?;
+        self.finish_pending_body_return(id)
+    }
+
+    fn reconcile_trap_contacts_only_after_entry(
+        &mut self,
+        id: ActorId,
+        imposed_normal: Option<[i64; 3]>,
+        avoidable_traps: BTreeSet<u64>,
+    ) -> Result<(), GameError> {
         self.reconcile_spatial_condition_anchors(id)?;
         let actor = self.actors.get(&id).ok_or(GameError::UnknownActor)?;
-        if !actor.alive() || self.actor_frozen(id) {
+        if !actor.alive()
+            || (self.actor_frozen(id) && !self.body_return_continuation_authorized(id))
+        {
             return Ok(());
         }
         if !self.world.has_concealed_features() && actor.trap_contacts.ids().next().is_none() {
@@ -394,6 +465,10 @@ impl Game {
                 return Err(GameError::InvalidLocation);
             }
             let boundary = TrapRegionBoundary {
+                phase: TrapRegionPhase::Contacts,
+                active_clock: self
+                    .body_return_continuation_authorized(id)
+                    .then(|| self.actor_clock(id)),
                 actor: id,
                 location,
                 orientation,
@@ -423,7 +498,8 @@ impl Game {
             let mut observers = Vec::new();
             for (&observer, owner) in self.actors.iter() {
                 if !owner.alive()
-                    || self.actor_frozen(observer)
+                    || (self.actor_frozen(observer)
+                        && !(observer == id && self.body_return_continuation_authorized(id)))
                     || !self.condition_allows_voluntary_input(observer)
                 {
                     continue;

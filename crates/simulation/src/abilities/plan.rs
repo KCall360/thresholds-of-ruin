@@ -117,6 +117,9 @@ pub enum PlannedEffect {
     GainStrength,
     RaiseLevel,
     CancelSpecials,
+    BalefulPolymorph {
+        forms: Vec<crate::content_ids::BodyFormId>,
+    },
     HasteDose {
         id: ConditionId,
         rest: ConditionId,
@@ -343,14 +346,22 @@ impl<'de> Deserialize<'de> for SelfDevicePlan {
 impl SelfDevicePlan {
     fn valid(&self, rules: &crate::rules::Ruleset) -> bool {
         rules.ability(&self.ability).is_some_and(|d| {
-            if !super::self_device_definition_valid(d) {
+            let polymorph = super::self_polymorph_device_definition_valid(d);
+            if !(super::self_device_definition_valid(d) || polymorph) {
                 return false;
             }
             let crate::rules::StrikeSource::Authored { strikes } = &d.strikes else {
                 return false;
             };
             self.descriptors == strikes[0].descriptors
-                && item_effects_match_definition(&strikes[0].on_success, &self.effects)
+                && item_effects_match_definition(
+                    if polymorph {
+                        &strikes[0].on_failure
+                    } else {
+                        &strikes[0].on_success
+                    },
+                    &self.effects,
+                )
                 && effects_valid(&self.effects, rules)
         })
     }
@@ -795,8 +806,14 @@ impl Plan {
                     valid_item(*item)
                         && matches!(
                             discovery,
-                            crate::ItemDiscovery::OnUse | crate::ItemDiscovery::Never
+                            crate::ItemDiscovery::OnUse
+                                | crate::ItemDiscovery::DiscernibleEffect
+                                | crate::ItemDiscovery::Never
                         )
+                        && (*discovery != crate::ItemDiscovery::DiscernibleEffect
+                            || rules
+                                .ability(delivery.ability())
+                                .is_some_and(super::discernible_device_definition_valid))
                         && match delivery {
                             DeviceDeliveryPlan::Ray { plan } => {
                                 matches!(aim, crate::DeviceAim::Direction {direction} if *direction == plan.direction)
@@ -805,7 +822,13 @@ impl Plan {
                                     && plan.cooldown.is_none()
                                     && plan.supply_costs.is_empty()
                             }
-                            DeviceDeliveryPlan::SelfEffect { plan } => plan.valid(rules),
+                            DeviceDeliveryPlan::SelfEffect { plan } => {
+                                plan.valid(rules)
+                                    && (matches!(aim, crate::DeviceAim::SelfTarget {})
+                                        || rules
+                                            .ability(&plan.ability)
+                                            .is_some_and(super::self_device_definition_valid))
+                            }
                         }
                 }
                 Self::Respec(plan) => plan.valid(rules),
@@ -833,6 +856,7 @@ impl Plan {
                     ..
                 } => {
                     valid_item(*item)
+                        && *discovery != crate::ItemDiscovery::DiscernibleEffect
                         && rules
                             .validate_payload_recipients(
                                 descriptors,
@@ -859,9 +883,11 @@ impl Plan {
                     item,
                     effects,
                     descriptors,
+                    discovery,
                     ..
                 } => {
                     valid_item(*item)
+                        && *discovery != crate::ItemDiscovery::DiscernibleEffect
                         && effects_valid(effects, rules)
                         && rules
                             .validate_payload_recipients(
@@ -967,6 +993,7 @@ pub(crate) fn effects_valid(effects: &[PlannedEffect], rules: &crate::rules::Rul
                 .all(|effect| effect.recipient() == first.recipient())
         })
         && effects.iter().all(|effect| match effect {
+            PlannedEffect::BalefulPolymorph { forms } => crate::rules::valid_body_forms(forms),
             PlannedEffect::Theft { theft } => theft.valid(),
             PlannedEffect::AlterEquipment { alteration } => alteration.valid(rules),
             PlannedEffect::CorrodeArmor { slot, amount } => {
@@ -1150,6 +1177,10 @@ pub(super) fn effects_match_definition_scoped(
                 (Effect::MapTopology, PlannedEffect::MapTopology)
                 | (Effect::DetectFood, PlannedEffect::DetectFood)
                 | (Effect::DetectMagic, PlannedEffect::DetectMagic) => true,
+                (
+                    Effect::BalefulPolymorph { forms },
+                    PlannedEffect::BalefulPolymorph { forms: captured },
+                ) => forms == captured,
                 (Effect::TeleportRandom, PlannedEffect::TeleportRandom)
                 | (Effect::TeleportToRayOrigin, PlannedEffect::TeleportToRayOrigin)
                 | (Effect::RoomLight, PlannedEffect::RoomLight)
@@ -1642,6 +1673,18 @@ impl Game {
                 Effect::GainStrength => Ok(PlannedEffect::GainStrength),
                 Effect::RaiseLevel => Ok(PlannedEffect::RaiseLevel),
                 Effect::CancelSpecials => Ok(PlannedEffect::CancelSpecials),
+                Effect::BalefulPolymorph { forms } => {
+                    if !crate::rules::valid_body_forms(forms)
+                        || forms
+                            .iter()
+                            .any(|id| self.content.polymorph_body_package(id).is_none())
+                    {
+                        return Err(invalid());
+                    }
+                    Ok(PlannedEffect::BalefulPolymorph {
+                        forms: forms.clone(),
+                    })
+                }
                 Effect::HasteDose { condition, rest } => {
                     let turn_ticks = self
                         .actors
@@ -1883,6 +1926,10 @@ impl<'de> Deserialize<'de> for PlannedEffect {
             GainStrength {},
             RaiseLevel {},
             CancelSpecials {},
+            BalefulPolymorph {
+                #[serde(deserialize_with = "crate::rules::read_body_forms")]
+                forms: Vec<crate::content_ids::BodyFormId>,
+            },
             HasteDose {
                 id: ConditionId,
                 rest: ConditionId,
@@ -1978,6 +2025,7 @@ impl<'de> Deserialize<'de> for PlannedEffect {
             Fields::GainStrength {} => Self::GainStrength,
             Fields::RaiseLevel {} => Self::RaiseLevel,
             Fields::CancelSpecials {} => Self::CancelSpecials,
+            Fields::BalefulPolymorph { forms } => Self::BalefulPolymorph { forms },
             Fields::HasteDose {
                 id,
                 rest,

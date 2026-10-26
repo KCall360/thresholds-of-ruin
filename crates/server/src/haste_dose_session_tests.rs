@@ -27,10 +27,21 @@ fn haste_source(root: &Path) -> crate::Scenario {
             {"kind":"apply_persistent_condition","condition":"rogue.slowed","cancels":null}
         ]}
     });
+    for species in ["fixture.haste_owner", "fixture.haste_caster"] {
+        let mut body_package = manifest["creatures"]["body_packages"]["rogue.body.human"].clone();
+        body_package["species"] = json!(species);
+        if species == "fixture.haste_caster" {
+            // Preserve this fixture actor's prior implicit one-cell geometry.
+            body_package["body"] = json!({"cells":[[0,0,0]],"eye":[0,0,0],"mass":80});
+        }
+        manifest["creatures"]["body_packages"][format!("{species}.body")] = body_package;
+    }
     manifest["characters"][0]["creature"]["species"] = json!("fixture.haste_owner");
+    manifest["characters"][0]["creature"]["body_package"] = json!("fixture.haste_owner.body");
     manifest["characters"][0]["turn_ticks"] = json!(100);
     let mut caster = manifest["characters"][0]["creature"].clone();
     caster["species"] = json!("fixture.haste_caster");
+    caster["body_package"] = json!("fixture.haste_caster.body");
     let mut regions = source.region_defs().unwrap();
     let mut region = serde_json::to_value(&regions[0]).unwrap();
     region["actors"] =

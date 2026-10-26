@@ -60,6 +60,7 @@ impl<'de> Deserialize<'de> for ReplacementPurchase {
 impl ReplacementPurchase {
     fn purchase(&self) -> AdvancementPurchase {
         AdvancementPurchase {
+            id: None,
             pool: self.pool.clone(),
             selection: self.selection.selection(),
         }

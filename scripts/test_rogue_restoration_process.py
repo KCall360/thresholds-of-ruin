@@ -25,7 +25,7 @@ import unittest
 
 from arena_matrix import toml_source
 from checkpoint_payload import decode_checkpoint_payload
-from process_harness import ProcessTestCase, ROOT, settle_rogue_action
+from process_harness import ProcessTestCase, ROOT, settle_rogue_action, hit_die_counts
 from process_work_budget import ProcessBudgetExceeded, ProcessWorkBudget
 from restorable_loss_harness import losses
 from rogue_roster_package import PRODUCTION, encounter
@@ -183,7 +183,8 @@ class RogueRestorationProcesses(ProcessTestCase):
 
     def assert_starter(self, player, initial):
         self.assertFalse(initial["state"]["wizard_game"])
-        self.assertEqual(u64(combat(initial)["own_stats"]["hit_dice"]["total"]), 1)
+        self.assertEqual(hit_die_counts(combat(initial)["own_stats"]["hit_dice"]),
+                         {("racial", "racial"): 1, ("class", "warrior"): 1})
         self.assertEqual({row["name"]: int(row["quantity"]) for row in observation(initial)["inventory"]},
                          {"mace": 1, "ring mail": 1, "clean bandage": 3, "food ration": 1})
         names = {row["id"]: row["name"] for row in observation(initial)["inventory"]}

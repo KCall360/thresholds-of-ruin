@@ -409,6 +409,10 @@ pub enum ResolvedEffect {
     CancelSpecials {
         changed: bool,
     },
+    BalefulPolymorph {
+        form: Option<crate::content_ids::BodyFormId>,
+        changed: bool,
+    },
     GainStrength {
         change: super::StrengthGain,
     },
@@ -537,7 +541,8 @@ impl ResolvedEffect {
             | Self::MapTopology { changed }
             | Self::DetectMagic { changed }
             | Self::DrainLife { changed }
-            | Self::CancelSpecials { changed } => *changed,
+            | Self::CancelSpecials { changed }
+            | Self::BalefulPolymorph { changed, .. } => *changed,
             Self::GainStrength { change } => *change != super::StrengthGain::Unchanged,
             Self::RaiseLevel { amount } => *amount > 0,
             Self::HasteDose { .. } => true,
@@ -586,7 +591,8 @@ impl ResolvedEffect {
             | Self::DetectMonsters { .. }
             | Self::DetectFood { .. }
             | Self::MapTopology { .. }
-            | Self::DetectMagic { .. } => self.clone(),
+            | Self::DetectMagic { .. }
+            | Self::BalefulPolymorph { .. } => self.clone(),
             Self::CancelSpecials { .. } => Self::CancelSpecials {
                 changed: creature.cancel_specials()?,
             },
@@ -1103,6 +1109,40 @@ pub(crate) struct BatchResolution {
     pub selected_branch: Option<crate::rules::RiderTrigger>,
 }
 
+/// Select once after resistance succeeds. Geometry is deliberately absent:
+/// an unfit draw remains that paid failed draw, never a second selection.
+pub(super) fn select_baleful_form(
+    creature: &crate::creatures::CreatureState,
+    forms: &[crate::content_ids::BodyFormId],
+    rng: &mut u64,
+) -> Result<Option<crate::content_ids::BodyFormId>, EffectApplicationError> {
+    if !crate::rules::valid_body_forms(forms)
+        || forms.iter().any(|id| {
+            creature
+                .build()
+                .content()
+                .polymorph_body_package(id)
+                .is_none()
+        })
+    {
+        return Err(EffectApplicationError::InvalidDefinition);
+    }
+    let Some(current) = creature.build().active_body_package() else {
+        return Ok(None);
+    };
+    let eligible: Vec<_> = forms.iter().filter(|id| **id != current.id).collect();
+    if eligible.is_empty() {
+        return Ok(None);
+    }
+    let index = crate::quantity::QuantityRange {
+        minimum: 1,
+        maximum: eligible.len() as u64,
+    }
+    .sample(rng)
+    .map_err(|_| EffectApplicationError::RandomnessExhausted)?
+        - 1;
+    Ok(Some(eligible[index as usize].clone()))
+}
 /// Resolve one payload through the shared pure kernel, preserving the caller's
 /// RNG on every hard failure. Ordinary condition rejection remains soft.
 pub fn resolve<'a>(
@@ -1424,6 +1464,10 @@ pub(super) fn resolve_batch<'a>(
             PlannedEffect::DetectMagic => ResolvedEffect::DetectMagic { changed: false },
             PlannedEffect::DrainLife => ResolvedEffect::DrainLife { changed: false },
             PlannedEffect::CancelSpecials => ResolvedEffect::CancelSpecials { changed: false },
+            PlannedEffect::BalefulPolymorph { forms } => ResolvedEffect::BalefulPolymorph {
+                form: select_baleful_form(&application.creature, forms, rng)?,
+                changed: false,
+            },
             PlannedEffect::GainStrength => ResolvedEffect::GainStrength {
                 change: super::StrengthGain::Unchanged,
             },
@@ -1780,6 +1824,11 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
             CancelSpecials {
                 changed: bool,
             },
+            BalefulPolymorph {
+                #[serde(deserialize_with = "crate::bounded::required_option")]
+                form: Option<crate::content_ids::BodyFormId>,
+                changed: bool,
+            },
             GainStrength {
                 change: super::StrengthGain,
             },
@@ -1884,6 +1933,14 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
             Fields::DetectMagic { changed } => Self::DetectMagic { changed },
             Fields::DrainLife { changed } => Self::DrainLife { changed },
             Fields::CancelSpecials { changed } => Self::CancelSpecials { changed },
+            Fields::BalefulPolymorph { form, changed } => {
+                if changed && form.is_none() {
+                    return Err(serde::de::Error::custom(
+                        "changed Polymorph requires a body",
+                    ));
+                }
+                Self::BalefulPolymorph { form, changed }
+            }
             Fields::GainStrength { change } => Self::GainStrength { change },
             Fields::RaiseLevel { amount } => Self::RaiseLevel { amount },
             Fields::HasteDose { id, rest, outcome } => Self::HasteDose { id, rest, outcome },

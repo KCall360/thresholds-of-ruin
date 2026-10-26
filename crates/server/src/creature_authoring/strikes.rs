@@ -438,6 +438,18 @@ fn effects(values: &[Effect], rules: &s::rules::Ruleset) -> Result<Vec<s::rules:
                 Effect::MapTopology => s::rules::Effect::MapTopology,
                 Effect::DrainLife => s::rules::Effect::DrainLife,
                 Effect::CancelSpecials => s::rules::Effect::CancelSpecials,
+                Effect::BalefulPolymorph { forms } => {
+                    if forms.is_empty() || forms.len() > s::limits::CATALOG_ENTRIES {
+                        return Err(invalid("Polymorph requires a bounded nonempty form roster"));
+                    }
+                    let forms = forms.iter().map(|id| s::content_ids::BodyFormId::new(id)
+                        .map_err(|_| invalid("Invalid Polymorph body-form ID")))
+                        .collect::<Result<Vec<_>, Failure>>()?;
+                    if forms.iter().collect::<std::collections::BTreeSet<_>>().len() != forms.len() {
+                        return Err(invalid("Duplicate Polymorph body-form ID"));
+                    }
+                    s::rules::Effect::BalefulPolymorph { forms }
+                },
                 Effect::StepSelfOneCell => s::rules::Effect::StepSelfOneCell,
                 Effect::TeleportRandom => s::rules::Effect::TeleportRandom,
                 Effect::TeleportToRayOrigin => s::rules::Effect::TeleportToRayOrigin,

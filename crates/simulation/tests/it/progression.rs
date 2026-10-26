@@ -420,12 +420,16 @@ fn recorded_only_builds_allow_explicit_manual_growth_without_claiming_a_health_r
         {
             "source": {"kind": "racial"},
             "health_seed": 42,
+            "health_policy": "maximized",
+            "owner": null,
             "health_origin": {"templates": [], "kind": "humanoid", "die": 8},
             "health_improvement": 0,
         },
         {
             "source": {"kind": "racial"},
             "health_seed": other.entries()[1].health_seed(),
+            "health_policy": "seeded",
+            "owner": null,
             "health_origin": {"templates": [], "kind": "humanoid", "die": 8},
             "health_improvement": 0,
         },

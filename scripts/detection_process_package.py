@@ -34,6 +34,7 @@ def fixture(*, paging=False, mapping=False, certified=True, production=PRODUCTIO
     items = read("catalog/items.toml")
     species = read("catalog/creatures.toml")["creatures"]["species"]
     actors = read("catalog/actors.toml")["actors"]
+    bodies = read("catalog/bodies.toml")["creatures"]["body_packages"]
     manifest = {key: copy.deepcopy(source[key]) for key in
                 ("format", "version", "ruleset", "factions", "ai_profiles", "themes", "assets")}
     owner = copy.deepcopy(source["characters"][0])
@@ -44,12 +45,18 @@ def fixture(*, paging=False, mapping=False, certified=True, production=PRODUCTIO
     human.setdefault("modifiers", []).append({"scope": "always", "op": {"kind": "set",
         "stat": {"kind": "attribute", "attribute": "speed"}, "value": 0}})
     species["fixture.detection"] = human
+    # The fixture changes the species' Speed modifier, not its body/class HD
+    # composition. Rebind an exact body recipe instead of dropping ownership.
+    body = copy.deepcopy(bodies[owner["creature"]["body_package"]])
+    body["species"] = "fixture.detection"
+    bodies["fixture.body.detection"] = body
+    owner["creature"]["body_package"] = "fixture.body.detection"
     peer = copy.deepcopy(owner["creature"])
     peer["name"] = "PRIVATE detection peer"
     width, depth, height = (32, 32, 8) if paging or mapping else (7, 5, 2)
     manifest.update(id="imported-detection-pages" if paging else "imported-detection",
                     default_character=1, characters=[owner], archetypes={**actors, **items["items"]},
-                    creatures={"species": species}, appearance_pools=items["appearance_pools"],
+                    creatures={"species": species, "body_packages": bodies}, appearance_pools=items["appearance_pools"],
                     spatial_scopes={"study": {"members": [1], "rooms": {"1": [
                         {"region": 1, "min": [0, 0, 0], "max": [width - 1, depth - 1, height - 1]}]},
                         "passages": [], "doorways": []}})

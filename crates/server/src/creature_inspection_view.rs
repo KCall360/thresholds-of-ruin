@@ -7,6 +7,14 @@ use s::rules::{Modifier, ModifierOp, Ruleset, Scope, Selector, Stat};
 use tor_protocol as p;
 use tor_simulation as s;
 
+fn restoration_view(build: &s::creatures::CreatureBuild) -> p::InspectionRestoration {
+    if build.uses_authored_restoration() {
+        p::InspectionRestoration::Authored
+    } else {
+        p::InspectionRestoration::ChooseAgain
+    }
+}
+
 pub(crate) fn attack_view(
     value: &s::attacks::MeleeAttack,
     rules: Option<&Ruleset>,
@@ -239,6 +247,10 @@ fn effect_view(value: &s::rules::Effect, rules: &Ruleset) -> p::CombatTraceStep 
         s::rules::Effect::DetectMagic => ("detect_magic", vec![]),
         s::rules::Effect::MapTopology => ("map_topology", vec![]),
         s::rules::Effect::DrainLife => ("drain_life", vec![]),
+        s::rules::Effect::BalefulPolymorph { forms } => (
+            "baleful_polymorph",
+            vec![unsigned("forms_count", forms.len() as u64)],
+        ),
         s::rules::Effect::CancelSpecials => ("cancel_specials", vec![]),
         s::rules::Effect::StepSelfOneCell => ("step_self_one_cell", vec![]),
         s::rules::Effect::TeleportRandom => ("teleport_random", vec![]),
@@ -806,10 +818,7 @@ pub(crate) fn inspect(
         faction: view.identity.faction,
         species: named(build.species_id(), None),
         starting_skills: build.starting_skills().map(skill),
-        restoration: match build.restoration_policy() {
-            s::creatures::RestorationPolicy::ChooseAgain => p::InspectionRestoration::ChooseAgain,
-            s::creatures::RestorationPolicy::Authored(_) => p::InspectionRestoration::Authored,
-        },
+        restoration: restoration_view(build),
         dormant_talents: derived
             .dormant_reasons
             .iter()
@@ -1098,6 +1107,85 @@ mod tests {
     use super::*;
 
     #[test]
+    fn owned_inspection_reports_declared_personal_policy_not_normalized_record_policy() {
+        use s::creatures::{BodyPackage, CreatureBuild, PlannedAdvancement, RestorationPolicy};
+        // A valid public authoring fixture: one replaceable racial body row
+        // followed by one personally owned class row. No Engine internals.
+        let rules =
+            Ruleset::validate(toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap()).unwrap();
+        let catalog: crate::creature_authoring::Catalog = serde_json::from_value(
+            serde_json::json!({"species":{"inspection_subject":{
+                "kind":"humanoid",
+                "behavior":{"disposition":"mean","idle":"explore","memory_ticks":1000},
+                "attributes":{"strength":1,"speed":1,"intellect":1,"willpower":1,"awareness":1,"presence":1},
+                "melee":{"skill":"heavy_weaponry","bonus":0,"wind_up":60,"recovery":40,
+                    "strikes":[{"offset":0,"check":{"actor":"user",
+                        "skill":{"kind":"natural_attack"},
+                        "against":{"kind":"defense","defense":"physical"}},
+                        "on_success":[{"kind":"damage","damage":{"kind":"components",
+                            "components":[{"category":"impact","amount":{"kind":"fixed","amount":1}}]}}],
+                        "on_failure":[],"descriptors":[],"riders":[]}]},
+                "modifiers":[]
+            }}}),
+        ).unwrap();
+        let spec: crate::creature_authoring::BuildSpec = serde_json::from_value(
+            serde_json::json!({"species":"inspection_subject","name":"subject","faction":"fixture",
+                "binding":"intellect","starting_skills":["heavy_weaponry","discipline"],
+                "restoration":"authored","nutrition":{"kind":"exempt"},
+                "hit_dice":[{"source":"racial","purchases":[]},{"source":"warrior","purchases":[]}]}),
+        ).unwrap();
+        let catalog = catalog.compile(rules).unwrap();
+        let original = catalog.prepare(&spec).unwrap().instantiate(73).unwrap();
+        assert!(original.uses_authored_restoration());
+        let package = std::sync::Arc::new(BodyPackage {
+            id: s::content_ids::BodyFormId::new("inspection_body").unwrap(),
+            species: original.species_id().clone(),
+            body: s::BodySpec::default(),
+            advancement: original
+                .ledger()
+                .entries()
+                .iter()
+                .zip(original.choices())
+                .take(1)
+                .map(|(die, choices)| PlannedAdvancement {
+                    source: die.source(),
+                    choices: choices.clone(),
+                })
+                .collect(),
+        });
+        for authored in [false, true] {
+            let mut advancement = original.advancement().clone();
+            if !authored {
+                advancement.restoration = RestorationPolicy::ChooseAgain;
+            }
+            let raw = CreatureBuild::from_recorded(
+                original.content().clone(),
+                original.species_id().clone(),
+                original.initial_attributes(),
+                original.ledger().clone(),
+                original.binding(),
+                advancement,
+                vec![],
+            )
+            .unwrap();
+            let build = raw
+                .with_body_package(package.clone(), raw.personal_health_root_seed().unwrap())
+                .unwrap();
+            assert_eq!(build.personal_hd_count().get(), 1);
+            assert_eq!(build.ledger().total_hd().get(), 2);
+            assert_eq!(build.restoration_policy(), &RestorationPolicy::ChooseAgain);
+            assert_eq!(
+                restoration_view(&build),
+                if authored {
+                    p::InspectionRestoration::Authored
+                } else {
+                    p::InspectionRestoration::ChooseAgain
+                }
+            );
+        }
+    }
+
+    #[test]
     fn action_duration_modifier_discloses_typed_rate_without_attribute_changes() {
         let rules =
             Ruleset::validate(toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap()).unwrap();
@@ -1114,6 +1202,31 @@ mod tests {
                     &field.value, p::DiagnosticValue::Text { value } if value == rate
                 )));
         }
+    }
+
+    #[test]
+    fn large_polymorph_roster_inspection_is_bounded_and_does_not_disclose_ids() {
+        let rules =
+            Ruleset::validate(toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap()).unwrap();
+        let effect = s::rules::Effect::BalefulPolymorph {
+            forms: (0..4096)
+                .map(|index| {
+                    s::content_ids::BodyFormId::new(format!("private_body_{index}")).unwrap()
+                })
+                .collect(),
+        };
+        assert!(effect.valid_shape());
+        let view = effect_view(&effect, &rules);
+        p::CombatTraceView {
+            steps: vec![view.clone()],
+            truncated: false,
+        }
+        .validate()
+        .unwrap();
+        assert_eq!(view.fields, vec![unsigned("forms_count", 4096)]);
+        assert!(!serde_json::to_string(&view)
+            .unwrap()
+            .contains("private_body"));
     }
 
     #[test]

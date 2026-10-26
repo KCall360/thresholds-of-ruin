@@ -10,7 +10,7 @@ import unittest
 
 from service_contract_host import ServiceHost
 from utility_potions_package import (
-    assert_extra_healing, assert_poison, assert_sight, condition, deadline, fixture, initial_items, inventory_item, observation,
+    assert_extra_healing, assert_poison, assert_sight, condition, deadline, fixture, initial_items, inventory_item, observation, extra_healing_roll, fixture_roll,
 )
 
 
@@ -122,9 +122,13 @@ class UtilityPotionsServiceContracts(UtilityServiceHarness):
         self.assertLessEqual(deadline(second) - deadline(first), 89200)
         self.assertFalse(second["state"]["wizard_game"])
 
-    def test_extra_healing_at_owned_hd_cap_cures_blindness_and_identifies(self):
+    def test_extra_healing_respects_owned_hd_caps_cures_blindness_and_identifies(self):
         ids = initial_items(self, self.snapshot())
         blind = self.drink(ids["blind"])
         healed = self.drink(ids["extra"])
-        assert_extra_healing(self, blind, healed, ids["extra"])
+        # No attack or poison precedes this dose: the only rules-stream draw
+        # since fixture seed42 is the ordinary blindness duration d85.
+        state, _ = fixture_roll(42, 85)
+        _, rolled_amount = extra_healing_roll(state)
+        assert_extra_healing(self, blind, healed, ids["extra"], rolled_amount=rolled_amount)
         self.assertFalse(healed["state"]["wizard_game"])

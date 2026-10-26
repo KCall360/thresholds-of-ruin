@@ -26,6 +26,25 @@ pub(super) fn catalog() -> (
     (manifest.creatures.compile(rules).unwrap(), manifest)
 }
 
+// Deliberate source variants author a matching immutable package as well as the
+// actor, so prerequisite tests do not fail early on package mismatch.
+fn prepare_roster_variant(
+    catalog: &tor_server::creature_authoring::CompiledCatalog,
+    manifest: &tor_server::scenario_package::Manifest,
+    spec: &tor_server::creature_authoring::BuildSpec,
+) -> Result<tor_server::creature_authoring::Recipe, String> {
+    let mut authored = manifest.creatures.clone();
+    if let Some(id) = &spec.body_package {
+        let package = authored.body_packages.get_mut(id).expect("fixture package");
+        package.species = spec.species.clone();
+        package.hit_dice = spec.hit_dice.clone();
+    }
+    authored
+        .compile(catalog.content().rules().clone())
+        .and_then(|catalog| catalog.prepare(spec))
+        .map_err(|error| format!("{error:?}"))
+}
+
 // Pin acquisition provenance independently of the recipe compiler. Only the
 // non-ledger build fields are borrowed so the strict recorded constructor can
 // materialize the expected ledger; no actual HD field enters the expectation.
@@ -35,16 +54,29 @@ fn assert_seeded_racial_ledger(
     seed: u64,
     kind: &str,
     die: u16,
+    body: Option<(&str, usize)>,
 ) {
     use tor_simulation::progression::{HdLedger, HdSource};
     let seeded = HdLedger::seeded(vec![HdSource::Racial; count], seed).unwrap();
     let hd: Vec<_> = seeded
         .entries()
         .iter()
-        .map(|row| {
+        .enumerate()
+        .map(|(ordinal, row)| {
+            let owner = match body {
+                Some((form, count)) if ordinal < count => serde_json::json!({
+                    "kind": "body", "form": form, "ordinal": ordinal,
+                }),
+                Some((_, count)) => serde_json::json!({
+                    "kind": "personal", "id": ordinal - count + 1,
+                }),
+                None => serde_json::Value::Null,
+            };
             serde_json::json!({
                 "source": {"kind": "racial"},
                 "health_seed": row.health_seed(),
+                "health_policy": if ordinal == 0 { "maximized" } else { "seeded" },
+                "owner": owner,
                 "health_origin": {"templates": [], "kind": kind, "die": die},
                 "health_improvement": 0,
             })
@@ -53,7 +85,11 @@ fn assert_seeded_racial_ledger(
     let actual = serde_json::to_value(BuildRecord::capture(build)).unwrap();
     let mut expected = actual.clone();
     expected["hd"] = serde_json::json!(hd);
-    expected["health_root_seed"] = serde_json::json!(seed);
+    expected["health_root_seed"] = if body.is_some() {
+        serde_json::Value::Null
+    } else {
+        serde_json::json!(seed)
+    };
     expected["drained_hd"] = serde_json::json!([]);
     for field in ["hd", "health_root_seed", "drained_hd"] {
         assert_eq!(actual[field], expected[field], "exact owned ledger {field}");
@@ -74,10 +110,10 @@ fn rogue_roster_actual_hd_seeds_choices_and_natural_rows_round_trip_without_sour
         ("emu", 1, 1),
         ("snake", 1, 1),
         ("rattlesnake", 2, 1),
-        ("hobgoblin", 1, 1),
+        ("hobgoblin", 2, 1),
         ("zombie", 2, 1),
         ("quagga", 3, 2),
-        ("centaur", 4, 3),
+        ("centaur", 5, 3),
         ("yeti", 4, 2),
         ("troll", 6, 3),
         ("wraith", 5, 1),
@@ -87,7 +123,7 @@ fn rogue_roster_actual_hd_seeds_choices_and_natural_rows_round_trip_without_sour
         ("jabberwock", 15, 2),
         ("leprechaun", 3, 1),
         ("nymph", 3, 1),
-        ("orc", 1, 1),
+        ("orc", 2, 1),
         ("aquator", 5, 1),
         ("dragon", 10, 3),
     ] {
@@ -125,6 +161,100 @@ fn rogue_roster_actual_hd_seeds_choices_and_natural_rows_round_trip_without_sour
 }
 
 #[test]
+fn approved_class_trio_retains_personal_training_and_seeded_health_behind_one_body_hd() {
+    use tor_simulation::content_ids::{BodyFormId, ClassId};
+    use tor_simulation::creatures::composition::{HdOwner, PersonalHdId};
+    use tor_simulation::progression::{HdLedger, HdSource, HealthRollPolicy};
+    let (catalog, manifest) = catalog();
+    for (name, classes, talents, unspent) in [
+        ("hobgoblin", 1, vec![(0, "rattling_blow")], 0),
+        ("orc", 1, vec![(0, "measured_cut")], 0),
+        (
+            "centaur",
+            4,
+            vec![(1, "second_strike"), (3, "third_strike")],
+            2,
+        ),
+    ] {
+        let form = BodyFormId::new(format!("rogue.body.{name}")).unwrap();
+        let spec = manifest.archetypes[&format!("rogue.{name}")]
+            .creature
+            .as_ref()
+            .unwrap();
+        let seed = actor_health_seed(42, 3);
+        let build = catalog.prepare(spec).unwrap().instantiate(seed).unwrap();
+        assert_eq!(build.personal_hd_count().get(), classes as u64);
+        assert_eq!(build.ledger().total_hd().get(), classes as u64 + 1);
+        assert_eq!(build.unspent_points(), unspent);
+        assert_eq!(build.ledger().entries()[0].source(), HdSource::Racial);
+        assert_eq!(
+            build.ledger().entries()[0].owner(),
+            Some(&HdOwner::Body { form, ordinal: 0 })
+        );
+        assert_eq!(
+            build.ledger().entries()[0].health_policy(),
+            Some(HealthRollPolicy::Maximized)
+        );
+        let mut sources = vec![HdSource::Racial];
+        sources.extend(vec![
+            HdSource::Class(ClassId::new("warrior").unwrap());
+            classes
+        ]);
+        let expected_stream = HdLedger::seeded(sources, seed).unwrap();
+        for (index, die) in build.ledger().entries().iter().enumerate().skip(1) {
+            assert_eq!(
+                die.source(),
+                HdSource::Class(ClassId::new("warrior").unwrap())
+            );
+            assert_eq!(
+                die.owner(),
+                Some(&HdOwner::Personal {
+                    id: PersonalHdId(NonZeroU64::new(index as u64).unwrap())
+                })
+            );
+            assert_eq!(die.health_policy(), Some(HealthRollPolicy::Seeded));
+            assert_eq!(
+                die.health_seed(),
+                expected_stream.entries()[index].health_seed()
+            );
+            let expected: Vec<_> = talents
+                .iter()
+                .filter(|(owner, _)| *owner == index - 1)
+                .map(|(_, id)| *id)
+                .collect();
+            assert_eq!(
+                build.choices()[index]
+                    .talents()
+                    .map(|id| id.as_str())
+                    .collect::<Vec<_>>(),
+                expected
+            );
+        }
+        let other_body = catalog
+            .content()
+            .body_package(&BodyFormId::new("rogue.body.troll").unwrap())
+            .unwrap()
+            .clone();
+        let changed = build.replace_body_package(other_body).unwrap();
+        assert_eq!(changed.personal_hd_count(), build.personal_hd_count());
+        assert_eq!(
+            &changed.ledger().entries()[6..],
+            &build.ledger().entries()[1..]
+        );
+        assert_eq!(&changed.choices()[6..], &build.choices()[1..]);
+        assert_eq!(changed.personal_health_root_seed(), Some(seed));
+        assert_eq!(
+            BuildRecord::capture(&changed)
+                .restore(catalog.content().clone())
+                .unwrap(),
+            changed
+        );
+        let stored = BuildRecord::capture(&build);
+        assert_eq!(stored.restore(catalog.content().clone()).unwrap(), build);
+    }
+}
+
+#[test]
 fn rogue_roster_unlock_purchases_are_required_and_hobgoblin_owns_its_signature() {
     let (catalog, manifest) = catalog();
     let mut quagga = manifest.archetypes["rogue.quagga"]
@@ -132,7 +262,10 @@ fn rogue_roster_unlock_purchases_are_required_and_hobgoblin_owns_its_signature()
         .clone()
         .unwrap();
     quagga.hit_dice[1].purchases.clear();
-    let untrained = catalog.prepare(&quagga).unwrap().instantiate(17).unwrap();
+    let untrained = prepare_roster_variant(&catalog, &manifest, &quagga)
+        .unwrap()
+        .instantiate(17)
+        .unwrap();
     assert!(!untrained
         .derive()
         .unwrap()
@@ -172,7 +305,7 @@ fn rogue_roster_unlock_purchases_are_required_and_hobgoblin_owns_its_signature()
 
 #[test]
 fn rogue_troll_compiles_exact_racial_rows_owned_grants_and_authored_restoration() {
-    use tor_simulation::{creatures::RestorationPolicy, progression::HdSource};
+    use tor_simulation::creatures::RestorationPolicy;
     let (catalog, manifest) = catalog();
     let troll = manifest.archetypes["rogue.troll"]
         .creature
@@ -180,7 +313,7 @@ fn rogue_troll_compiles_exact_racial_rows_owned_grants_and_authored_restoration(
         .unwrap();
     let seed = actor_health_seed(42, 3);
     let build = catalog.prepare(troll).unwrap().instantiate(seed).unwrap();
-    assert_seeded_racial_ledger(&build, 6, seed, "giant", 8);
+    assert_seeded_racial_ledger(&build, 6, seed, "giant", 8, Some(("rogue.body.troll", 6)));
     let expected = [
         vec!["rogue.regeneration"],
         vec!["second_strike"],
@@ -208,8 +341,7 @@ fn rogue_troll_compiles_exact_racial_rows_owned_grants_and_authored_restoration(
     // Vampire tests own RG1's half-period recovery and rebuild semantics.
     let mut without_rg1 = troll.clone();
     without_rg1.hit_dice[0].purchases.clear();
-    let without_rg1 = catalog
-        .prepare(&without_rg1)
+    let without_rg1 = prepare_roster_variant(&catalog, &manifest, &without_rg1)
         .unwrap()
         .instantiate(seed)
         .unwrap();
@@ -221,14 +353,7 @@ fn rogue_troll_compiles_exact_racial_rows_owned_grants_and_authored_restoration(
             .map(|id| TalentId::new(id).unwrap())
             .collect()
     );
-    let RestorationPolicy::Authored(plan) = build.restoration_policy() else {
-        panic!("authored restoration")
-    };
-    assert_eq!(plan.len(), 6);
-    for (ordinal, planned) in plan.iter().enumerate() {
-        assert_eq!(planned.source, HdSource::Racial);
-        assert_eq!(planned.choices, build.choices()[ordinal]);
-    }
+    assert_eq!(build.restoration_policy(), &RestorationPolicy::ChooseAgain);
 }
 
 #[test]
@@ -266,7 +391,10 @@ fn rogue_vampire_owned_ordinals_and_species_eligibility_are_required() {
     for ordinal in [0, 1] {
         let mut without = vampire.clone();
         without.hit_dice[ordinal].purchases.clear();
-        let without = catalog.prepare(&without).unwrap().instantiate(42).unwrap();
+        let without = prepare_roster_variant(&catalog, &manifest, &without)
+            .unwrap()
+            .instantiate(42)
+            .unwrap();
         let sheet = without.derive().unwrap();
         assert_eq!(sheet.abilities.contains(&drain), ordinal != 0);
         assert_eq!(sheet.active_talents.contains(&regeneration), ordinal != 1);
@@ -280,7 +408,10 @@ fn rogue_vampire_owned_ordinals_and_species_eligibility_are_required() {
         let mut invalid = vampire.clone();
         invalid.species = species.into();
         invalid.hit_dice[remove].purchases.clear();
-        assert!(catalog.prepare(&invalid).is_err(), "ineligible {species}");
+        assert!(
+            prepare_roster_variant(&catalog, &manifest, &invalid).is_err(),
+            "ineligible {species}"
+        );
     }
 }
 
@@ -319,7 +450,6 @@ fn rogue_vampire_growth_keeps_exact_rows_seeds_choices_and_authored_restoration(
     use tor_simulation::{
         creatures::RestorationPolicy,
         prepared_spawn::{PopulationCapacity, PreparedSpawnError},
-        progression::HdSource,
     };
     let (catalog, manifest) = catalog();
     let vampire = manifest
@@ -336,20 +466,20 @@ fn rogue_vampire_growth_keeps_exact_rows_seeds_choices_and_authored_restoration(
             .instantiate_seeded_racial(seed, u64::from(depth.saturating_sub(26)))
             .unwrap();
         assert_eq!(grown.ledger().total_hd().get(), expected as u64);
-        assert_seeded_racial_ledger(&grown, expected, seed, "undead", 12);
+        assert_seeded_racial_ledger(
+            &grown,
+            expected,
+            seed,
+            "undead",
+            12,
+            Some(("rogue.body.vampire", 8)),
+        );
         assert_eq!(&grown.ledger().entries()[..8], base.ledger().entries());
         assert_eq!(&grown.choices()[..8], base.choices());
         assert!(grown.choices()[8..]
             .iter()
             .all(|choice| *choice == Default::default()));
-        let RestorationPolicy::Authored(plan) = grown.restoration_policy() else {
-            panic!("authored restoration")
-        };
-        assert_eq!(plan.len(), expected);
-        for (ordinal, planned) in plan.iter().enumerate() {
-            assert_eq!(planned.source, HdSource::Racial);
-            assert_eq!(planned.choices, grown.choices()[ordinal]);
-        }
+        assert_eq!(grown.restoration_policy(), &RestorationPolicy::ChooseAgain);
         assert!(grown.derive().unwrap().dormant_talents.is_empty());
         let saved = serde_json::to_vec(&BuildRecord::capture(&grown)).unwrap();
         let restored: BuildRecord = serde_json::from_slice(&saved).unwrap();
@@ -386,7 +516,12 @@ fn rogue_vampire_recovery_and_restorable_injury_survive_owned_grant_rebuild() {
     let mut without = spec.clone();
     without.hit_dice[1].purchases.clear();
     creature
-        .rebuild(catalog.prepare(&without).unwrap().instantiate(42).unwrap())
+        .rebuild(
+            prepare_roster_variant(&catalog, &manifest, &without)
+                .unwrap()
+                .instantiate(42)
+                .unwrap(),
+        )
         .unwrap();
     assert_eq!(creature.health_recovery().period(), 2 * period);
     assert_eq!(creature.health_recovery().elapsed(), 2 * elapsed);
@@ -427,8 +562,15 @@ fn rogue_rattlesnake_owned_venom_and_canonical_strength_restoration_bind_existin
         .unwrap();
     let seed = actor_health_seed(42, 3);
     let build = catalog.prepare(spec).unwrap().instantiate(seed).unwrap();
-    assert_seeded_racial_ledger(&build, 2, seed, "animal", 8);
-    assert_eq!(build.unspent_points(), 1);
+    assert_seeded_racial_ledger(
+        &build,
+        2,
+        seed,
+        "animal",
+        8,
+        Some(("rogue.body.rattlesnake", 2)),
+    );
+    assert_eq!(build.unspent_points(), 0);
     assert_eq!(
         build.choices()[0]
             .talents()
@@ -437,25 +579,21 @@ fn rogue_rattlesnake_owned_venom_and_canonical_strength_restoration_bind_existin
         ["rogue.venomous_bite"]
     );
     assert_eq!(build.choices()[1].talents().count(), 0);
-    let RestorationPolicy::Authored(plan) = build.restoration_policy() else {
-        panic!("authored R restoration")
-    };
-    assert_eq!(plan.len(), 2);
+    assert_eq!(build.restoration_policy(), &RestorationPolicy::ChooseAgain);
     let venom = AbilityId::new("rogue.venomous_bite").unwrap();
     assert!(build.derive().unwrap().abilities.contains(&venom));
     let mut untrained = spec.clone();
     untrained.hit_dice[0].purchases.clear();
-    let untrained = catalog
-        .prepare(&untrained)
+    let untrained = prepare_roster_variant(&catalog, &manifest, &untrained)
         .unwrap()
         .instantiate(seed)
         .unwrap();
     assert_eq!(untrained.ledger(), build.ledger());
-    assert_eq!(untrained.unspent_points(), 2);
+    assert_eq!(untrained.unspent_points(), 0);
     assert!(!untrained.derive().unwrap().abilities.contains(&venom));
     let mut ineligible = spec.clone();
     ineligible.species = "rogue.snake".into();
-    assert!(catalog.prepare(&ineligible).is_err());
+    assert!(prepare_roster_variant(&catalog, &manifest, &ineligible).is_err());
 
     let species =
         &catalog.content().catalog().species[&SpeciesId::new("rogue.rattlesnake").unwrap()];
@@ -536,8 +674,8 @@ fn rogue_rattlesnake_owned_venom_and_canonical_strength_restoration_bind_existin
 }
 
 #[test]
-fn rogue_wraith_owns_five_seeded_rows_parentless_drain_and_four_unspent_points() {
-    use tor_simulation::{creatures::RestorationPolicy, progression::HdSource};
+fn rogue_wraith_owns_five_seeded_rows_parentless_drain_and_no_personal_points() {
+    use tor_simulation::creatures::RestorationPolicy;
     let (catalog, manifest) = catalog();
     let spec = manifest.archetypes["rogue.wraith"]
         .creature
@@ -545,8 +683,15 @@ fn rogue_wraith_owns_five_seeded_rows_parentless_drain_and_four_unspent_points()
         .unwrap();
     let seed = actor_health_seed(42, 3);
     let build = catalog.prepare(spec).unwrap().instantiate(seed).unwrap();
-    assert_seeded_racial_ledger(&build, 5, seed, "undead", 12);
-    assert_eq!(build.unspent_points(), 4);
+    assert_seeded_racial_ledger(
+        &build,
+        5,
+        seed,
+        "undead",
+        12,
+        Some(("rogue.body.wraith", 5)),
+    );
+    assert_eq!(build.unspent_points(), 0);
     assert_eq!(
         build.choices()[0]
             .talents()
@@ -557,14 +702,7 @@ fn rogue_wraith_owns_five_seeded_rows_parentless_drain_and_four_unspent_points()
     assert!(build.choices()[1..]
         .iter()
         .all(|choice| *choice == Default::default()));
-    let RestorationPolicy::Authored(plan) = build.restoration_policy() else {
-        panic!("authored W restoration")
-    };
-    assert_eq!(plan.len(), 5);
-    for (ordinal, row) in plan.iter().enumerate() {
-        assert_eq!(row.source, HdSource::Racial);
-        assert_eq!(row.choices, build.choices()[ordinal]);
-    }
+    assert_eq!(build.restoration_policy(), &RestorationPolicy::ChooseAgain);
     let drain = AbilityId::new("rogue.energy_drain").unwrap();
     let derived = build.derive().unwrap();
     assert!(derived.dormant_talents.is_empty());
@@ -577,21 +715,23 @@ fn rogue_wraith_owns_five_seeded_rows_parentless_drain_and_four_unspent_points()
     );
     let mut untrained = spec.clone();
     untrained.hit_dice[0].purchases.clear();
-    let untrained = catalog
-        .prepare(&untrained)
+    let untrained = prepare_roster_variant(&catalog, &manifest, &untrained)
         .unwrap()
         .instantiate(seed)
         .unwrap();
     assert_eq!(untrained.ledger(), build.ledger());
-    assert_eq!(untrained.unspent_points(), 5);
+    assert_eq!(untrained.unspent_points(), 0);
     assert!(!untrained.derive().unwrap().abilities.contains(&drain));
     let mut ineligible = spec.clone();
     ineligible.species = "rogue.human".into();
-    assert!(catalog.prepare(&ineligible).is_err());
+    assert!(prepare_roster_variant(&catalog, &manifest, &ineligible).is_err());
     // Actual HD1 ownership alone qualifies: DR2 has no DR1 parent or HD2 gate.
     let mut first = spec.clone();
     first.hit_dice.truncate(1);
-    let first = catalog.prepare(&first).unwrap().instantiate(seed).unwrap();
+    let first = prepare_roster_variant(&catalog, &manifest, &first)
+        .unwrap()
+        .instantiate(seed)
+        .unwrap();
     assert!(first.derive().unwrap().abilities.contains(&drain));
     assert_eq!(first.unspent_points(), 0);
 
@@ -618,10 +758,7 @@ fn rogue_wraith_owns_five_seeded_rows_parentless_drain_and_four_unspent_points()
 
 #[test]
 fn rogue_jabberwock_owns_exact_seeded_rows_gates_and_restorable_rending_grant() {
-    use tor_simulation::{
-        creatures::{record::CreatureRecord, CreatureState, RestorationPolicy},
-        progression::HdSource,
-    };
+    use tor_simulation::creatures::{record::CreatureRecord, CreatureState, RestorationPolicy};
     let (catalog, manifest) = catalog();
     let spec = manifest.archetypes["rogue.jabberwock"]
         .creature
@@ -629,8 +766,15 @@ fn rogue_jabberwock_owns_exact_seeded_rows_gates_and_restorable_rending_grant() 
         .unwrap();
     let seed = actor_health_seed(42, 3);
     let build = catalog.prepare(spec).unwrap().instantiate(seed).unwrap();
-    assert_seeded_racial_ledger(&build, 15, seed, "aberration", 8);
-    assert_eq!(build.unspent_points(), 13);
+    assert_seeded_racial_ledger(
+        &build,
+        15,
+        seed,
+        "aberration",
+        8,
+        Some(("rogue.body.jabberwock", 15)),
+    );
+    assert_eq!(build.unspent_points(), 0);
     for (ordinal, choices) in build.choices().iter().enumerate() {
         let expected = match ordinal {
             1 => vec!["second_strike"],
@@ -642,14 +786,7 @@ fn rogue_jabberwock_owns_exact_seeded_rows_gates_and_restorable_rending_grant() 
             expected
         );
     }
-    let RestorationPolicy::Authored(plan) = build.restoration_policy() else {
-        panic!("authored J restoration")
-    };
-    assert_eq!(plan.len(), 15);
-    for (ordinal, row) in plan.iter().enumerate() {
-        assert_eq!(row.source, HdSource::Racial);
-        assert_eq!(row.choices, build.choices()[ordinal]);
-    }
+    assert_eq!(build.restoration_policy(), &RestorationPolicy::ChooseAgain);
     let rending = AbilityId::new("rending_pair").unwrap();
     let derived = build.derive().unwrap();
     assert!(derived.dormant_talents.is_empty());
@@ -663,8 +800,7 @@ fn rogue_jabberwock_owns_exact_seeded_rows_gates_and_restorable_rending_grant() 
     );
     let mut untrained = spec.clone();
     untrained.hit_dice[7].purchases.clear();
-    let untrained = catalog
-        .prepare(&untrained)
+    let untrained = prepare_roster_variant(&catalog, &manifest, &untrained)
         .unwrap()
         .instantiate(seed)
         .unwrap();
@@ -672,23 +808,22 @@ fn rogue_jabberwock_owns_exact_seeded_rows_gates_and_restorable_rending_grant() 
     assert!(!untrained.derive().unwrap().abilities.contains(&rending));
     let mut missing_parent = spec.clone();
     missing_parent.hit_dice[1].purchases.clear();
-    assert!(catalog.prepare(&missing_parent).is_err());
+    assert!(prepare_roster_variant(&catalog, &manifest, &missing_parent).is_err());
     for (owner, earlier) in [(1, 0), (7, 6)] {
         let mut too_early = spec.clone();
         too_early.hit_dice.swap(owner, earlier);
         // The row owns a point, not a historical purchase time. Eligibility
         // requires a genuinely below-threshold current build.
         too_early.hit_dice.truncate(owner);
-        assert!(catalog.prepare(&too_early).is_err());
+        assert!(prepare_roster_variant(&catalog, &manifest, &too_early).is_err());
     }
     let mut ineligible = spec.clone();
     ineligible.species = "rogue.human".into();
-    assert!(catalog.prepare(&ineligible).is_err());
+    assert!(prepare_roster_variant(&catalog, &manifest, &ineligible).is_err());
     // Shared flag/HD eligibility is reusable, not a Jabberwock identity branch.
     let mut other_sequence = spec.clone();
     other_sequence.species = "rogue.troll".into();
-    assert!(catalog
-        .prepare(&other_sequence)
+    assert!(prepare_roster_variant(&catalog, &manifest, &other_sequence)
         .unwrap()
         .instantiate(seed)
         .unwrap()
@@ -774,7 +909,6 @@ fn assert_roster_growth(name: &str, owned: usize, last_depth: u32, kind: &str, d
     use tor_simulation::{
         creatures::RestorationPolicy,
         prepared_spawn::{PopulationCapacity, PreparedSpawnError},
-        progression::HdSource,
     };
     let (catalog, manifest) = catalog();
     let spec = manifest.archetypes[&format!("rogue.{name}")]
@@ -787,20 +921,20 @@ fn assert_roster_growth(name: &str, owned: usize, last_depth: u32, kind: &str, d
         let grown = base
             .instantiate_seeded_racial(seed, u64::from(depth.saturating_sub(26)))
             .unwrap();
-        assert_seeded_racial_ledger(&grown, expected, seed, kind, die);
+        assert_seeded_racial_ledger(
+            &grown,
+            expected,
+            seed,
+            kind,
+            die,
+            Some((&format!("rogue.body.{name}"), owned)),
+        );
         assert_eq!(&grown.ledger().entries()[..owned], base.ledger().entries());
         assert_eq!(&grown.choices()[..owned], base.choices());
         assert!(grown.choices()[owned..]
             .iter()
             .all(|choice| *choice == Default::default()));
-        let RestorationPolicy::Authored(plan) = grown.restoration_policy() else {
-            panic!("authored {name} growth restoration")
-        };
-        assert_eq!(plan.len(), expected);
-        for (ordinal, row) in plan.iter().enumerate() {
-            assert_eq!(row.source, HdSource::Racial);
-            assert_eq!(row.choices, grown.choices()[ordinal]);
-        }
+        assert_eq!(grown.restoration_policy(), &RestorationPolicy::ChooseAgain);
         let saved = serde_json::to_vec(&BuildRecord::capture(&grown)).unwrap();
         let restored: BuildRecord = serde_json::from_slice(&saved).unwrap();
         assert_eq!(restored.restore(catalog.content().clone()).unwrap(), grown);
@@ -1139,8 +1273,7 @@ fn rogue_flytrap_clutch_has_shared_policy_and_tightening_is_owned_at_hd_six() {
     );
     let mut without_gr2 = spec.clone();
     without_gr2.hit_dice[5].purchases.clear();
-    let without_gr2 = catalog
-        .prepare(&without_gr2)
+    let without_gr2 = prepare_roster_variant(&catalog, &manifest, &without_gr2)
         .unwrap()
         .instantiate(42)
         .unwrap();
@@ -1158,10 +1291,10 @@ fn rogue_flytrap_clutch_has_shared_policy_and_tightening_is_owned_at_hd_six() {
     }
     let mut missing_parent = spec.clone();
     missing_parent.hit_dice[0].purchases.clear();
-    assert!(catalog.prepare(&missing_parent).is_err());
+    assert!(prepare_roster_variant(&catalog, &manifest, &missing_parent).is_err());
     let mut ineligible = spec.clone();
     ineligible.species = "rogue.griffin".into();
-    assert!(catalog.prepare(&ineligible).is_err());
+    assert!(prepare_roster_variant(&catalog, &manifest, &ineligible).is_err());
     let mut state = CreatureState::new(build.clone()).unwrap();
     for _ in 0..3 {
         assert_eq!(state.drain_latest_hit_die().unwrap().applied, 1);
@@ -1215,6 +1348,93 @@ fn assert_dragon_breath(
 }
 
 #[test]
+fn native_dragon_personal_receipts_preserve_combat_and_strict_original_funding() {
+    let (catalog, manifest) = catalog();
+    let spec = manifest.archetypes["rogue.dragon"]
+        .creature
+        .as_ref()
+        .unwrap();
+    let seed = actor_health_seed(42, 3);
+    let build = catalog.prepare(spec).unwrap().instantiate(seed).unwrap();
+    assert_seeded_racial_ledger(
+        &build,
+        10,
+        seed,
+        "dragon",
+        12,
+        Some(("rogue.body.dragon", 10)),
+    );
+    assert_eq!(build.personal_hd_count().get(), 0);
+    assert_eq!(build.unspent_points(), 0);
+    assert_dragon_breath(&build.derive().unwrap(), 3, 2, 5);
+    let encoded = serde_json::to_value(BuildRecord::capture(&build)).unwrap();
+    let expected = serde_json::json!([
+        {"ordinal":3,"choices":{"purchase_highwater":1,"purchases":[],"attribute":"willpower"}},
+        {"ordinal":7,"choices":{"purchase_highwater":1,"attribute":"willpower","purchases":[{
+            "id":{"owner":{"kind":"body","form":"rogue.body.dragon","ordinal":7},"serial":1},
+            "pool":"advancement","selection":{"kind":"skill_rank","skill":"breath"}
+        }]}}
+    ]);
+    assert_eq!(encoded["body_build"]["personal_body_grants"], expected);
+    for mutation in 0..4 {
+        let mut bad = spec.clone();
+        match mutation {
+            0 => bad.body_package = None,
+            1 => bad.personal_body_grants.reverse(),
+            2 => bad.personal_body_grants[0].ordinal = 7,
+            _ => bad.personal_body_grants[1].purchases.clear(),
+        }
+        assert!(
+            catalog.prepare(&bad).is_err(),
+            "author partition mutation {mutation}"
+        );
+    }
+
+    assert!(build.choices().iter().all(|row| row.attribute.is_none()));
+    assert!(build.choices()[7].purchases.is_empty());
+    let decoded: BuildRecord = serde_json::from_value(encoded.clone()).unwrap();
+    assert_eq!(decoded.restore(catalog.content().clone()).unwrap(), build);
+    for mutation in 0..5 {
+        let mut bad = encoded.clone();
+        let grants = &mut bad["body_build"]["personal_body_grants"];
+        match mutation {
+            0 => grants[0]["choices"]["attribute"] = serde_json::json!("strength"),
+            1 => {
+                grants[1]["choices"]["purchases"][0]["selection"]["skill"] =
+                    serde_json::json!("lore")
+            }
+            2 => grants[1]["choices"]["purchases"][0]["id"]["serial"] = serde_json::json!(2),
+            3 => {
+                grants[1]["choices"]["purchases"][0]["id"]["owner"]["ordinal"] =
+                    serde_json::json!(3)
+            }
+            _ => grants.as_array_mut().unwrap().reverse(),
+        }
+        let bad: BuildRecord = serde_json::from_value(bad).unwrap();
+        assert!(
+            bad.restore(catalog.content().clone()).is_err(),
+            "mutation {mutation}"
+        );
+    }
+    let troll = catalog
+        .content()
+        .body_package(&tor_simulation::content_ids::BodyFormId::new("rogue.body.troll").unwrap())
+        .unwrap();
+    let changed = build.replace_body_package(troll.clone()).unwrap();
+    let changed_record = serde_json::to_value(BuildRecord::capture(&changed)).unwrap();
+    assert_eq!(
+        changed_record["body_build"]["personal_body_grants"],
+        expected
+    );
+    let returned = changed
+        .replace_body_package(build.base_body_package().unwrap().clone())
+        .unwrap();
+    assert_eq!(returned.ledger(), build.ledger());
+    assert_eq!(returned.choices(), build.choices());
+    assert_dragon_breath(&returned.derive().unwrap(), 3, 2, 5);
+}
+
+#[test]
 fn rogue_dragon_owns_ten_seeded_rows_separate_attributes_and_six_unspent_points() {
     use tor_simulation::{
         attributes::{Attribute, Skill},
@@ -1226,9 +1446,14 @@ fn rogue_dragon_owns_ten_seeded_rows_separate_attributes_and_six_unspent_points(
         .creature
         .as_ref()
         .unwrap();
+    // Preserve the ordinary, unpartitioned rules oracle independently of native ownership.
+    let mut ordinary = spec.clone();
+    ordinary.body_package = None;
+    ordinary.personal_body_grants.clear();
+    let spec = &ordinary;
     let seed = actor_health_seed(42, 3);
     let build = catalog.prepare(spec).unwrap().instantiate(seed).unwrap();
-    assert_seeded_racial_ledger(&build, 10, seed, "dragon", 12);
+    assert_seeded_racial_ledger(&build, 10, seed, "dragon", 12, None);
     assert_eq!(
         build.starting_skills(),
         &[Skill::HeavyWeaponry, Skill::Breath]
@@ -1252,9 +1477,11 @@ fn rogue_dragon_owns_ten_seeded_rows_separate_attributes_and_six_unspent_points(
         assert_eq!(
             choices,
             &HdChoices {
+                purchase_highwater: 0,
                 purchases: selection
                     .into_iter()
                     .map(|selection| AdvancementPurchase {
+                        id: None,
                         pool: tor_simulation::content_ids::PointPoolId::new("advancement").unwrap(),
                         selection,
                     })
@@ -1335,6 +1562,11 @@ fn rogue_dragon_natural_unlocks_fire_subtype_and_ray_use_shared_compiled_rules()
         .creature
         .as_ref()
         .unwrap();
+    // Preserve the ordinary, unpartitioned rules oracle independently of native ownership.
+    let mut ordinary = spec.clone();
+    ordinary.body_package = None;
+    ordinary.personal_body_grants.clear();
+    let spec = &ordinary;
     let build = catalog.prepare(spec).unwrap().instantiate(42).unwrap();
     let sheet = build.derive().unwrap();
     let fire = Selector::Descriptor {
@@ -1481,7 +1713,7 @@ fn rogue_dragon_hd_eight_owned_rank_attribute_and_seed_survive_drain_save_restor
         &build.ledger().entries()[..7]
     );
     assert_eq!(state.build().choices(), &build.choices()[..7]);
-    assert_eq!(state.build().unspent_points(), 4);
+    assert_eq!(state.build().unspent_points(), 0);
     assert_dragon_breath(state.derived(), 2, 1, 3);
     assert!(state
         .derived()
@@ -1497,7 +1729,7 @@ fn rogue_dragon_hd_eight_owned_rank_attribute_and_seed_survive_drain_save_restor
         &build.ledger().entries()[..8]
     );
     assert_eq!(restored.build().choices(), &build.choices()[..8]);
-    assert_eq!(restored.build().unspent_points(), 4);
+    assert_eq!(restored.build().unspent_points(), 0);
     assert_dragon_breath(restored.derived(), 3, 2, 5);
     let encoded = serde_json::to_vec(&CreatureRecord::capture(&restored)).unwrap();
     let record: CreatureRecord = serde_json::from_slice(&encoded).unwrap();
@@ -1519,7 +1751,6 @@ fn rogue_dragon_future_breath_purchases_are_ordinal_owned_capped_and_restorable(
             record::CreatureRecord, BuildError, CreatureState, HdChoices, RestorationPolicy,
         },
         prepared_spawn::{OrdinalAdvancement, PopulationCapacity, PreparedSpawnError},
-        progression::HdSource,
         HdCount, HdIndex,
     };
     let (catalog, manifest) = catalog();
@@ -1573,7 +1804,14 @@ fn rogue_dragon_future_breath_purchases_are_ordinal_owned_capped_and_restorable(
         .iter()
         .map(|entry| OrdinalAdvancement {
             ordinal: HdCount(entry.ordinal),
-            choices: compiled.choices()[entry.ordinal as usize - 1].clone(),
+            choices: {
+                let mut choices = compiled.choices()[entry.ordinal as usize - 1].clone();
+                choices.purchase_highwater = 0;
+                for purchase in &mut choices.purchases {
+                    purchase.id = None;
+                }
+                choices
+            },
         })
         .collect();
     for entry in &schedule {
@@ -1596,28 +1834,62 @@ fn rogue_dragon_future_breath_purchases_are_ordinal_owned_capped_and_restorable(
         let grown = base
             .instantiate_seeded_racial_with_advancement(seed, u64::from(depth - 26), &schedule)
             .unwrap();
-        assert_seeded_racial_ledger(&grown, hd, seed, "dragon", 12);
+        assert_seeded_racial_ledger(
+            &grown,
+            hd,
+            seed,
+            "dragon",
+            12,
+            Some(("rogue.body.dragon", 10)),
+        );
         assert_eq!(&grown.ledger().entries()[..10], base.ledger().entries());
         assert_eq!(&grown.choices()[..10], base.choices());
-        assert_eq!(grown.unspent_points(), hd as u64 - 4 - u64::from(rank - 2));
+        assert_eq!(grown.personal_hd_count().get(), hd as u64 - 10);
+        assert_eq!(grown.unspent_points(), hd as u64 - 10 - u64::from(rank - 2));
+        let saved = serde_json::to_value(BuildRecord::capture(&grown)).unwrap();
+        let native = serde_json::to_value(BuildRecord::capture(&base)).unwrap();
+        assert_eq!(
+            saved["body_build"]["personal_body_grants"],
+            native["body_build"]["personal_body_grants"]
+        );
+        assert_eq!(saved["body_build"]["base"], native["body_build"]["base"]);
+        assert_eq!(saved["body_build"]["health_root"], seed);
+        assert_eq!(saved["body_build"]["birth_personal_count"], hd - 10);
         assert_dragon_breath(&grown.derive().unwrap(), 3, rank, 3 + i64::from(rank));
         for (index, choice) in grown.choices().iter().enumerate().skip(10) {
-            assert_eq!(
-                choice,
-                &schedule
-                    .iter()
-                    .find(|entry| entry.ordinal.get() == index as u64 + 1)
-                    .map(|entry| entry.choices.clone())
-                    .unwrap_or_default()
-            );
+            let scheduled = schedule
+                .iter()
+                .find(|entry| entry.ordinal.get() == index as u64 + 1);
+            let mut expected = scheduled
+                .map(|entry| entry.choices.clone())
+                .unwrap_or_default();
+            if let Some(purchase) = expected.purchases.first_mut() {
+                expected.purchase_highwater = 1;
+                purchase.id = Some(tor_simulation::creatures::composition::PurchaseId {
+                    owner: tor_simulation::creatures::composition::HdOwner::Personal {
+                        id: tor_simulation::creatures::composition::PersonalHdId(
+                            std::num::NonZeroU64::new(index as u64 - 9).unwrap(),
+                        ),
+                    },
+                    serial: std::num::NonZeroU64::new(1).unwrap(),
+                });
+            }
+            assert_eq!(choice, &expected);
         }
-        let RestorationPolicy::Authored(plan) = grown.restoration_policy() else {
-            panic!("authored Dragon growth restoration")
-        };
-        assert_eq!(plan.len(), hd);
+        assert!(grown.uses_authored_restoration());
+        assert_eq!(
+            grown.restoration_policy(),
+            &RestorationPolicy::ChooseAgain,
+            "outer positional record is normalized; personal receipt is independent"
+        );
+        let plan = saved["body_build"]["personal_restoration"]["entries"]
+            .as_array()
+            .unwrap();
+        assert_eq!(plan.len(), hd - 10);
         for (index, row) in plan.iter().enumerate() {
-            assert_eq!(row.source, HdSource::Racial);
-            assert_eq!(row.choices, grown.choices()[index]);
+            assert_eq!(row["id"], index + 1);
+            assert_eq!(row["source"], serde_json::json!({"kind":"racial"}));
+            assert_eq!(row["choices"], saved["choices"][index + 10]);
         }
         let encoded = serde_json::to_vec(&BuildRecord::capture(&grown)).unwrap();
         let record: BuildRecord = serde_json::from_slice(&encoded).unwrap();
@@ -1635,6 +1907,45 @@ fn rogue_dragon_future_breath_purchases_are_ordinal_owned_capped_and_restorable(
             assert_dragon_breath(restored.derived(), 3, rank, 3 + i64::from(rank));
         }
     }
+    let fresh_seed = actor_health_seed(43, 3);
+    let fresh = base
+        .instantiate_seeded_racial_with_advancement(fresh_seed, 5, &schedule)
+        .unwrap();
+    assert_seeded_racial_ledger(
+        &fresh,
+        15,
+        fresh_seed,
+        "dragon",
+        12,
+        Some(("rogue.body.dragon", 10)),
+    );
+    assert_dragon_breath(&fresh.derive().unwrap(), 3, 3, 6);
+    let fresh_record = serde_json::to_value(BuildRecord::capture(&fresh)).unwrap();
+    let base_record = serde_json::to_value(BuildRecord::capture(&base)).unwrap();
+    assert_eq!(
+        fresh_record["body_build"]["personal_body_grants"],
+        base_record["body_build"]["personal_body_grants"]
+    );
+    assert_eq!(fresh.personal_hd_count().get(), 5);
+    assert_eq!(fresh.unspent_points(), 4);
+    let mut native_slot = schedule.clone();
+    native_slot[0].ordinal = HdCount(10);
+    assert_eq!(
+        base.instantiate_seeded_racial_with_advancement(seed, 15, &native_slot),
+        Err(PreparedSpawnError::Build(BuildError::InvalidOwnership))
+    );
+    let mut duplicate = schedule.clone();
+    duplicate[1].ordinal = duplicate[0].ordinal;
+    assert_eq!(
+        base.instantiate_seeded_racial_with_advancement(seed, 15, &duplicate),
+        Err(PreparedSpawnError::Build(BuildError::InvalidOwnership))
+    );
+    let mut preowned = schedule.clone();
+    preowned[0].choices = compiled.choices()[14].clone();
+    assert_eq!(
+        base.instantiate_seeded_racial_with_advancement(seed, 15, &preowned),
+        Err(PreparedSpawnError::Build(BuildError::InvalidOwnership))
+    );
     let mut capped = base
         .instantiate_seeded_racial_with_advancement(seed, 246, &schedule)
         .unwrap();

@@ -1212,6 +1212,22 @@ fn canonical_wraith_earned_regrowth_survives_source_free_service_reopen() {
         let actors = saved["game"]["actors"].as_u64().unwrap() as usize;
         &saved["shared"]["actors"][actors][actor.0.to_string()]["combat"]["creature"]
     }
+    fn owned_rows(build: &Value, kind: &str) -> Value {
+        json!(build["hd"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| row["owner"]["kind"] == kind)
+            .map(|(index, row)| json!({"hit_die":row,"choices":build["choices"][index]}))
+            .collect::<Vec<_>>())
+    }
+    fn paid_choice(owner: Value, selection: Value) -> Value {
+        json!({"purchase_highwater":1,"purchases":[{
+            "id":{"owner":owner,"serial":1},"pool":"advancement","selection":selection
+        }],"attribute":null})
+    }
+    // hd is PERSONAL advancement, independent of the effective body row.
     fn progress(service: &Service, earned: u64, spent: u64, hd: u64) -> Value {
         let snapshot = saved(service);
         let owner = creature(&snapshot, OWNER);
@@ -1226,7 +1242,24 @@ fn canonical_wraith_earned_regrowth_survives_source_free_service_reopen() {
         ] {
             assert_eq!(xp[field], json!(expected), "{field}");
         }
-        assert_eq!(owner["build"]["hd"].as_array().unwrap().len() as u64, hd);
+        assert_eq!(
+            owner["build"]["hd"].as_array().unwrap().len() as u64,
+            hd + 1
+        );
+        assert_eq!(
+            owned_rows(&owner["build"], "body")
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            owned_rows(&owner["build"], "personal")
+                .as_array()
+                .unwrap()
+                .len() as u64,
+            hd
+        );
         assert_eq!(owner["dead"], false);
         let view = service.engine.observation(OWNER).unwrap().combat.unwrap();
         assert!(!view.dead && !view.terminal);
@@ -1784,10 +1817,31 @@ fn canonical_wraith_earned_regrowth_survives_source_free_service_reopen() {
     assert!(!case.service.engine.wizard_enabled());
     let initial = progress(&case.service, 0, 0, 2);
     let original = creature(&initial, OWNER)["build"].clone();
-    let empty = json!({"purchases":[],"attribute":null});
-    assert_eq!(original["choices"], json!([empty, empty]));
+    let empty = json!({"purchase_highwater":0,"purchases":[],"attribute":null});
+    assert_eq!(original["choices"], json!([empty, empty, empty]));
+    assert_eq!(original["body_build"]["base"]["id"], "rogue.body.human");
+    assert_eq!(
+        original["body_build"]["active"],
+        original["body_build"]["base"]
+    );
+    assert_eq!(original["body_build"]["birth_personal_count"], 2);
+    assert_eq!(original["body_build"]["next_personal_id"], 3);
+    assert_eq!(original["body_build"]["drained"], json!([]));
+    assert_eq!(
+        original["hd"][0]["owner"],
+        json!({"kind":"body","form":"rogue.body.human","ordinal":0})
+    );
+    for (index, personal_id) in [(1, 1), (2, 2)] {
+        assert_eq!(
+            original["hd"][index]["owner"],
+            json!({"kind":"personal","id":personal_id})
+        );
+        assert_eq!(original["hd"][index]["health_policy"], "seeded");
+    }
+    assert_eq!(original["hd"][0]["health_policy"], "maximized");
     assert_eq!(original["restoration"], json!({"kind":"choose_again"}));
-    assert!(original["health_root_seed"].is_u64());
+    assert!(original["health_root_seed"].is_null());
+    assert!(original["body_build"]["health_root"].is_u64());
     assert_eq!(
         original["hd"]
             .as_array()
@@ -1795,7 +1849,11 @@ fn canonical_wraith_earned_regrowth_survives_source_free_service_reopen() {
             .iter()
             .map(|row| row["source"].clone())
             .collect::<Vec<_>>(),
-        vec![json!({"kind":"class","id":"warrior"}); 2]
+        vec![
+            json!({"kind":"racial"}),
+            json!({"kind":"class","id":"warrior"}),
+            json!({"kind":"class","id":"warrior"})
+        ]
     );
     // Capture actual constructor seeds for these authored identities; neither
     // their values nor this script claim the process fixture's Health rolls.
@@ -1808,12 +1866,13 @@ fn canonical_wraith_earned_regrowth_survives_source_free_service_reopen() {
         .collect();
     assert!(constructor_builds
         .values()
-        .all(|build| build["health_root_seed"].is_u64()
+        .all(|build| build["health_root_seed"].is_null()
+            && build["body_build"]["health_root"].is_u64()
             && build["hd"]
                 .as_array()
                 .unwrap()
                 .iter()
-                .all(|row| row["health_seed"].is_u64())));
+                .all(|row| row["health_seed"].is_u64() && row["owner"].is_object())));
     let wraith = creature(&initial, WRAITH);
     assert_eq!(wraith["build"]["hd"].as_array().unwrap().len(), 5);
     assert!(wraith["build"]["hd"]
@@ -1824,18 +1883,50 @@ fn canonical_wraith_earned_regrowth_survives_source_free_service_reopen() {
     assert_eq!(
         wraith["build"]["choices"],
         json!([
-        {"purchases":[{"pool":"advancement","selection":{"kind":"talent","talent":DRAIN}}],"attribute":null},
-        empty, empty, empty, empty])
+            paid_choice(
+                json!({"kind":"body","form":"rogue.body.wraith","ordinal":0}),
+                json!({"kind":"talent","talent":DRAIN})
+            ),
+            empty,
+            empty,
+            empty,
+            empty
+        ])
     );
     assert_eq!(wraith["earned_progress"]["peak_threat"], 4);
+    assert_eq!(owned_rows(&wraith["build"], "personal"), json!([]));
+    for (ordinal, row) in wraith["build"]["hd"].as_array().unwrap().iter().enumerate() {
+        assert_eq!(
+            row["owner"],
+            json!({"kind":"body","form":"rogue.body.wraith","ordinal":ordinal})
+        );
+    }
     let w_overview = query(
         &mut case.service,
         case.clients.get_mut(&WRAITH).unwrap(),
         json!({"kind":"overview"}),
     );
+    assert!(
+        w_overview
+            .iter()
+            .any(|message| message["type"] == "advancement_page"),
+        "zero-personal-HD owned Wraith must receive its authorized overview: {w_overview:?}"
+    );
     assert_eq!(
-        page(&w_overview)["entries"][0]["value"]["points"]["unspent"],
-        "4"
+        page(&w_overview)["entries"][0]["value"]["growth"]["highest_applied_tier"],
+        "0"
+    );
+    assert_eq!(
+        page(&w_overview)["entries"][0]["value"]["growth"]["body_package_hit_dice"],
+        "5"
+    );
+    assert_eq!(
+        page(&w_overview)["entries"][0]["value"]["growth"]["highest_earned_tier"],
+        "0"
+    );
+    assert_eq!(
+        page(&w_overview)["entries"][0]["value"]["points"],
+        json!({"earned":"0","spent":"0","unspent":"0"})
     );
     assert!(case
         .service
@@ -1866,8 +1957,9 @@ fn canonical_wraith_earned_regrowth_survives_source_free_service_reopen() {
             ("food ration".into(), 1)
         ])
     );
-    case.purchase(1, json!({"kind":"talent","talent":"rattling_blow"}));
-    case.purchase(2, json!({"kind":"skill_rank","skill":"lore"}));
+    // The effective body slot is locked; purchases fund stable personal owners.
+    case.purchase(2, json!({"kind":"talent","talent":"rattling_blow"}));
+    case.purchase(3, json!({"kind":"skill_rank","skill":"lore"}));
     let paid = creature(&progress(&case.service, 0, 0, 2), OWNER)["build"].clone();
     assert_eq!(paid["hd"], original["hd"]);
     assert_eq!(paid["health_root_seed"], original["health_root_seed"]);
@@ -1875,8 +1967,15 @@ fn canonical_wraith_earned_regrowth_survives_source_free_service_reopen() {
     assert_eq!(
         paid["choices"],
         json!([
-            {"purchases":[{"pool":"advancement","selection":{"kind":"talent","talent":"rattling_blow"}}],"attribute":null},
-            {"purchases":[{"pool":"advancement","selection":{"kind":"skill_rank","skill":"lore"}}],"attribute":null}
+            empty,
+            paid_choice(
+                json!({"kind":"personal","id":1}),
+                json!({"kind":"talent","talent":"rattling_blow"})
+            ),
+            paid_choice(
+                json!({"kind":"personal","id":2}),
+                json!({"kind":"skill_rank","skill":"lore"})
+            )
         ])
     );
     for index in 0..8 {
@@ -1936,7 +2035,7 @@ fn canonical_wraith_earned_regrowth_survives_source_free_service_reopen() {
             .unwrap()
             .hit_dice
             .total;
-        if actual_hd == 1 {
+        if actual_hd == 2 {
             assert!(events.iter().any(|event| matches!(event,
                 CombatEventView::Ability { caster: Some(caster), target: Some(target), ability,
                     outcome: AbilityOutcome::Unaffected, strike: Some(0) }
@@ -1962,8 +2061,31 @@ fn canonical_wraith_earned_regrowth_survives_source_free_service_reopen() {
                 json!([{"kind":"damage","amount":0}])
             );
             let build = &creature(&drained, OWNER)["build"];
-            assert_eq!(build["hd"], json!([paid["hd"][0]]));
-            assert_eq!(build["choices"], json!([paid["choices"][0]]));
+            assert_eq!(build["hd"], json!([paid["hd"][0], paid["hd"][1]]));
+            assert_eq!(owned_rows(build, "body"), owned_rows(&paid, "body"));
+            assert_eq!(
+                owned_rows(build, "personal"),
+                json!([owned_rows(&paid, "personal")[0]])
+            );
+            assert_eq!(
+                build["body_build"]["drained"],
+                json!([{
+                    "hit_die":paid["hd"][2],"choices":paid["choices"][2]
+                }])
+            );
+            assert_eq!(
+                build["drained_hd"],
+                json!([]),
+                "owned loss is not copied into legacy drain storage"
+            );
+            assert_eq!(
+                build["body_build"]["health_root"],
+                paid["body_build"]["health_root"]
+            );
+            assert_eq!(
+                build["choices"],
+                json!([paid["choices"][0], paid["choices"][1]])
+            );
             assert_eq!(build["health_root_seed"], paid["health_root_seed"]);
             assert_eq!(lore(&case.service), 0);
             assert!(case.service.engine.alive(WRAITH));
@@ -1998,11 +2120,11 @@ fn canonical_wraith_earned_regrowth_survives_source_free_service_reopen() {
     let at_195 = progress(&case.service, 195, 0, 1);
     assert_eq!(
         creature(&at_195, OWNER)["build"]["hd"],
-        json!([original["hd"][0]])
+        json!([original["hd"][0], original["hd"][1]])
     );
     assert_eq!(
         creature(&at_195, OWNER)["build"]["choices"],
-        json!([paid["choices"][0]])
+        json!([paid["choices"][0], paid["choices"][1]])
     );
     assert_eq!(
         creature(&at_195, OWNER)["build"]["health_root_seed"],
@@ -2054,8 +2176,22 @@ fn canonical_wraith_earned_regrowth_survives_source_free_service_reopen() {
         "exact original ordinal source and Health seed"
     );
     assert_eq!(build["health_root_seed"], original["health_root_seed"]);
-    assert_eq!(build["choices"], json!([paid["choices"][0], empty]));
+    // ChooseAgain returns the funded owner and original Health, not its removed choices.
+    let restored_empty = json!({"purchase_highwater":1,"purchases":[],"attribute":null});
+    assert_eq!(
+        build["choices"],
+        json!([paid["choices"][0], paid["choices"][1], restored_empty])
+    );
     assert_eq!(lore(&case.service), 0);
+    assert_eq!(build["body_build"]["drained"], json!([]));
+    assert_eq!(
+        build["body_build"]["health_root"],
+        original["body_build"]["health_root"]
+    );
+    assert_eq!(
+        build["body_build"]["personal_restoration"],
+        json!({"kind":"choose_again"})
+    );
     let overview = query(
         &mut case.service,
         case.clients.get_mut(&OWNER).unwrap(),
@@ -2065,10 +2201,13 @@ fn canonical_wraith_earned_regrowth_survives_source_free_service_reopen() {
         page(&overview)["entries"][0]["value"]["points"],
         json!({"earned":"2","spent":"1","unspent":"1"})
     );
-    case.purchase(2, json!({"kind":"skill_rank","skill":"lore"}));
+    case.purchase(3, json!({"kind":"skill_rank","skill":"lore"}));
+    let mut repaid = paid.clone();
+    repaid["choices"][2]["purchase_highwater"] = json!(2);
+    repaid["choices"][2]["purchases"][0]["id"]["serial"] = json!(2);
     assert_eq!(
         creature(&progress(&case.service, 215, 200, 2), OWNER)["build"],
-        paid
+        repaid
     );
     assert_eq!(lore(&case.service), 1);
     case.act(OWNER, json!({"type":"wait"}));

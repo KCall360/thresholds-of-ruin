@@ -392,6 +392,14 @@ class DetectionAuthoredFixtureContracts(unittest.TestCase):
         source_species = tomllib.loads((root / "catalog/creatures.toml").read_text())["creatures"]["species"]
         self.assertEqual({key: fixture["manifest"]["archetypes"][key] for key in source_items}, source_items)
         self.assertEqual({key: fixture["manifest"]["creatures"]["species"][key] for key in source_species}, source_species)
+        source_bodies = tomllib.loads((root / "catalog/bodies.toml").read_text())["creatures"]["body_packages"]
+        actual_bodies = fixture["manifest"]["creatures"]["body_packages"]
+        self.assertEqual({key: actual_bodies[key] for key in source_bodies}, source_bodies)
+        owner = fixture["manifest"]["characters"][0]
+        body = actual_bodies[owner["creature"]["body_package"]]
+        self.assertEqual(body, {**source_bodies["rogue.body.human"], "species": "fixture.detection"})
+        self.assertEqual(owner["creature"]["hit_dice"],
+                         tomllib.loads((root / "scenario.toml").read_text())["characters"][0]["creature"]["hit_dice"])
         self.assertEqual(fixture["rules"], (root / "rules.toml").read_text())
         self.assertEqual(source_items["rogue.food_detection"]["class"], "scroll")
         self.assertIn("readable", source_items["rogue.food_detection"])

@@ -749,8 +749,10 @@ fn ownership_limit_subject() -> CreatureBuild {
     let build = subject(document, vec![HdSource::Racial; 3]);
     let choices = vec![
         HdChoices {
+            purchase_highwater: 0,
             purchases: (0..256)
                 .map(|index| AdvancementPurchase {
+                    id: None,
                     pool: pool("advancement"),
                     selection: PurchaseSelection::Talent(talent(&format!("limit_{index:03}"))),
                 })
@@ -758,7 +760,9 @@ fn ownership_limit_subject() -> CreatureBuild {
             attribute: None,
         },
         HdChoices {
+            purchase_highwater: 0,
             purchases: vec![AdvancementPurchase {
+                id: None,
                 pool: pool("advancement"),
                 selection: PurchaseSelection::SkillRank(Skill::Athletics),
             }],

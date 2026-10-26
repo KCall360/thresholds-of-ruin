@@ -732,3 +732,34 @@ fn portable_light_raw_commands_emit_explicit_actions_and_show_current_fuel() {
         "lighting never auto-equips"
     );
 }
+
+#[test]
+fn known_dual_device_requires_explicit_self_or_direction() {
+    let mut view = magic_state();
+    view.observation.ground_items.clear();
+    view.observation.inventory[1].identified = true;
+    view.observation.interactions.as_mut().unwrap().inventory[1].device_activation =
+        Some(DeviceActivation::DirectionOrSelf);
+    assert!(view.validate().is_ok());
+    let item = view.observation.inventory[1].id;
+    assert!(parse(&format!("zap #{item}"), &view)
+        .unwrap_err()
+        .contains("yourself"));
+    for suffix in ["self", "at self", "yourself", "to yourself"] {
+        assert_eq!(
+            parse(&format!("zap #{item} {suffix}"), &view).unwrap(),
+            Input::Command(Command::Act {
+                expected_revision: view.revision,
+                action: Action::Zap {
+                    item,
+                    aim: DeviceAim::SelfTarget {}
+                }
+            })
+        );
+    }
+    assert!(parse(&format!("zap #{item} east"), &view).is_ok());
+    view.observation.inventory[1].identified = false;
+    view.observation.interactions.as_mut().unwrap().inventory[1].device_activation =
+        Some(DeviceActivation::Direction);
+    assert!(parse(&format!("zap #{item} self"), &view).is_err());
+}

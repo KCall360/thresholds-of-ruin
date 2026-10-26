@@ -1,9 +1,10 @@
-format = 32
+format = 33
 id = "rogue-exploration"
 version = "1.0"
 ruleset = "rules.toml"
-modules = ["catalog/creatures.toml", "catalog/actors.toml", "catalog/items.toml"]
-# Both presets keep their first advancement point for an ordinary player choice.
+modules = ["catalog/creatures.toml", "catalog/bodies.toml", "catalog/actors.toml", "catalog/items.toml"]
+# Both presets have one innate racial body HD plus one personal class HD.
+# Only the personal class point is available for an ordinary player choice.
 default_character = 1
 themes = ["dungeon"]
 factions = { delvers = ["dungeon_foes"], dungeon_foes = ["delvers"] }
@@ -24,6 +25,7 @@ loadout = [
   { archetype = "rogue.ration", quantity = 1 },
 ]
 [characters.creature]
+body_package = "rogue.body.human"
 species = "rogue.human"
 name = "Warrior"
 faction = "delvers"
@@ -32,7 +34,7 @@ starting_skills = ["heavy_weaponry", "discipline"]
 restoration = "choose_again"
 nutrition = { kind = "required" }
 future_growth = { kind = "selected", source = { kind = "class", class = "warrior" } }
-hit_dice = [{ source = "warrior", purchases = [] }]
+hit_dice = [{ source = "racial", purchases = [] }, { source = "warrior", purchases = [] }]
 
 [[characters]]
 asset = "creature.humanoid.human"
@@ -49,6 +51,7 @@ loadout = [
   { archetype = "rogue.ration", quantity = 1 },
 ]
 [characters.creature]
+body_package = "rogue.body.human"
 species = "rogue.human"
 name = "Mage"
 faction = "delvers"
@@ -57,7 +60,7 @@ starting_skills = ["spellcasting", "heavy_weaponry"]
 restoration = "choose_again"
 nutrition = { kind = "required" }
 future_growth = { kind = "selected", source = { kind = "class", class = "mage" } }
-hit_dice = [{ source = "mage", purchases = [] }]
+hit_dice = [{ source = "racial", purchases = [] }, { source = "mage", purchases = [] }]
 
 [generation_recipes.exploration]
 kind = "grid_rooms"

@@ -732,10 +732,12 @@ pub(crate) fn compile_choices(
     rules: &s::rules::Ruleset,
 ) -> Result<s::creatures::HdChoices, Failure> {
     Ok(s::creatures::HdChoices {
+        purchase_highwater: 0,
         purchases: purchases
             .iter()
             .map(|purchase| {
                 Ok(s::creatures::AdvancementPurchase {
+                    id: None,
                     pool: PointPoolId::new(&purchase.pool)
                         .map_err(|_| invalid("Invalid point pool ID"))?,
                     selection: match &purchase.selection {
@@ -774,7 +776,19 @@ pub enum Restoration {
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct PersonalBodyGrant {
+    pub ordinal: u16,
+    #[serde(default)]
+    pub purchases: Vec<Purchase>,
+    pub attribute: Option<Attribute>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BuildSpec {
+    #[serde(default)]
+    pub personal_body_grants: Vec<PersonalBodyGrant>,
+    #[serde(default)]
+    pub body_package: Option<String>,
     #[serde(default)]
     pub future_growth: FutureGrowth,
     pub starting_skills: [Skill; 2],
@@ -828,9 +842,22 @@ impl FutureGrowth {
 #[serde(deny_unknown_fields)]
 pub struct Catalog {
     #[serde(default)]
+    pub body_packages: BTreeMap<String, BodyPackage>,
+    #[serde(default)]
     pub species: BTreeMap<String, Species>,
     #[serde(default)]
     pub templates: BTreeMap<String, Template>,
+}
+/// Explicit support metadata; `true` declares an ordinary supported living,
+/// corporeal, nonunique body. It does not add the form to any live item pool.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BodyPackage {
+    pub species: String,
+    pub body: crate::scenario_package::BodySpec,
+    pub hit_dice: Vec<Advancement>,
+    #[serde(default)]
+    pub polymorph_eligible: bool,
 }
 fn subtypes(values: &[String]) -> Result<BTreeSet<SubtypeId>, Failure> {
     let compiled = values
@@ -850,11 +877,12 @@ pub struct CompiledCatalog {
 pub(crate) enum CatalogKind {
     Species,
     Template,
+    BodyPackage,
 }
 
 impl Catalog {
     pub fn is_empty(&self) -> bool {
-        self.species.is_empty() && self.templates.is_empty()
+        self.species.is_empty() && self.templates.is_empty() && self.body_packages.is_empty()
     }
     pub fn compile(&self, rules: Arc<s::rules::Ruleset>) -> Result<CompiledCatalog, Failure> {
         self.compile_with_context(rules, |_, _, failure| failure)
@@ -867,6 +895,7 @@ impl Catalog {
     ) -> Result<CompiledCatalog, Failure> {
         if self.species.len() > s::limits::CATALOG_ENTRIES
             || self.templates.len() > s::limits::CATALOG_ENTRIES
+            || self.body_packages.len() > s::limits::CATALOG_ENTRIES
         {
             return Err(invalid("Creature catalog exceeds definition limits"));
         }
@@ -977,6 +1006,46 @@ impl Catalog {
         }
         let content = s::creatures::Content::with_detection_appearances(&content, appearances)
             .map_err(|error| invalid(format!("Invalid species detection appearance: {error:?}")))?;
+        let mut packages = BTreeMap::new();
+        let mut eligible = BTreeSet::new();
+        for (id, author) in &self.body_packages {
+            let (id, package) = (|| -> Result<_, Failure> {
+                let id = BodyFormId::new(id).map_err(|_| invalid("Invalid body-package ID"))?;
+                let package = s::creatures::BodyPackage {
+                    id: id.clone(),
+                    species: SpeciesId::new(&author.species)
+                        .map_err(|_| invalid("Invalid body species"))?,
+                    body: author.body.clone().into(),
+                    advancement: author
+                        .hit_dice
+                        .iter()
+                        .map(|entry| {
+                            Ok(s::creatures::PlannedAdvancement {
+                                source: hit_die_source(&entry.source, content.rules())?,
+                                choices: compile_choices(
+                                    &entry.purchases,
+                                    entry.attribute.as_ref(),
+                                    content.rules(),
+                                )?,
+                            })
+                        })
+                        .collect::<Result<Vec<_>, Failure>>()?,
+                };
+                package
+                    .validate(&content)
+                    .map_err(|error| invalid(format!("Invalid body package: {error:?}")))?;
+                Ok((id, Arc::new(package)))
+            })()
+            .map_err(|failure| context(CatalogKind::BodyPackage, id, failure))?;
+            if author.polymorph_eligible {
+                eligible.insert(id.clone());
+            }
+            packages.insert(id, package);
+        }
+        let content = s::creatures::Content::with_body_packages(&content, packages)
+            .map_err(|error| invalid(format!("Invalid body packages: {error:?}")))?;
+        let content = s::creatures::Content::with_polymorph_forms(&content, eligible)
+            .map_err(|error| invalid(format!("Invalid supported body forms: {error:?}")))?;
         Ok(CompiledCatalog { content })
     }
 }
@@ -1078,37 +1147,91 @@ impl CompiledCatalog {
                 )
             })
             .collect::<Result<Vec<_>, Failure>>()?;
-        let mut prototype = s::creatures::CreatureBuild::from_recorded(
-            self.content.clone(),
-            id,
-            attributes,
-            ledger,
-            primitive(&author.binding, "mana binding")?,
-            s::creatures::BuildAdvancement {
-                starting_skills: [
-                    skill(&author.starting_skills[0])?,
-                    skill(&author.starting_skills[1])?,
-                ],
-                restoration: match author.restoration {
-                    Restoration::ChooseAgain => s::creatures::RestorationPolicy::ChooseAgain,
-                    Restoration::Authored => s::creatures::RestorationPolicy::Authored(
-                        author
-                            .hit_dice
-                            .iter()
-                            .zip(&choices)
-                            .map(|(entry, choices)| {
-                                Ok(s::creatures::PlannedAdvancement {
-                                    source: hit_die_source(&entry.source, self.content.rules())?,
-                                    choices: choices.clone(),
-                                })
+        let advancement = s::creatures::BuildAdvancement {
+            starting_skills: [
+                skill(&author.starting_skills[0])?,
+                skill(&author.starting_skills[1])?,
+            ],
+            restoration: match author.restoration {
+                Restoration::ChooseAgain => s::creatures::RestorationPolicy::ChooseAgain,
+                Restoration::Authored => s::creatures::RestorationPolicy::Authored(
+                    author
+                        .hit_dice
+                        .iter()
+                        .zip(&choices)
+                        .map(|(entry, choices)| {
+                            Ok(s::creatures::PlannedAdvancement {
+                                source: hit_die_source(&entry.source, self.content.rules())?,
+                                choices: choices.clone(),
                             })
-                            .collect::<Result<_, Failure>>()?,
-                    ),
-                },
-                choices,
+                        })
+                        .collect::<Result<_, Failure>>()?,
+                ),
             },
-            templates,
-        )
+            choices,
+        };
+        let binding = primitive(&author.binding, "mana binding")?;
+        if author.personal_body_grants.len() > s::limits::HIT_DICE
+            || (author.body_package.is_none() && !author.personal_body_grants.is_empty())
+        {
+            return Err(invalid(
+                "Personal body grants require a bounded explicit body package",
+            ));
+        }
+        let mut personal_body_grants = BTreeMap::new();
+        let mut previous = None;
+        for grant in &author.personal_body_grants {
+            if previous.is_some_and(|ordinal| ordinal >= grant.ordinal) {
+                return Err(invalid(
+                    "Personal body grants require ordered unique donor ordinals",
+                ));
+            }
+            previous = Some(grant.ordinal);
+            personal_body_grants.insert(
+                grant.ordinal,
+                compile_choices(
+                    &grant.purchases,
+                    grant.attribute.as_ref(),
+                    self.content.rules(),
+                )?,
+            );
+        }
+        let mut prototype = if let Some(package_id) = &author.body_package {
+            if !templates.is_empty() {
+                return Err(invalid("Body packages do not support mixed templates"));
+            }
+            let package_id = BodyFormId::new(package_id)
+                .map_err(|_| invalid("Invalid birth body-package ID"))?;
+            let package = self
+                .content
+                .body_package(&package_id)
+                .ok_or_else(|| invalid("Unknown birth body package"))?;
+            if package.species != id {
+                return Err(invalid(
+                    "Body package species differs from authored creature",
+                ));
+            }
+            s::creatures::CreatureBuild::from_recorded_body_package_personal_grants(
+                self.content.clone(),
+                package.clone(),
+                attributes,
+                ledger,
+                binding,
+                advancement,
+                0,
+                personal_body_grants,
+            )
+        } else {
+            s::creatures::CreatureBuild::from_recorded(
+                self.content.clone(),
+                id,
+                attributes,
+                ledger,
+                binding,
+                advancement,
+                templates,
+            )
+        }
         .map_err(|error| invalid(format!("Invalid authored creature build: {error:?}")))?;
         prototype
             .set_future_growth(author.future_growth.compile()?)

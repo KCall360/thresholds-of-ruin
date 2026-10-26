@@ -1039,6 +1039,29 @@ pub enum EffectRecipient {
     Target,
     Source,
 }
+/// An authored roster is separate from spawn tables; order is deterministic.
+pub(crate) fn valid_body_forms(forms: &[crate::content_ids::BodyFormId]) -> bool {
+    !forms.is_empty()
+        && forms.len() <= crate::limits::CATALOG_ENTRIES
+        && forms
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
+            == forms.len()
+}
+pub(crate) fn read_body_forms<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Vec<crate::content_ids::BodyFormId>, D::Error> {
+    let forms = crate::bounded::Bounded::<
+        crate::content_ids::BodyFormId,
+        { crate::limits::CATALOG_ENTRIES },
+    >::deserialize(d)?
+    .0;
+    if !valid_body_forms(&forms) {
+        return Err(serde::de::Error::custom("invalid Polymorph body roster"));
+    }
+    Ok(forms)
+}
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Effect {
@@ -1077,6 +1100,9 @@ pub enum Effect {
     RaiseLevel,
     /// Target-only permanent special suppression and current concealment cleanup.
     CancelSpecials,
+    BalefulPolymorph {
+        forms: Vec<crate::content_ids::BodyFormId>,
+    },
     HasteDose {
         condition: ConditionId,
         rest: ConditionId,
@@ -1204,6 +1230,10 @@ impl<'de> Deserialize<'de> for Effect {
             GainStrength {},
             RaiseLevel {},
             CancelSpecials {},
+            BalefulPolymorph {
+                #[serde(deserialize_with = "read_body_forms")]
+                forms: Vec<crate::content_ids::BodyFormId>,
+            },
             HasteDose {
                 condition: ConditionId,
                 rest: ConditionId,
@@ -1306,6 +1336,7 @@ impl<'de> Deserialize<'de> for Effect {
             Fields::GainStrength {} => Self::GainStrength,
             Fields::RaiseLevel {} => Self::RaiseLevel,
             Fields::CancelSpecials {} => Self::CancelSpecials,
+            Fields::BalefulPolymorph { forms } => Self::BalefulPolymorph { forms },
             Fields::HasteDose { condition, rest } => Self::HasteDose { condition, rest },
             Fields::ArrestDescent {} => Self::ArrestDescent,
             Fields::StepSelfOneCell {} => Self::StepSelfOneCell,
@@ -3056,6 +3087,9 @@ impl References<'_> {
                         "condition_duration",
                     )?;
                 }
+                Effect::BalefulPolymorph { forms } => {
+                    bound(valid_body_forms(forms), "polymorph_roster")?
+                }
                 Effect::SearchAdjacentGuises
                 | Effect::ObservePublicPlan
                 | Effect::DrainLatestHitDie
@@ -3703,6 +3737,7 @@ impl Effect {
             Self::CorrodeArmor { amount, .. } => {
                 (1..=crate::limits::NUMERIC as u32).contains(amount)
             }
+            Self::BalefulPolymorph { forms } => valid_body_forms(forms),
             Self::HasteDose { condition, rest } => condition != rest,
             Self::ApplyLinkedHold { policy } => policy.valid(),
             Self::HoldDamage { .. } => true,
@@ -4133,8 +4168,8 @@ mod tests {
         ));
         assert!(
             toml::from_str::<RulesetDocument>(&DEFAULT_RULESET_TOML.replace(
-                "id = \"interactions-v53\"",
-                "id = \"interactions-v53\"\nunknown = true"
+                "id = \"interactions-v54\"",
+                "id = \"interactions-v54\"\nunknown = true"
             ))
             .is_err()
         );

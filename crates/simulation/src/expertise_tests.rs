@@ -415,6 +415,7 @@ fn replacing_the_last_fixed_grant_with_paid_expertise_checks_candidate_ownership
                 index: 0,
             },
             Some(crate::creatures::AdvancementPurchase {
+                id: None,
                 pool: PointPoolId::new("advancement").unwrap(),
                 selection: PurchaseSelection::Expertise(expertise("fixture.knives")),
             }),

@@ -36,7 +36,7 @@ mod contact_policy;
 mod contact_trace;
 mod ray;
 pub use contact_policy::{RayResolution, RayTraversal};
-pub(crate) use contact_trace::MAX_CONTACT_STATES;
+pub(crate) use contact_trace::{ContactEnd, MAX_CONTACT_STATES};
 #[cfg(test)]
 mod contact_trace_tests;
 mod resolve;
@@ -120,6 +120,27 @@ pub(crate) fn device_definition_valid(
     })
 }
 
+/// DiscernibleEffect is currently a closed Polymorph device policy, not a
+/// generic alias for successful effects or for chart completion.
+pub(crate) fn discernible_device_definition_valid(d: &crate::rules::AbilityDef) -> bool {
+    let crate::rules::StrikeSource::Authored { strikes } = &d.strikes else {
+        return false;
+    };
+    let [strike] = strikes.as_slice() else {
+        return false;
+    };
+    d.invocation.is_directional_ray()
+        && ray::definition_shape_valid(d)
+        && d.cost.is_none()
+        && d.cooldown.is_none()
+        && d.supply_costs.is_empty()
+        && strike.on_success.is_empty()
+        && matches!(
+            strike.on_failure.as_slice(),
+            [crate::rules::Effect::BalefulPolymorph { .. }]
+        )
+}
+
 /// Self devices use one checkless, cost-free item payload, never a granted ability.
 pub(crate) fn self_device_definition_valid(d: &crate::rules::AbilityDef) -> bool {
     let crate::rules::StrikeSource::Authored { strikes } = &d.strikes else {
@@ -146,6 +167,28 @@ pub(crate) fn self_device_definition_valid(d: &crate::rules::AbilityDef) -> bool
             .on_success
             .iter()
             .all(|effect| effect.valid_shape() && !effect.spatial())
+}
+
+/// A willing self-target waives only this authored Polymorph ray's resistance.
+/// The same device remains a resisted physical ray when aimed directionally.
+pub(crate) fn self_polymorph_device_definition_valid(d: &crate::rules::AbilityDef) -> bool {
+    let crate::rules::StrikeSource::Authored { strikes } = &d.strikes else {
+        return false;
+    };
+    let [strike] = strikes.as_slice() else {
+        return false;
+    };
+    d.invocation == InvocationKind::DirectionalContactRay
+        && d.reach == crate::rules::Reach::UntilObstruction
+        && ray::definition_shape_valid(d)
+        && d.cost.is_none()
+        && d.cooldown.is_none()
+        && d.supply_costs.is_empty()
+        && strike.descriptors.is_empty()
+        && matches!(
+            strike.on_failure.as_slice(),
+            [crate::rules::Effect::BalefulPolymorph { .. }]
+        )
 }
 
 #[cfg(test)]
@@ -176,3 +219,10 @@ mod growth_dose_tests;
 mod haste_dose_tests;
 #[cfg(test)]
 mod portable_light_tests;
+
+#[cfg(test)]
+mod polymorph_tests;
+
+#[cfg(test)]
+#[path = "abilities/discovery_policy_tests.rs"]
+mod discovery_policy_tests;
