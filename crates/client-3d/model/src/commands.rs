@@ -27,6 +27,9 @@ pub enum Cmd {
     /// A step of choosing and firing a projectile. These query the server for
     /// its choices, so the connection's session carries them out.
     Projectile(ProjectileStep),
+    /// An advancement command as the player types it ("overview", "purchase
+    /// ..."). The connection's advancement pages turn it into requests.
+    Advancement(String),
     Door(DoorTarget, bool),
     /// Journey to a known cell, named by its key.
     Travel(String),
@@ -97,8 +100,8 @@ pub fn request(state: &ClientState, command: Cmd) -> Result<Request, String> {
         }
         return Err("You can't act right now.".into());
     }
-    if matches!(command, Cmd::Projectile(_)) {
-        return Err("Projectile choices are made in the session.".into());
+    if matches!(command, Cmd::Projectile(_) | Cmd::Advancement(_)) {
+        return Err("Choices with server pages are made in the session.".into());
     }
     let action = match command {
         Cmd::Wait => Action::Wait,
@@ -159,7 +162,9 @@ pub fn request(state: &ClientState, command: Cmd) -> Result<Request, String> {
                 None => Action::Move { direction },
             }
         }
-        Cmd::Control | Cmd::Projectile(_) => unreachable!("handled before acting"),
+        Cmd::Control | Cmd::Projectile(_) | Cmd::Advancement(_) => {
+            unreachable!("handled before acting")
+        }
     };
     Ok(state.command_request(Command::Act {
         expected_revision: state.state().revision,

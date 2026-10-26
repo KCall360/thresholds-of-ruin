@@ -30,6 +30,7 @@ pub(super) fn receive(
     for event in events {
         match event {
             NetEvent::Ready => game.busy = false,
+            NetEvent::Advancement(lines) => game.advancement = lines,
             NetEvent::Projectile(prompt) => {
                 // A chosen delivery waits for its direction like any aim.
                 let aiming = prompt.as_ref().is_some_and(|p| p.aiming);

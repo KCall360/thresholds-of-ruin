@@ -11,7 +11,9 @@ impl InitialPresentation {
         match event {
             // Connection has already validated and applied each server message.
             Event::View(_) => Ok(()),
-            Event::Projectile(_) => Err("Unexpected projectile choice during startup".into()),
+            Event::Projectile(_) | Event::Advancement(_) => {
+                Err("Unexpected player page during startup".into())
+            }
             Event::Status(status) if self.statuses.len() < EVENT_CAPACITY - 2 => {
                 self.statuses.push(status);
                 Ok(())

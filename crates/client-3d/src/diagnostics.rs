@@ -143,6 +143,9 @@ pub(super) fn capture(
         "panel_open": panel.as_ref().is_some_and(|panel| panel.open),
         // Pack actions in number-key order, as "row: action".
         "panel_actions": panel.as_ref().map(|panel| panel.actions.iter().map(|(label, _)| label.clone()).collect::<Vec<_>>()),
+        "advancement": game.as_ref().filter(|game| game.advancement_open).map(|game| serde_json::json!({
+            "lines": game.advancement, "typed": game.typed,
+        })),
         "aiming": game.as_ref().and_then(|game| game.aiming.as_ref()).map(|aim| format!("{aim:?}")),
         "projectile": game.as_ref().and_then(|game| game.projectile.as_ref()).map(|prompt| serde_json::json!({
             "title": prompt.title, "rows": prompt.rows, "choosing": prompt.choosing, "aiming": prompt.aiming,

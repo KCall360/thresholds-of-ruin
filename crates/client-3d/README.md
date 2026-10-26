@@ -327,6 +327,10 @@ Objects:
   with Previous, Next and Cancel. Once a delivery is chosen, the next movement
   key fires it. The session binds every query to its own reply and drops the
   choice when the state it was made from changes.
+- F10 opens the owner's advancement screen with the server's overview. Type
+  any [advancement command](../../docs/play/advancement.md) and press Enter;
+  Esc or F10 closes the screen. While it is open, typing never moves the
+  character or turns the camera.
 - Number keys 1 to 9, then 0, take the pack's first ten actions in order.
   Each button shows its key, so the pack can be played without the mouse.
 

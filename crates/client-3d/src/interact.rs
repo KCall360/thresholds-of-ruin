@@ -347,7 +347,7 @@ pub fn click(
     mut game: ResMut<Game>,
     mut pursuit: ResMut<Pursuit>,
 ) {
-    if !mouse.just_pressed(MouseButton::Left) || hover.over_ui {
+    if !mouse.just_pressed(MouseButton::Left) || hover.over_ui || game.advancement_open {
         return;
     }
     // An ability waiting for a creature takes the clicked one.
@@ -531,6 +531,16 @@ pub fn keys(
     mut panel: ResMut<Panel>,
     mut exit: EventWriter<AppExit>,
 ) {
+    // The advancement screen takes the keyboard for its command line.
+    if keys.just_pressed(KeyCode::F10)
+        || (game.advancement_open && keys.just_pressed(KeyCode::Escape))
+    {
+        crate::advancement_screen::toggle(&net, &mut game);
+        return;
+    }
+    if game.advancement_open {
+        return;
+    }
     if keys.just_pressed(KeyCode::Escape) {
         if game.projectile.is_some() {
             game.aiming = None;

@@ -25,6 +25,8 @@ pub enum Event {
     View(Box<View>),
     /// A projectile choice in progress, or `None` once it ends.
     Projectile(Option<ProjectilePrompt>),
+    /// The advancement pages as the player reads them.
+    Advancement(Vec<String>),
     Status(String),
     Ready,
     Fatal(String),
@@ -207,7 +209,6 @@ async fn run(
     tx: &SyncSender<Event>,
 ) -> Result<(), Error> {
     let mut connection = Connection::connect(address, token, actor, "3d").await?;
-    connection.use_external_advancement_presentation();
     connection.set_pace(Duration::from_millis(90));
     let result = session(&mut connection, observe, rx, tx).await;
     // A broken presentation pipe is normal during window shutdown. Connection
@@ -241,6 +242,7 @@ async fn session(
         publish(tx, event)?;
     }
     let mut menu = None;
+    let mut advancement = Vec::new();
     loop {
         tokio::select! {
             biased;
@@ -256,6 +258,19 @@ async fn session(
                     }
                     publish(tx, Event::Ready)?;
                 }
+                Some(Input { command: Cmd::Advancement(text), .. }) => {
+                    // Browsing is free and stays allowed while work is under way.
+                    let request = tor_client_common::advancement::parse(&text)
+                        .and_then(|input| connection.advancement_pages.request(input, &connection.state));
+                    match request {
+                        Ok(Some(request)) if connection.is_synchronized() => transact(connection, request, tx).await?,
+                        Ok(Some(_)) => publish(tx, Event::Status("Resynchronizing; try again.".into()))?,
+                        Ok(None) => {}
+                        Err(reason) => publish(tx, Event::Status(reason))?,
+                    }
+                    present_advancement(connection, &mut advancement, tx, true)?;
+                    publish(tx, Event::Ready)?;
+                }
                 Some(command) => {
                     match request_from(&connection.state, &command.shown, command.command) {
                         Ok(request) if connection.is_synchronized() => transact(connection, request, tx).await?,
@@ -269,9 +284,27 @@ async fn session(
                 let message = message?;
                 present(connection, &message, tx)?;
                 projectile::revalidate(connection, &mut menu, tx)?;
+                present_advancement(connection, &mut advancement, tx, false)?;
             }
         }
     }
+}
+
+/// Publish the advancement display when it changed, or always on request.
+fn present_advancement(
+    connection: &Connection,
+    shown: &mut Vec<String>,
+    tx: &SyncSender<Event>,
+    always: bool,
+) -> Result<(), Error> {
+    let lines = connection
+        .advancement_pages
+        .display(&connection.state.state().observation);
+    if always || lines != *shown {
+        shown.clone_from(&lines);
+        publish(tx, Event::Advancement(lines))?;
+    }
+    Ok(())
 }
 
 async fn transact(
@@ -321,6 +354,20 @@ async fn transact_with(
     .await
     .map_err(|_| "Response timed out")??;
     Ok(())
+}
+
+/// A ready connection whose commands a test receives directly.
+#[cfg(test)]
+pub(crate) fn test_channel() -> (crate::Net, async_mpsc::Receiver<Input>) {
+    let (mut network, commands, events) = Network::channels();
+    events.send(Event::Ready).unwrap();
+    network.next_event().unwrap();
+    // The window's side of the event channel stays open for the test.
+    std::mem::forget(events);
+    (
+        crate::Net(std::sync::Arc::new(std::sync::Mutex::new(network))),
+        commands,
+    )
 }
 
 #[cfg(test)]

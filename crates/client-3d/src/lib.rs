@@ -4,6 +4,7 @@
 //! The server describes cells in an observer frame that moves with the
 //! character. Matching cell keys between views recovers that motion, so the
 //! window keeps one steady world and the camera glides after the player.
+mod advancement_screen;
 mod autoplay;
 mod bestiary;
 mod cave;
@@ -348,7 +349,14 @@ pub fn run() -> Result<(), Error> {
     .insert_resource(autoplay::Autoplay::new(autoplay, hunt))
     .add_systems(
         Startup,
-        (setup, interact::setup, minimap::setup, cursor::setup).chain(),
+        (
+            setup,
+            interact::setup,
+            advancement_screen::setup,
+            minimap::setup,
+            cursor::setup,
+        )
+            .chain(),
     )
     .add_systems(
         Update,
@@ -356,6 +364,7 @@ pub fn run() -> Result<(), Error> {
             receive,
             react,
             interact::keys,
+            (advancement_screen::typing, advancement_screen::show),
             interact::panel,
             interact::panel_buttons,
             input,
@@ -543,6 +552,10 @@ struct Game {
     aiming: Option<Aim>,
     /// A projectile choice in progress, as the session last presented it.
     projectile: Option<net::ProjectilePrompt>,
+    /// The advancement screen: open, its pages and the command being typed.
+    advancement_open: bool,
+    advancement: Vec<String>,
+    typed: String,
     busy: bool,
     fatal: bool,
     since_send: f32,

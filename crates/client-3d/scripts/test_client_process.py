@@ -810,7 +810,7 @@ class Native3DProcesses(ProcessTestCase):
                 vk = ord(name.upper()) if len(name) == 1 and name.isascii() and name.isalnum() else {
                     "Escape": 0x1B, "space": 0x20, "Return": 0x0D, "Tab": 0x09,
                     "Up": 0x26, "Down": 0x28, "Left": 0x25, "Right": 0x27,
-                    "PageUp": 0x21, "PageDown": 0x22,
+                    "PageUp": 0x21, "PageDown": 0x22, "F10": 0x79,
                 }[name]
                 scan = user32.MapVirtualKeyW(vk, 0)
                 extended = name in ("Up", "Down", "Left", "Right", "PageUp", "PageDown")
@@ -1072,6 +1072,44 @@ class Native3DProcesses(ProcessTestCase):
         charges = sorted(row["charges"] for row in owner["state"]["observation"]["interactions"]["inventory"]
                          if row["charges"] is not None)
         self.assertEqual(charges, [2], "the zap spent one charge of the identified wand east")
+        native("Escape", True)
+        try:
+            self.assertEqual(window.child.wait(timeout=30), 0)
+        finally:
+            native("Escape", False)
+
+    def test_native_advancement_screen_reads_the_owners_pages(self):
+        """F10 opens the owner's advancement pages from the real server, and a
+        typed command fetches another; Esc closes it without quitting."""
+        self.server(scenario="advancement-owner")
+        executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
+        window = self.launch("tor-client-3d", [
+            "--connect", self.address, "--capture", self.directory / "captures", "--capture-every", "0.4",
+            "--quit-after", "180",
+        ], executable=executable)
+        self.captured(window, lambda frame: frame["has_control"] and not frame["busy"])
+        native = self.native_keys(window)
+
+        def tap(name, done):
+            native(name, True)
+            try:
+                return self.captured(window, lambda frame: not frame["busy"] and done(frame))
+            finally:
+                native(name, False)
+
+        def lines(frame):
+            return chr(10).join((frame["advancement"] or {}).get("lines", []))
+
+        feet = self.captured(window)["world_feet"]
+        frame = tap("F10", lambda frame: "Overview" in lines(frame))
+        self.assertNotIn("Open overview to fetch", lines(frame))
+        for letter in "ledger":
+            frame = tap(letter, lambda frame, letter=letter: frame["advancement"]["typed"].endswith(letter))
+        self.assertEqual(frame["advancement"]["typed"], "ledger")
+        frame = tap("Return", lambda frame: "Ledger" in lines(frame) and frame["advancement"]["typed"] == "")
+        self.assertEqual(frame["world_feet"], feet, "typing a, d, e and the like never moves the character")
+        frame = tap("Escape", lambda frame: frame["advancement"] is None)
+        self.assertIsNone(window.child.poll(), "Esc closes the screen, not the game")
         native("Escape", True)
         try:
             self.assertEqual(window.child.wait(timeout=30), 0)
