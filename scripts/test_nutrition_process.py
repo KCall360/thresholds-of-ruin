@@ -124,10 +124,11 @@ class NutritionProcesses(ProcessTestCase):
         if isinstance(value, dict):
             if "edible" in value:
                 self.assertEqual(set(value), {"item", "slot", "equipped_slot", "known_equipment", "known_projectile_bonus", "known_cursed", "known_protected",
-                                             "drinkable", "edible", "readable", "zappable", "device_activation", "charges"})
+                                             "drinkable", "edible", "readable", "zappable", "device_activation", "portable_light", "charges"})
                 self.assertFalse(value["readable"])
                 self.assertFalse(value["zappable"])
                 self.assertIsNone(value["device_activation"])
+                self.assertIsNone(value["portable_light"])
                 self.assertIsNone(value["charges"])
                 self.assertIsNone(value["known_cursed"])
                 self.assertIsNone(value["known_protected"])
@@ -293,10 +294,11 @@ class NutritionProcesses(ProcessTestCase):
             entry = next(row for row in observation(frame)["interactions"]["inventory"] if row["item"] == meal["id"])
             self.assertTrue(entry["edible"])
             self.assertEqual(set(entry), {"item", "slot", "equipped_slot", "known_equipment", "known_projectile_bonus", "known_cursed", "known_protected",
-                                          "drinkable", "edible", "readable", "zappable", "device_activation", "charges"})
+                                          "drinkable", "edible", "readable", "zappable", "device_activation", "portable_light", "charges"})
             self.assertFalse(entry["readable"])
             self.assertFalse(entry["zappable"])
             self.assertIsNone(entry["device_activation"])
+            self.assertIsNone(entry["portable_light"])
             self.assertIsNone(entry["charges"])
             self.assertIsNone(entry["known_cursed"])
             self.assertIsNone(entry["known_protected"])

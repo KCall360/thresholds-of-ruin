@@ -440,7 +440,9 @@ class HeadlessProcesses(ProcessTestCase):
                 for entry in cell["ground_items"]:
                     self.assertEqual(set(entry), {"item", "position"})
                     self.assertEqual(set(entry["item"]), {
-                        "class", "quantity", "appearance", "identified", "description", "name", "asset"})
+                        "class", "quantity", "appearance", "identified", "description", "name", "asset",
+                        "presentation"})
+                    self.assertIsNone(entry["item"]["presentation"])
                     for value in (entry, entry["item"]):
                         for field in ("id", "reachable", "supply_reachable", "known_supply"):
                             self.assertNotIn(field, value)

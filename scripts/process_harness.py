@@ -735,7 +735,13 @@ class Process:
         finally:
             self.lines.put(None)
 
-    def until(self, predicate, seconds=15):
+    def until(self, predicate, seconds=15, *, include_transcript=True):
+        """Wait within one deadline; optionally return only the matched line.
+
+        JSON-frame callers already retain their parsed result and need no second
+        read of consumed capture chunks. This changes only the return value;
+        FIFO consumption, the diagnostic tail and lossless retention are shared.
+        """
         deadline = time.monotonic() + seconds
         start = self.lines.offset
         while True:
@@ -760,6 +766,8 @@ class Process:
             if time.monotonic() >= deadline:
                 raise self._failure("Process output deadline")
             if matched:
+                if not include_transcript:
+                    return line
                 if getattr(self, "_segmented_stdout", False):
                     try:
                         result = self.lines.read_between(start, self.lines.offset, deadline=deadline)
@@ -1006,7 +1014,9 @@ class ProcessTestCase(unittest.TestCase):
                 found.append(value)
                 return True
             return False
-        client.until(match, seconds)
+        # The parsed frame is the result; replaying the consumed transcript here
+        # can wait on archival even after the exact response arrived in time.
+        client.until(match, seconds, include_transcript=False)
         return found[-1]
 
     def client(self, token=TOKEN, observe=False, actor=None, *, omit_memory=False, compact_background=False):

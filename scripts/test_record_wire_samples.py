@@ -217,7 +217,8 @@ class CompleteRecordingContracts(unittest.TestCase):
             case.work_budget.before()
             predicates = []
 
-            def until(predicate, seconds):
+            def until(predicate, seconds, *, include_transcript):
+                self.assertFalse(include_transcript)
                 self.assertGreater(seconds, 0)
                 self.assertLessEqual(seconds, 10)
                 # Exercise the actual base ASCII -> overridden frame -> budget
