@@ -98,6 +98,44 @@ class Sample(unittest.TestCase):
                 self.assertEqual(records[0]['kind'], 'selection')
                 self.assertEqual(records[-1]['kind'], 'suite')
 
+    def test_deferred_tests_leave_the_selection_without_being_reported_as_skipped(self):
+        source = '''import unittest
+class Sample(unittest.TestCase):
+ def test_a(self): pass
+ def test_slow(self): raise AssertionError('deferred test ran')
+'''
+        for workers in (1, 2):
+            with self.subTest(workers=workers):
+                result, records = self.run_fixture(source, '--workers', str(workers), '--exclude',
+                                                   'test_sample.Sample.test_slow', 'discover', '-s', '.', ci='')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn('DEFERRED (not run): test_sample.Sample.test_slow', result.stderr)
+                self.assertEqual(records[0]['test_ids'], ['test_sample.Sample.test_a'])
+                self.assertEqual(records[0]['deferred'], ['test_sample.Sample.test_slow'])
+                self.assertEqual([row['test_id'] for row in records if row['kind'] == 'test'],
+                                 ['test_sample.Sample.test_a'])
+                self.assertEqual((records[-1]['tests_run'], records[-1]['skipped']), (1, 0))
+
+    def test_deferring_an_unloaded_test_fails_closed(self):
+        source = '''import unittest
+class Sample(unittest.TestCase):
+ def test_a(self): pass
+'''
+        result, records = self.run_fixture(source, '--exclude', 'test_sample.Sample.test_renamed',
+                                           'discover', '-s', '.', ci='')
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('not loaded: test_sample.Sample.test_renamed', result.stderr)
+        self.assertNotIn('test', [row['kind'] for row in records])
+
+    def test_deferral_is_rejected_in_ci(self):
+        source = '''import unittest
+class Sample(unittest.TestCase):
+ def test_a(self): pass
+'''
+        result, _ = self.run_fixture(source, '--exclude', 'test_sample.Sample.test_a', 'discover', '-s', '.', ci='true')
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('local quick/push selection only', result.stderr)
+
     def test_interruption_preserves_prior_subtest_failure_and_error_counts(self):
         for statement, field in [("self.fail('failure sentinel')", 'failures'),
                                  ("raise ValueError('error sentinel')", 'errors')]:

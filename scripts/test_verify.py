@@ -12,6 +12,7 @@ from io import StringIO
 from unittest.mock import patch
 import unittest
 
+import ci_test_contracts
 import verify
 
 
@@ -178,9 +179,25 @@ class ProcessSelection(unittest.TestCase):
             self.assertIn("requires full", error.getvalue())
 
     def test_the_summary_says_full_runs_every_process_test(self):
-        self.assertEqual(verify.process_summary("quick", ["a"], ["a", "b"]), "process tests: 1 of 2 (touched and smoke)")
-        self.assertEqual(verify.process_summary("push", ["a"], ["a", "b"]), "process tests: 1 of 2 (touched and smoke)")
-        self.assertEqual(verify.process_summary("full", ["a"], ["a", "b"]), "process tests: all 2")
+        for tier in ("quick", "push"):
+            self.assertEqual(verify.process_summary(tier, ["a"], ["a", "b"]),
+                             "process tests: 1 of 2 (touched, changed clients and smoke)")
+            self.assertEqual(verify.process_summary(tier, ["a"], ["a", "b"], ["a.C.test_x"]),
+                             "process tests: 1 of 2 (touched, changed clients and smoke); "
+                             "1 extended-cost tests deferred to full and CI")
+        self.assertEqual(verify.process_summary("full", ["a"], ["a", "b"], ["a.C.test_x"]), "process tests: all 2")
+
+    def test_clients_reached_only_through_dependencies_select_the_smoke_set(self):
+        smoke = ("test_headless_process",)
+        select = lambda affected, direct: verify.select_process_tests(
+            [], set(affected), False, self.scripts, smoke, direct=set(direct))
+        # A protocol change reaches every client; that is the broad smoke case.
+        self.assertEqual(select(["tor-protocol", "tor-client-ascii", "tor-client-headless", "tor-server"],
+                                ["tor-protocol"]), ["test_headless_process"])
+        self.assertEqual(select(["tor-client-ascii"], ["tor-client-ascii"]),
+                         ["test_ascii_process", "test_items_process"])
+        self.assertEqual(select(["tor-server", "tor-client-ascii"], ["tor-server", "tor-client-ascii"]),
+                         ["test_ascii_process", "test_headless_process", "test_items_process"])
 
     def test_the_summary_names_the_slowest_recorded_tests(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -192,6 +209,29 @@ class ProcessSelection(unittest.TestCase):
                               encoding="utf-8")
             slowest = verify.slowest_tests([first, second, Path(directory, "missing.jsonl")], count=1)
         self.assertEqual([row["test_id"] for row in slowest], ["m.C.test_slow"])
+
+    def test_extended_cost_tests_are_deferred_only_from_selected_unedited_modules(self):
+        local = verify.LOCAL_EXTENDED[0]
+        module = local.split(".")[0]
+        reviewed = sorted(test for test in ci_test_contracts.EXTENDED if test.startswith("test_floor_activation_process."))
+        self.assertTrue(reviewed)
+        self.assertEqual(verify.deferred_process_tests([module, "test_floor_activation_process"], []),
+                         sorted([*reviewed, *(t for t in verify.LOCAL_EXTENDED if t.startswith(module + "."))]))
+        self.assertEqual(verify.deferred_process_tests(["test_text_process"], []), [])
+        # A change to a test module runs every test in it.
+        self.assertEqual(verify.deferred_process_tests([module], [f"scripts/{module}.py"]), [])
+
+    def test_local_extended_tests_exist_and_are_not_already_reviewed(self):
+        import ast
+        self.assertFalse(set(verify.LOCAL_EXTENDED) & set(ci_test_contracts.EXTENDED))
+        self.assertEqual(len(verify.LOCAL_EXTENDED), len(set(verify.LOCAL_EXTENDED)))
+        for test in verify.LOCAL_EXTENDED:
+            with self.subTest(test=test):
+                module, cls, method = test.split(".")
+                tree = ast.parse((verify.SCRIPTS / f"{module}.py").read_text(encoding="utf-8"))
+                classes = {node.name: node for node in tree.body if isinstance(node, ast.ClassDef)}
+                self.assertIn(cls, classes)
+                self.assertIn(method, {node.name for node in classes[cls].body if isinstance(node, ast.FunctionDef)})
 
     def test_the_smoke_set_names_existing_process_tests(self):
         self.assertLessEqual(set(verify.SMOKE_PROCESS_TESTS), set(verify.process_tests(verify.SCRIPTS)))
@@ -387,6 +427,40 @@ class Tiers(unittest.TestCase):
                 self.assertEqual(Path(environment["TOR_SCENARIO_COMPILER"]), verify.ROOT / "alternate-target/debug" /
                                  ("tor-scenario.exe" if os.name == "nt" else "tor-scenario"))
 
+    def test_quick_tests_direct_packages_and_push_tests_every_affected_one(self):
+        affected = {"tor-protocol", "tor-client-common", "tor-server"}
+        quick = {n: c for n, c, _ in verify.plan("quick", affected, [], tested={"tor-protocol"})}
+        push = {n: c for n, c, _ in verify.plan("push", affected, [], tested={"tor-protocol"})}
+        self.assertEqual(quick["rust-debug"], ["cargo", "test", "-p", "tor-protocol", "--locked"])
+        for package in affected:
+            self.assertIn(package, quick["clippy"])
+        self.assertIn("service_contract_ci.py", push["rust-debug"][1])
+        for package in affected:
+            self.assertIn(package, push["rust-debug"])
+
+    def test_quick_and_push_defer_extended_tests_but_full_runs_them(self):
+        deferred = ["test_text_process.TextProcesses.test_long"]
+        for tier in ("quick", "push"):
+            steps = {n: c for n, c, _ in verify.plan(tier, set(), ["test_text_process"], deferred=deferred)}
+            command = steps["process-debug"]
+            self.assertEqual(command[command.index("--exclude") + 1], deferred[0])
+            self.assertEqual(command[-1], "test_text_process")
+        for profile in (None, "debug", "release"):
+            for _, command, _ in verify.plan("full", set(), [], ci_profile=profile, deferred=deferred):
+                self.assertNotIn("--exclude", command)
+
+    def test_cli_quick_reports_untested_dependents_and_runs_direct_tests(self):
+        with patch.object(verify.subprocess, "run") as commands, \
+                patch.object(verify, "changes", return_value=(["crates/protocol/src/lib.rs"], "+#[test]\n")), \
+                patch.object(verify, "free_memory_gb", return_value=8), \
+                redirect_stdout(StringIO()) as output:
+            commands.return_value.stdout = json.dumps(metadata())
+            self.assertEqual(0, verify.main(["quick", "--dry-run"]))
+        text = output.getvalue()
+        self.assertIn("clippy only (tested by push): tor-client-ascii, tor-client-common, tor-server", text)
+        self.assertIn("  rust-debug: cargo test -p tor-protocol --locked", text)
+        self.assertNotIn("simulation-isolated", text)
+
     def test_quick_limits_rust_to_affected_packages(self):
         steps = {n: c for n, c, _ in verify.plan("quick", {"tor-world"}, [])}
         self.assertEqual(list(steps), ["fmt", "clippy", "architecture", "build-tools", "python-tools", "rust-debug"])
@@ -394,11 +468,12 @@ class Tiers(unittest.TestCase):
         self.assertNotIn("--workspace", steps["rust-debug"])
 
     def test_simulation_fixture_contract_has_an_isolated_debug_invocation(self):
-        for tier in ("quick", "push", "full"):
+        for tier in ("push", "full"):
             steps = {n: c for n, c, _ in verify.plan(tier, {"tor-simulation"}, [])}
             self.assertEqual(steps["simulation-isolated"], ["cargo", "test", "-p", "tor-simulation",
                              "--test", "it", "--locked", "fixture_contract::"])
-        self.assertNotIn("simulation-isolated", self.names("quick", {"tor-protocol"}))
+        self.assertNotIn("simulation-isolated", self.names("quick", {"tor-simulation"}))
+        self.assertNotIn("simulation-isolated", self.names("push", {"tor-protocol"}))
         release = verify.plan("full", set(), [], ci_profile="release")
         self.assertNotIn("simulation-isolated", [name for name, _, _ in release])
 

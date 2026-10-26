@@ -186,9 +186,14 @@ def main(argv=None):
     parser.add_argument('--workers', type=int, default=1)
     parser.add_argument('--ci-python-shard', type=int, choices=(1, 2))
     parser.add_argument('--from-file', metavar='IDS')
+    # Deferred tests leave the selection before it is recorded: they are not run,
+    # never reported as skipped, and each one must exist in the loaded suite.
+    parser.add_argument('--exclude', action='append', default=[], metavar='TEST_ID')
     local, arguments = parser.parse_known_args(sys.argv[1:] if argv is None else argv)
     if local.workers < 1:
         parser.error('--workers must be at least 1')
+    if local.exclude and (local.ci_python_shard is not None or os.environ.get('CI')):
+        parser.error('--exclude is a local quick/push selection only')
     if local.ci_python_shard is not None and (local.from_file or local.waive_local_graphical
             or os.environ.get('TOR_TEST_PROFILE') not in ('debug', 'release') or not os.environ.get('TOR_TEST_TIMINGS')):
         parser.error('--ci-python-shard requires complete profile discovery and timing evidence')
@@ -241,6 +246,13 @@ def main(argv=None):
                         os.environ.get('GITHUB_SHA'), os.environ.get('GITHUB_RUN_ID'),
                         os.environ.get('GITHUB_RUN_ATTEMPT'), profile=profile)
                     suite = unittest.TestSuite(test for test in tests if test.id() in selected)
+                if local.exclude:
+                    tests = list(parallel_tests.flatten(suite))
+                    missing = sorted(set(local.exclude) - {test.id() for test in tests})
+                    if missing:
+                        parser.error('--exclude names tests that were not loaded: ' + ', '.join(missing))
+                    suite = unittest.TestSuite(test for test in tests if test.id() not in local.exclude)
+                    self.stream.writeln('DEFERRED (not run): ' + ', '.join(sorted(set(local.exclude))))
                 if handle is not None:
                     try:
                         ids = [test.id() for test in islice(parallel_tests.flatten(suite), 10001)]
@@ -249,7 +261,8 @@ def main(argv=None):
                     except Exception:
                         ids = None  # Reporting cannot replace the existing runner's result.
                     record({'kind': 'selection', 'seconds': 0.0, 'test_ids': ids,
-                            **({'shard': shard} if shard is not None else {})})
+                            **({'shard': shard} if shard is not None else {}),
+                            **({'deferred': sorted(set(local.exclude))} if local.exclude else {})})
                 if local.workers > 1:
                     successful = parallel_tests.run(suite, workers=local.workers, stream=self.stream,
                                                     sink=record if handle else None, failfast=self.failfast,
