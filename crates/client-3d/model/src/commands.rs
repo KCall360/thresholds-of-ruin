@@ -20,6 +20,10 @@ pub enum Cmd {
     Identify(Option<ItemTarget>),
     /// Use a granted ability, by its disclosed id, on what it targets.
     Ability(String, AbilityTarget),
+    /// Struggle free of a disclosed hold.
+    Escape(HoldTarget),
+    /// Study a reachable trap of unknown family.
+    ExamineTrap(TrapTarget),
     Door(DoorTarget, bool),
     /// Journey to a known cell, named by its key.
     Travel(String),
@@ -91,6 +95,23 @@ pub fn request(state: &ClientState, command: Cmd) -> Result<Request, String> {
         Cmd::Zap(item, direction) => zap_action(view, item, direction)?,
         Cmd::Identify(item) => identification_action(view, item)?,
         Cmd::Ability(id, target) => ability_action(view, &id, target)?,
+        Cmd::ExamineTrap(trap) => {
+            let examinable = view
+                .visible_cells
+                .iter()
+                .filter_map(|cell| cell.trap.as_ref())
+                .any(|found| found.id == trap && found.reachable && found.family.is_none());
+            if !examinable {
+                return Err("There is no unknown trap within reach there.".into());
+            }
+            Action::ExamineTrap { trap }
+        }
+        Cmd::Escape(hold) => {
+            if !view.linked_holds.iter().any(|offer| offer.target == hold) {
+                return Err("That hold is no longer available.".into());
+            }
+            Action::Escape { hold }
+        }
         Cmd::Door(door, open) => Action::SetDoor { door, open },
         Cmd::Travel(destination) => {
             return Ok(state.command_request(Command::Travel {

@@ -31,6 +31,7 @@ pub(crate) fn view(revision: u64) -> View {
         actors: vec![],
         items: vec![],
         inventory: vec![],
+        holds: vec![],
         abilities: vec![],
         identify: None,
         narration: vec![],

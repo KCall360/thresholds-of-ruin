@@ -139,3 +139,74 @@ fn abilities_are_aimed_as_their_target_kind_requires() {
         assert!(action(&state, refused).is_err());
     }
 }
+
+#[test]
+fn only_a_disclosed_hold_can_be_escaped_and_it_names_its_holder() {
+    let mut observed = test_support::observation();
+    let hold = HoldTarget::from_digest([21; 32]);
+    observed.linked_holds = vec![LinkedHold {
+        target: hold,
+        holder: Some(ActorTarget::from_digest([2; 32])),
+    }];
+    let snapshot: Snapshot = serde_json::from_value(serde_json::json!({
+        "readiness": {"revision": "0", "admission": true, "resume": [], "cancel": []},
+        "context": StreamContext { stream: StreamId("holds".into()), epoch: 0 },
+        "actor": observed.actor, "branch": "play", "cursor": {"sequence": "0", "tick": "0"},
+        "has_control": true, "intentions": [], "history": {"entries": [], "older_before": null},
+        "state": {"wizard_game": false, "revision": "0", "observation": observed},
+    }))
+    .unwrap();
+    let state = ClientState::from_snapshot(snapshot).unwrap();
+    let projected = view(&state, &Palette::default());
+    assert_eq!(projected.holds.len(), 1);
+    assert_eq!(projected.holds[0].label, "sentinel");
+    assert_eq!(
+        action(&state, Cmd::Escape(hold)),
+        Ok(Action::Escape { hold })
+    );
+    assert!(action(&state, Cmd::Escape(HoldTarget::from_digest([22; 32]))).is_err());
+}
+
+#[test]
+fn examining_a_trap_sends_only_for_an_unknown_one_within_reach() {
+    let mut observed = test_support::observation();
+    let near = TrapTarget::from_digest([41; 32]);
+    let known = TrapTarget::from_digest([42; 32]);
+    let cell = |x: i32, id, family| CellView {
+        object_presentation: None,
+        lit: true,
+        key: format!("cell-{x}"),
+        position: Position { x, y: 0, z: 0 },
+        wall: false,
+        material: String::new(),
+        trap: Some(TrapView {
+            id,
+            family,
+            reachable: true,
+        }),
+        door: None,
+        asset: None,
+        stairs_up: false,
+        stairs_down: false,
+        place_hint: false,
+    };
+    observed.visible_cells = vec![cell(0, near, None), cell(1, known, Some(TrapFamily::Arrow))];
+    let snapshot: Snapshot = serde_json::from_value(serde_json::json!({
+        "readiness": {"revision": "0", "admission": true, "resume": [], "cancel": []},
+        "context": StreamContext { stream: StreamId("traps".into()), epoch: 0 },
+        "actor": observed.actor, "branch": "play", "cursor": {"sequence": "0", "tick": "0"},
+        "has_control": true, "intentions": [], "history": {"entries": [], "older_before": null},
+        "state": {"wizard_game": false, "revision": "0", "observation": observed},
+    }))
+    .unwrap();
+    let state = ClientState::from_snapshot(snapshot).unwrap();
+    assert_eq!(
+        action(&state, Cmd::ExamineTrap(near)),
+        Ok(Action::ExamineTrap { trap: near })
+    );
+    assert!(
+        action(&state, Cmd::ExamineTrap(known)).is_err(),
+        "already known"
+    );
+    assert!(action(&state, Cmd::ExamineTrap(TrapTarget::from_digest([43; 32]))).is_err());
+}

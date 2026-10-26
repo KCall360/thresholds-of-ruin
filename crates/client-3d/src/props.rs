@@ -647,6 +647,15 @@ impl PropLibrary {
         self.get("stairs-down".into(), meshes, stairs_down)
     }
 
+    /// A discovered trap's floor plate, marked by its family once known.
+    pub fn trap(
+        &mut self,
+        family: Option<tor_protocol::TrapFamily>,
+        meshes: &mut Assets<Mesh>,
+    ) -> Model {
+        self.get(format!("trap:{family:?}"), meshes, move || trap(family))
+    }
+
     pub fn glint(&mut self, meshes: &mut Assets<Mesh>) -> Model {
         self.get("glint".into(), meshes, || {
             let mut p = Parts {
@@ -1060,6 +1069,88 @@ fn body_armor(p: &mut Parts, kind: Kind) {
         4,
         LEATHER,
     );
+}
+
+/// A pressure plate sunk in the floor. Unknown traps show only a warning
+/// rim; a known family adds the mechanism it springs.
+fn trap(family: Option<tor_protocol::TrapFamily>) -> Parts {
+    use tor_protocol::TrapFamily as F;
+    let accent = match family {
+        None | Some(F::Mysterious) => Accent::Amber,
+        Some(F::Teleport) => Accent::Violet,
+        Some(F::SleepingGas | F::PoisonDart) => Accent::Teal,
+        Some(F::TrapDoor) => Accent::Abyss,
+        Some(F::Rust | F::Arrow | F::BearTrap) => Accent::Ember,
+    };
+    let mut p = Parts {
+        accent: Some(accent),
+        ..default()
+    };
+    p.metal.cuboid(
+        Vec3::Y * 0.012,
+        Vec3::new(0.3, 0.012, 0.3),
+        Quat::IDENTITY,
+        IRON * 0.7,
+    );
+    // A thin glowing seam round the plate.
+    for (center, half) in [
+        (Vec3::new(0.0, 0.026, 0.31), Vec3::new(0.32, 0.004, 0.012)),
+        (Vec3::new(0.0, 0.026, -0.31), Vec3::new(0.32, 0.004, 0.012)),
+        (Vec3::new(0.31, 0.026, 0.0), Vec3::new(0.012, 0.004, 0.3)),
+        (Vec3::new(-0.31, 0.026, 0.0), Vec3::new(0.012, 0.004, 0.3)),
+    ] {
+        p.glow.cuboid(center, half, Quat::IDENTITY, Vec3::ONE);
+    }
+    match family {
+        Some(F::BearTrap) => {
+            for k in 0..8 {
+                let x = -0.21 + k as f32 * 0.06;
+                for z in [-0.08, 0.08] {
+                    p.metal.prism(
+                        Vec3::new(x, 0.024, z),
+                        Vec3::new(x, 0.07, z * 0.6),
+                        0.014,
+                        0.002,
+                        4,
+                        STEEL,
+                        0.0,
+                    );
+                }
+            }
+        }
+        Some(F::Arrow | F::PoisonDart) => {
+            for x in [-0.12, 0.0, 0.12] {
+                p.matte.cuboid(
+                    Vec3::new(x, 0.026, 0.0),
+                    Vec3::new(0.012, 0.003, 0.16),
+                    Quat::IDENTITY,
+                    STONE_DARK * 0.5,
+                );
+            }
+        }
+        Some(F::TrapDoor) => {
+            p.matte.cuboid(
+                Vec3::Y * 0.027,
+                Vec3::new(0.24, 0.004, 0.24),
+                Quat::IDENTITY,
+                WOOD_DARK,
+            );
+        }
+        Some(F::Rust) => {
+            p.matte.blob(
+                Vec3::Y * 0.03,
+                Vec3::new(0.16, 0.02, 0.12),
+                3,
+                0.3,
+                BRONZE * 0.6,
+            );
+        }
+        Some(F::SleepingGas | F::Teleport | F::Mysterious) | None => {
+            p.metal
+                .torus(Vec3::Y * 0.028, Vec3::Y, 0.11, 0.012, 16, 4, BRONZE);
+        }
+    }
+    p
 }
 
 /// A rolled bandage with its loose end trailing across the floor.

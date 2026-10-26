@@ -294,3 +294,30 @@ fn stair_cosmetics_do_not_create_or_remove_real_navigation() {
     view.visible[0].object_presentation.as_mut().unwrap().kind = ObjectPresentationKind::Stairs;
     assert!(describe(&view, at).2.is_none());
 }
+
+#[test]
+fn a_found_trap_is_named_by_family_and_only_an_unknown_reachable_one_is_studied() {
+    let mut view = empty();
+    let at = Position { x: 1, y: 0, z: 0 };
+    let id = TrapTarget::from_digest([31; 32]);
+    let mut floor = cell(at, "trap-cell");
+    floor.trap = Some(TrapView {
+        id,
+        family: None,
+        reachable: true,
+    });
+    view.visible = vec![floor];
+    let (name, _, intent) = describe(&view, at);
+    assert_eq!(name, "Trap");
+    assert!(matches!(intent, Some(Intent::ExamineTrap(found)) if found == id));
+    view.visible[0].trap.as_mut().unwrap().reachable = false;
+    assert!(
+        describe(&view, at).2.is_none(),
+        "out of reach: no click, no travel onto it"
+    );
+    view.visible[0].trap.as_mut().unwrap().family = Some(TrapFamily::BearTrap);
+    view.visible[0].trap.as_mut().unwrap().reachable = true;
+    let (name, _, intent) = describe(&view, at);
+    assert_eq!(name, "Bear trap");
+    assert!(intent.is_none(), "a known trap needs no study");
+}

@@ -37,6 +37,8 @@ pub struct View {
     pub actors: Vec<Actor>,
     pub items: Vec<GroundItem>,
     pub inventory: Vec<Carried>,
+    /// Holds on the character it may try to escape, labelled by holder.
+    pub holds: Vec<tor_client_common::holds::HoldChoice>,
     /// Granted abilities beyond the basic attack, in the server's order.
     /// Projectile abilities are left to the projectile choice.
     pub abilities: Vec<Ability>,
@@ -279,6 +281,7 @@ pub fn view(state: &ClientState, palette: &Palette) -> View {
                 }
             })
             .collect(),
+        holds: tor_client_common::holds::hold_choices(o),
         abilities: tor_client_common::abilities::choices(o)
             .into_iter()
             .filter(|ability| ability.target_kind != AbilityTargetKind::DirectionalProjectile)
@@ -393,6 +396,8 @@ pub struct Terrain<'a> {
     pub stairs_up: bool,
     pub stairs_down: bool,
     pub door: Option<bool>,
+    /// A discovered trap, by family once that is known.
+    pub trap: Option<Option<TrapFamily>>,
     pub seen: bool,
     pub lit: bool,
 }
@@ -409,6 +414,7 @@ impl View {
                 stairs_up: c.stairs_up,
                 stairs_down: c.stairs_down,
                 door: c.door.as_ref().map(|d| d.open),
+                trap: c.trap.as_ref().map(|t| t.family),
                 seen: true,
                 lit: c.lit,
             })
@@ -421,6 +427,7 @@ impl View {
                 stairs_up: c.stairs_up,
                 stairs_down: c.stairs_down,
                 door: c.door.as_ref().map(|d| d.open),
+                trap: c.trap.as_ref().map(|t| t.family),
                 seen: false,
                 lit: false,
             }))

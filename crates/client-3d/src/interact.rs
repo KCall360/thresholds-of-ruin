@@ -135,6 +135,7 @@ pub(crate) enum PanelButton {
     Identify(Option<ItemTarget>),
     /// The view's granted ability at this index.
     Ability(usize),
+    Escape(tor_protocol::HoldTarget),
 }
 
 const PANEL_WIDTH: f32 = 380.0;
@@ -626,6 +627,17 @@ pub fn panel(
                 &[("Decline", PanelButton::Identify(None))],
             );
         }
+        if !view.holds.is_empty() {
+            heading(ui, "Held");
+            for hold in &view.holds {
+                row(
+                    ui,
+                    &hold.label,
+                    None,
+                    &[("Escape", PanelButton::Escape(hold.target))],
+                );
+            }
+        }
         if !view.abilities.is_empty() {
             heading(ui, "Abilities");
             for (index, ability) in view.abilities.iter().enumerate() {
@@ -818,6 +830,7 @@ pub fn panel_buttons(
                     PanelButton::Drop(item) => Cmd::Drop(item),
                     PanelButton::Use(item, operation) => Cmd::Use(item, operation),
                     PanelButton::Identify(item) => Cmd::Identify(item),
+                    PanelButton::Escape(hold) => Cmd::Escape(hold),
                     PanelButton::Aim(item) => {
                         // Close the pack so the map takes the direction.
                         game.aiming = Some(crate::Aim::Device(item));

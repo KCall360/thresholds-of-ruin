@@ -637,12 +637,14 @@ impl Default for CameraRig {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum CellLook {
     Object(ItemModel),
     Door,
     StairsUp,
     StairsDown,
+    /// A discovered trap, by family once known.
+    Trap(Option<tor_protocol::TrapFamily>),
 }
 
 #[derive(Resource)]

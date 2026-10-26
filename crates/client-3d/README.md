@@ -311,6 +311,12 @@ Objects:
   at yourself is zapped at once.
 - When the server asks which item to identify, the pack opens on that choice:
   pick one of the offered items, or decline.
+- Discovered traps lie on the floor as plates with a glowing seam: amber while
+  their family is unknown, then coloured and fitted with the mechanism they
+  spring. The mini-map marks them orange. Clicking a reachable unknown trap
+  studies it; known traps are never offered as a travel destination.
+- When something holds the character, the pack lists each hold by its holder
+  (or as unseen) with Escape.
 - The pack also lists granted abilities beyond the basic attack, labelled
   with their cooldowns and supply needs. Self-only abilities act at once.
   Rays and steps take the next movement key. Abilities aimed at a creature

@@ -205,8 +205,10 @@ fn look(cell: &tor_client_3d_model::Terrain<'_>) -> CellLook {
         CellLook::Object(model)
     } else if cell.stairs_up {
         CellLook::StairsUp
-    } else {
+    } else if cell.stairs_down {
         CellLook::StairsDown
+    } else {
+        CellLook::Trap(cell.trap.flatten())
     }
 }
 
@@ -261,6 +263,11 @@ fn build_cells(
         open.insert(bevy_cell(at));
         if seen && cell.lit {
             lit_open.insert(bevy_cell(at));
+        }
+        if cell.trap.is_some() && !(cell.door.is_some() || cell.stairs_up || cell.stairs_down) {
+            // A trap lies on open floor; it does not block the way.
+            wanted.entry(at).or_insert((look(&cell), cell));
+            continue;
         }
         if !(cell.door.is_some() || cell.stairs_up || cell.stairs_down) {
             continue;
@@ -365,6 +372,13 @@ fn build_cells(
                         ));
                     })
                     .add_child(leaf)
+                    .id()
+            }
+            CellLook::Trap(family) => {
+                let model = library.trap(*family, meshes);
+                commands
+                    .spawn((Transform::from_translation(base), Visibility::default()))
+                    .with_children(|parent| model.attach(parent))
                     .id()
             }
             CellLook::StairsUp => {

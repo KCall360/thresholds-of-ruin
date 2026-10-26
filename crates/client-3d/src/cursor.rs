@@ -231,7 +231,7 @@ pub(crate) fn pointer(intent: Option<&Intent>) -> Pointer {
         Some(Intent::Take(_) | Intent::Fetch(_)) => Pointer::Grasp,
         Some(Intent::Attack(..) | Intent::Charge(_)) => Pointer::Fight,
         Some(Intent::Travel(_) | Intent::Climb(_)) => Pointer::Walk,
-        Some(Intent::Door(..)) => Pointer::Grasp,
+        Some(Intent::Door(..) | Intent::ExamineTrap(_)) => Pointer::Grasp,
         None => Pointer::Default,
     }
 }

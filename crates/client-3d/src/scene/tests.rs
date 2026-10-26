@@ -809,3 +809,39 @@ fn a_weapon_change_alone_keeps_the_rig() {
     assert_eq!(body(&app), before, "only the hand's prop changes");
     assert_eq!(held_one(&app).1 .0, ItemModel::ShortSword);
 }
+
+#[test]
+fn a_discovered_trap_is_drawn_and_redrawn_once_its_family_is_known() {
+    let mut app = app(CreatureModel::Placeholder);
+    app.add_systems(Update, project_terrain.after(project));
+    let at = Position { x: 2, y: 0, z: 0 };
+    let mut floor = app.world().resource::<Fixture>().0.visible[0].clone();
+    floor.position = at;
+    floor.key = "trap-floor".into();
+    floor.trap = Some(tor_protocol::TrapView {
+        id: tor_protocol::TrapTarget::from_digest([51; 32]),
+        family: None,
+        reachable: false,
+    });
+    app.world_mut()
+        .resource_mut::<Fixture>()
+        .0
+        .visible
+        .push(floor);
+    app.update();
+    let (first, look) = app.world().resource::<Game>().cells[&ivec(at)];
+    assert!(matches!(look, CellLook::Trap(None)));
+    app.world_mut().resource_mut::<Fixture>().0.visible[1]
+        .trap
+        .as_mut()
+        .unwrap()
+        .family = Some(tor_protocol::TrapFamily::Teleport);
+    app.update();
+    let (second, look) = app.world().resource::<Game>().cells[&ivec(at)];
+    assert!(matches!(
+        look,
+        CellLook::Trap(Some(tor_protocol::TrapFamily::Teleport))
+    ));
+    assert_ne!(first, second, "the identified trap is redrawn");
+    assert!(!app.world().entities().contains(first));
+}
