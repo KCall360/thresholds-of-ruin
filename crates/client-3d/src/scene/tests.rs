@@ -449,6 +449,59 @@ fn remembered_terrain_builds_dim_geometry_without_decorative_lighting() {
     );
 }
 
+/// The single held weapon a one-figure fixture shows.
+fn held_one(app: &App) -> (Entity, (ItemModel, Entity)) {
+    let held = &app.world().resource::<Game>().held;
+    assert_eq!(held.len(), 1, "one figure holds one weapon");
+    held.iter()
+        .map(|(hand, value)| (*hand, *value))
+        .next()
+        .unwrap()
+}
+
+fn present_held(
+    mut commands: Commands,
+    mut game: ResMut<Game>,
+    mut library: ResMut<PropLibrary>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    view: Res<Fixture>,
+) {
+    update_held(&mut commands, &mut game, &mut library, &mut meshes, &view.0);
+}
+
+#[test]
+fn other_figures_hold_their_disclosed_weapon_and_nothing_when_none_is_disclosed() {
+    let mut app = app(CreatureModel::Human);
+    app.add_systems(Update, present_held.after(project));
+    app.update();
+    assert!(
+        app.world().resource::<Game>().held.is_empty(),
+        "no disclosed weapon, no guessed one"
+    );
+    app.world_mut().resource_mut::<Fixture>().0.actors[0]
+        .wearing
+        .weapons[0] = Some(ItemModel::Mace);
+    app.update();
+    let (hand, (kind, model)) = held_one(&app);
+    assert_eq!(kind, ItemModel::Mace);
+    assert_eq!(
+        app.world()
+            .get::<ChildOf>(model)
+            .map(|parent| parent.parent()),
+        Some(hand),
+        "the mace hangs from the figure's hand"
+    );
+    app.world_mut().resource_mut::<Fixture>().0.actors[0]
+        .wearing
+        .weapons[0] = None;
+    app.update();
+    assert!(app.world().resource::<Game>().held.is_empty());
+    assert!(
+        app.world().get_entity(model).is_err(),
+        "the mace is removed"
+    );
+}
+
 #[test]
 fn cosmetic_item_models_never_reuse_real_corpse_rigs_or_acquire_cell_picks() {
     use tor_protocol::ItemTarget;
@@ -658,7 +711,7 @@ fn live_sword_swaps_align_handles_and_clear_unequipped_meshes() {
     for (kind, scale) in [(ItemModel::Greatsword, 1.0), (ItemModel::ShortSword, 0.62)] {
         app.world_mut().resource_mut::<Fixture>().0.inventory[0].model = kind;
         app.update();
-        let (actual, hand, entity) = app.world().resource::<Game>().held.unwrap();
+        let (hand, (actual, entity)) = held_one(&app);
         assert_eq!(actual, kind);
         let held = app.world().get::<Transform>(entity).unwrap();
         // Independent authored handle midpoint, checked against the transform
@@ -679,14 +732,14 @@ fn live_sword_swaps_align_handles_and_clear_unequipped_meshes() {
         previous = Some(entity);
         app.update();
         assert_eq!(
-            app.world().resource::<Game>().held.unwrap().2,
+            held_one(&app).1 .1,
             entity,
             "unchanged loadout must retain the visible entity"
         );
     }
     app.world_mut().resource_mut::<Fixture>().0.inventory[0].equipped = None;
     app.update();
-    assert!(app.world().resource::<Game>().held.is_none());
+    assert!(app.world().resource::<Game>().held.is_empty());
     assert!(app.world().get_entity(previous.unwrap()).is_err());
 }
 
@@ -727,4 +780,26 @@ fn disclosed_equipment_changes_rebuild_the_rig_and_removal_restores_the_costume(
     );
     let (_, restored) = rendered(&mut app, Default::default());
     assert_eq!(restored, costume, "removal restores the body's own costume");
+}
+
+#[test]
+fn a_weapon_change_alone_keeps_the_rig() {
+    let mut app = app(CreatureModel::Human);
+    app.add_systems(Update, present_held.after(project));
+    app.update();
+    let body = |app: &App| {
+        *app.world()
+            .resource::<Game>()
+            .actors
+            .values()
+            .next()
+            .unwrap()
+    };
+    let before = body(&app);
+    app.world_mut().resource_mut::<Fixture>().0.actors[0]
+        .wearing
+        .weapons[0] = Some(ItemModel::ShortSword);
+    app.update();
+    assert_eq!(body(&app), before, "only the hand's prop changes");
+    assert_eq!(held_one(&app).1 .0, ItemModel::ShortSword);
 }

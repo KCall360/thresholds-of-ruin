@@ -192,7 +192,7 @@ fn align(commands: &mut Commands, game: &mut Game, view: &View) {
     game.cave = CaveWorld::default();
     game.door_leaves.clear();
     game.hands.clear();
-    game.held = None;
+    game.held.clear();
     game.pending.clear();
     game.last_revision = None;
     game.snap_camera = true;
@@ -555,10 +555,13 @@ fn build_actors(
                 crate::picking::Pick(tor_client_3d_model::Focus::Actor(actor.id)),
             ));
             if let Ok(mut body) = bodies.get_mut(entity) {
+                // Held weapons follow the hand; only worn pieces rebuild the body.
                 if body.model == actor.model
                     && body.appearance_seed == actor.appearance_seed
-                    && body.wearing == actor.wearing
+                    && creatures::Equipment::disclosed(&body.wearing)
+                        == creatures::Equipment::disclosed(&actor.wearing)
                 {
+                    body.wearing = actor.wearing;
                     body.goal = goal;
                     if body.name != actor.name || body.hostile != actor.hostile {
                         body.name.clone_from(&actor.name);
@@ -986,7 +989,9 @@ fn prune_corpses(
     });
 }
 
-/// Show the equipped weapon at the player's side.
+/// Show each figure's main-hand weapon in its hand: the player's from its own
+/// inventory, everyone else's from their disclosed worn equipment. A figure
+/// with nothing disclosed holds nothing, rather than a guessed weapon.
 fn update_held(
     commands: &mut Commands,
     game: &mut Game,
@@ -994,32 +999,46 @@ fn update_held(
     meshes: &mut Assets<Mesh>,
     view: &View,
 ) {
-    let weapon = view
+    let own = view
         .inventory
         .iter()
-        .find(|c| c.equipped.is_some() && c.class == ItemClass::Weapon);
-    let body = view
-        .actors
-        .iter()
-        .find(|a| a.is_self)
-        .and_then(|a| game.actors.get(&a.id))
-        .and_then(|body| game.hands.get(body))
-        .copied();
-    let wanted = weapon.zip(body).map(|(w, b)| (w.model, b));
-    if wanted == game.held.as_ref().map(|(model, body, _)| (*model, *body)) {
-        return;
+        .find(|c| c.equipped.is_some() && c.class == ItemClass::Weapon)
+        .map(|c| c.model);
+    let mut wanted = HashMap::new();
+    for actor in &view.actors {
+        let weapon = if actor.is_self {
+            own
+        } else {
+            actor.wearing.weapons[0]
+        };
+        let hand = game
+            .actors
+            .get(&actor.id)
+            .and_then(|body| game.hands.get(body))
+            .copied();
+        if let (Some(kind), Some(hand)) = (weapon, hand) {
+            // The first view of a figure is its primary; aliases do not override it.
+            wanted.entry(hand).or_insert(kind);
+        }
     }
-    if let Some((_, _, model)) = game.held.take() {
-        commands.entity(model).try_despawn();
-    }
-    if let Some((kind, body)) = wanted {
+    game.held.retain(|hand, (kind, model)| {
+        let keep = wanted.get(hand) == Some(kind);
+        if !keep {
+            commands.entity(*model).try_despawn();
+        }
+        keep
+    });
+    for (hand, kind) in wanted {
+        if game.held.contains_key(&hand) {
+            continue;
+        }
         let model = library.item(kind, meshes);
         let held = commands
             .spawn((crate::props::held_transform(kind), Visibility::default()))
             .with_children(|parent| model.attach(parent))
             .id();
-        commands.entity(body).add_child(held);
-        game.held = Some((kind, body, held));
+        commands.entity(hand).add_child(held);
+        game.held.insert(hand, (kind, held));
     }
 }
 

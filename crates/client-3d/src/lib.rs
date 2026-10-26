@@ -519,8 +519,8 @@ struct Game {
     cave: CaveWorld,
     chunks: HashMap<IVec3, Entity>,
     door_leaves: HashMap<IVec3, Entity>,
-    /// The equipped weapon shown on the player: recipe, hand, model.
-    held: Option<(ItemModel, Entity, Entity)>,
+    /// The weapon shown in each figure's hand: hand joint to recipe and model.
+    held: HashMap<Entity, (ItemModel, Entity)>,
     /// Counts views, so panels know when to refresh.
     view_serial: u64,
     /// The weapon hand of each figure, for showing what it holds.
