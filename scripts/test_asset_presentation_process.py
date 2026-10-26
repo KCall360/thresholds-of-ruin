@@ -7,10 +7,12 @@ native input, repeated screens, spectator reconnect and save/resume boundary.
 """
 import shutil
 import subprocess
+import threading
 import tomllib
 import unittest
 
 from arena_matrix import toml_source
+from stream_relay import StreamRelay
 from process_harness import ProcessTestCase, ROOT, SPECTATOR_TOKEN, non_graphical
 
 
@@ -52,6 +54,34 @@ def prepare(test):
     return package
 
 
+class MissingSelfAssetPalette(StreamRelay):
+    """Omit one nested-only asset from the first catalog; allow normal repair."""
+    asset = "creature.humanoid.mage"
+
+    def __init__(self, address):
+        self.masked = threading.Event()
+        self.repaired = threading.Event()
+        self.repaired_revision = None
+        super().__init__(address)
+
+    def corrupt_observation(self, message):
+        if message.get("type") != "palette":
+            return False
+        body = message["palette"]["body"]
+        if body["type"] != "full":
+            return False
+        if not self.masked.is_set():
+            if self.asset not in body["assets"]:
+                raise AssertionError("fixture must advertise the real player appearance")
+            body["assets"].remove(self.asset)
+            self.masked.set()
+            return True
+        if message.get("request_id") and self.asset in body["assets"]:
+            self.repaired_revision = int(message["palette"]["revision"])
+            self.repaired.set()
+        return False
+
+
 class AssetPresentationProcesses(ProcessTestCase):
     graphical = True
 
@@ -64,6 +94,33 @@ class AssetPresentationProcesses(ProcessTestCase):
         self.assertIn("ruin scout", self.say(text, "examine ruin scout"))
         self.assertIn("iron greatsword", self.say(text, "inventory"))
         self.assertNotIn("amulet", self.say(text, "examine iron greatsword"))
+
+    def test_native_client_repairs_an_asset_disclosed_only_in_self_appearance(self):
+        package = prepare(self)
+        path = package / "scenario.toml"
+        manifest = tomllib.loads(path.read_text(encoding="utf-8"))
+        manifest["characters"][0]["asset"] = MissingSelfAssetPalette.asset
+        # Own-body disclosure exists even with no extra visible actor cells.
+        manifest["characters"][0]["body"] = {"cells": [[0, 0, 0]], "eye": [0, 0, 0], "mass": 80}
+        manifest["assets"]["presentation"].append(MissingSelfAssetPalette.asset)
+        path.write_text(toml_source(manifest), encoding="utf-8", newline="\n")
+        validated = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
+                                   capture_output=True, text=True, encoding="utf-8", timeout=30)
+        self.assertEqual(validated.returncode, 0, validated.stderr)
+        self.server(scenario=package)
+        relay = MissingSelfAssetPalette(self.address)
+        self.addCleanup(relay.close)
+        window = self.launch("tor-client-ascii", ["--connect", relay.address, "--report-frames"])
+        self.assertTrue(relay.masked.wait(10), "initial palette was not intercepted")
+        self.assertTrue(relay.repaired.wait(10), "nested self appearance did not request palette repair")
+        frame = self.ascii_frame(window, lambda f: f["state"] is not None and not f["busy"]
+                                 and f["palette"]["revision"] == relay.repaired_revision
+                                 and not f["palette"]["stale"])
+        observation = frame["state"]["observation"]
+        self.assertEqual(observation["self_appearance"]["asset"], MissingSelfAssetPalette.asset)
+        self.assertFalse(any(a.get("asset") == MissingSelfAssetPalette.asset
+                             for a in observation["visible_actors"]), "fixture must exercise the nested-only carrier")
+        self.assertEqual(relay.errors, [])
 
     def settled_palette(self, window):
         return self.ascii_frame(window, lambda frame: frame["state"] is not None

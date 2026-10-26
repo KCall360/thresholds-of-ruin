@@ -76,6 +76,37 @@ class CaseParsing(unittest.TestCase):
         self.assertEqual([], compare.parse_cases(["combat"], 5)[0].validator_args(extra))
 
 
+class BuildRouting(unittest.TestCase):
+    def test_separate_workspace_builds_use_each_tree_manifest(self):
+        fixtures = {
+            "fixture-root": compare.Workload("root", "probe", "root_bench", "unused"),
+            "fixture-sub": compare.Workload("sub", "probe", "sub_bench", "unused",
+                                            manifest="crates/isolated/Cargo.toml"),
+        }
+        with tempfile.TemporaryDirectory() as directory, patch.dict(compare.WORKLOADS, fixtures):
+            tree = Path(directory)
+            units = compare.parse_cases(list(fixtures), 1)
+            with patch.object(compare.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as run:
+                compare.build(tree, units, tree / "build.log", tree / "target")
+            commands = [call.args[0] for call in run.call_args_list]
+            self.assertEqual(len(commands), 2)
+            self.assertEqual({c[c.index("--manifest-path") + 1] for c in commands},
+                             {str(tree / spec.manifest) for spec in fixtures.values()})
+            self.assertTrue(all(call.kwargs["cwd"] == tree for call in run.call_args_list))
+
+    def test_colliding_example_outputs_are_rejected_before_building(self):
+        fixtures = {
+            "fixture-root": compare.Workload("root", "probe", "same_bench", "unused"),
+            "fixture-sub": compare.Workload("sub", "probe", "same_bench", "unused",
+                                            manifest="crates/isolated/Cargo.toml"),
+        }
+        with tempfile.TemporaryDirectory() as directory, patch.dict(compare.WORKLOADS, fixtures):
+            tree = Path(directory)
+            with patch.object(compare.subprocess, "run") as run, self.assertRaisesRegex(ValueError, "multiple build owners"):
+                compare.build(tree, compare.parse_cases(list(fixtures), 1), tree / "build.log", tree / "target")
+            run.assert_not_called()
+
+
 class Scheduling(unittest.TestCase):
     def test_balanced_rounds_reverse_each_pair_without_changing_coverage(self):
         units = compare.parse_cases(["physics", "combat"], 5)

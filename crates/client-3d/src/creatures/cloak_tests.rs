@@ -130,3 +130,41 @@ fn replacement_cloaks_keep_the_wearers_ghost_material() {
         }
     }
 }
+
+#[test]
+fn native_cloak_cut_survives_recipe_transfer_and_equipment_removal() {
+    fn points(look: &Look) -> Vec<[f32; 3]> {
+        let (world, rig, _, meshes) = rogue_tests::spawn_one(look);
+        cloak_meshes(&world, &rig)
+            .into_iter()
+            .flat_map(|handle| {
+                let Some(VertexAttributeValues::Float32x3(points)) = meshes
+                    .get(&handle)
+                    .unwrap()
+                    .attribute(Mesh::ATTRIBUTE_POSITION)
+                else {
+                    panic!("cloak vertices")
+                };
+                points.clone()
+            })
+            .collect()
+    }
+    let native = Look::with_choice(CreatureModel::Vampire, 42, Some(Variant::default()));
+    let expected = points(&native);
+    assert!(!expected.is_empty());
+    let mut transferred = native.clone();
+    transferred.outfit = Some(outfit::Outfit::native(&native));
+    assert!(
+        points(&transferred) == expected,
+        "transferring the recipe must preserve its cut"
+    );
+    let mut gear = Equipment::default();
+    gear.select("cloak").unwrap();
+    let equipped = transferred.equipped(gear);
+    assert_ne!(
+        points(&equipped),
+        expected,
+        "travel cloak replaces the native cut"
+    );
+    assert!(points(&equipped.equipped(Equipment::default())) == expected);
+}

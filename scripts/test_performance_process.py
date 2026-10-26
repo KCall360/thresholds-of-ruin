@@ -16,6 +16,28 @@ class PerformanceProcesses(ProcessTestCase):
     def benchmark(self, name, args, timeout):
         return benchmark(self, name, args, timeout)
 
+    def test_comparison_builds_examples_from_separate_cargo_workspaces(self):
+        import perf_compare as compare
+        fixtures = {}
+        for label, folder in [("root", self.directory), ("sub", self.directory / "isolated")]:
+            folder.mkdir(exist_ok=True)
+            (folder / "Cargo.toml").write_text(
+                '[package]\nname = "workspace-probe"\nversion = "0.1.0"\nedition = "2021"\n'
+                '[workspace]\n[[example]]\nname = "' + label + '_bench"\npath = "probe.rs"\n', encoding="utf-8")
+            (folder / "Cargo.lock").write_text(
+                'version = 4\n[[package]]\nname = "workspace-probe"\nversion = "0.1.0"\n', encoding="utf-8")
+            (folder / "probe.rs").write_text('fn main() { println!("' + label + '"); }', encoding="utf-8")
+            fixtures[label] = compare.Workload(label, "workspace-probe", label + "_bench", "unused",
+                manifest="Cargo.toml" if label == "root" else "isolated/Cargo.toml")
+        target = self.directory / "build-target"
+        with patch.dict(compare.WORKLOADS, fixtures):
+            compare.build(self.directory, compare.parse_cases(list(fixtures), 1),
+                          self.directory / "workspace-build.log", target)
+        for label in fixtures:
+            result = subprocess.run([target / "release/examples" / (label + "_bench" + SUFFIX)],
+                                    capture_output=True, text=True, check=True, timeout=30)
+            self.assertEqual(result.stdout.strip(), label)
+
     def test_small_maintained_producers_emit_complete_valid_reports(self):
         from combat_performance_report import summarize as combat
         from item_performance_report import summarize as items

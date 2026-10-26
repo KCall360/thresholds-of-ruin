@@ -22,8 +22,11 @@ environment variable can select another backend explicitly. Capture diagnostics
 identify the actual adapter, backend and driver; verification receipts also
 record renderer and compiler configuration without session credentials.
 
-For faster Windows shader compilation, an optional matching `dxcompiler.dll`
-and `dxil.dll` pair can be placed beside the actual client executable. The client
+For Windows wardrobe review, place a matching `dxcompiler.dll` and `dxil.dll`
+pair beside the actual client executable. The Windows SDK supplies both in its
+versioned `bin/<version>/x64` directory. DXC also avoids the position-dependent
+black speckles observed on skinned models with FXC and depth prepasses on the
+Windows review host; the native pixel regression covers the first Ranger. The client
 selects that pair by absolute path, independently of the launcher's working
 directory. Without the pair it uses the built-in FXC compiler. Explicit
 `WGPU_DX12_COMPILER` choices remain authoritative; `WGPU_DX12_COMPILER=fxc`
@@ -42,6 +45,9 @@ cargo run --release --manifest-path crates/client-3d/Cargo.toml -- --seed 42
 
 Use an optimized client for art review and launch-time comparisons; procedural
 sculpting is substantially more expensive in an unoptimized development build.
+For scripted compositions, deterministic captures and one-window looping playback,
+see [scripted model review](review-scripts/README.md).
+
 Offline review modes run without a server. Create the destination directory
 before using `--capture DIR`; the screenshot writer expects it to exist.
 
@@ -94,11 +100,43 @@ and stops it on exit. Other options:
   (90 for profiles); `--capture-every SECS` adds timed motion frames to the
   line-up captures. `--outfit NAME` dresses humanoids from the wardrobe:
   `commoner`, `ranger`, `knight`, `courtier`, `leotard`, `sarong`, `tavern`,
-  `queen`, `pharaoh`, `goddess`, `juliet`, `jungle`, `genie`, `princess`,
-  `pirate`, `maiden` and `witch`.
+  `queen`, `pharaoh`, `goddess`, `juliet`, `jungle`, `genie`, `princess`, `royal-princess`, `sylvan-duelist`,
+  `pirate`, `maiden` and `witch`. Character-study recipes add `elven-ranger`,
+  `rogue`, `paladin`, `barbarian`, `valkyrie`, `cleric`, `druid`, `bard`,
+  `vampire-noble`, `necromancer` and `desert`. These paired adult costumes
+  select wearer-fitted necklines, independent skirt layers, embroidery and
+  shared fur, leaf or feather trim. Female cuts emphasize fitted waists,
+  exposed cleavage and split skirts; male openings are authored separately.
+  For a focused review, use `--lineups --family Warrior --outfit elven-ranger
+  --capture DIR --capture-warmup 3`; repeat with `--turn 90` or `--turn 180`
+  for side and rear views, and `--jump --capture-every 0.5` for motion.
+  These are initial study interpretations: accessory completeness and visual
+  fidelity still require review against the supplied studies.
   Lineup capture deadlines use real time and wait for each GPU readback.
   Slow frames stop at each camera and family boundary so no view is skipped;
   creature animation retains its capped timestep.
+  Automatic wardrobe cycling follows that same presented lineup clock, so slow
+  model rebuilds and readbacks do not skip through outfits between captures.
+- Independent equipment preview: repeat `--wear helm`, `--wear boots`, and
+  `--wear cloak`, and `--wear breastplate` with `--bestiary` or `--lineups`. For example,
+  `--lineups --family Warrior,Mage --outfit royal-princess --wear helm --wear boots
+  --wear cloak --wear breastplate --capture DIR` combines the preset with a steel
+  helm, leather boots, a travel cloak and a fitted breastplate. These pieces override only their own regions and
+  remain equipped while O or `--wardrobe-cycle` changes the outfit. A closed
+  helm hides the preset crown/hood, loose hair and covered earrings; boots replace
+  footwear and its attached trim. Clearing a visual equipment selection in the
+  composition API restores the currently selected preset's piece; omit `--wear`
+  to review that preset alone. Native mage robes retain their pose-aware
+  deformation with accessory equipment. This first preview supports dressable
+  humanoids; unsupported bodies keep their existing recipes. Breastplates fit
+  over the selected torso layers without replacing sleeves or skirts. The female
+  variant has a contoured front and an opening fitted from the same bust landmarks
+  as garment necklines; the male variant retains a broad chest plate. Existing
+  cuirasses participate in the fitting surface when worn underneath. Covered
+  bodice ornaments are suppressed; straps and pendants fit the resulting exterior.
+  Cloaks use the same armor surface for resting and posed upper-back clearance.
+  Additional armor regions and slots, general cloth collision and gameplay
+  integration remain future work. `--wear` is rejected for live connections and the item gallery.
 - `--fallen-lineups` shows the same five generated individuals in settled
   death poses, with a full lineup and two close views framed around the fallen
   bodies, clothing and held props. For manual corpse review, use
@@ -113,6 +151,26 @@ and stops it on exit. Other options:
 - `TOR_3D_PROFILE_BUILD=1` enables local startup timings for model cache misses
   and scene construction phases, plus live/idle model-cache payload and evictions;
   ordinary runs keep this profiling disabled
+- CPU construction comparisons use `python scripts/perf_compare.py BASE --case models`
+  from the repository root. Both revisions must contain the versioned `model_bench`
+  example and its validator. Three fixed compositions each produce three cold/warm
+  spawn pairs; cold starts with an empty model cache and warm reuses that cache while
+  retaining the first model. World/rig creation and queued entity insertion are timed;
+  material setup and mesh accounting are outside the timers. Mesh byte counts cover
+  CPU vertex/index buffers, not total process memory or GPU residency. The current workload
+  also records 30 CPU pose-update timings per sample at 50 Hz, following two untimed
+  initialization updates and a jump trigger. It runs the same pose, transform and
+  soft-body schedule as review playback, including hair/cloth fitting. Schedule
+  execution is timed; timestep updates and pose-change checks are outside the timer.
+  This is not GPU rendering, total application frame time or display pacing. The
+  standalone producer disables optional startup profiling during measurement. It
+  enables a bounded latest-frame profile for pose/joints, robe fitting, drape
+  updates and hair/contact fitting; ordinary playback leaves this disabled.
+  Model workload version 4 additionally splits hair time into control fitting,
+  mesh deformation, face/edge constraints, and mesh writes/normal reconstruction.
+  Nested stage totals must fit inside hair time; they are not added again to the
+  top-level total. These phase totals exclude scheduling, transform propagation
+  and soft-body work. Compare only matching workload versions.
 - `--demo-hunt` explores and fights whatever it finds
 - `--gallery` shows every prop on a stretch of cave floor, no server needed
 - `--demo-interact` runs a scripted pass over pick up, drop, equip, remove,
@@ -304,6 +362,9 @@ Objects:
   The Ranger recipe supplies its own pouch across wearer families.
   Sequential outfit replacements preserve body identity and reuse unchanged
   head/hair assets; selecting Native restores the original clothing and key.
+  Mage and RedMage join the swappable humanoids. Replacement outfits remove
+  native robes, sash knots and sleeve bells; Native restores them. Casting
+  identity remains independent of the worn outfit.
   Shared shoulder armor uses a hollow faceted crown and an overlapping lower
   plate, fitted over the resolved arm rather than scaled from build alone.
   Modeling follows the [Bold Storybook definition](../../docs/art/3d-art-direction.md#proportions-bold-storybook):
@@ -486,3 +547,55 @@ gesture. Display captions do not choose combat effects. A hurt reaction needs
 a disclosed HP decrease or worsening injury between comparable views. An
 applied status effect alone does not make its target flinch; damage that stays
 within another actor's disclosed injury band may have no flinch.
+
+
+The original blue `princess` dress remains available. `royal-princess` selects
+the purple and gold reference gown: a low sweetheart bodice, detached sleeve
+swags, lavender lining, two thigh openings around a central panel, and a jeweled
+crown. On male figures it selects the courtier outfit. For the female review use
+`--women --family Warrior,orc,nymph --outfit royal-princess`.
+
+Gathered sleeve puffs can expose a contrasting lining between raised fabric strips.
+The Bard uses red strips over cream lining on both body cuts, with female bell
+sleeves and the separate male short-sleeve cut. Plain puffs remain available.
+
+Brocade uses fitted thread curves on torso garments and skirts. Torso stitches
+stop at neckline openings, bare shoulders, cropped hems, and native skin patches.
+Fine motifs remain independent of the body mesh shading resolution.
+
+Bell sleeves use a hollow cloth shell with a visible inner lining and thin hem.
+Their folds grow toward the wrist, preserving the shared forearm fit; fitted
+bracers retain their separate construction.
+
+Belt pouches fit the combined waist and pelvic surface, including outer torso
+layers. Their curved backs, rounded fronts and belt loops share that fit across
+wearers instead of relying on a fixed depth.
+
+Sleeve compression folds follow the inner elbow and taper at their ends, leaving
+the outside of the joint smooth. The upper and lower cloth retain their eased,
+overlapping supports while bending.
+
+Fitted torso belts and buckles follow the torso during breathing and action poses,
+so that a moving waist cannot pass through a band held on the separate hip joint.
+Caster belts continue to share the dedicated robe attachment.
+
+
+### Sylvan Duelist
+
+`sylvan-duelist` adds the green-and-gold forest outfit alongside both princess
+presets. Female wearers have two embroidered shoulder-to-waist panels, an open
+center and torso sides, dark trousers, tall boots and hanging green cloth.
+Male wearers use the separate Ranger recipe. Review with
+`--women --family Warrior,Mage,orc --outfit sylvan-duelist`; add `--jump` and
+`--capture-every 0.5` for motion captures.
+
+The reusable `Straps::Panels` cut resolves its width and path from the bust apex,
+bust width, shoulder breadth and waist. Coverage, embroidery clipping and edge
+binding share that cut; the renderer does not branch on the outfit name.
+
+
+For fixed-step offline wardrobe reviews, add `--review-step-hz 50` to a
+`--lineups` command. Each rendered update advances presentation by 20 ms;
+screenshot readbacks hold the pose. Rates 20-240 Hz are supported. Wall-clock
+watchdogs still run normally. This is a clock option for existing lineups, not
+the proposed scene-script runner or a guarantee of identical pixels.

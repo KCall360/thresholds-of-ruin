@@ -13,7 +13,7 @@ directory. Wall-clock timings are diagnostic; counts are deterministic.
 
 Cases are latency_bench case names (rN-aN-hN-memory|durable, or stream-rN-memory|durable
 for region streaming) or WORKLOAD[:GROUP]
-for combat, physics, items, client, and places. Those workloads always run
+for combat, physics, items, client, places, and models. Those workloads always run
 their complete matrix because their validators require it; GROUP only selects
 what is shown. Arguments after `--` are passed to every benchmark invocation.
 """
@@ -76,9 +76,13 @@ class Workload:
     group: object = None  # row -> group name, for the generic row extractor
     keys: tuple = ()      # row fields that identify a group rather than count work
     version_field: str = "version"
+    manifest: str = "Cargo.toml"  # relative to each compared tree
 
 
 WORKLOADS = {
+    "models": Workload("models", "tor-client-3d", "model_bench", "scripts/model_performance_report.py",
+                       group=lambda row: row["case"], keys=("case", "sample", "seed", "version", "hz"),
+                       manifest="crates/client-3d/Cargo.toml"),
     "latency": Workload("performance", "tor-server", "latency_bench", "scripts/performance_report.py",
                         ("--quick", "--phase-b", "--phase-c", "--phase-d", "--discovery-only", "--saved-discovery")),
     "combat": Workload("combat", "tor-server", "combat_bench", "scripts/combat_performance_report.py",
@@ -133,7 +137,9 @@ def parse_cases(cases, cycles):
     for workload, selected in groups.items():
         shown = () if "" in selected else tuple(dict.fromkeys(selected))
         units[workload] = Unit(workload, workload, (), shown)
-    return list(units.values())
+    result = list(units.values())
+    build_groups(result)  # Also reject ambiguous executable snapshots with --no-build.
+    return result
 
 
 def schedule(units, rounds, order="base-first"):
@@ -340,12 +346,23 @@ def prepare_worktree(commit):
     return path
 
 
-def build(tree, units, log, target):
+def build_groups(units):
+    """Group Cargo inputs while requiring a unique owner for each output name."""
     packages = defaultdict(set)
+    owners = {}
     for unit in units:
-        packages[unit.spec.package].add(unit.spec.example)
-    for package, examples in sorted(packages.items()):
-        command = ["cargo", "build", "--release", "--locked", "--target-dir", str(target), "-p", package]
+        owner = (unit.spec.manifest, unit.spec.package)
+        previous = owners.setdefault(unit.spec.example, owner)
+        if previous != owner:
+            raise ValueError(f"Benchmark example {unit.spec.example!r} has multiple build owners")
+        packages[owner].add(unit.spec.example)
+    return packages
+
+
+def build(tree, units, log, target):
+    for (manifest, package), examples in sorted(build_groups(units).items()):
+        command = ["cargo", "build", "--release", "--locked", "--target-dir", str(target),
+                   "--manifest-path", str(tree / manifest), "-p", package]
         for example in sorted(examples):
             command += ["--example", example]
         print(f"Building {', '.join(sorted(examples))} in {tree}", flush=True)
@@ -491,7 +508,7 @@ def main(argv=None):
             "sides": {"base": {"ref": args.base, "commit": base_commit, "dirty": False},
                       "head": {"ref": "working tree", "commit": head_commit, "dirty": head_dirty}},
             "binaries": {side: {k: v["sha256"] for k, v in examples.items()} for side, examples in binaries.items()},
-            "units": {u.id: {"workload": u.workload, "command": [u.spec.example, *u.args, *extra],
+            "units": {u.id: {"workload": u.workload, "manifest": u.spec.manifest, "command": [u.spec.example, *u.args, *extra],
                              "validator_args": u.validator_args(extra)} for u in units},
             "runs": runs, "failures": failures, "results": results, "bundle": bundle,
         }

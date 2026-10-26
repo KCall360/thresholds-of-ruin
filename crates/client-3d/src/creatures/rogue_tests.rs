@@ -977,10 +977,17 @@ fn at_rest_women_stand_with_their_weight_on_one_leg() {
             9,
             Some(Variant {
                 woman,
+                // This long idle witness owns hip posing, not loose-hair fitting.
+                // Hair contact has separate full-mesh jump/isolation witnesses.
+                hair: if woman { 4 } else { 1 },
                 ..Default::default()
             }),
         );
         let (mut app, root) = animate_look(look, 1, |_| Vec3::ZERO);
+        assert!(
+            app.world().get::<Rig>(root).unwrap().hair.is_none(),
+            "pose fixture must not spend its 4000 frames fitting loose hair"
+        );
         let hips = app
             .world()
             .get::<Rig>(root)
@@ -1219,33 +1226,14 @@ pub(super) fn points_under(world: &World, meshes: &Assets<Mesh>, root: Entity) -
     out
 }
 
+#[path = "composition_cases.rs"]
+mod composition_cases;
+
 #[test]
-fn every_dressable_humanoid_wears_every_outfit() {
-    // Clothes and armour are cut for the wearer, not its kind: every
-    // humanoid that wears separable clothes can be dressed from the whole
-    // wardrobe, and each outfit brings exactly its own garments.
-    // Kinds that differ in what they natively wear: plate, a jerkin, a
-    // coat, bare limbs, rags and a ghost's translucent body.
-    for model in [
-        CreatureModel::Human,
-        CreatureModel::Sentinel,
-        CreatureModel::Vampire,
-        CreatureModel::Zombie,
-        CreatureModel::Troll,
-        CreatureModel::Leprechaun,
-        CreatureModel::Nymph,
-        CreatureModel::Medusa,
-        CreatureModel::Phantom,
-    ] {
+fn every_dressable_recipe_keeps_identity_and_distinct_cache_keys() {
+    for model in composition_cases::MODELS {
         for woman in [false, true] {
-            let look = Look::with_choice(
-                model,
-                2,
-                Some(Variant {
-                    woman,
-                    ..Default::default()
-                }),
-            );
+            let look = Look::with_choice(model, 2, Some(Variant { woman, ..default() }));
             assert!(look.dresses(), "{model:?} wears separable clothes");
             assert_eq!(look.clone().dressed(Wardrobe::Native).key, look.key);
             let mut keys = BTreeSet::new();
@@ -1253,121 +1241,170 @@ fn every_dressable_humanoid_wears_every_outfit() {
                 let dressed = look.clone().dressed(wardrobe);
                 assert!(
                     keys.insert(dressed.key.clone()),
-                    "{wardrobe:?} is cached apart"
+                    "{model:?} {wardrobe:?} cached apart"
                 );
-                let outfit = outfit::Outfit::worn(&dressed);
-                let (world, rig, library, meshes) = spawn_one(&dressed);
-                // What the body grows stays with it whatever it wears.
-                if model == CreatureModel::Medusa {
-                    assert!(!rig.segments.is_empty(), "{wardrobe:?} keeps her serpents");
-                }
-                // What the outfit puts on the head decides whether hair shows:
-                // a helm hides it, and a sentinel out of her helm shows hers.
-                let fall = rig.drapes.iter().any(|(_, kind)| *kind == Drape::Hair);
-                assert_eq!(
-                    fall,
-                    geometry::loose_fall(&dressed),
-                    "{model:?} {wardrobe:?} hair"
-                );
-                if wardrobe == Wardrobe::Knight {
-                    assert!(!fall, "{model:?} wears her hair under the helm");
-                }
-                // Pointed ears fold inside a helm rather than poking through.
-                if wardrobe == Wardrobe::Knight {
-                    let tip = geometry::rogue::ear_tip(&dressed, Vec3::new(0.24, 0.2, -0.08));
-                    assert!(
-                        tip.x <= geometry::rogue::EAR_UNDER_COVER,
-                        "{model:?} ears under the helm"
-                    );
-                }
-                // Hair and what is worn in it (wreaths, topknots) go under
-                // a helm, and show again out of it.
-                assert_eq!(
-                    geometry::rogue::hair_shows(&dressed),
-                    match wardrobe {
-                        Wardrobe::Knight => false,
-                        Wardrobe::Commoner | Wardrobe::Courtier => true,
-                        _ => geometry::rogue::hair_shows(&dressed),
-                    },
-                    "{model:?} {wardrobe:?} hair"
-                );
-                if model == CreatureModel::Sentinel && woman && wardrobe == Wardrobe::Courtier {
-                    assert!(fall, "out of her helm, a sentinel lets her hair down");
-                }
-                for (_, mesh) in meshes.iter() {
-                    if let Some(bevy::render::mesh::VertexAttributeValues::Float32x3(ps)) =
-                        mesh.attribute(Mesh::ATTRIBUTE_POSITION)
-                    {
-                        assert!(ps.iter().flatten().all(|v| v.is_finite()));
-                    }
-                }
-                let cloaks = rig
-                    .drapes
-                    .iter()
-                    .filter(|(_, kind)| *kind == Drape::Cloak)
-                    .count();
-                let skirts = rig
-                    .drapes
-                    .iter()
-                    .filter(|(_, kind)| matches!(kind, Drape::Skirt(_)))
-                    .count();
-                if wardrobe != Wardrobe::Native {
-                    assert_eq!(
-                        cloaks,
-                        usize::from(outfit.cloak.is_some()),
-                        "{model:?} {wardrobe:?} cloak"
-                    );
-                    let peplum = matches!(
-                        outfit.outer,
-                        Some(outfit::Outer::Shell {
-                            peplum: Some(_),
-                            ..
-                        })
-                    );
-                    // Each layer beneath a skirt hangs and sways on its own.
-                    let layers = outfit
-                        .skirt
-                        .map_or(0, |skirt| skirt.layers.iter().flatten().count());
-                    assert_eq!(
-                        skirts,
-                        usize::from(outfit.skirt.is_some()) + usize::from(peplum) + layers,
-                        "{model:?} {wardrobe:?} skirts"
-                    );
-                }
-                // Plate is steel on the arms and legs; cloth outfits have none
-                // there. A ghost's whole body below the head is translucent.
-                if dressed.style.ghostly() {
-                    continue;
-                }
-                let metal = library.materials.metal().clone();
-                let steel_on = |joint: J| {
-                    let e = rig.joint(joint).expect("limb");
-                    world
-                        .get::<Children>(e)
-                        .into_iter()
-                        .flat_map(|children| children.iter())
-                        .any(|child| {
-                            world
-                                .get::<MeshMaterial3d<StandardMaterial>>(child)
-                                .is_some_and(|m| m.0 == metal)
-                        })
-                };
-                // Metal on the arm is plate, or jewellery worn round it.
-                let plated = outfit.arms == outfit::Arms::Plate;
-                let jewelled = outfit.trimmings.armlets.is_some();
-                assert_eq!(
-                    steel_on(J::ArmL),
-                    plated || jewelled,
-                    "{model:?} {wardrobe:?} arms"
-                );
-                assert_eq!(
-                    steel_on(J::LegL),
-                    outfit.legs == outfit::Legs::Plate,
-                    "{model:?} {wardrobe:?} legs"
-                );
+                let _recipe = outfit::Outfit::worn(&dressed);
             }
         }
     }
+}
+
+#[test]
+fn focused_and_seeded_compositions_generate_their_declared_parts() {
+    let seed = std::env::var("TOR_COMPOSITION_SEED").map_or(0x5eed_cafe, |value| {
+        value
+            .parse::<u64>()
+            .expect("TOR_COMPOSITION_SEED must be a decimal u64")
+    });
+    let cases = composition_cases::plan(seed);
+    let selected = std::env::var("TOR_COMPOSITION_CASE").ok().map(|value| {
+        value
+            .parse::<usize>()
+            .expect("TOR_COMPOSITION_CASE must be a nonnegative case index")
+    });
+    assert!(
+        selected.is_none_or(|index| index < cases.len()),
+        "TOR_COMPOSITION_CASE is outside this plan"
+    );
+    for (index, case) in cases.into_iter().enumerate() {
+        if selected.is_some_and(|selected| selected != index) {
+            continue;
+        }
+        eprintln!("composition batch_seed={seed} case={index} {case:?}");
+        check_generated_composition(case);
+    }
+}
+
+fn check_generated_composition(case: composition_cases::Case) {
+    let model = case.model;
+    let woman = case.variant.woman;
+    let wardrobe = case.wardrobe;
+    let dressed = Look::with_choice(model, case.seed, Some(case.variant))
+        .dressed(wardrobe)
+        .equipped(case.equipment);
+    let outfit = outfit::Outfit::worn(&dressed);
+    let (world, rig, library, meshes) = spawn_one(&dressed);
+    // What the body grows stays with it whatever it wears.
+    if model == CreatureModel::Medusa {
+        assert!(!rig.segments.is_empty(), "{wardrobe:?} keeps her serpents");
+    }
+    // What the outfit puts on the head decides whether hair shows:
+    // a helm hides it, and a sentinel out of her helm shows hers.
+    let fall = rig.drapes.iter().any(|(_, kind)| *kind == Drape::Hair);
+    assert_eq!(
+        fall,
+        geometry::loose_fall(&dressed),
+        "{model:?} {wardrobe:?} hair"
+    );
+    if wardrobe == Wardrobe::Knight || case.equipment.head.is_some() {
+        assert!(!fall, "{model:?} wears her hair under the helm");
+    }
+    // Pointed ears fold inside a helm rather than poking through.
+    if wardrobe == Wardrobe::Knight || case.equipment.head.is_some() {
+        let tip = geometry::rogue::ear_tip(&dressed, Vec3::new(0.24, 0.2, -0.08));
+        assert!(
+            tip.x <= geometry::rogue::EAR_UNDER_COVER,
+            "{model:?} ears under the helm"
+        );
+    }
+    // Hair and what is worn in it (wreaths, topknots) go under
+    // a helm, and show again out of it.
+    assert_eq!(
+        geometry::rogue::hair_shows(&dressed),
+        match wardrobe {
+            Wardrobe::Knight => false,
+            _ if case.equipment.head.is_some() => false,
+            Wardrobe::Commoner | Wardrobe::Courtier => true,
+            _ => geometry::rogue::hair_shows(&dressed),
+        },
+        "{model:?} {wardrobe:?} hair"
+    );
+    if model == CreatureModel::Sentinel && woman && wardrobe == Wardrobe::Courtier {
+        assert!(fall, "out of her helm, a sentinel lets her hair down");
+    }
+    for (_, mesh) in meshes.iter() {
+        if let Some(bevy::render::mesh::VertexAttributeValues::Float32x3(ps)) =
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        {
+            assert!(ps.iter().flatten().all(|v| v.is_finite()));
+        }
+    }
+    let cloaks = rig
+        .drapes
+        .iter()
+        .filter(|(_, kind)| *kind == Drape::Cloak)
+        .count();
+    let skirts = rig
+        .drapes
+        .iter()
+        .filter(|(_, kind)| matches!(kind, Drape::Skirt(_)))
+        .count();
+    if case.equipment.back.is_some() {
+        assert_eq!(
+            cloaks, 1,
+            "equipped cloak must be generated once, including over native robes"
+        );
+    }
+    if wardrobe != Wardrobe::Native {
+        assert_eq!(
+            cloaks,
+            usize::from(outfit.cloak.is_some()),
+            "{model:?} {wardrobe:?} cloak"
+        );
+        let peplum = matches!(
+            outfit.outer,
+            Some(outfit::Outer::Shell {
+                peplum: Some(_),
+                ..
+            })
+        );
+        // Each layer beneath a skirt hangs and sways on its own.
+        let layers = outfit
+            .skirt
+            .map_or(0, |skirt| skirt.layers.iter().flatten().count());
+        assert_eq!(
+            skirts,
+            usize::from(outfit.skirt.is_some()) + usize::from(peplum) + layers,
+            "{model:?} {wardrobe:?} skirts"
+        );
+    }
+    // Plate is steel on the arms and legs; cloth outfits have none
+    // there. A ghost's whole body below the head is translucent.
+    if dressed.style.ghostly() {
+        return;
+    }
+    let metal = library.materials.metal().clone();
+    let steel_on = |joint: J| {
+        let e = rig.joint(joint).expect("limb");
+        world
+            .get::<Children>(e)
+            .into_iter()
+            .flat_map(|children| children.iter())
+            .any(|child| {
+                world
+                    .get::<MeshMaterial3d<StandardMaterial>>(child)
+                    .is_some_and(|m| m.0 == metal)
+            })
+    };
+    if case.equipment.body.is_some() {
+        assert!(
+            steel_on(J::Torso),
+            "equipped breastplate must have rendered torso geometry"
+        );
+    }
+    // Metal on the arm is plate, or jewellery worn round it.
+    let plated = outfit.arms == outfit::Arms::Plate;
+    let jewelled = outfit.trimmings.armlets.is_some();
+    assert_eq!(
+        steel_on(J::ArmL),
+        plated || jewelled,
+        "{model:?} {wardrobe:?} arms"
+    );
+    assert_eq!(
+        steel_on(J::LegL),
+        outfit.legs == outfit::Legs::Plate,
+        "{model:?} {wardrobe:?} legs"
+    );
 }
 
 #[test]
@@ -1384,8 +1421,8 @@ fn long_hair_hangs_where_it_did_and_swings_smoothly_as_she_moves() {
         geometry::loose_fall(&look),
         "the nymph wears her hair long and loose"
     );
-    // At rest the fall sits exactly where it would on the head: its own
-    // part, pivoted at the crown, carries the head's proportions.
+    // The authored fall retains its exact head placement and crown pivot.
+    // Contact may bend the fall around the composed body, but not move its scalp.
     let (world, rig, _, meshes) = spawn_one(&look);
     let (hair, _) = *rig
         .drapes
@@ -1407,13 +1444,41 @@ fn long_hair_hangs_where_it_did_and_swings_smoothly_as_she_moves() {
     let (low, high) = on_head.matte.bounds();
     let scale = anatomy::storybook_part(Plan::Biped, J::Head);
     let (low, high) = (low * scale, high * scale);
-    let bounds = placed.iter().fold((Vec3::MAX, Vec3::MIN), |(lo, hi), p| {
+    let authored: Vec<_> = super::hair_contact::authored_points(rig.hair.as_ref().unwrap())
+        .into_iter()
+        .map(|p| at.transform_point3(p))
+        .collect();
+    let bounds = authored.iter().fold((Vec3::MAX, Vec3::MIN), |(lo, hi), p| {
         (lo.min(*p), hi.max(*p))
     });
     assert!(
         (bounds.0 - low).abs().max_element() < 1e-4 && (bounds.1 - high).abs().max_element() < 1e-4,
-        "{bounds:?} against {low} {high}"
+        "authored {bounds:?} against {low} {high}"
     );
+    // Crown vertices must still occupy those exact rendered positions. Lower
+    // contact and edge stretch have their own animated hair_contact regression.
+    assert_eq!(placed.len(), authored.len());
+    let (attached, root) = super::hair_contact::attachment_witnesses(rig.hair.as_ref().unwrap());
+    let crown_floor = at.transform_point3(root).y;
+    let mut crown = 0;
+    for ((fitted, source), attached) in placed.iter().zip(&authored).zip(attached) {
+        // Exact attachment follows authored ownership, not a global height
+        // that accidentally includes the jaw/neck fall on another body.
+        if attached {
+            assert!(
+                fitted.distance(*source) < 1e-5,
+                "contact moved an attachment"
+            );
+        }
+        // Independent spatial witness: the real crown cannot be made mobile
+        // merely by changing the ownership mask.
+        if source.y >= crown_floor {
+            assert!(attached, "crown lost attachment ownership");
+            assert!(fitted.distance(*source) < 1e-5, "contact moved the crown");
+            crown += 1;
+        }
+    }
+    assert!(crown > 20);
     // Walking, then turning a right angle: it trails and lifts with each
     // step, more through the turn, and never jumps between frames.
     let path = |f: usize| {
@@ -1481,6 +1546,271 @@ fn long_hair_hangs_where_it_did_and_swings_smoothly_as_she_moves() {
 }
 
 #[test]
+fn transferred_bare_surfaces_use_the_recipient_skin_without_recoloring_cloth() {
+    let mut donor = Look::with_choice(
+        CreatureModel::Nymph,
+        42,
+        Some(Variant {
+            woman: true,
+            hair: 4,
+            ..default()
+        }),
+    );
+    donor.skin = Vec3::new(0.1, 0.65, 0.2);
+    let mut recipient = Look::with_choice(
+        CreatureModel::Human,
+        91,
+        Some(Variant {
+            woman: true,
+            hair: 4,
+            ..default()
+        }),
+    );
+    recipient.skin = Vec3::new(0.72, 0.35, 0.23);
+    recipient.outfit = Some(outfit::Outfit::native(&donor));
+    let has_pigment = |look: &Look, joint, color: Vec3| {
+        let linear = Color::srgb(color.x, color.y, color.z).to_linear();
+        let expected = Vec3::new(linear.red, linear.green, linear.blue).normalize();
+        let (world, rig, _, meshes) = spawn_one(look);
+        let mut stack = vec![rig.joint(joint).unwrap()];
+        let mut colors = Vec::new();
+        while let Some(entity) = stack.pop() {
+            if let Some(mesh) = world.get::<Mesh3d>(entity).and_then(|m| meshes.get(&m.0)) {
+                if let Some(bevy::render::mesh::VertexAttributeValues::Float32x4(values)) =
+                    mesh.attribute(Mesh::ATTRIBUTE_COLOR)
+                {
+                    colors.extend(values.iter().map(|c| Vec3::new(c[0], c[1], c[2])));
+                }
+            }
+            if let Some(children) = world.get::<Children>(entity) {
+                stack.extend(children.iter());
+            }
+        }
+        assert!(colors.len() > 100, "{joint:?}: no meaningful mesh witness");
+        let matching = colors
+            .iter()
+            .filter(|c| c.normalize().distance(expected) < 0.0001)
+            .count();
+        assert!(
+            matching > 100,
+            "{joint:?}: expected pigment {color:?}, found {matching} vertices"
+        );
+    };
+    for joint in [J::HandL, J::LegL, J::FootL] {
+        has_pigment(&recipient, joint, recipient.skin);
+    }
+    // The same numeric donor pigment can be authored cloth. It must stay fixed.
+    recipient.outfit.as_mut().unwrap().legs = outfit::Legs::Trousers(donor.skin);
+    has_pigment(&recipient, J::LegL, donor.skin);
+    let mut equipment = Equipment::default();
+    equipment.select("boots").unwrap();
+    let restored = recipient.equipped(equipment).equipped(Equipment::default());
+    has_pigment(&restored, J::FootL, restored.skin);
+}
+
+#[test]
+fn native_accessories_survive_explicit_recipe_copy() {
+    fn attached_points(look: &Look) -> Vec<Vec<Vec3>> {
+        let (world, rig, _, meshes) = spawn_one(look);
+        let mut result = Vec::new();
+        for joint in [J::Hips, J::ArmL, J::ArmR, J::ForeL, J::ForeR] {
+            let parent = rig.joint(joint).unwrap();
+            for child in world.get::<Children>(parent).unwrap().iter() {
+                // Separately attached garments, not the body mesh or child joints.
+                if world.get::<Mesh3d>(child).is_none() && !rig.joints.contains(&Some(child)) {
+                    result.push(points_under(&world, &meshes, child));
+                }
+            }
+        }
+        result
+    }
+    for model in [
+        CreatureModel::Orc,
+        CreatureModel::Troll,
+        CreatureModel::Leprechaun,
+        CreatureModel::Nymph,
+        CreatureModel::Medusa,
+        CreatureModel::Phantom,
+        CreatureModel::Wraith,
+    ] {
+        let native = Look::with_choice(
+            model,
+            42,
+            Some(Variant {
+                woman: true,
+                ..default()
+            }),
+        );
+        let original = attached_points(&native);
+        assert!(original.iter().any(|p| !p.is_empty()));
+        let mut copied = native.clone();
+        copied.outfit = Some(outfit::Outfit::native(&native));
+        let actual = attached_points(&copied);
+        assert_eq!(
+            actual.len(),
+            original.len(),
+            "{model:?}: copied recipe lost attached garments"
+        );
+        let mut recipient = Look::with_choice(
+            CreatureModel::Human,
+            91,
+            Some(Variant {
+                woman: true,
+                build: 2,
+                shade: 3,
+                ..default()
+            }),
+        );
+        recipient.outfit = copied.outfit;
+        let transferred = attached_points(&recipient);
+        assert_eq!(
+            transferred.len(),
+            original.len(),
+            "{model:?}: transfer lost attachments"
+        );
+        assert!(transferred.iter().flatten().all(|p| p.is_finite()));
+        for (a, b) in actual.iter().zip(&original) {
+            assert_eq!(
+                a.len(),
+                b.len(),
+                "{model:?}: copied garment topology changed"
+            );
+            assert!(
+                a.iter().zip(b).all(|(a, b)| a.distance(*b) < 0.00001),
+                "{model:?}: copied garment placement changed"
+            );
+        }
+    }
+    // Details from three recipes coexist on one wearer and can be removed
+    // independently without losing the other attachments.
+    let mut mixed = Look::with_choice(
+        CreatureModel::Human,
+        71,
+        Some(Variant {
+            woman: true,
+            hair: 4,
+            ..default()
+        }),
+    );
+    let mut recipe = outfit::Outfit::from_wardrobe(Wardrobe::Commoner, &mixed);
+    mixed.outfit = Some(recipe);
+    let base_count = attached_points(&mixed).len();
+    let details = |model| outfit::Outfit::native(&Look::of(model, 42)).details;
+    recipe.details.hip = details(CreatureModel::Nymph).hip;
+    recipe.details.shoulder_discs = details(CreatureModel::Medusa).shoulder_discs;
+    recipe.details.sleeve_tatters = details(CreatureModel::Phantom).sleeve_tatters;
+    for (hip, shoulders, sleeves, added) in [
+        (true, true, true, 5),
+        (false, true, true, 4),
+        (true, false, true, 3),
+        (true, true, false, 3),
+    ] {
+        let mut selected = recipe;
+        if !hip {
+            selected.details.hip = None;
+        }
+        if !shoulders {
+            selected.details.shoulder_discs = None;
+        }
+        if !sleeves {
+            selected.details.sleeve_tatters = None;
+        }
+        mixed.outfit = Some(selected);
+        assert_eq!(attached_points(&mixed).len(), base_count + added);
+    }
+}
+
+#[test]
+fn explicit_recipe_changes_do_not_alias_in_a_shared_model_cache() {
+    let mut materials = Assets::<StandardMaterial>::default();
+    let mut library = PropLibrary::new(crate::props::PropMaterials::new(&mut materials));
+    let mut meshes = Assets::<Mesh>::default();
+    let mut world = World::new();
+    let base = Look::with_choice(
+        CreatureModel::Nymph,
+        2,
+        Some(Variant {
+            woman: true,
+            ..default()
+        }),
+    );
+    let mut first = base.clone();
+    first.outfit = Some(outfit::Outfit::from_wardrobe(Wardrobe::Commoner, &base));
+    let mut second = first.clone();
+    second.outfit.as_mut().unwrap().tunic = Vec3::new(0.8, 0.05, 0.6);
+    assert_eq!(
+        first.key, second.key,
+        "exercise raw recipe overrides, not catalog IDs"
+    );
+    let mut draw = |look: &Look| {
+        let parent = world.spawn(Transform::default()).id();
+        let mut queue = bevy::ecs::world::CommandQueue::default();
+        let rig = spawn(
+            &mut Commands::new(&mut queue, &world),
+            &mut library,
+            &mut meshes,
+            parent,
+            look,
+        );
+        queue.apply(&mut world);
+        let handles = |joint| -> Vec<AssetId<Mesh>> {
+            world
+                .get::<Children>(rig.joint(joint).unwrap())
+                .into_iter()
+                .flat_map(|children| children.iter())
+                .filter_map(|child| world.get::<Mesh3d>(child).map(|m| m.0.id()))
+                .collect()
+        };
+        let torso = handles(J::Torso);
+        let colors: Vec<[f32; 4]> = torso
+            .iter()
+            .flat_map(|id| {
+                match meshes
+                    .get(*id)
+                    .unwrap()
+                    .attribute(Mesh::ATTRIBUTE_COLOR)
+                    .unwrap()
+                {
+                    bevy::render::mesh::VertexAttributeValues::Float32x4(values) => values.clone(),
+                    _ => panic!("garment colors"),
+                }
+            })
+            .collect();
+        (
+            torso,
+            handles(J::Head),
+            rig.hair.as_ref().map(super::hair_contact::source_meshes),
+            colors,
+        )
+    };
+    let original = draw(&base);
+    let a = draw(&first);
+    let b = draw(&second);
+    assert!(!a.0.is_empty() && !a.3.is_empty());
+    assert_ne!(
+        a.0, b.0,
+        "different authored recipes reused the same torso mesh"
+    );
+    assert_ne!(
+        a.3, b.3,
+        "cached pixels would retain the previous garment pigment"
+    );
+    assert_eq!(a.1, b.1, "unchanged heads should still share geometry");
+    assert!(a.2.is_some(), "fixture must exercise reusable hair sources");
+    assert_eq!(a.2, b.2, "unchanged hair sources should still be shared");
+    assert_eq!(
+        draw(&first),
+        a,
+        "repeat selection must reuse its own composition"
+    );
+    assert_eq!(
+        draw(&base),
+        original,
+        "native restoration must reuse its original geometry"
+    );
+}
+
+#[test]
 fn redressing_reuses_the_head_and_hair_the_outfit_leaves_alone() {
     // Changing clothes rebuilds only what they shape: outfits that leave
     // the head bare share its face and hair, and a helm gets its own head.
@@ -1517,11 +1847,10 @@ fn redressing_reuses_the_head_and_hair_the_outfit_leaves_alone() {
                 .filter_map(|child| world.get::<Mesh3d>(child).map(|m| m.0.id()))
                 .collect()
         };
-        let hair = rig
-            .drapes
-            .iter()
-            .find(|(_, kind)| *kind == Drape::Hair)
-            .map(|&(e, _)| meshes_of(e));
+        // Mutable contact meshes belong to each wearer; redressing reuses
+        // their immutable source geometry. Instance isolation is covered by
+        // wearers_keep_independent_contact_meshes_and_cached_sources.
+        let hair = rig.hair.as_ref().map(super::hair_contact::source_meshes);
         (
             meshes_of(rig.joint(J::Head).unwrap()),
             hair,
@@ -1769,6 +2098,14 @@ fn torso_costume_witness(model: CreatureModel, woman: bool) -> (Look, Vec3, f32,
 /// Direct mesh vertices on one joint, excluding separate drapes, limbs and
 /// body features. Positions include the mesh's actual Storybook transform.
 fn joint_surface_samples(look: &Look, joint: J) -> Vec<(Vec3, Vec3)> {
+    joint_surface_samples_with_drapes(look, joint, true)
+}
+
+fn joint_surface_samples_with_drapes(
+    look: &Look,
+    joint: J,
+    include_drapes: bool,
+) -> Vec<(Vec3, Vec3)> {
     use bevy::render::mesh::VertexAttributeValues;
     let (world, rig, _, meshes) = spawn_one(look);
     let mut samples = Vec::new();
@@ -1777,6 +2114,9 @@ fn joint_surface_samples(look: &Look, joint: J) -> Vec<(Vec3, Vec3)> {
         .unwrap()
         .iter()
     {
+        if !include_drapes && rig.drapes.iter().any(|(entity, _)| *entity == child) {
+            continue;
+        }
         let Some(mesh) = world.get::<Mesh3d>(child).and_then(|m| meshes.get(&m.0)) else {
             continue;
         };
@@ -2595,6 +2935,530 @@ fn wardrobe_accessories_clear_plate_and_its_tabard_on_every_build() {
                         .map(|at| plate.distance(at))
                         .fold(f32::INFINITY, f32::min);
                     assert!(clearance > 0.028, "{model:?} woman {woman} build {build} reverse {reverse}: strap must clear plate, tabard and heraldry; minimum clearance {clearance:.4}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn layered_skirts_drive_motion_with_their_rendered_lengths() {
+    for woman in [false, true] {
+        let look = Look::with_choice(
+            CreatureModel::Human,
+            7,
+            Some(Variant {
+                woman,
+                ..Default::default()
+            }),
+        )
+        .dressed(Wardrobe::Goddess);
+        let skirt = outfit::Outfit::worn(&look).skirt.unwrap();
+        let (_, rig, _, _) = spawn_one(&look);
+        let mut lengths: Vec<f32> = rig
+            .drapes
+            .iter()
+            .filter_map(|(_, drape)| {
+                if let Drape::Skirt(length) = drape {
+                    Some(*length)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        lengths.sort_by(f32::total_cmp);
+        let mut expected = vec![skirt.length];
+        expected.extend(
+            skirt
+                .layers
+                .iter()
+                .flatten()
+                .map(|layer| skirt.length + layer.longer),
+        );
+        expected.sort_by(f32::total_cmp);
+        assert_eq!(lengths.len(), expected.len());
+        for (actual, expected) in lengths.into_iter().zip(expected) {
+            assert!((actual - expected).abs() < 1e-6,
+                "cloth motion must use its rendered length: woman={woman}, actual={actual}, expected={expected}");
+        }
+    }
+}
+
+#[test]
+fn layered_skirts_preserve_their_relative_fit_while_swaying() {
+    for wardrobe in [Wardrobe::Cleric, Wardrobe::Druid] {
+        let look = Look::with_choice(
+            CreatureModel::Human,
+            9,
+            Some(Variant {
+                woman: true,
+                ..default()
+            }),
+        )
+        .dressed(wardrobe);
+        let (mut app, root) = animate_look(look, 0, |_| Vec3::ZERO);
+        let mut largest_sway = 0.0f32;
+        let mut final_sway = 0.0;
+        for frame in 0..160 {
+            let position = if frame < 45 {
+                Vec3::Z * frame as f32 * 0.03
+            } else if frame < 90 {
+                Vec3::new((frame - 45) as f32 * 0.03, 0.0, 1.35)
+            } else {
+                Vec3::new(1.35, 0.0, 1.35)
+            };
+            app.world_mut()
+                .get_mut::<Transform>(root)
+                .unwrap()
+                .translation = position;
+            app.update();
+            let rig = app.world().get::<Rig>(root).unwrap();
+            let rotations: Vec<_> = rig
+                .drapes
+                .iter()
+                .filter(|(_, kind)| matches!(kind, Drape::Skirt(_)))
+                .map(|(entity, _)| app.world().get::<Transform>(*entity).unwrap().rotation)
+                .collect();
+            assert!(rotations.len() >= 2);
+            final_sway = rotations[0].angle_between(Quat::IDENTITY);
+            largest_sway = largest_sway.max(final_sway);
+            for rotation in &rotations[1..] {
+                assert!(rotation.abs_diff_eq(rotations[0],1e-5),"{wardrobe:?} frame={frame}: layers lose fitted clearance while walking, turning or settling");
+            }
+        }
+        assert!(
+            largest_sway > 0.01,
+            "the layered garment must still sway while travelling"
+        );
+        assert!(
+            final_sway < 0.03,
+            "the garment must settle after stopping: {final_sway}"
+        );
+    }
+}
+
+#[test]
+fn fitted_belt_front_clears_the_torso_through_a_jump() {
+    use bevy::render::mesh::VertexAttributeValues;
+    for model in [
+        CreatureModel::Human,
+        CreatureModel::Orc,
+        CreatureModel::Nymph,
+    ] {
+        for woman in [false, true] {
+            let look = Look::with_choice(model, 9, Some(Variant { woman, ..default() }))
+                .dressed(Wardrobe::Cleric);
+            let body = anatomy::HumanoidBody::resolve(&look);
+            let support = geometry::torso_shape(body, None, false);
+            let (mut app, root) = animate_look(look, 1, |_| Vec3::ZERO);
+            let rig = app.world().get::<Rig>(root).unwrap();
+            let hips = rig.joint(J::Hips).unwrap();
+            let torso = rig.joint(J::Torso).unwrap();
+            let leather = LEATHER * 0.8;
+            let color = Color::srgb(leather.x, leather.y, leather.z).to_linear();
+            let target = Vec3::new(color.red, color.green, color.blue);
+            let mut samples = Vec::new();
+            for joint in [hips, torso] {
+                for child in app.world().get::<Children>(joint).unwrap().iter() {
+                    let Some(handle) = app.world().get::<Mesh3d>(child) else {
+                        continue;
+                    };
+                    let mesh = app
+                        .world()
+                        .resource::<Assets<Mesh>>()
+                        .get(&handle.0)
+                        .unwrap();
+                    let Some(VertexAttributeValues::Float32x3(points)) =
+                        mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+                    else {
+                        panic!("points")
+                    };
+                    let Some(VertexAttributeValues::Float32x4(colors)) =
+                        mesh.attribute(Mesh::ATTRIBUTE_COLOR)
+                    else {
+                        panic!("colors")
+                    };
+                    let transform = app
+                        .world()
+                        .get::<Transform>(child)
+                        .unwrap()
+                        .compute_affine();
+                    for (point, color) in points.iter().zip(colors) {
+                        let point = transform.transform_point3(Vec3::from(*point));
+                        let hip_point = point
+                            + if joint == torso {
+                                body.torso
+                            } else {
+                                Vec3::ZERO
+                            };
+                        if hip_point.x.abs() < 0.02
+                            && hip_point.z > 0.0
+                            && (0.045..=0.095).contains(&hip_point.y)
+                            && Vec3::new(color[0], color[1], color[2]).distance(target) < 1e-5
+                        {
+                            samples.push((joint, point));
+                        }
+                    }
+                }
+            }
+            assert!(samples.len() > 20, "exercise actual emitted belt vertices");
+            app.world_mut().get_mut::<Anim>(root).unwrap().action = Some((Move::Jump, 0.0));
+            for frame in 0..70 {
+                app.update();
+                let transform = app
+                    .world()
+                    .get::<Transform>(torso)
+                    .unwrap()
+                    .compute_affine();
+                for &(joint, point) in &samples {
+                    let torso_point = if joint == torso {
+                        point
+                    } else {
+                        transform.inverse().transform_point3(point)
+                    };
+                    let gap = support.distance(torso_point / anatomy::HIP_SCALE);
+                    assert!(
+                        gap >= 0.001,
+                        "frame={frame}: fitted belt loses clearance from moving torso, gap={gap}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn both_mages_swap_every_wardrobe_and_restore_their_native_identity() {
+    for model in [CreatureModel::Mage, CreatureModel::RedMage] {
+        for woman in [false, true] {
+            let native = Look::with_choice(model, 17, Some(Variant { woman, ..default() }));
+            assert!(
+                native.dresses(),
+                "{model:?} must join the swappable humanoids"
+            );
+            for wardrobe in Wardrobe::ALL {
+                let dressed = native.clone().dressed(wardrobe);
+                assert_eq!(dressed.style, native.style);
+                assert_eq!(dressed.skin, native.skin);
+                assert_eq!(dressed.scale, native.scale);
+                assert_eq!(dressed.v.woman, woman);
+                assert_eq!(dressed.outfit.is_some(), wardrobe != Wardrobe::Native);
+                let restored = dressed.dressed(Wardrobe::Native);
+                assert_eq!(restored.key, native.key);
+                assert!(restored.outfit.is_none());
+            }
+        }
+    }
+}
+
+#[test]
+fn mage_replacements_own_their_garments_without_native_robe_or_bells() {
+    for model in [CreatureModel::Mage, CreatureModel::RedMage] {
+        for woman in [false, true] {
+            let native = Look::with_choice(model, 17, Some(Variant { woman, ..default() }));
+            let (_, native_rig, _, _) = spawn_one(&native);
+            assert!(native_rig.robe.is_some());
+            for wardrobe in [
+                Wardrobe::Commoner,
+                Wardrobe::Knight,
+                Wardrobe::Leotard,
+                Wardrobe::RoyalPrincess,
+            ] {
+                let dressed = native.clone().dressed(wardrobe);
+                assert!(dressed.outfit.is_some(), "{model:?} {wardrobe:?}");
+                let (_, rig, _, _) = spawn_one(&dressed);
+                assert!(
+                    rig.robe.is_none(),
+                    "native robe must not overlay {wardrobe:?}"
+                );
+                assert_eq!(
+                    rig.rest, native_rig.rest,
+                    "clothes must preserve skeletal landmarks"
+                );
+                // Holding anatomy constant isolates accidental caster-only costume additions.
+                let mut equivalent = dressed.clone();
+                equivalent.style = Style::Scout;
+                for joint in [J::ForeL, J::ForeR] {
+                    assert!(
+                        surface_signature(joint_surface_samples(&dressed, joint))
+                            == surface_signature(joint_surface_samples(&equivalent, joint)),
+                        "{model:?} {wardrobe:?}: native bell sleeve leaked into replacement"
+                    );
+                }
+            }
+            let (_, restored, _, _) = spawn_one(
+                &native
+                    .clone()
+                    .dressed(Wardrobe::Ranger)
+                    .dressed(Wardrobe::Native),
+            );
+            assert!(restored.robe.is_some());
+        }
+    }
+}
+
+#[test]
+fn equipment_composes_visible_parts_without_replacing_the_gown_or_native_robe() {
+    let mut equipment = Equipment::default();
+    for name in ["helm", "boots", "cloak"] {
+        equipment.select(name).unwrap();
+    }
+    let base = Look::with_choice(
+        CreatureModel::Human,
+        17,
+        Some(Variant {
+            woman: true,
+            ..default()
+        }),
+    )
+    .dressed(Wardrobe::RoyalPrincess);
+    let worn = base.clone().equipped(equipment);
+    let (_, rig, _, _) = spawn_one(&worn);
+    assert_eq!(rig.cloaks.len(), 1);
+    assert!(!geometry::loose_fall(&worn));
+    for joint in [J::Torso, J::Hips, J::ArmL] {
+        assert!(
+            surface_signature(joint_surface_samples_with_drapes(&base, joint, false))
+                == surface_signature(joint_surface_samples_with_drapes(&worn, joint, false)),
+            "{joint:?}: equipment changed unrelated gown geometry"
+        );
+    }
+    for joint in [J::Head, J::FootL] {
+        assert!(
+            surface_signature(joint_surface_samples_with_drapes(&base, joint, false))
+                != surface_signature(joint_surface_samples_with_drapes(&worn, joint, false)),
+            "{joint:?}: selected equipment must change emitted geometry"
+        );
+        let restored = worn.clone().equipped(Equipment::default());
+        assert!(
+            surface_signature(joint_surface_samples_with_drapes(&restored, joint, false))
+                == surface_signature(joint_surface_samples_with_drapes(&base, joint, false))
+        );
+    }
+    for model in [CreatureModel::Mage, CreatureModel::RedMage] {
+        let native = Look::of(model, 17).equipped(equipment);
+        let (_, rig, _, _) = spawn_one(&native);
+        assert!(
+            rig.robe.is_some(),
+            "equipping accessories retains native robe deformation"
+        );
+    }
+}
+
+#[test]
+fn equipment_head_cache_restores_crown_and_reuses_head_when_only_boots_change() {
+    let mut materials = Assets::<StandardMaterial>::default();
+    let mut library = PropLibrary::new(crate::props::PropMaterials::new(&mut materials));
+    let mut meshes = Assets::<Mesh>::default();
+    let mut world = World::new();
+    let base = Look::with_choice(
+        CreatureModel::Human,
+        17,
+        Some(Variant {
+            woman: true,
+            ..default()
+        }),
+    )
+    .dressed(Wardrobe::RoyalPrincess);
+    let mut head = |look: &Look| {
+        let parent = world.spawn(Transform::default()).id();
+        let mut queue = bevy::ecs::world::CommandQueue::default();
+        let rig = spawn(
+            &mut Commands::new(&mut queue, &world),
+            &mut library,
+            &mut meshes,
+            parent,
+            look,
+        );
+        queue.apply(&mut world);
+        world
+            .get::<Children>(rig.joint(J::Head).unwrap())
+            .unwrap()
+            .iter()
+            .filter_map(|e| world.get::<Mesh3d>(e).map(|m| m.0.id()))
+            .collect::<Vec<_>>()
+    };
+    let crown = head(&base);
+    let mut equipment = Equipment::default();
+    equipment.select("boots").unwrap();
+    assert_eq!(head(&base.clone().equipped(equipment)), crown);
+    equipment.select("helm").unwrap();
+    let helmet = head(&base.clone().equipped(equipment));
+    assert_ne!(helmet, crown);
+    assert_eq!(
+        head(
+            &base
+                .clone()
+                .equipped(equipment)
+                .equipped(Equipment::default())
+        ),
+        crown
+    );
+}
+
+#[test]
+fn breastplate_changes_torso_preserves_limbs_and_restores_gown() {
+    let mut equipment = Equipment::default();
+    equipment.select("breastplate").unwrap();
+    for wardrobe in [Wardrobe::RoyalPrincess, Wardrobe::Bard] {
+        let base = Look::with_choice(
+            CreatureModel::Human,
+            17,
+            Some(Variant {
+                woman: true,
+                ..default()
+            }),
+        )
+        .dressed(wardrobe);
+        let armored = base.clone().equipped(equipment);
+        assert!(
+            surface_signature(joint_surface_samples_with_drapes(&base, J::Torso, false))
+                != surface_signature(joint_surface_samples_with_drapes(&armored, J::Torso, false))
+        );
+        for joint in [J::ArmL, J::ForeL, J::LegL, J::ShinL, J::FootL, J::Head] {
+            assert!(
+                surface_signature(joint_surface_samples(&base, joint))
+                    == surface_signature(joint_surface_samples(&armored, joint)),
+                "{wardrobe:?} {joint:?}: torso armor must retain compatible pieces"
+            );
+        }
+        let restored = armored.equipped(Equipment::default());
+        assert!(
+            surface_signature(joint_surface_samples_with_drapes(&base, J::Torso, false))
+                == surface_signature(joint_surface_samples_with_drapes(
+                    &restored,
+                    J::Torso,
+                    false
+                ))
+        );
+    }
+}
+
+#[test]
+fn sylvan_duelist_generates_finite_layers_and_keeps_mage_identity() {
+    for model in [
+        CreatureModel::Human,
+        CreatureModel::Orc,
+        CreatureModel::Mage,
+        CreatureModel::RedMage,
+    ] {
+        for woman in [false, true] {
+            let base = Look::with_choice(
+                model,
+                17,
+                Some(Variant {
+                    woman,
+                    build: 2,
+                    ..default()
+                }),
+            );
+            let look = base.clone().dressed(Wardrobe::SylvanDuelist);
+            let (_, rig, _, meshes) = spawn_one(&look);
+            assert!(rig.joint(J::HandR).is_some());
+            assert!(!rig.cloaks.is_empty());
+            assert_eq!(look.style, base.style);
+            assert_eq!(look.clone().dressed(Wardrobe::Native).key, base.key);
+            assert!(meshes.len() > 5);
+            for (_, mesh) in meshes.iter() {
+                let positions = mesh
+                    .attribute(Mesh::ATTRIBUTE_POSITION)
+                    .unwrap()
+                    .as_float3()
+                    .unwrap();
+                assert!(!positions.is_empty());
+                assert!(
+                    positions.iter().flatten().all(|v| v.is_finite()),
+                    "{model:?} woman={woman}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn crossed_belts_follow_their_fitted_torso_through_a_jump() {
+    use bevy::render::mesh::VertexAttributeValues;
+    for model in [
+        CreatureModel::Human,
+        CreatureModel::Mage,
+        CreatureModel::Nymph,
+    ] {
+        for woman in [true] {
+            let look = Look::with_choice(model, 9, Some(Variant { woman, ..default() }))
+                .dressed(Wardrobe::SylvanDuelist);
+            let body = anatomy::HumanoidBody::resolve(&look);
+            let support = geometry::torso_shape(body, None, false);
+            let (mut app, root) = animate_look(look, 1, |_| Vec3::ZERO);
+            let rig = app.world().get::<Rig>(root).unwrap();
+            let hips = rig.joint(J::Hips).unwrap();
+            let torso = rig.joint(J::Torso).unwrap();
+            let leather = Vec3::new(0.10, 0.075, 0.065);
+            let color = Color::srgb(leather.x, leather.y, leather.z).to_linear();
+            let target = Vec3::new(color.red, color.green, color.blue);
+            let mut samples = Vec::new();
+            for joint in [hips, torso] {
+                for child in app.world().get::<Children>(joint).unwrap().iter() {
+                    let Some(handle) = app.world().get::<Mesh3d>(child) else {
+                        continue;
+                    };
+                    let mesh = app
+                        .world()
+                        .resource::<Assets<Mesh>>()
+                        .get(&handle.0)
+                        .unwrap();
+                    let Some(VertexAttributeValues::Float32x3(points)) =
+                        mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+                    else {
+                        panic!("points")
+                    };
+                    let Some(VertexAttributeValues::Float32x4(colors)) =
+                        mesh.attribute(Mesh::ATTRIBUTE_COLOR)
+                    else {
+                        panic!("colors")
+                    };
+                    let transform = app
+                        .world()
+                        .get::<Transform>(child)
+                        .unwrap()
+                        .compute_affine();
+                    for (point, color) in points.iter().zip(colors) {
+                        let point = transform.transform_point3(Vec3::from(*point));
+                        let hip_point = point
+                            + if joint == torso {
+                                body.torso
+                            } else {
+                                Vec3::ZERO
+                            };
+                        if hip_point.x.abs() < 0.02
+                            && hip_point.z > 0.0
+                            && (0.075..=0.105).contains(&hip_point.y)
+                            && Vec3::new(color[0], color[1], color[2]).distance(target) < 1e-5
+                        {
+                            samples.push((joint, point));
+                        }
+                    }
+                }
+            }
+            assert!(samples.len() > 20, "exercise actual emitted belt vertices");
+            app.world_mut().get_mut::<Anim>(root).unwrap().action = Some((Move::Jump, 0.0));
+            for frame in 0..70 {
+                app.update();
+                let transform = app
+                    .world()
+                    .get::<Transform>(torso)
+                    .unwrap()
+                    .compute_affine();
+                for &(joint, point) in &samples {
+                    let torso_point = if joint == torso {
+                        point
+                    } else {
+                        transform.inverse().transform_point3(point)
+                    };
+                    let gap = support.distance(torso_point / anatomy::HIP_SCALE);
+                    assert!(
+                        (0.003..0.025).contains(&gap),
+                        "frame={frame}: fitted belt loses clearance from moving torso, gap={gap}"
+                    );
                 }
             }
         }

@@ -724,6 +724,44 @@ pub(crate) fn maintain_cache(
 
 pub use tor_client_3d_model::ItemModel as Kind;
 
+/// Authored in prop-local coordinates, also used to emit the handle shaft.
+const SWORD_HANDLE_START: Vec3 = Vec3::new(-0.235, 0.03, 0.0);
+const SWORD_HANDLE_END: Vec3 = Vec3::new(-0.4, 0.03, 0.0);
+
+fn sword_scale(kind: Kind) -> Option<f32> {
+    match kind {
+        Kind::Greatsword => Some(1.0),
+        Kind::ShortSword => Some(0.62),
+        _ => None,
+    }
+}
+
+/// Prop-local frame: origin at the handle's midpoint, +X toward the blade.
+/// Missing metadata remains explicit; other item recipes are not sword grips.
+fn sword_handle_frame(kind: Kind) -> Option<Transform> {
+    sword_scale(kind).map(|scale| {
+        Transform::from_translation((SWORD_HANDLE_START + SWORD_HANDLE_END) * (0.5 * scale))
+    })
+}
+
+/// Shared hand-local presentation for live and preview consumers. The target
+/// is the existing hand convention, not yet an anatomy-resolved grasp frame.
+/// Parent hand scale is unchanged; no additional item scaling is introduced.
+pub(crate) fn held_transform(kind: Kind) -> Transform {
+    let rotation = Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2)
+        * Quat::from_rotation_x(std::f32::consts::FRAC_PI_2);
+    if let Some(handle) = sword_handle_frame(kind) {
+        let grasp = Vec3::new(-0.03, -0.02, 0.0);
+        // Align the authored handle with the target, rather than estimating
+        // a model-dependent forward offset in each caller.
+        Transform::from_rotation(rotation).with_translation(grasp - rotation * handle.translation)
+    } else {
+        // Preserve existing non-sword presentation until its recipe declares
+        // a handle frame; do not invent anatomy or an item grip here.
+        Transform::from_rotation(rotation).with_translation(Vec3::new(0.0, -0.02, 0.29))
+    }
+}
+
 pub(crate) fn hash(text: &str) -> u64 {
     text.bytes().fold(1469598103934665603u64, |h, b| {
         (h ^ u64::from(b)).wrapping_mul(1099511628211)
@@ -746,8 +784,7 @@ fn build_item(kind: Kind, name: &str) -> Parts {
             Vec3::new(0.38, 0.6, 0.68),
         ),
         Kind::Mace => mace(&mut p),
-        Kind::Greatsword => sword(&mut p, 1.0),
-        Kind::ShortSword => sword(&mut p, 0.62),
+        Kind::Greatsword | Kind::ShortSword => sword(&mut p, sword_scale(kind).unwrap()),
         Kind::RingMail => ring_mail(&mut p),
         Kind::Bandage => bandage(&mut p),
         Kind::Ration => ration(&mut p),
@@ -850,8 +887,8 @@ fn sword(p: &mut Parts, scale: f32) {
         BRONZE,
     );
     p.matte.prism(
-        Vec3::new(-0.235, 0.03, 0.0),
-        Vec3::new(-0.4, 0.03, 0.0),
+        SWORD_HANDLE_START,
+        SWORD_HANDLE_END,
         0.022,
         0.022,
         6,
@@ -1702,6 +1739,36 @@ impl Default for Builder {
 }
 
 impl Builder {
+    /// Farthest forward ray intersection with existing triangles, expressed in
+    /// this builder's current recipe coordinates. Includes all surface layers.
+    pub(crate) fn outer_surface(&self, origin: Vec3, direction: Vec3) -> Option<Vec3> {
+        let start = self.xf.transform_point3(origin);
+        let ray = self.xf.transform_vector3(direction);
+        let mut farthest: Option<f32> = None;
+        for triangle in self.positions.as_chunks::<3>().0 {
+            let a = Vec3::from_array(triangle[0]);
+            let edge1 = Vec3::from_array(triangle[1]) - a;
+            let edge2 = Vec3::from_array(triangle[2]) - a;
+            let cross = ray.cross(edge2);
+            let determinant = edge1.dot(cross);
+            if determinant.abs() < 1e-10 {
+                continue;
+            }
+            let offset = start - a;
+            let u = offset.dot(cross) / determinant;
+            let q = offset.cross(edge1);
+            let v = ray.dot(q) / determinant;
+            if u < -1e-5 || v < -1e-5 || u + v > 1.00001 {
+                continue;
+            }
+            let distance = edge2.dot(q) / determinant;
+            if distance >= 0.0 {
+                farthest = Some(farthest.map_or(distance, |old| old.max(distance)));
+            }
+        }
+        farthest.map(|distance| origin + direction * distance)
+    }
+
     /// Whether nothing has been built yet.
     #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool {

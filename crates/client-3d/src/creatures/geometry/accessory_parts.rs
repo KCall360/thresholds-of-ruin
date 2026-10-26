@@ -74,14 +74,41 @@ pub(super) fn neck_band(p: &mut Parts, neck: Neck, build: f32, slim: f32) {
                 }
             }
         }
-        Neck::Collar { .. } | Neck::Teeth { .. } => {}
+        Neck::Collar { .. } | Neck::Teeth { .. } | Neck::Pendant { .. } => {}
     }
 }
 
 /// What lies over the collarbones, in the torso's space: a broad beaded
 /// collar, or teeth strung on a cord.
-pub(super) fn neck_collar(p: &mut Parts, neck: Neck, build: f32) {
+pub(super) fn neck_collar(p: &mut Parts, neck: Neck, build: f32, form: &crate::sdf::Sculpt) {
     match neck {
+        Neck::Pendant { metal, gem } => {
+            let path: Vec<_> = (0..=32)
+                .map(|k| {
+                    let a = k as f32 * TAU / 32.0;
+                    let x = a.sin() * 0.09 * build;
+                    let y = 0.535 - 0.055 * a.cos().max(0.0);
+                    torso_surface(form, x, y, a.cos() >= 0.0)
+                        + Vec3::Z * (if a.cos() >= 0.0 { 0.004 } else { -0.004 })
+                })
+                .collect();
+            tube(
+                &mut p.metal,
+                &path,
+                &vec![(0.0025, 0.0025); path.len()],
+                metal,
+            );
+            let at = torso_surface(form, 0.0, 0.465, true) + Vec3::Z * 0.006;
+            p.metal
+                .blob(at, Vec3::new(0.015, 0.023, 0.006), 1, 0.0, metal);
+            p.satin.blob(
+                at + Vec3::Z * 0.005,
+                Vec3::new(0.010, 0.017, 0.006),
+                1,
+                0.0,
+                gem,
+            );
+        }
         Neck::Collar { metal, beads } => {
             // Bands rising in rings round the base of the neck.
             for (k, (radius, y)) in [(0.075, 0.548), (0.098, 0.53), (0.12, 0.508)]
@@ -170,21 +197,63 @@ pub(super) fn peak(p: &mut Parts, color: Vec3, side: f32, build: f32) {
 }
 
 /// What is worn round the waist over the garments, in the hips' space.
-pub(super) fn waist(p: &mut Parts, waist: Waist, body: HumanoidBody) {
-    let b = body.build;
-    let belt = super::super::robe::belt_radii(b, body.waist);
-    let at =
-        |a: f32, y: f32, out: f32| Vec3::new(a.sin() * (belt.x + out), y, a.cos() * (belt.y + out));
+pub(super) fn waist(p: &mut Parts, waist: Waist, body: HumanoidBody, support: &crate::sdf::Sculpt) {
+    let fit = |height| super::super::robe::belt_on(body, height, support);
+    let belt = fit(BELT_CENTER_Y);
+    let at = |a: f32, y: f32, out: f32| {
+        if y >= BELT_BOTTOM_Y {
+            waist_parts::point(body, support, y, a, out)
+        } else {
+            Vec3::new(a.sin() * (belt.x + out), y, a.cos() * (belt.y + out))
+        }
+    };
     match waist {
+        Waist::Jeweled { metal, gem } => {
+            // The framework is fitted to the body at every height, rather
+            // than a horizontal ring that projects from a narrow waist.
+            let path: Vec<_> = (0..=64)
+                .map(|k| {
+                    let a = k as f32 * TAU / 64.0;
+                    waist_parts::point(
+                        body,
+                        support,
+                        0.125 - 0.075 * a.cos().max(0.0).powi(4),
+                        a,
+                        0.009,
+                    )
+                })
+                .collect();
+            tube(
+                &mut p.metal,
+                &path,
+                &vec![(0.0035, 0.0035); path.len()],
+                metal,
+            );
+            for k in [-2i32, -1, 0, 1, 2] {
+                let a = k as f32 * 0.42;
+                let at = waist_parts::point(
+                    body,
+                    support,
+                    0.125 - 0.075 * a.cos().max(0.0).powi(4),
+                    a,
+                    0.015,
+                );
+                let size = if k == 0 { 1.0 } else { 0.65 };
+                p.metal
+                    .blob(at, Vec3::new(0.018, 0.028, 0.008) * size, 1, 0.0, metal);
+                p.satin.blob(
+                    at + Vec3::Z * 0.007,
+                    Vec3::new(0.012, 0.020, 0.007) * size,
+                    1,
+                    0.0,
+                    gem,
+                );
+            }
+        }
         Waist::Sash(color) => {
             // A broad sash round the waist, knotted at her left hip with
             // two tails hanging from the knot.
-            tube(
-                &mut p.matte,
-                &[Vec3::Y * 0.04, Vec3::Y * 0.11],
-                &[(belt.x + 0.008, belt.y + 0.008); 2],
-                color,
-            );
+            waist_parts::band(&mut p.matte, body, support, Vec2::new(0.04, 0.11), color);
             let knot = at(0.9, 0.06, 0.012);
             p.matte
                 .blob(knot, Vec3::new(0.028, 0.03, 0.022), 3, 0.1, color);
@@ -231,6 +300,18 @@ pub(super) fn waist(p: &mut Parts, waist: Waist, body: HumanoidBody) {
                     p.metal
                         .blob(coin, Vec3::new(0.011, 0.011, 0.003), 1, 0.0, metal);
                 }
+            }
+        }
+        Waist::CrossedBelts(color) => {
+            for (tilt, gap) in [(-0.04, 0.008), (0.04, 0.013)] {
+                waist_parts::slanted_band(
+                    &mut p.matte,
+                    body,
+                    support,
+                    Vec2::new(0.075, 0.105),
+                    Vec2::new(tilt, gap),
+                    color,
+                );
             }
         }
         Waist::Crossed(color) => {

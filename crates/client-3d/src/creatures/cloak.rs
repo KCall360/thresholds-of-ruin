@@ -1,6 +1,6 @@
 //! Connected, lined shoulder cloth. Recipes share construction and materials;
 //! each wearer owns the vertices that follow its motion.
-use super::{anatomy::HumanoidBody, *};
+use super::{anatomy::HumanoidBody, deformation::SurfaceBinding, *};
 use bevy::asset::RenderAssetUsages;
 use bevy::render::{
     mesh::{Indices, PrimitiveTopology, VertexAttributeValues},
@@ -11,12 +11,15 @@ const ROWS: usize = 20;
 const COLUMNS: usize = 48;
 const GRID: usize = (ROWS + 1) * (COLUMNS + 1);
 const THICKNESS: f32 = 0.012;
+// Reserve lining thickness and interpolation across the curved plate shoulder.
+const LAYER_GAP: f32 = 0.020;
 
 pub(super) struct Recipe {
     shoulders: f32,
     hem: f32,
     top: [Vec3; COLUMNS + 1],
     support: crate::sdf::Sculpt,
+    contact: bool,
     pub length: f32,
     exterior: Vec3,
     lining: Vec3,
@@ -34,6 +37,7 @@ impl Recipe {
             hem: 0.36 * body.hips_width * body.build * anatomy::HIP_SCALE.x,
             top: [Vec3::ZERO; COLUMNS + 1],
             support,
+            contact: false,
             length: 1.08,
             exterior,
             lining,
@@ -41,6 +45,14 @@ impl Recipe {
         };
         recipe.reserve_back_layer(0.0);
         recipe
+    }
+
+    /// Fit over an actual equipped torso shell and retain that support for
+    /// pose-aware upper-back clearance during the cloak's eased swing.
+    pub fn reserve_body_layer(&mut self, layer: &crate::sdf::Sculpt) {
+        self.support.union(layer.clone(), 0.0);
+        self.contact = true;
+        self.reserve_back_layer(0.0);
     }
 
     /// Reserve the selected rear accessory layer before fitting the yoke and
@@ -56,7 +68,8 @@ impl Recipe {
             let y = 0.505 - 0.035 * u * u;
             let at = geometry::torso_surface_hit(&self.support, x, y, false)
                 .expect("resolved shoulder yoke must have upper-back support");
-            at * anatomy::HIP_SCALE + Vec3::NEG_Z * 0.012 - Vec3::new(0.0, 0.53, -0.15)
+            at * anatomy::HIP_SCALE + Vec3::NEG_Z * if self.contact { LAYER_GAP } else { 0.012 }
+                - Vec3::new(0.0, 0.53, -0.15)
         });
     }
 
@@ -86,7 +99,10 @@ impl Recipe {
         let at = (point + Vec3::new(0.0, 0.53, -0.15)) / anatomy::HIP_SCALE;
         if at.y >= 0.075 {
             if let Some(back) = geometry::torso_surface_hit(&self.support, at.x, at.y, false) {
-                point.z = point.z.min(back.z * anatomy::HIP_SCALE.z - 0.012 + 0.15);
+                point.z = point.z.min(
+                    back.z * anatomy::HIP_SCALE.z - if self.contact { LAYER_GAP } else { 0.012 }
+                        + 0.15,
+                );
             }
         }
         point
@@ -97,9 +113,17 @@ pub(super) struct CloakRig {
     pub entity: Entity,
     mesh: Handle<Mesh>,
     rest: Vec<Vec3>,
+    bindings: Vec<SurfaceBinding<f32>>,
     points: Vec<Vec3>,
     normals: Vec<Vec3>,
-    last_rotation: Quat,
+    last_rotation: Option<Quat>,
+    support: Option<crate::sdf::Sculpt>,
+}
+
+impl CloakRig {
+    pub(super) fn invalidate(&mut self) {
+        self.last_rotation = None;
+    }
 }
 
 fn index(row: usize, column: usize) -> usize {
@@ -228,14 +252,24 @@ pub(super) fn spawn(
         entity,
         mesh,
         points: rest.clone(),
+        bindings: (0..=ROWS)
+            .map(|row| {
+                let t = row.saturating_sub(1) as f32 / (ROWS - 1) as f32;
+                SurfaceBinding::single(t * t * (3.0 - 2.0 * t))
+            })
+            .collect(),
         rest,
         normals,
-        last_rotation: Quat::IDENTITY,
+        last_rotation: None,
+        support: recipe.contact.then_some(recipe.support),
     }
 }
 
 pub(super) fn place(cloak: &mut CloakRig, rotation: Quat, meshes: &mut Assets<Mesh>) {
-    if rotation.angle_between(cloak.last_rotation) < 1e-6 {
+    if cloak
+        .last_rotation
+        .is_some_and(|last| rotation.angle_between(last) < 1e-6)
+    {
         return;
     }
     // The drape entity retains its existing eased swing. Cancel that rotation
@@ -243,19 +277,30 @@ pub(super) fn place(cloak: &mut CloakRig, rotation: Quat, meshes: &mut Assets<Me
     // Two fixed rows form a supported yoke, rather than a hinge-shaped gap.
     let inverse = rotation.inverse();
     for row in 0..=ROWS {
-        let t = row.saturating_sub(1) as f32 / (ROWS - 1) as f32;
-        let give = t * t * (3.0 - 2.0 * t);
-        let bend = inverse * Quat::IDENTITY.slerp(rotation, give);
         for column in 0..=COLUMNS {
             let i = index(row, column);
-            cloak.points[i] = bend * cloak.rest[i];
+            cloak.points[i] = cloak.bindings[row]
+                .evaluate(|&give| inverse * Quat::IDENTITY.slerp(rotation, give) * cloak.rest[i]);
+            if let Some(support) = cloak.support.as_ref().filter(|_| row > 1) {
+                let mut at = rotation * cloak.points[i] + Vec3::new(0.0, 0.53, -0.15);
+                let query = at / anatomy::HIP_SCALE;
+                if query.y >= 0.075 {
+                    if let Some(back) =
+                        geometry::torso_surface_hit(support, query.x, query.y, false)
+                    {
+                        // Reserve both faces of the lining after rotation.
+                        at.z = at.z.min(back.z * anatomy::HIP_SCALE.z - LAYER_GAP);
+                        cloak.points[i] = inverse * (at - Vec3::new(0.0, 0.53, -0.15));
+                    }
+                }
+            }
         }
     }
     surface_normals(&cloak.points, &mut cloak.normals);
     if let Some(mesh) = meshes.get_mut(&cloak.mesh) {
         write(mesh, &cloak.points, &cloak.normals);
     }
-    cloak.last_rotation = rotation;
+    cloak.last_rotation = Some(rotation);
 }
 
 #[cfg(test)]
@@ -269,6 +314,87 @@ mod tests {
             panic!("cloth positions")
         };
         points.iter().map(|p| Vec3::from_array(*p)).collect()
+    }
+
+    #[test]
+    fn wraith_cloak_recipe_copies_and_equipment_replaces_then_restores_it() {
+        let native = Look::with_choice(
+            CreatureModel::Wraith,
+            42,
+            Some(Variant {
+                woman: true,
+                ..default()
+            }),
+        );
+        let (_, native_rig, _, native_meshes) = super::super::rogue_tests::spawn_one(&native);
+        assert_eq!(native_rig.cloaks.len(), 1);
+        let original = positions(native_meshes.get(&native_rig.cloaks[0].mesh).unwrap());
+        let colors = |mesh: &Mesh| match mesh.attribute(Mesh::ATTRIBUTE_COLOR).unwrap() {
+            VertexAttributeValues::Float32x4(values) => values.clone(),
+            _ => panic!("cloak colors"),
+        };
+        let original_colors = colors(native_meshes.get(&native_rig.cloaks[0].mesh).unwrap());
+        let mut equipment = Equipment::default();
+        equipment.select("cloak").unwrap();
+        let equipped = native.clone().equipped(equipment);
+        let (_, rig, _, meshes) = super::super::rogue_tests::spawn_one(&equipped);
+        assert_eq!(
+            rig.cloaks.len(),
+            1,
+            "back item must replace the native cloak"
+        );
+        assert_ne!(
+            positions(meshes.get(&rig.cloaks[0].mesh).unwrap()),
+            original
+        );
+        let restored = equipped.equipped(Equipment::default());
+        let (_, rig, _, meshes) = super::super::rogue_tests::spawn_one(&restored);
+        assert_eq!(rig.cloaks.len(), 1);
+        assert_eq!(
+            positions(meshes.get(&rig.cloaks[0].mesh).unwrap()),
+            original
+        );
+        let recipe = outfit::Outfit::native(&native);
+        assert!(recipe.cloak.unwrap().ragged);
+        assert!(
+            !outfit::Composition::resolve(&native.clone().equipped(equipment))
+                .outfit
+                .cloak
+                .unwrap()
+                .ragged
+        );
+        let mut copied = native.clone();
+        copied.outfit = Some(recipe);
+        let (_, rig, _, meshes) = super::super::rogue_tests::spawn_one(&copied);
+        assert_eq!(rig.cloaks.len(), 1, "copied recipe lost its cloak");
+        assert_eq!(
+            positions(meshes.get(&rig.cloaks[0].mesh).unwrap()),
+            original
+        );
+        let mut recipient = Look::with_choice(
+            CreatureModel::Human,
+            91,
+            Some(Variant {
+                woman: true,
+                build: 2,
+                ..default()
+            }),
+        );
+        recipient.outfit = Some(recipe);
+        let (_, mut rig, _, mut meshes) = super::super::rogue_tests::spawn_one(&recipient);
+        assert_eq!(rig.cloaks.len(), 1, "cross-body recipe lost its cloak");
+        let cloak = &mut rig.cloaks[0];
+        assert_eq!(
+            colors(meshes.get(&cloak.mesh).unwrap()),
+            original_colors,
+            "transferred cloak must retain its palette"
+        );
+        let before = positions(meshes.get(&cloak.mesh).unwrap());
+        place(cloak, Quat::from_rotation_x(0.3), &mut meshes);
+        let after = positions(meshes.get(&cloak.mesh).unwrap());
+        assert_ne!(before, after, "transferred cloak must animate");
+        assert_eq!(before.len(), after.len());
+        assert!(after.iter().all(|p| p.is_finite()));
     }
 
     #[test]
@@ -312,7 +438,7 @@ mod tests {
 
     #[test]
     fn shoulder_rows_stay_attached_and_motion_changes_only_the_wearers_mesh() {
-        for ragged in [false, true] {
+        for (ragged, armored) in [(false, false), (true, false), (false, true)] {
             for woman in [false, true] {
                 for build in 0..3 {
                     let look = Look::with_choice(
@@ -334,12 +460,24 @@ mod tests {
                     let mut queue = bevy::ecs::world::CommandQueue::default();
                     let mut commands = Commands::new(&mut queue, &world);
                     let recipe = || {
-                        Recipe::new(
+                        let mut recipe = Recipe::new(
                             body,
                             Vec3::new(0.06, 0.04, 0.09),
                             Vec3::new(0.7, 0.05, 0.1),
                             ragged,
-                        )
+                        );
+                        if armored {
+                            let mut armor = geometry::torso_shape(
+                                body,
+                                Some(geometry::TorsoMaterial::Plate),
+                                true,
+                            );
+                            armor
+                                .inflate(0.04)
+                                .carve(crate::sdf::Shape::Beyond(Vec3::Y, 0.485), 0.003);
+                            recipe.reserve_body_layer(&armor);
+                        }
+                        recipe
                     };
                     let mut first = spawn(
                         &mut commands,

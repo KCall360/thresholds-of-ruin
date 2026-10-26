@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "scenes": [
+    {
+      "script": "live-showcase/01-court.json",
+      "shots": [
+        {
+          "camera": "front",
+          "hold_seconds": 10,
+          "transition_seconds": 4
+        },
+        {
+          "camera": "three-quarter",
+          "hold_seconds": 10,
+          "transition_seconds": 4
+        },
+        {
+          "camera": "low-front",
+          "hold_seconds": 8,
+          "transition_seconds": 4
+        }
+      ]
+    },
+    {
+      "script": "live-showcase/02-adventurers.json",
+      "shots": [
+        {
+          "camera": "front",
+          "hold_seconds": 10,
+          "transition_seconds": 4
+        },
+        {
+          "camera": "three-quarter",
+          "hold_seconds": 10,
+          "transition_seconds": 4
+        },
+        {
+          "camera": "low-front",
+          "hold_seconds": 8,
+          "transition_seconds": 4
+        }
+      ]
+    },
+    {
+      "script": "live-showcase/03-arcane.json",
+      "shots": [
+        {
+          "camera": "front",
+          "hold_seconds": 10,
+          "transition_seconds": 4
+        },
+        {
+          "camera": "three-quarter",
+          "hold_seconds": 10,
+          "transition_seconds": 4
+        },
+        {
+          "camera": "low-front",
+          "hold_seconds": 8,
+          "transition_seconds": 4
+        }
+      ]
+    },
+    {
+      "script": "live-showcase/04-creatures.json",
+      "shots": [
+        {
+          "camera": "front",
+          "hold_seconds": 10,
+          "transition_seconds": 4
+        },
+        {
+          "camera": "three-quarter",
+          "hold_seconds": 10,
+          "transition_seconds": 4
+        },
+        {
+          "camera": "low-front",
+          "hold_seconds": 8,
+          "transition_seconds": 4
+        }
+      ]
+    }
+  ]
+}

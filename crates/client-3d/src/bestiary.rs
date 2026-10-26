@@ -309,14 +309,20 @@ struct Director {
 
 pub fn run(diagnostics: Diagnostics) {
     let mut app = App::new();
+    if let Some(hz) = diagnostics.review_step_hz {
+        app.insert_resource(
+            crate::review_clock::ReviewStep::new(hz).expect("validated review rate"),
+        );
+    }
     app.add_plugins(crate::graphics::plugins().set(WindowPlugin {
         primary_window: Some(Window {
-            title: "Thresholds of Ruin — bestiary".into(),
+            title: "Thresholds of Ruin \u{2014} bestiary".into(),
             resolution: WindowResolution::new(1600., 1000.),
             ..default()
         }),
         ..default()
     }))
+    .add_plugins(crate::review_clock::ReviewClockPlugin)
     .add_plugins(MaterialPlugin::<CaveMaterial>::default())
     .insert_resource(ClearColor(FOG))
     .insert_resource(AmbientLight {
@@ -434,17 +440,16 @@ impl Wearer {
         wardrobe: creatures::Wardrobe,
     ) -> creatures::Rig {
         let look = self.look.clone().dressed(wardrobe);
+        if !look.equipment().is_empty() {
+            eprintln!("Equipped wardrobe {wardrobe:?}: {:?}", look.equipment());
+        }
         let rig = creatures::spawn(commands, library, meshes, entity, &look);
         if self.sword {
             let sword = library.item(tor_client_3d_model::ItemModel::Greatsword, meshes);
             if let Some(hand) = rig.joint(creatures::J::HandR) {
                 let held = commands
                     .spawn((
-                        Transform::from_rotation(
-                            Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2)
-                                * Quat::from_rotation_x(std::f32::consts::FRAC_PI_2),
-                        )
-                        .with_translation(Vec3::new(0.0, -0.02, 0.29)),
+                        crate::props::held_transform(tor_client_3d_model::ItemModel::Greatsword),
                         Visibility::default(),
                     ))
                     .with_children(|p| sword.attach(p))
@@ -465,6 +470,7 @@ fn redress(
     time: Res<Time<Real>>,
     keys: Option<Res<ButtonInput<KeyCode>>>,
     diagnostics: Res<Diagnostics>,
+    lineup: Res<Lineup>,
     dress: Option<ResMut<Dress>>,
     mut library: ResMut<PropLibrary>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -473,7 +479,14 @@ fn redress(
     let Some(mut dress) = dress else {
         return;
     };
-    let now = time.elapsed_secs();
+    // Captures hold the lineup clock until a frame is presented. Keep automatic
+    // outfit changes on that same clock so slow rebuilds/readbacks cannot
+    // trigger another rebuild on every update.
+    let now = if diagnostics.lineups {
+        lineup.elapsed
+    } else {
+        time.elapsed_secs()
+    };
     let pressed = keys.is_some_and(|keys| keys.just_pressed(KeyCode::KeyO));
     let due = diagnostics
         .wardrobe_cycle
@@ -601,7 +614,7 @@ fn setup(
                 ))
                 .id();
             let wearer = Wearer {
-                look,
+                look: look.equipped(diagnostics.equipment),
                 sword: *name == "Warrior",
             };
             let rig = wearer.dress(
@@ -939,6 +952,23 @@ fn lineup_secs(diagnostics: &Diagnostics) -> f32 {
         LINEUP
     }
 }
+fn lineup_capture_deadline(
+    named: f32,
+    warmup: f32,
+    next_motion: f32,
+    interval: Option<f32>,
+) -> f32 {
+    let Some(interval) = interval.filter(|value| value.is_finite() && *value > 0.0) else {
+        return named;
+    };
+    let motion = if next_motion <= warmup {
+        warmup + interval.max(1.0 / 60.0)
+    } else {
+        next_motion
+    };
+    named.min(motion)
+}
+
 const LINEUP_SHOTS: [(f32, &str, usize); 3] =
     [(1.9, "line", 0), (2.8, "close-a", 1), (3.8, "close-b", 2)];
 
@@ -946,6 +976,7 @@ const LINEUP_SHOTS: [(f32, &str, usize); 3] =
 fn lineup(
     mut commands: Commands,
     time: Res<Time<Real>>,
+    presentation: Res<Time>,
     diagnostics: Res<Diagnostics>,
     mut state: ResMut<Lineup>,
     mut library: ResMut<PropLibrary>,
@@ -974,8 +1005,19 @@ fn lineup(
     };
     let deadline =
         diagnostics.capture_warmup + next_family as f32 * lineup_secs(&diagnostics) + next_moment;
+    let deadline = lineup_capture_deadline(
+        deadline,
+        diagnostics.capture_warmup,
+        state.next_motion,
+        diagnostics.capture.as_ref().and(diagnostics.capture_every),
+    );
     if pending.is_empty() {
-        state.elapsed = (state.elapsed + time.delta_secs()).min(deadline);
+        let delta = if diagnostics.review_step_hz.is_some() {
+            presentation.delta_secs()
+        } else {
+            time.delta_secs()
+        };
+        state.elapsed = (state.elapsed + delta).min(deadline);
     }
     let index = if changing_family && state.elapsed >= deadline {
         next_family
@@ -1053,7 +1095,10 @@ fn lineup(
                     Visibility::default(),
                 ))
                 .id();
-            let wearer = Wearer { look, sword: false };
+            let wearer = Wearer {
+                look: look.equipped(diagnostics.equipment),
+                sword: false,
+            };
             let rig = wearer.dress(
                 &mut commands,
                 &mut library,
@@ -1115,6 +1160,7 @@ fn lineup(
         };
         *transform = diagnostics.preview_camera(focus, offset, &mut cave_materials);
     }
+    let mut requested_named = false;
     for (when, tag, step) in LINEUP_SHOTS {
         let wanted = index * LINEUP_SHOTS.len() + step;
         let due = diagnostics.capture_warmup + index as f32 * lineup_secs(&diagnostics) + when;
@@ -1138,6 +1184,7 @@ fn lineup(
                 commands
                     .spawn(Screenshot::primary_window())
                     .observe(save_to_disk(path));
+                requested_named = true;
             }
         }
     }
@@ -1147,6 +1194,7 @@ fn lineup(
             && interval > 0.0
             && now > 0.0
             && state.elapsed >= state.next_motion
+            && !requested_named
             && pending.is_empty()
         {
             state.next_motion = state.elapsed + interval.max(1.0 / 60.0);

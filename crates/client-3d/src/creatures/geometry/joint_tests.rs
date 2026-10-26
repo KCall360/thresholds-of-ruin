@@ -268,3 +268,31 @@ fn articulated_joint_xeroc_shanks_and_pads_keep_skin_with_pale_nails() {
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+#[test]
+fn reparented_mesh_preserves_placement_across_proportions_and_parent_pose() {
+    let world = Affine3A::from_rotation_translation(
+        Quat::from_rotation_y(0.7) * Quat::from_rotation_z(-0.3),
+        Vec3::new(3.0, -2.0, 0.5),
+    );
+    for (plan, parent, child, pivot) in [
+        (Plan::Biped, J::Hips, J::Torso, Vec3::new(0.0, 0.12, -0.01)),
+        (Plan::Bird, J::ShinL, J::FootL, BIRD_ANKLE),
+    ] {
+        let conversion = reparent_mesh_transform(plan, parent, child, pivot);
+        for vertex in [
+            Vec3::ZERO,
+            Vec3::new(-0.2, 0.03, 0.14),
+            Vec3::new(0.1, -0.3, -0.2),
+        ] {
+            let original = world.transform_point3(storybook_part(plan, parent) * vertex);
+            let moved = world.transform_point3(
+                pivot + storybook_part(plan, child) * conversion.transform_point3(vertex),
+            );
+            assert!(
+                original.distance(moved) < 1e-6,
+                "{parent:?} -> {child:?}: {original:?} != {moved:?}"
+            );
+        }
+    }
+}
