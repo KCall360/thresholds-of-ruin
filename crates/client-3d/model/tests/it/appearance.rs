@@ -116,3 +116,26 @@ fn an_unknown_miscellaneous_item_does_not_claim_to_be_a_container() {
     };
     assert_ne!(item_model(&palette(&[]), &item), ItemModel::Pouch);
 }
+
+#[test]
+fn cosmetic_object_recipe_selects_fallback_without_item_class_or_name_inference() {
+    use tor_client_3d_model::object_model;
+    use tor_protocol::{ObjectPresentation, ObjectPresentationKind};
+    let mut p = ObjectPresentation {
+        name: "greatsword".into(),
+        asset: None,
+        kind: ObjectPresentationKind::Item {
+            class: ItemClass::Potion,
+        },
+    };
+    assert_eq!(object_model(&palette(&[]), &p), ItemModel::Potion);
+    p.asset = Some("item.wand.authored".into());
+    assert_eq!(object_model(&palette(&[]), &p), ItemModel::Potion);
+    assert_eq!(
+        object_model(&palette(&["item.wand.authored"]), &p),
+        ItemModel::Wand
+    );
+    p.asset = None;
+    p.kind = ObjectPresentationKind::Stairs;
+    assert_eq!(object_model(&palette(&[]), &p), ItemModel::Stairs);
+}

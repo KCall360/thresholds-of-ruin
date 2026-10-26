@@ -16,6 +16,7 @@ fn empty() -> View {
 
 fn cell(position: Position, key: &str) -> CellView {
     CellView {
+        object_presentation: None,
         lit: true,
         key: key.into(),
         position,
@@ -208,6 +209,7 @@ fn remembered_door_reachability_never_grants_a_current_action() {
     let at = Position { x: 1, y: 0, z: 0 };
     let live = door(at, true);
     view.memory.push(tor_protocol::RememberedMapCell {
+        object_presentation: None,
         key: live.key,
         position: at,
         wall: live.wall,
@@ -262,4 +264,33 @@ fn an_elevated_hostiles_click_attacks_its_exact_target_instead_of_moving() {
         if target == foe),
         "the actor target must survive click interpretation: {request:?}"
     );
+}
+
+#[test]
+fn stair_cosmetics_do_not_create_or_remove_real_navigation() {
+    let mut view = empty();
+    let at = view.feet;
+    let mut stair = cell(at, "actual-stairs");
+    stair.stairs_down = true;
+    view.visible = vec![stair];
+    assert_eq!(describe(&view, at).0, "Stairs leading down");
+    assert!(matches!(
+        describe(&view, at).2,
+        Some(Intent::Climb(Direction::Down))
+    ));
+    view.visible[0].object_presentation = Some(ObjectPresentation {
+        name: "silver flask".into(),
+        asset: None,
+        kind: ObjectPresentationKind::Item {
+            class: ItemClass::Potion,
+        },
+    });
+    assert_eq!(describe(&view, at).0, "Silver flask");
+    assert!(matches!(
+        describe(&view, at).2,
+        Some(Intent::Climb(Direction::Down))
+    ));
+    view.visible[0].stairs_down = false;
+    view.visible[0].object_presentation.as_mut().unwrap().kind = ObjectPresentationKind::Stairs;
+    assert!(describe(&view, at).2.is_none());
 }

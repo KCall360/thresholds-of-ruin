@@ -186,6 +186,9 @@ fn presentation_event(connection: &Connection, message: &ServerMessage) -> Optio
             &connection.state,
             &connection.palette,
         )))),
+        // Dedicated chart rows are not terrain, actor models, picks or paths.
+        // Ordinary chart UI remains a separate 3D task, not a map-page fallback.
+        ServerMessage::ChartPage { .. } => None,
         ServerMessage::Error { message, .. } => Some(Event::Status(message.clone())),
         _ => None,
     }

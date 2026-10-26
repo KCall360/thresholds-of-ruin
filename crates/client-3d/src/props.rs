@@ -515,6 +515,7 @@ fn accent_for(name: &str) -> Accent {
 fn build_item(kind: Kind, name: &str) -> Parts {
     let mut p = Parts::default();
     match kind {
+        Kind::Stairs => return stairs_down(),
         Kind::Placeholder => p.matte.blob(
             Vec3::Y * 0.16,
             Vec3::new(0.22, 0.16, 0.22),

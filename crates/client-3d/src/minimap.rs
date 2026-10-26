@@ -27,13 +27,41 @@ pub(crate) struct MiniMap {
 #[derive(Component)]
 pub(crate) struct MiniMapFrame;
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum Ground {
     Wall,
     Floor,
+    Object,
     Door,
     Up,
     Down,
+}
+
+fn terrain_kind(cell: &tor_client_3d_model::Terrain<'_>, dz: i32) -> Option<Ground> {
+    Some(if cell.stairs_up || cell.stairs_down {
+        match cell.object_model {
+            Some(tor_client_3d_model::ItemModel::Stairs) => Ground::Down,
+            Some(_) => Ground::Object,
+            None if cell.stairs_up => Ground::Up,
+            None => Ground::Down,
+        }
+    } else if cell.door.is_some() {
+        Ground::Door
+    } else if cell.wall && dz == 0 {
+        Ground::Wall
+    } else if !cell.wall && dz == 0 {
+        Ground::Floor
+    } else {
+        return None;
+    })
+}
+
+fn item_color(model: tor_client_3d_model::ItemModel) -> [f32; 3] {
+    if model == tor_client_3d_model::ItemModel::Stairs {
+        [0.4, 0.55, 0.95]
+    } else {
+        [0.95, 0.78, 0.3]
+    }
 }
 
 pub(crate) fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
@@ -146,20 +174,7 @@ pub(crate) fn draw(
         if dx.abs() > REACH || dy.abs() > REACH || !(-1..=1).contains(&dz) {
             continue;
         }
-        let kind = if cell.stairs_up {
-            Ground::Up
-        } else if cell.stairs_down {
-            Ground::Down
-        } else if cell.door.is_some() {
-            Ground::Door
-        } else if cell.wall {
-            if dz != 0 {
-                continue;
-            }
-            Ground::Wall
-        } else if dz == 0 {
-            Ground::Floor
-        } else {
+        let Some(kind) = terrain_kind(&cell, dz) else {
             continue;
         };
         let entry = ground.entry((dx, dy)).or_insert((kind, seen));
@@ -175,6 +190,7 @@ pub(crate) fn draw(
         let lit = if seen { 1.0 } else { 0.5 };
         let color = match kind {
             Ground::Floor => [0.62, 0.52, 0.38],
+            Ground::Object => [0.95, 0.78, 0.3],
             Ground::Wall => [0.3, 0.32, 0.4],
             Ground::Door => [0.86, 0.6, 0.24],
             Ground::Up => [0.36, 0.84, 0.86],
@@ -205,7 +221,7 @@ pub(crate) fn draw(
     for item in &view.items {
         let (dx, dy) = (item.position.x - feet.x, item.position.y - feet.y);
         if (item.position.z - feet.z).abs() <= 1 {
-            canvas.dot(dx, dy, 1, [0.95, 0.78, 0.3]);
+            canvas.dot(dx, dy, 1, item_color(item.model));
         }
     }
     for actor in view.actors.iter().filter(|a| !a.is_self) {
@@ -301,5 +317,57 @@ impl Canvas<'_> {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod cosmetic_tests {
+    use super::*;
+    use tor_client_3d_model::{ItemModel, Terrain};
+    use tor_protocol::{ItemClass, ObjectPresentation, ObjectPresentationKind, Position};
+
+    #[test]
+    fn sampled_stair_colors_leave_factual_geometry_and_navigation_unchanged() {
+        let mut cell = Terrain {
+            object_presentation: None,
+            object_model: None,
+            key: "stairs",
+            position: Position { x: 1, y: 0, z: 0 },
+            wall: false,
+            stairs_up: true,
+            stairs_down: false,
+            door: None,
+            seen: true,
+            lit: true,
+        };
+        assert_eq!(terrain_kind(&cell, 0), Some(Ground::Up));
+        let potion = ObjectPresentation {
+            name: "flask".into(),
+            asset: None,
+            kind: ObjectPresentationKind::Item {
+                class: ItemClass::Potion,
+            },
+        };
+        cell.object_presentation = Some(&potion);
+        cell.object_model = Some(ItemModel::Potion);
+        assert_eq!(terrain_kind(&cell, 0), Some(Ground::Object));
+        assert!(cell.stairs_up && !cell.stairs_down);
+        let stairs = ObjectPresentation {
+            name: "stairs".into(),
+            asset: None,
+            kind: ObjectPresentationKind::Stairs,
+        };
+        cell.object_presentation = Some(&stairs);
+        cell.object_model = Some(ItemModel::Stairs);
+        assert_eq!(terrain_kind(&cell, 0), Some(Ground::Down));
+        assert_eq!(item_color(ItemModel::Stairs), [0.4, 0.55, 0.95]);
+        assert_eq!(item_color(ItemModel::Potion), [0.95, 0.78, 0.3]);
+        cell.object_model = None;
+        cell.object_presentation = None;
+        assert_eq!(terrain_kind(&cell, 0), Some(Ground::Up));
+        // Even a malformed cosmetic-only cell cannot manufacture stair topology.
+        cell.stairs_up = false;
+        cell.object_model = Some(ItemModel::Stairs);
+        assert_eq!(terrain_kind(&cell, 0), Some(Ground::Floor));
     }
 }
