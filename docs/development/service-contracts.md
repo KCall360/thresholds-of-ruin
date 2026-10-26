@@ -23,7 +23,8 @@ cannot produce a successful gate. The count grows with the suite and is not
 hardcoded to the pilot inventory.
 
 Local `quick` and `push` use the same wrapper when `tor-server` is in their
-selected package set. Host adapter, scenario and wrapper Python changes select
+tested package set (`quick` tests directly changed packages, `push` every
+affected one). Host adapter, scenario and wrapper Python changes select
 that owner. Unrelated quick checks are not broadened. Clippy/documentation use
 the same host feature when selected. The Python CI partitions continue building
 and exercising the production applications with their default feature set.
