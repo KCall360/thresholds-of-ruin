@@ -4259,7 +4259,15 @@ fn ribbon_surface_turn(
                 .zip(end)
                 .map(|(a, b)| {
                     let from = a.0.lerp(b.0, t) + outward * 0.65;
-                    let surface = form.onto(from, -outward);
+                    // A ray grazing the flank takes short steps; keep
+                    // marching from where one bounded march stopped.
+                    let mut surface = form.onto(from, -outward);
+                    for _ in 0..4 {
+                        if form.distance(surface).abs() < 0.0005 {
+                            break;
+                        }
+                        surface = form.onto(surface, -outward);
+                    }
                     debug_assert!(
                         surface.is_finite() && form.distance(surface).abs() < 0.002,
                         "ribbon turn must stay on its support: {surface}"
