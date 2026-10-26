@@ -438,9 +438,11 @@ fn constrain_faces(
         [0.0, 0.5, 0.5],
         [0.5, 0.0, 0.5],
     ];
-    // A sample's field value is reused while its position keeps the same bits:
-    // later passes requery only faces that contact or stretching moved.
-    let mut known: Vec<Option<([u32; 3], f32)>> = vec![None; triangles.len() * SAMPLES.len()];
+    // Field values are keyed by the exact bits of the sample position. Edge
+    // midpoints shared by neighbouring faces are queried once, and later
+    // passes requery only samples that contact or stretching moved.
+    let mut known: std::collections::HashMap<[u32; 3], f32> =
+        std::collections::HashMap::with_capacity(triangles.len() * 3);
     for _ in 0..24 {
         let mut corrected = false;
         // Edge relaxation is cheap relative to support queries. Diffuse the
@@ -448,24 +450,17 @@ fn constrain_faces(
         for _ in 0..8 {
             corrected |= limit_stretch(points, edges, influence, distance);
         }
-        for (index, tri) in triangles.iter().enumerate() {
-            for (sample, weights) in SAMPLES.into_iter().enumerate() {
+        for tri in triangles {
+            for weights in SAMPLES {
                 let p = points[tri[0]] * weights[0]
                     + points[tri[1]] * weights[1]
                     + points[tri[2]] * weights[2];
                 if !(0.04..0.60).contains(&p.y) {
                     continue;
                 }
-                let bits = p.to_array().map(f32::to_bits);
-                let slot = &mut known[index * SAMPLES.len() + sample];
-                let gap = match *slot {
-                    Some((seen, gap)) if seen == bits => gap,
-                    _ => {
-                        let gap = distance(p);
-                        *slot = Some((bits, gap));
-                        gap
-                    }
-                };
+                let gap = *known
+                    .entry(p.to_array().map(f32::to_bits))
+                    .or_insert_with(|| distance(p));
                 if gap >= 0.006 {
                     continue;
                 }
@@ -1016,5 +1011,32 @@ mod face_constraint_tests {
             "the pressed face is cleared: {points:?}"
         );
         assert_eq!(far.get(), 4, "each unmoved far sample is queried once");
+    }
+}
+
+#[cfg(test)]
+mod shared_sample_tests {
+    use super::*;
+    use std::cell::Cell;
+
+    #[test]
+    fn a_midpoint_shared_by_two_faces_is_queried_once() {
+        // Two clear faces share the edge 1-2; its midpoint is one sample.
+        let mut points = vec![
+            Vec3::new(0.0, 0.1, 1.0),
+            Vec3::new(0.1, 0.1, 1.0),
+            Vec3::new(0.0, 0.2, 1.0),
+            Vec3::new(0.1, 0.2, 1.0),
+        ];
+        let shared = points[1] * 0.5 + points[2] * 0.5;
+        let hits = Cell::new(0usize);
+        let field = |p: Vec3| {
+            if p == shared {
+                hits.set(hits.get() + 1);
+            }
+            1.0
+        };
+        constrain_faces(&mut points, &[[0, 1, 2], [3, 2, 1]], &[], &[1.0; 4], &field);
+        assert_eq!(hits.get(), 1, "the shared edge midpoint is queried once");
     }
 }
