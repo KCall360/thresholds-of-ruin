@@ -19,6 +19,7 @@ mod minimap;
 #[doc(hidden)]
 pub mod model_benchmark;
 mod net;
+mod pack;
 mod picking;
 mod props;
 #[cfg(test)]
@@ -540,6 +541,8 @@ struct Game {
     status: String,
     /// A device or ability waiting for what it is aimed at.
     aiming: Option<Aim>,
+    /// A projectile choice in progress, as the session last presented it.
+    projectile: Option<net::ProjectilePrompt>,
     busy: bool,
     fatal: bool,
     since_send: f32,
@@ -582,6 +585,8 @@ enum Aim {
         id: String,
         target: tor_protocol::AbilityTargetKind,
     },
+    /// A chosen projectile delivery: the next movement input fires it.
+    Projectile,
 }
 
 impl Aim {
@@ -590,6 +595,9 @@ impl Aim {
         use tor_protocol::AbilityTargetKind as Kind;
         match self {
             Aim::Device(item) => Some(Cmd::Zap(*item, direction)),
+            Aim::Projectile => Some(Cmd::Projectile(tor_client_3d_model::ProjectileStep::Fire(
+                direction,
+            ))),
             Aim::Ability {
                 id,
                 target: Kind::SelfStep | Kind::DirectionalRay,

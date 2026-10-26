@@ -68,10 +68,13 @@ fn used(id: &str, aim: AbilityAim) -> Action {
 }
 
 #[test]
-fn granted_abilities_are_listed_without_the_basic_attack_or_projectiles() {
+fn granted_abilities_are_listed_without_the_basic_attack() {
     let projected = view(&state(), &Palette::default());
     let listed: Vec<_> = projected.abilities.iter().map(|a| a.id.as_str()).collect();
-    assert_eq!(listed, ["magic_missile", "frost_ray", "lunge", "heal_self"]);
+    assert_eq!(
+        listed,
+        ["magic_missile", "frost_ray", "lunge", "heal_self", "arrow"]
+    );
     assert_eq!(
         projected.abilities[1].target,
         AbilityTargetKind::DirectionalRay

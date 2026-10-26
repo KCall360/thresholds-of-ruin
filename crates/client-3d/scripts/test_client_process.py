@@ -1027,6 +1027,57 @@ class Native3DProcesses(ProcessTestCase):
         self.assertTrue(any(item["name"] == "unfamiliar relic" for item in restored["state"]["observation"]["inventory"]),
                         "the native client's clean exit must persist its action without a helper save")
 
+    def test_native_keys_read_identify_and_zap_magic_items(self):
+        """The pack's number keys reach reading, identification and a
+        directional zap, all answered by a real server."""
+        self.server(scenario="magic-items")
+        executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
+        window = self.launch("tor-client-3d", [
+            "--connect", self.address, "--capture", self.directory / "captures", "--capture-every", "0.4",
+            "--quit-after", "240",
+        ], executable=executable)
+        frame = self.captured(window, lambda frame: frame["has_control"] and not frame["busy"])
+        native = self.native_keys(window)
+
+        def tap(name, done):
+            native(name, True)
+            try:
+                return self.captured(window, lambda frame: not frame["busy"] and done(frame))
+            finally:
+                native(name, False)
+
+        def action(frame, label):
+            position = next(index for index, text in enumerate(frame["panel_actions"]) if text.endswith(label))
+            self.assertLess(position, 10, "the action must have a number key")
+            return str((position + 1) % 10)
+
+        for _ in range(len(frame["ground_items"])):
+            held = len(frame["inventory"])
+            frame = tap("g", lambda frame, held=held: len(frame["inventory"]) > held)
+        self.assertFalse(frame["ground_items"], "every supply is picked up with G")
+        frame = tap("i", lambda frame: frame["panel_open"] and any(text.endswith(": Read") for text in frame["panel_actions"]))
+        frame = tap(action(frame, ": Read"), lambda frame: any(
+            text.endswith(": Identify") for text in frame["panel_actions"]))
+        self.assertTrue(frame["panel_open"], "the identification choice opens the pack")
+        frame = tap(action(frame, ": Identify"), lambda frame: any(
+            "embers" in item["name"] for item in frame["inventory"]))
+        frame = tap(action(frame, "embers: Zap"), lambda frame: frame["aiming"] is not None)
+        self.assertFalse(frame["panel_open"], "aiming hands the direction to the map")
+        tap("d", lambda frame: frame["aiming"] is None)
+        _, observed = self.client(token=SPECTATOR_TOKEN, observe=True)
+        view = observed["state"]["observation"]
+        wands = [row for row in view["inventory"] if row["class"] == "wand"]
+        self.assertTrue(all(row["identified"] for row in wands))
+        _, owner = self.client(observe=True)
+        charges = sorted(row["charges"] for row in owner["state"]["observation"]["interactions"]["inventory"]
+                         if row["charges"] is not None)
+        self.assertEqual(charges, [2], "the zap spent one charge of the identified wand east")
+        native("Escape", True)
+        try:
+            self.assertEqual(window.child.wait(timeout=30), 0)
+        finally:
+            native("Escape", False)
+
     def test_fresh_window_hydrates_occluded_terrain_after_save_reload(self):
         server = self.server()
         player, _ = self.client()

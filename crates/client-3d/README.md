@@ -321,7 +321,14 @@ Objects:
   with their cooldowns and supply needs. Self-only abilities act at once.
   Rays and steps take the next movement key. Abilities aimed at a creature
   take a click on one (yourself or an ally for supportive abilities). Esc
-  stops aiming. Projectile abilities are not offered yet.
+  stops aiming.
+- Projectile abilities ask the server for their choices. The pack shows each
+  page: a thrown source or an equipped launcher, then compatible ammunition,
+  with Previous, Next and Cancel. Once a delivery is chosen, the next movement
+  key fires it. The session binds every query to its own reply and drops the
+  choice when the state it was made from changes.
+- Number keys 1 to 9, then 0, take the pack's first ten actions in order.
+  Each button shows its key, so the pack can be played without the mouse.
 
 ## How it works
 

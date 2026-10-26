@@ -30,6 +30,17 @@ pub(super) fn receive(
     for event in events {
         match event {
             NetEvent::Ready => game.busy = false,
+            NetEvent::Projectile(prompt) => {
+                // A chosen delivery waits for its direction like any aim.
+                let aiming = prompt.as_ref().is_some_and(|p| p.aiming);
+                if aiming {
+                    game.aiming = Some(crate::Aim::Projectile);
+                    game.status = "Choose a direction to fire. Esc cancels.".into();
+                } else if game.aiming == Some(crate::Aim::Projectile) {
+                    game.aiming = None;
+                }
+                game.projectile = prompt;
+            }
             NetEvent::Status(text) => {
                 if std::env::var_os("TOR_3D_DEBUG").is_some() {
                     eprintln!("status: {text}");

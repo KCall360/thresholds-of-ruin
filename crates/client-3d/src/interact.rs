@@ -105,6 +105,10 @@ pub struct Panel {
     built_for: u64,
     /// Whether the panel was opened for the identification choice now waiting.
     prompted: bool,
+    /// The projectile prompt it was last built with.
+    shown_projectile: Option<crate::net::ProjectilePrompt>,
+    /// Its actions in plan order, for the number keys.
+    pub(crate) actions: Vec<(String, PanelButton)>,
 }
 
 #[derive(Component)]
@@ -125,7 +129,7 @@ type TooltipFilter = (With<Tooltip>, Without<Selection>);
 #[derive(Component)]
 pub(crate) struct PanelRoot;
 
-#[derive(Component, Clone, Copy)]
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PanelButton {
     Take(ItemTarget),
     Drop(ItemTarget),
@@ -136,6 +140,10 @@ pub(crate) enum PanelButton {
     /// The view's granted ability at this index.
     Ability(usize),
     Escape(tor_protocol::HoldTarget),
+    ProjectileChoose(usize),
+    ProjectileNext,
+    ProjectilePrevious,
+    ProjectileCancel,
 }
 
 const PANEL_WIDTH: f32 = 380.0;
@@ -524,7 +532,14 @@ pub fn keys(
     mut exit: EventWriter<AppExit>,
 ) {
     if keys.just_pressed(KeyCode::Escape) {
-        if game.aiming.take().is_some() {
+        if game.projectile.is_some() {
+            game.aiming = None;
+            send(
+                &net,
+                &mut game,
+                Cmd::Projectile(tor_client_3d_model::ProjectileStep::Cancel),
+            );
+        } else if game.aiming.take().is_some() {
             game.status = "You stop aiming.".into();
         } else if panel.open {
             panel.open = false;
@@ -535,6 +550,26 @@ pub fn keys(
     }
     if keys.any_just_pressed([KeyCode::KeyI, KeyCode::KeyZ]) {
         panel.open = !panel.open;
+    }
+    if panel.open {
+        const DIGITS: [KeyCode; crate::pack::HOTKEYS] = [
+            KeyCode::Digit1,
+            KeyCode::Digit2,
+            KeyCode::Digit3,
+            KeyCode::Digit4,
+            KeyCode::Digit5,
+            KeyCode::Digit6,
+            KeyCode::Digit7,
+            KeyCode::Digit8,
+            KeyCode::Digit9,
+            KeyCode::Digit0,
+        ];
+        if let Some(position) = DIGITS.iter().position(|key| keys.just_pressed(*key)) {
+            if let Some((_, action)) = panel.actions.get(position).cloned() {
+                activate(action, &net, &mut panel, &mut game);
+            }
+            return;
+        }
     }
     let Some(view) = &game.view else {
         return;
@@ -586,8 +621,9 @@ pub fn panel(
     let Ok((root, mut visibility)) = root.single_mut() else {
         return;
     };
-    // A waiting identification choice opens the pack once, to answer it.
-    let waiting = game.view.as_ref().is_some_and(|v| v.identify.is_some());
+    // A waiting identification or projectile choice opens the pack once.
+    let waiting = game.view.as_ref().is_some_and(|v| v.identify.is_some())
+        || game.projectile.as_ref().is_some_and(|p| p.choosing);
     if waiting && !panel.prompted {
         panel.open = true;
         panel.built_for = u64::MAX;
@@ -598,124 +634,48 @@ pub fn panel(
     } else {
         Visibility::Hidden
     };
-    if !panel.open || panel.built_for == game.view_serial {
+    if !panel.open
+        || (panel.built_for == game.view_serial && panel.shown_projectile == game.projectile)
+    {
         return;
     }
+    panel.shown_projectile.clone_from(&game.projectile);
     panel.built_for = game.view_serial;
     commands.entity(root).despawn_related::<Children>();
     let Some(view) = &game.view else {
         return;
     };
+    let lines = crate::pack::plan(view, game.projectile.as_ref());
+    panel.actions = crate::pack::actions(&lines);
+    let mut position = 0;
     commands.entity(root).with_children(|ui| {
-        if let Some(choices) = &view.identify {
-            heading(ui, "Identify which item?");
-            for item in view.inventory.iter().filter(|i| choices.contains(&i.id)) {
-                row(
-                    ui,
-                    &item.name,
-                    None,
-                    &[("Identify", PanelButton::Identify(Some(item.id)))],
-                );
-            }
-            if choices.is_empty() {
-                note(ui, "Nothing you carry can be identified.");
-            }
-            row(
-                ui,
-                "Leave it",
-                None,
-                &[("Decline", PanelButton::Identify(None))],
-            );
-        }
-        if !view.holds.is_empty() {
-            heading(ui, "Held");
-            for hold in &view.holds {
-                row(
-                    ui,
-                    &hold.label,
-                    None,
-                    &[("Escape", PanelButton::Escape(hold.target))],
-                );
-            }
-        }
-        if !view.abilities.is_empty() {
-            heading(ui, "Abilities");
-            for (index, ability) in view.abilities.iter().enumerate() {
-                row(
-                    ui,
-                    &ability.label,
-                    None,
-                    &[("Use", PanelButton::Ability(index))],
-                );
-            }
-        }
-        heading(ui, "Pack");
-        if view.inventory.is_empty() {
-            note(ui, "You carry nothing.");
-        }
-        for item in &view.inventory {
-            let mut label = item.name.clone();
-            if item.quantity > 1 {
-                label.push_str(&format!(" x{}", item.quantity));
-            }
-            let mut actions = Vec::new();
-            if let Some(light) = &item.portable_light {
-                label.push_str(&format!(
-                    " [{}; fuel: {} ticks]",
-                    if light.lit { "lit" } else { "unlit" },
-                    light.remaining
-                ));
-                if light.ignitable {
-                    actions.push(("Ignite", PanelButton::Use(item.id, ItemOperation::Ignite)));
-                }
-                if light.extinguishable {
-                    actions.push((
-                        "Extinguish",
-                        PanelButton::Use(item.id, ItemOperation::Extinguish),
-                    ));
+        for line in &lines {
+            match line {
+                crate::pack::Line::Heading(text) => heading(ui, text),
+                crate::pack::Line::Note(text) => note(ui, text),
+                crate::pack::Line::Row {
+                    label,
+                    detail,
+                    actions,
+                } => {
+                    let labelled: Vec<(String, PanelButton)> = actions
+                        .iter()
+                        .map(|(text, button)| {
+                            let key = crate::pack::hotkey(position);
+                            position += 1;
+                            (
+                                key.map_or_else(
+                                    || (*text).to_string(),
+                                    |key| format!("{key} {text}"),
+                                ),
+                                *button,
+                            )
+                        })
+                        .collect();
+                    row(ui, label, detail.as_deref(), &labelled);
                 }
             }
-            if item.equipped.is_some() {
-                actions.push(("Remove", PanelButton::Use(item.id, ItemOperation::Unequip)));
-            } else if item.can_equip {
-                actions.push(("Equip", PanelButton::Use(item.id, ItemOperation::Equip)));
-            }
-            if item.edible {
-                actions.push(("Eat", PanelButton::Use(item.id, ItemOperation::Eat)));
-            }
-            if item.drinkable {
-                actions.push(("Drink", PanelButton::Use(item.id, ItemOperation::Drink)));
-            }
-            if item.readable {
-                actions.push(("Read", PanelButton::Use(item.id, ItemOperation::Read)));
-            }
-            match item.device {
-                Some(tor_protocol::DeviceActivation::SelfTarget) => {
-                    actions.push(("Zap", PanelButton::Use(item.id, ItemOperation::Zap)));
-                }
-                Some(tor_protocol::DeviceActivation::Direction) => {
-                    actions.push(("Zap", PanelButton::Aim(item.id)));
-                }
-                None => {}
-            }
-            if item.equipped.is_none() || item.portable_light.is_some() {
-                actions.push(("Drop", PanelButton::Drop(item.id)));
-            }
-            row(ui, &label, item.equipped.as_deref(), &actions);
         }
-        let reachable: Vec<_> = view.items.iter().filter(|i| i.reachable).collect();
-        if !reachable.is_empty() {
-            heading(ui, "Within reach");
-            for item in reachable {
-                let label = if item.quantity > 1 {
-                    format!("{} x{}", item.name, item.quantity)
-                } else {
-                    item.name.clone()
-                };
-                row(ui, &label, None, &[("Take", PanelButton::Take(item.id))]);
-            }
-        }
-        note(ui, "I, Z or Esc: close");
     });
 }
 
@@ -745,7 +705,7 @@ fn row(
     ui: &mut ChildSpawnerCommands,
     label: &str,
     detail: Option<&str>,
-    actions: &[(&str, PanelButton)],
+    actions: &[(String, PanelButton)],
 ) {
     ui.spawn(Node {
         flex_direction: FlexDirection::Row,
@@ -801,7 +761,7 @@ fn row(
                         BorderRadius::all(Val::Px(3.0)),
                     ))
                     .with_child((
-                        Text::new(*text),
+                        Text::new(text.as_str()),
                         TextFont {
                             font_size: 13.0,
                             ..default()
@@ -824,57 +784,68 @@ pub fn panel_buttons(
     }
     for (interaction, action, mut background) in &mut buttons {
         match interaction {
-            Interaction::Pressed => {
-                let command = match *action {
-                    PanelButton::Take(item) => Cmd::Take(item),
-                    PanelButton::Drop(item) => Cmd::Drop(item),
-                    PanelButton::Use(item, operation) => Cmd::Use(item, operation),
-                    PanelButton::Identify(item) => Cmd::Identify(item),
-                    PanelButton::Escape(hold) => Cmd::Escape(hold),
-                    PanelButton::Aim(item) => {
-                        // Close the pack so the map takes the direction.
-                        game.aiming = Some(crate::Aim::Device(item));
-                        game.status = "Choose a direction to zap. Esc cancels.".into();
-                        panel.open = false;
-                        continue;
-                    }
-                    PanelButton::Ability(index) => {
-                        let Some(view) = &game.view else { continue };
-                        let Some(ability) = view.abilities.get(index).cloned() else {
-                            continue;
-                        };
-                        let own = view.actors.iter().find(|a| a.is_self).map(|a| a.id);
-                        match (ability.target, own) {
-                            (tor_protocol::AbilityTargetKind::SelfOnly, Some(own)) => Cmd::Ability(
-                                ability.id,
-                                tor_client_3d_model::AbilityTarget::Actor(own),
-                            ),
-                            (target, _) => {
-                                game.status = match target {
-                                    tor_protocol::AbilityTargetKind::SelfStep
-                                    | tor_protocol::AbilityTargetKind::DirectionalRay => format!(
-                                        "Choose a direction for {}. Esc cancels.",
-                                        ability.label
-                                    ),
-                                    _ => format!(
-                                        "Click a creature for {}. Esc cancels.",
-                                        ability.label
-                                    ),
-                                };
-                                game.aiming = Some(crate::Aim::Ability {
-                                    id: ability.id,
-                                    target,
-                                });
-                                panel.open = false;
-                                continue;
-                            }
-                        }
-                    }
-                };
-                send(&net, &mut game, command);
-            }
+            Interaction::Pressed => activate(*action, &net, &mut panel, &mut game),
             Interaction::Hovered => background.0 = BUTTON_HOT,
             Interaction::None => background.0 = BUTTON,
         }
     }
+}
+
+/// Carry out a pack action, whether clicked or chosen by its number key.
+pub(crate) fn activate(action: PanelButton, net: &Net, panel: &mut Panel, game: &mut Game) {
+    let command = match action {
+        PanelButton::Take(item) => Cmd::Take(item),
+        PanelButton::Drop(item) => Cmd::Drop(item),
+        PanelButton::Use(item, operation) => Cmd::Use(item, operation),
+        PanelButton::Identify(item) => Cmd::Identify(item),
+        PanelButton::Escape(hold) => Cmd::Escape(hold),
+        PanelButton::ProjectileChoose(index) => {
+            Cmd::Projectile(tor_client_3d_model::ProjectileStep::Choose(index))
+        }
+        PanelButton::ProjectileNext => Cmd::Projectile(tor_client_3d_model::ProjectileStep::Next),
+        PanelButton::ProjectilePrevious => {
+            Cmd::Projectile(tor_client_3d_model::ProjectileStep::Previous)
+        }
+        PanelButton::ProjectileCancel => {
+            Cmd::Projectile(tor_client_3d_model::ProjectileStep::Cancel)
+        }
+        PanelButton::Aim(item) => {
+            // Close the pack so the map takes the direction.
+            game.aiming = Some(crate::Aim::Device(item));
+            game.status = "Choose a direction to zap. Esc cancels.".into();
+            panel.open = false;
+            return;
+        }
+        PanelButton::Ability(index) => {
+            let Some(view) = &game.view else { return };
+            let Some(ability) = view.abilities.get(index).cloned() else {
+                return;
+            };
+            let own = view.actors.iter().find(|a| a.is_self).map(|a| a.id);
+            match (ability.target, own) {
+                (tor_protocol::AbilityTargetKind::DirectionalProjectile, _) => {
+                    Cmd::Projectile(tor_client_3d_model::ProjectileStep::Start(ability.id))
+                }
+                (tor_protocol::AbilityTargetKind::SelfOnly, Some(own)) => {
+                    Cmd::Ability(ability.id, tor_client_3d_model::AbilityTarget::Actor(own))
+                }
+                (target, _) => {
+                    game.status = match target {
+                        tor_protocol::AbilityTargetKind::SelfStep
+                        | tor_protocol::AbilityTargetKind::DirectionalRay => {
+                            format!("Choose a direction for {}. Esc cancels.", ability.label)
+                        }
+                        _ => format!("Click a creature for {}. Esc cancels.", ability.label),
+                    };
+                    game.aiming = Some(crate::Aim::Ability {
+                        id: ability.id,
+                        target,
+                    });
+                    panel.open = false;
+                    return;
+                }
+            }
+        }
+    };
+    send(net, game, command);
 }

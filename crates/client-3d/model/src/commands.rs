@@ -24,12 +24,29 @@ pub enum Cmd {
     Escape(HoldTarget),
     /// Study a reachable trap of unknown family.
     ExamineTrap(TrapTarget),
+    /// A step of choosing and firing a projectile. These query the server for
+    /// its choices, so the connection's session carries them out.
+    Projectile(ProjectileStep),
     Door(DoorTarget, bool),
     /// Journey to a known cell, named by its key.
     Travel(String),
 }
 
 /// The immutable disclosure boundary used to interpret this input.
+/// Choosing a projectile delivery from the server's pages, then firing it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProjectileStep {
+    /// Ask for the sources of this projectile ability.
+    Start(String),
+    /// Take the choice at this index on the current page.
+    Choose(usize),
+    Next,
+    Previous,
+    /// Fire the chosen delivery along a direction.
+    Fire(Direction),
+    Cancel,
+}
+
 /// What a granted ability is aimed at, as its target kind requires.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AbilityTarget {
@@ -79,6 +96,9 @@ pub fn request(state: &ClientState, command: Cmd) -> Result<Request, String> {
             return Ok(Request::Continue);
         }
         return Err("You can't act right now.".into());
+    }
+    if matches!(command, Cmd::Projectile(_)) {
+        return Err("Projectile choices are made in the session.".into());
     }
     let action = match command {
         Cmd::Wait => Action::Wait,
@@ -139,7 +159,7 @@ pub fn request(state: &ClientState, command: Cmd) -> Result<Request, String> {
                 None => Action::Move { direction },
             }
         }
-        Cmd::Control => unreachable!("handled before acting"),
+        Cmd::Control | Cmd::Projectile(_) => unreachable!("handled before acting"),
     };
     Ok(state.command_request(Command::Act {
         expected_revision: state.state().revision,

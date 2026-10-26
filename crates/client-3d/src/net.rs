@@ -12,7 +12,9 @@ pub use tor_client_3d_model::{Cmd, Happening, Input, View};
 use tor_client_common::{Connection, PendingRequest, RequestCompletion};
 use tor_protocol::*;
 
+mod projectile;
 mod startup;
+pub use projectile::ProjectilePrompt;
 use startup::InitialPresentation;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
@@ -21,6 +23,8 @@ const EVENTS_PER_FRAME: usize = 16;
 
 pub enum Event {
     View(Box<View>),
+    /// A projectile choice in progress, or `None` once it ends.
+    Projectile(Option<ProjectilePrompt>),
     Status(String),
     Ready,
     Fatal(String),
@@ -223,9 +227,12 @@ async fn session(
 ) -> Result<(), Error> {
     let mut initial = InitialPresentation::default();
     if !observe && connection.role() != AccessRole::Spectator {
-        transact_with(connection, Request::AcquireControl, |event| {
-            initial.record(event)
-        })
+        transact_with(
+            connection,
+            Request::AcquireControl,
+            |event| initial.record(event),
+            |_, _, _| {},
+        )
         .await?;
     }
     // Shared state has applied every handshake message. Present its settled
@@ -233,11 +240,22 @@ async fn session(
     for event in initial.finish(Box::new(view(&connection.state, &connection.palette))) {
         publish(tx, event)?;
     }
+    let mut menu = None;
     loop {
         tokio::select! {
             biased;
             command = rx.recv() => match command {
                 None => return Ok(()),
+                Some(Input { shown, command: Cmd::Projectile(step) }) => {
+                    if connection.state.validate_reply_context(&shown).is_err() {
+                        publish(tx, Event::Status("State changed; request was not sent. Review the new state.".into()))?;
+                    } else if connection.is_synchronized() {
+                        projectile::step(connection, &mut menu, step, tx).await?;
+                    } else {
+                        publish(tx, Event::Status("Resynchronizing; try again.".into()))?;
+                    }
+                    publish(tx, Event::Ready)?;
+                }
                 Some(command) => {
                     match request_from(&connection.state, &command.shown, command.command) {
                         Ok(request) if connection.is_synchronized() => transact(connection, request, tx).await?,
@@ -250,6 +268,7 @@ async fn session(
             message = connection.next() => {
                 let message = message?;
                 present(connection, &message, tx)?;
+                projectile::revalidate(connection, &mut menu, tx)?;
             }
         }
     }
@@ -260,20 +279,30 @@ async fn transact(
     request: Request,
     tx: &SyncSender<Event>,
 ) -> Result<(), Error> {
-    transact_with(connection, request, |event| publish(tx, event)).await
+    transact_with(
+        connection,
+        request,
+        |event| publish(tx, event),
+        |_, _, _| {},
+    )
+    .await
 }
 
+/// Send one request and present every message until it completes. `inspect`
+/// sees each message with the request's id, after shared state applied it.
 async fn transact_with(
     connection: &mut Connection,
     request: Request,
     mut deliver: impl FnMut(Event) -> Result<(), Error>,
+    mut inspect: impl FnMut(&Connection, &str, &ServerMessage),
 ) -> Result<(), Error> {
     let id = connection.request(request).await?;
-    let mut pending = PendingRequest::new(id);
+    let mut pending = PendingRequest::new(id.clone());
     timeout(Duration::from_secs(10), async {
         loop {
             let message = connection.next().await?;
             let completion = pending.observe(connection, &message);
+            inspect(connection, &id, &message);
             let complete = completion.is_some();
             let unknown = matches!(completion, Some(RequestCompletion::Unknown));
             if let Some(event) = presentation_event(connection, &message) {

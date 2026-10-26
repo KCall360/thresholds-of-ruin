@@ -40,7 +40,6 @@ pub struct View {
     /// Holds on the character it may try to escape, labelled by holder.
     pub holds: Vec<tor_client_common::holds::HoldChoice>,
     /// Granted abilities beyond the basic attack, in the server's order.
-    /// Projectile abilities are left to the projectile choice.
     pub abilities: Vec<Ability>,
     /// Carried items the server's pending identification choice accepts;
     /// `None` when no choice is waiting.
@@ -284,7 +283,6 @@ pub fn view(state: &ClientState, palette: &Palette) -> View {
         holds: tor_client_common::holds::hold_choices(o),
         abilities: tor_client_common::abilities::choices(o)
             .into_iter()
-            .filter(|ability| ability.target_kind != AbilityTargetKind::DirectionalProjectile)
             .map(|ability| Ability {
                 label: tor_client_common::abilities::ability_label(&ability),
                 id: ability.id,

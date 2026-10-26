@@ -140,7 +140,13 @@ pub(super) fn capture(
         "doors": view.map(|view| view.visible.iter().filter_map(|cell| cell.door.as_ref()).map(|door| serde_json::json!({
             "id": door.id, "open": door.open, "reachable": door.reachable,
         })).collect::<Vec<_>>()),
-        "panel_open": panel.is_some_and(|panel| panel.open),
+        "panel_open": panel.as_ref().is_some_and(|panel| panel.open),
+        // Pack actions in number-key order, as "row: action".
+        "panel_actions": panel.as_ref().map(|panel| panel.actions.iter().map(|(label, _)| label.clone()).collect::<Vec<_>>()),
+        "aiming": game.as_ref().and_then(|game| game.aiming.as_ref()).map(|aim| format!("{aim:?}")),
+        "projectile": game.as_ref().and_then(|game| game.projectile.as_ref()).map(|prompt| serde_json::json!({
+            "title": prompt.title, "rows": prompt.rows, "choosing": prompt.choosing, "aiming": prompt.aiming,
+        })),
         "hover": { "title": hover.as_ref().map(|hover| &hover.title),
             "cell": hover.as_ref().and_then(|hover| hover.cell).map(|cell| {
                 let local = cell - game.as_ref().map_or(IVec3::ZERO, |game| game.offset);
