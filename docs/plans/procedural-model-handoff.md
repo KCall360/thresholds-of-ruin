@@ -69,6 +69,11 @@ verified checkpoints below remain scoped evidence, not a claim that this branch
 is merge-ready. Continue from the work queue and preserve the outstanding
 platform/profile and publishing requirements before any merge.
 
+The branch was later rebased without conflicts onto main at `511ea466`
+(#191). The rebased tree equals a merge of the two. The checkpoints
+below were recorded on the earlier base (#171); their source fingerprints describe
+that base, not the rebased commits.
+
 
 The consolidated Windows release contract check passes 387 renderer-library
 checks, one model-library check and 31 model integration checks, plus tooling,
