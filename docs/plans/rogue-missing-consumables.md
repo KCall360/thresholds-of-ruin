@@ -1902,3 +1902,20 @@ and one retained non-graphical method; ordinary discovery contains 99 deferred
 and 2,153 retained methods. These are explicit local-only deferrals, never native
 passes, and graphical hosted-CI requirements remain unchanged. The bounded idle
 release performance gate and genuine aggregate verification remain outstanding.
+
+The final server regression now passes **1,187 tests, zero failures and zero
+ignored**, including the paid source-free detached-record positive and forged
+source rejection at each admission route. The latter fixture uses the real
+compact pooled-World codec rather than assuming an array representation. The
+workspace-unified core artifact also passes all **2,041 tests**. These retained
+native runs do not qualify the enclosing workspace Rust/Service step: resource
+limits stopped its remaining compilation before that step began executing tests.
+Completed artifacts and exact source identities were preserved for warm reuse.
+
+The next cheap final preflight found one formatting-only condition wrap in the
+appearance catalog, corrected here before further expensive qualification.
+Workspace strict lint/API documentation, remaining actual consumers and ordinary
+apps, the genuine aggregate tiers, independent 3D checks and the bounded idle
+release performance gate remain required. Recoverable cache rotation preserves
+compiled outputs and proof records; it is not permission to lower resource guards,
+assume a native pass, or discard the source needed for restoration.

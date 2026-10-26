@@ -157,13 +157,15 @@ impl PresentationCatalog {
         mut creatures: Vec<CreatureAppearance>,
         mut objects: Vec<ObjectPresentation>,
     ) -> Result<Arc<Self>, BuildError> {
-        if creatures.iter().any(|row| !row.valid()) || objects.iter().any(|row| {
-            !name_valid(&row.name)
-                || row
-                    .asset
-                    .as_deref()
-                    .is_some_and(|asset| !asset_valid(asset))
-        }) {
+        if creatures.iter().any(|row| !row.valid())
+            || objects.iter().any(|row| {
+                !name_valid(&row.name)
+                    || row
+                        .asset
+                        .as_deref()
+                        .is_some_and(|asset| !asset_valid(asset))
+            })
+        {
             return Err(BuildError::InvalidDefinition);
         }
         // Host accounting reserves these constant fallback/stair rows too.
