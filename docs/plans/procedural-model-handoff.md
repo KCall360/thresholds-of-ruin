@@ -82,9 +82,10 @@ base. Local evidence for those commits:
   tests passed again after the shoulder-cap and tasset change.
 - **`quick` tier (Windows):** formatting, Clippy, architecture, build tools, the
   isolated simulation check and the debug Rust suite pass.
-- **Arena-search sampling:** two tests fail only because the shared pinned
-  Python environment has numpy 2.5.3 against the branch's 2.5.4 pin. That
-  environment was not updated.
+- **Arena-search sampling:** two tests failed only because the shared pinned
+  Python environment had numpy 2.5.3 against the branch's 2.5.4 pin. With the
+  maintainer's approval, the environment was updated from the hash-pinned
+  requirements, and all 7 sampling tests now pass.
 - **Debug process tests:** five performance tests and one earned-route test
   first hit the run's 600-second build and wall-clock limits. One performance
   test also exposed a missing `subprocess` import, which is now fixed. All 18

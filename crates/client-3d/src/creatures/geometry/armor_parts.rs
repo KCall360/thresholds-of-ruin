@@ -153,11 +153,14 @@ pub(super) fn emit(
             || at.y < BOTTOM + 0.008
             || at.y > TOP - 0.008
     };
-    // Stitches read as a dashed line along hems, the opening and the centre seams.
+    // Edges are bound in darker leather; a dashed stitch runs down the centre
+    // seam and along the lower hem, thin enough not to fray the outline.
     let stitched = |at: Vec3, leather: Vec3| {
-        let seam = at.x.abs() < 0.005;
-        let hem = edge(at) || (at.y - (BOTTOM + 0.016)).abs() < 0.003;
-        if (seam || hem) && (at.y * 70.0 + at.x * 70.0).rem_euclid(1.0) < 0.5 {
+        let seam = at.x.abs() < 0.004;
+        let hem = (at.y - (BOTTOM + 0.016)).abs() < 0.0025;
+        if edge(at) {
+            leather * 0.62
+        } else if (seam || hem) && (at.y * 70.0 + at.x * 70.0).rem_euclid(1.0) < 0.5 {
             STITCH
         } else if seam {
             leather * 0.78
@@ -265,39 +268,39 @@ pub(super) fn emit(
             }
         }
         Item::SplintMail => {
-            // Vertical steel splints riveted top and bottom, gathered by a band.
-            for site in ring_sites(plate, opening, (low + high) * 0.5, 0.044 * b, false) {
+            // Vertical steel splints riveted at each end, gathered by a band.
+            // A splint crossing the female opening is cut where it meets the
+            // neckline, so splints still flank the V as on the sheet.
+            const STEPS: usize = 13;
+            for site in ring_sites(plate, None, (low + high) * 0.5, 0.044 * b, false) {
                 let angle = site.at.x.atan2(site.at.z);
                 let outward = Vec3::new(angle.sin(), 0.0, angle.cos());
-                let path: Vec<Vec3> = (0..7)
+                let path: Vec<Vec3> = (0..STEPS)
                     .map(|k| {
-                        let y = low + (high - low) * k as f32 / 6.0;
+                        let y = low + (high - low) * k as f32 / (STEPS - 1) as f32;
                         plate.onto(Vec3::Y * y + outward * 0.45, -outward) + outward * 0.006
                     })
                     .collect();
-                if path
-                    .iter()
-                    .any(|at| opening.is_some_and(|cut| cut.distance(*at) < 0.016))
-                {
-                    continue;
-                }
-                p.metal.tube_framed(
-                    &path,
-                    &[Vec2::new(0.015, 0.003); 7],
-                    4,
-                    &|_, _, _| STEEL,
-                    Some(site.around),
-                );
-                for end in [path[0], path[6]] {
-                    p.metal.prism(
-                        end,
-                        end + outward * 0.006,
-                        0.004,
-                        0.003,
-                        6,
-                        STEEL * 1.1,
-                        0.0,
+                let clear = |at: &Vec3| !opening.is_some_and(|cut| cut.distance(*at) < 0.016);
+                for run in path.split(|at| !clear(at)).filter(|run| run.len() >= 3) {
+                    p.metal.tube_framed(
+                        run,
+                        &vec![Vec2::new(0.015, 0.003); run.len()],
+                        4,
+                        &|_, _, _| STEEL,
+                        Some(site.around),
                     );
+                    for end in [run[0], run[run.len() - 1]] {
+                        p.metal.prism(
+                            end,
+                            end + outward * 0.006,
+                            0.004,
+                            0.003,
+                            6,
+                            STEEL * 1.1,
+                            0.0,
+                        );
+                    }
                 }
             }
             fitted_band(&mut p.matte, plate, 0.11, 0.135, 0.012, LEATHER);
