@@ -94,7 +94,10 @@ class RogueProjectileContent(unittest.TestCase):
         pool = next(row for row in shared["point_pools"] if row["id"] == "advancement")
         self.assertIn("expertise", pool["allowed"])
         for character in source("scenario.toml")["characters"]:
-            self.assertEqual(character["creature"]["hit_dice"][0]["purchases"], [])
+            rows = character["creature"]["hit_dice"]
+            self.assertEqual(character["creature"]["body_package"], "rogue.body.human")
+            self.assertEqual([row["source"] for row in rows], ["racial", "warrior" if character["id"] == 1 else "mage"])
+            self.assertEqual([row["purchases"] for row in rows], [[], []])
         # An NPC expertise choice must be authored, never inferred from its kit.
         for actor in source("catalog/actors.toml")["actors"].values():
             for die in actor["creature"]["hit_dice"]:

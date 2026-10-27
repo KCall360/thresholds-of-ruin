@@ -313,10 +313,12 @@ mod tests {
     fn fixture_with_rate(rate: crate::action_duration::ActionDuration) -> (Game, HoldId, HoldId) {
         let mut species = crate::test_creatures::species();
         species.modifiers.push(crate::rules::Modifier {
+            cancellable: false,
             scope: crate::rules::Scope::Always,
             op: crate::rules::ModifierOp::ActionDuration { value: rate },
         });
         species.modifiers.push(crate::rules::Modifier {
+            cancellable: false,
             scope: crate::rules::Scope::Always,
             op: crate::rules::ModifierOp::Flag {
                 flag: policy().sustaining,
@@ -351,6 +353,7 @@ mod tests {
             ),
         ] {
             species.modifiers.push(crate::rules::Modifier {
+                cancellable: false,
                 scope: crate::rules::Scope::Always,
                 op: crate::rules::ModifierOp::Add { stat, value },
             });

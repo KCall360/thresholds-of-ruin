@@ -120,6 +120,7 @@ pub(super) fn growth_scenario() -> Scenario {
         .unwrap()
         .modifiers
         .push(tor_simulation::rules::Modifier {
+            cancellable: false,
             scope: tor_simulation::rules::Scope::Always,
             op: tor_simulation::rules::ModifierOp::GrantAbility {
                 ability: tor_simulation::content_ids::AbilityId::new("slow_plan").unwrap(),

@@ -22,7 +22,7 @@ const GOLD: u32 = 0xedc579;
 const DANGER: u32 = 0xef958c;
 
 /// The key hint under the status lines.
-const HINT: &str = "? help  hjklyubn move/run  < > stairs  _ travel  ; look  i inventory  @ stats  z abilities  g pick up  a attack  ^P messages";
+const HINT: &str = "? help  hjklyubn move/run  < > stairs  _ travel  ; look  i inventory  m charts  @ stats  z abilities  g pick up  a attack  ^P messages";
 
 /// The map as drawn: one tile per column, current and remembered.
 pub fn map_tiles(
@@ -36,17 +36,38 @@ pub fn map_tiles(
         .iter()
         .map(|c| (c.position.x, c.position.y, c.position.z))
         .collect();
-    let mut cells: std::collections::BTreeMap<_, _> = state
-        .map_memory()
-        .map(|cell| (cell.position, cell.appearance()))
-        .collect();
-    for cell in map::appearance_cells(&state.state().observation) {
-        cells.insert(cell.position, cell);
-    }
-    let cells: Vec<_> = cells.into_values().collect();
+    let current_appearances = map::appearance_cells(&state.state().observation);
+    let cells = prepare_appearances(state.map_memory(), &current_appearances);
     map::appearance_tiles(&state.state().observation, &cells, palette, &|position| {
         current.contains(&(position.x, position.y, position.z))
     })
+}
+
+fn prepare_appearances<'a>(
+    memory: impl Iterator<Item = tor_client_common::MapCell<'a>>,
+    current: &'a [tor_protocol::RememberedMapCell],
+) -> Vec<map::PositionedAppearance<'a>> {
+    let mut cells: std::collections::BTreeMap<_, _> = memory
+        .map(|cell| {
+            (
+                cell.position,
+                map::PositionedAppearance {
+                    position: cell.position,
+                    appearance: &cell.cell.appearance,
+                },
+            )
+        })
+        .collect();
+    for cell in current {
+        cells.insert(
+            cell.position,
+            map::PositionedAppearance {
+                position: cell.position,
+                appearance: cell,
+            },
+        );
+    }
+    cells.into_values().collect()
 }
 
 /// The known cell under a pixel, current or remembered.
@@ -267,6 +288,22 @@ impl Canvas {
     }
 
     fn draw_screens(&mut self, app: &App) {
+        if app.charts_open {
+            self.screen(
+                "DETECTION CHARTS — READ ONLY",
+                "UP/DOWN choose or scroll   ENTER load   TAB catalog   PgUp/PgDn rows   ESC closes",
+            );
+            for (i, line) in app
+                .chart_lines()
+                .iter()
+                .skip(app.chart_scroll)
+                .take(24)
+                .enumerate()
+            {
+                self.text(72, 156 + i * 22, line, TEXT, 1, 96);
+            }
+            return;
+        }
         if let Some(state) = &app.state {
             let combat = state.state().observation.combat.as_ref();
             if let Some(combat) = combat.filter(|c| c.terminal && !app.end_dismissed) {
@@ -719,4 +756,235 @@ pub fn logical_mouse(x: f32, y: f32, width: usize, height: usize) -> Option<(usi
     let y = (y - (height as f32 - HEIGHT as f32 * scale) / 2.0) / scale;
     (x >= 0.0 && y >= 0.0 && x < WIDTH as f32 && y < HEIGHT as f32)
         .then_some((x as usize, y as usize))
+}
+
+#[cfg(test)]
+mod borrowed_map_tests {
+    use super::*;
+    use tor_client_common::{MapCell, RememberedCell};
+    use tor_protocol::{ItemClass, MapItemAppearance, Position, RememberedMapCell};
+
+    fn position(x: i32, z: i32) -> Position {
+        Position { x, y: 0, z }
+    }
+    fn cell(x: i32, z: i32) -> RememberedMapCell {
+        RememberedMapCell {
+            object_presentation: None,
+            key: format!("cell-{x}-{z}"),
+            position: position(x, z),
+            wall: false,
+            material: "retained stone description".into(),
+            asset: None,
+            place_hint: false,
+            stairs_up: false,
+            stairs_down: false,
+            door: None,
+            trap: None,
+            ground_items: vec![],
+        }
+    }
+    fn record(appearance: RememberedMapCell) -> RememberedCell {
+        RememberedCell {
+            appearance,
+            last_seen_tick: Some(1),
+            last_seen_revision: Some(1),
+        }
+    }
+    fn pile(class: ItemClass) -> MapItemAppearance {
+        MapItemAppearance {
+            presentation: None,
+            class,
+            name: "remembered object".into(),
+            description: "long retained description".into(),
+            appearance: "remembered object".into(),
+            identified: false,
+            quantity: 1,
+            asset: None,
+        }
+    }
+
+    #[test]
+    fn retained_map_occurrences_borrow_original_payload_storage() {
+        let mut appearance = cell(90, 7);
+        appearance.ground_items.push(pile(ItemClass::Potion));
+        appearance.ground_items[0].presentation = Some(tor_protocol::ObjectPresentation {
+            name: "retained false stairs".into(),
+            asset: None,
+            kind: tor_protocol::ObjectPresentationKind::Stairs,
+        });
+        appearance.stairs_down = true;
+        appearance.ground_items[0].name = "object".into();
+        appearance.ground_items[0].appearance = "object".into();
+        appearance.ground_items[0].description.clear();
+        appearance.object_presentation = Some(tor_protocol::ObjectPresentation {
+            name: "retained false potion".into(),
+            asset: None,
+            kind: tor_protocol::ObjectPresentationKind::Item {
+                class: ItemClass::Potion,
+            },
+        });
+        let saved = record(appearance);
+        let prepared = prepare_appearances(
+            [
+                MapCell {
+                    position: position(2, 0),
+                    cell: &saved,
+                },
+                MapCell {
+                    position: position(4, 1),
+                    cell: &saved,
+                },
+            ]
+            .into_iter(),
+            &[],
+        );
+        assert_eq!(
+            prepared.iter().map(|row| row.position).collect::<Vec<_>>(),
+            [position(2, 0), position(4, 1)]
+        );
+        for row in &prepared {
+            assert!(std::ptr::eq(row.appearance, &saved.appearance));
+            assert_eq!(row.material.as_ptr(), saved.material.as_ptr());
+            assert_eq!(row.ground_items.as_ptr(), saved.ground_items.as_ptr());
+            assert_eq!(
+                row.object_presentation.as_ref().unwrap().name.as_ptr(),
+                saved.object_presentation.as_ref().unwrap().name.as_ptr()
+            );
+            assert_eq!(
+                row.ground_items[0]
+                    .presentation
+                    .as_ref()
+                    .unwrap()
+                    .name
+                    .as_ptr(),
+                saved.ground_items[0]
+                    .presentation
+                    .as_ref()
+                    .unwrap()
+                    .name
+                    .as_ptr()
+            );
+        }
+    }
+
+    #[test]
+    fn positioned_merge_preserves_materialized_tiles_heights_order_and_current_overlays() {
+        let mut o = tor_client_common::test_support::observation();
+        o.visible_actors.clear();
+        let mut lower = cell(90, 7);
+        lower.ground_items.push(pile(ItemClass::Potion));
+        let mut stairs = cell(91, 7);
+        stairs.stairs_up = true;
+        let mut wall = cell(92, 7);
+        wall.wall = true;
+        let saved = [
+            record(lower),
+            record(stairs),
+            record(wall),
+            record(cell(93, 7)),
+        ];
+        let memory = [
+            MapCell {
+                position: position(0, 0),
+                cell: &saved[2],
+            },
+            MapCell {
+                position: position(1, -1),
+                cell: &saved[0],
+            },
+            MapCell {
+                position: position(2, 0),
+                cell: &saved[1],
+            },
+            MapCell {
+                position: position(3, 0),
+                cell: &saved[2],
+            },
+            MapCell {
+                position: position(3, 1),
+                cell: &saved[3],
+            },
+            MapCell {
+                position: position(4, 1),
+                cell: &saved[1],
+            },
+        ];
+        let mut current_item = cell(1, 0);
+        current_item.ground_items.push(pile(ItemClass::Wand));
+        let current = vec![cell(0, 0), current_item];
+        let prepared = prepare_appearances(memory.into_iter(), &current);
+        assert!(
+            !prepared[0].wall,
+            "current disclosure replaces the stale wall at the same occurrence"
+        );
+        // Independent old materialized merge; each retained occurrence gets its own position.
+        let mut old: std::collections::BTreeMap<_, _> = memory
+            .into_iter()
+            .map(|row| (row.position, row.appearance()))
+            .collect();
+        for row in &current {
+            old.insert(row.position, row.clone());
+        }
+        let old_materialized: Vec<_> = old.into_values().collect();
+        let old: Vec<_> = old_materialized
+            .iter()
+            .map(|row| map::PositionedAppearance {
+                position: row.position,
+                appearance: row,
+            })
+            .collect();
+        let is_current = |p| current.iter().any(|row| row.position == p);
+        let expected = map::appearance_tiles(&o, &old, &Default::default(), &is_current);
+        let actual = map::appearance_tiles(&o, &prepared, &Default::default(), &is_current);
+        assert_eq!(actual, expected);
+        assert_eq!(
+            actual
+                .iter()
+                .map(|row| (row.position, row.kind, row.glyph, row.remembered))
+                .collect::<Vec<_>>(),
+            [
+                (position(0, 0), Kind::Player, '@', false),
+                (position(1, 0), Kind::Item, '!', false),
+                (position(2, 0), Kind::StairsUp, '<', true),
+                (position(3, 0), Kind::LowWall, '#', true),
+                (position(4, 1), Kind::Floor, '.', true),
+            ]
+        );
+        // Current disclosed piles precede even lower retained planes, then creatures win.
+        o.ground_items.push(tor_protocol::GroundItemView {
+            presentation: None,
+            item: tor_protocol::ItemView {
+                id: tor_protocol::ItemTarget::from_digest([44; 32]),
+                name: "wand".into(),
+                class: ItemClass::Wand,
+                appearance: "wand".into(),
+                identified: false,
+                quantity: 1,
+                description: String::new(),
+                corpse: None,
+                asset: None,
+                known_currency: None,
+                known_supply: None,
+            },
+            position: position(1, 0),
+            reachable: false,
+            supply_reachable: false,
+        });
+        let overlaid = map::appearance_tiles(&o, &prepared, &Default::default(), &is_current);
+        assert_eq!(overlaid[1].glyph, '/');
+        o.visible_actors.push(tor_protocol::ActorView {
+            id: tor_protocol::ActorTarget::from_digest([45; 32]),
+            name: "disclosed creature".into(),
+            description: String::new(),
+            asset: None,
+            appearance_seed: None,
+            position: position(1, 0),
+        });
+        let occupied = map::appearance_tiles(&o, &prepared, &Default::default(), &is_current);
+        assert_eq!(occupied[1].kind, Kind::Creature);
+        assert_eq!(
+            occupied,
+            map::appearance_tiles(&o, &old, &Default::default(), &is_current)
+        );
+    }
 }

@@ -20,6 +20,7 @@ in a live session.
 - [Connect and control](#connection-and-control): authentication, snapshots, admission and retries
 - [Wire integers](#integer-representation) and [entity targets](#entity-target-references): exact client representations
 - [Pushed updates](#pushed-updates): ordered state, deltas, repair, readiness and reply contexts
+- [Detection and Mapping charts](#detection-and-mapping-charts): private, non-actionable samples
 - [Palettes](#asset-palettes), [annotations](#annotations) and [history](#history-and-persistence): separate disclosure channels
 - [Wizard operations](#wizard-commands-and-retained-branches) and [creature inspection](#privileged-creature-inspection): privileged scope
 - [Gameplay projections](#durable-places): places, items, motion and combat
@@ -171,7 +172,8 @@ assigns this credential the `spectator` role and identity, authorized for the
 scenario's actors. Only share this credential with someone who should watch;
 the player credential continues to allow control and annotations.
 
-Spectators may attach, request snapshots, palettes and explored-map pages, and browse permitted
+Spectators may attach, request snapshots, palettes, explored-map pages and private
+charts for their authorized attached actor, and browse permitted
 current or abandoned-branch history. All other
 requests are rejected with `Unauthorized`, before receipt lookup or mutation,
 even when an actor has no controller. Changing frontend labels, retrying an
@@ -303,7 +305,7 @@ of this wire representation.
 The first frame authenticates and declares a frontend label:
 
 ```json client-message
-{"type":"hello","protocol":60,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":63,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and
@@ -783,6 +785,79 @@ cannot walk arbitrary historical knowledge or read unseen live world state.
 Clients can retain certified coverage and request only uncovered face regions.
 Each region remains an atomic context-bound transfer; this changes no wire or
 save format.
+
+## Detection and Mapping charts
+
+Charts are a separate private disclosure channel for the attached actor, readable
+by authorized players and spectators without a control lease. They are not
+ordinary sight, explored-map memory or actionable targets. Queries have no actor
+selector and cannot read another actor's chart through a guessed token.
+
+Full observations require `charts`; every observation delta carries its complete
+replacement list, not collection edits. At most four unique summaries appear in
+kind order: `monsters`, `food`, `magic`, `mapping`. Each summary requires `kind`,
+`supported`, `mode`, `status`, and the explicitly nullable `acquired_at`, `chart`
+and `latest_attempt`. Modes are `live` and `historical`. Statuses are:
+
+- `inactive`: no retained sample; acquisition tick and token are null.
+- `empty`: a complete admitted sample with no occurrence rows; tick and token
+  are present, and its component declarations remain pageable.
+- `available`: a complete admitted nonempty sample, with tick and token.
+- `unavailable`: no deliverable sample token; this must not be shown as empty.
+
+Active Monster Detection describes the current committed state, not a retained
+last-seen monster list. Food, Magic and Mapping show historical acquisitions.
+A later empty or unavailable attempt does not erase their latest positive
+sample: `latest_attempt { attempted_at, status }` separately reports `empty`,
+`positive` or `unavailable`, even when no prior sample exists. `supported` is
+current preparation support, not sample freshness or permission to act. Mapping
+requires a certified current scope; a retained historical sample can remain
+available while `supported=false`. Missing optional source certification is not
+package rejection and does not permit fabricated paid Mapping.
+
+`Request::Chart { query }` has wire type `chart`. Its strict `ChartQuery` requires
+`context { stream, epoch }`, `branch`, exact observation `base { cursor, revision }`,
+the advertised `chart` token and an explicitly nullable `cursor`. Begin with
+null; thereafter echo exactly the previous page's nonzero `next` ordinal. This
+base is the last observation base, not the latest readiness or unrelated stream
+update cursor. The attachment actor, stream/reset epoch, current branch,
+observation base, advertised token and continuation must all still match.
+Reattach, rewind, reset or a changed observation invalidates the old transfer.
+There is no arbitrary past-Game selector: rewind establishes a new current
+branch, while retained acquisitions are explicitly historical.
+
+`ServerMessage::ChartPage` has wire type `chart_page` and the ordinary correlated
+`context` and `request_id`. Its `page` requires `context`, `branch`, `base`,
+`chart`, `kind`, `mode`, `acquired_at`, `total_components`, `total_records`, `start`,
+`records` and nullable `next`. Validate both outer reply authority and every
+inner header, including the exact request ID. Ticks, counts and ordinals use
+unsigned decimal strings; projected coordinate triples use signed decimal
+strings. All nullable fields remain present and unknown fields are rejected.
+
+Records begin with the complete ordered `component` declaration prefix, then
+nondecreasing `row` records. Components disclose only an ordinal and `aligned`
+or `inconsistent` alignment. Each row has a component, nullable projected
+position and mark. An inconsistent component has no claimed position; equal
+projected occurrences are retained, not deduplicated. Monster marks carry only
+the disclosed name and nullable asset. Food and Magic marks are generic presence,
+not item identities, stack quantities or inventory counts. Mapping marks contain
+only `wall_face` (nullable oriented normal), `passage`, `doorway`, `stairs`,
+`secret_door` or `trap_presence`. A wall normal shares the projected component
+frame and is null when unaligned. No source region IDs, actor/item handles,
+private transforms, stair destinations or action capabilities are exposed.
+
+Canonical admission checks the entire candidate and all its page costs before
+publishing a sample, never a successful prefix. Each page allows at most 512
+records and 128 KiB including its escaped correlated envelope; the complete
+transfer has a 64 MiB ceiling. A smaller host frame limit also applies and can
+return `ResourceLimit`, not a truncated success. The host reuses the committed
+revision's immutable prepared chart and advances a continuation only after output
+admission. Page queries neither recensus the floor nor advance time, sample RNG,
+learn map cells or execute actions. Clients validate declarations, ordering,
+headers, totals and final completion before atomically installing the whole
+chart; partial or stale assemblies never replace a complete display. Text and
+ASCII present this separate channel without granting movement, targeting or
+ordinary-map knowledge from its rows.
 
 ## Asset palettes
 
@@ -1400,6 +1475,15 @@ the target may refer to a consumed final unit absent from the current inventory.
 Clients resolve narration from their consecutive disclosed inventories. Other
 actors' equipment and consumption completions are not included. This also works
 for actors with anatomy and equipment but no combat state.
+
+A required `refused` list separately records paid item attempts that completed
+without consuming a charge or applying their effect. Each strict named row has
+`action` (the captured opaque-target Zap action) and the closed string `reason`,
+currently only `too_weak`. It is not an admission rejection, interruption or
+successful consumption. The owner or a follower observing that owner can narrate
+it, but unrelated observers receive no such row. It discloses no item family,
+ability identity, Health amount or recipient count. Exact retries do not append
+another refusal or pay again.
 
 Read and Zap take an opaque carried `item`; Zap also takes a closed string
 `direction`. Each item interaction row includes `readable`, `zappable`, and an

@@ -59,7 +59,7 @@ consumable = { discovery = "self_effect", effects = [{ kind = "restore_attribute
 
 [appearance_pools."rogue.potions"]
 asset = "item.potion"
-appearances = ["amber potion", "smoky potion", "violet potion", "azure potion", "crimson potion", "silver potion", "pearl potion", "teal potion"]
+appearances = ["amber potion", "smoky potion", "violet potion", "azure potion", "crimson potion", "silver potion", "pearl potion", "teal potion", "ochre potion", "indigo potion", "copper potion", "chartreuse potion", "saffron potion", "cerulean potion"]
 
 # Ordinary recoverable stacks; neither a purse abstraction nor a supply item.
 [items."rogue.gold"]
@@ -86,7 +86,8 @@ appearance_pool = "rogue.potions"
 consumable = { discovery = "on_use", effects = [{ kind = "heal_per_hit_die", sides = 4, bonus = 0, overflow = "improve_earliest_hit_die" }, { kind = "remove_condition", condition = "rogue.blindness" }] }
 
 # Extra healing uses independent HDd8 rolls. Strict overflow selects one or two
-# earliest eligible owned-HD improvements; hallucination cure is unsupported.
+# earliest eligible owned-HD improvements; the marked visual condition is cured
+# unconditionally, including when the drinker cannot see.
 [items."rogue.extra_healing"]
 asset = "item.potion"
 name = "potion of extra healing"
@@ -95,7 +96,7 @@ magical = true
 class = "potion"
 stackable = true
 appearance_pool = "rogue.potions"
-consumable = { discovery = "on_use", effects = [{ kind = "heal_per_hit_die", sides = 8, bonus = 0, overflow = "improve_earliest_hit_dice_by_excess" }, { kind = "remove_condition", condition = "rogue.blindness" }] }
+consumable = { discovery = "on_use", effects = [{ kind = "heal_per_hit_die", sides = 8, bonus = 0, overflow = "improve_earliest_hit_dice_by_excess" }, { kind = "remove_condition", condition = "rogue.blindness" }, { kind = "remove_condition", condition = "rogue.hallucinating" }] }
 
 # Ordinary timed potion conditions have no gaze-expiry protection. Durations
 # preserve source ranges in actor turns; TOR actor-active ticks are an adaptation.
@@ -167,7 +168,7 @@ readable = { discovery = "on_use", effects = [{ kind = "apply_condition_for_turn
 
 [appearance_pools."rogue.scrolls"]
 asset = "item.scroll"
-appearances = ["scroll titled VEL MOR", "scroll titled ELAM TOR", "scroll titled NAR SHEN", "scroll titled HETH ARA", "scroll titled TAL ION", "scroll titled UR SEK", "scroll titled KEL RAN", "scroll titled AN DOR", "scroll titled IV MEM", "scroll titled OS THAL", "scroll titled VEL TOR", "scroll titled SAH REN", "scroll titled OR VETH", "scroll titled NEM AL", "scroll titled TIR OS", "scroll titled KHA MER"]
+appearances = ["scroll titled VEL MOR", "scroll titled ELAM TOR", "scroll titled NAR SHEN", "scroll titled HETH ARA", "scroll titled TAL ION", "scroll titled UR SEK", "scroll titled KEL RAN", "scroll titled AN DOR", "scroll titled IV MEM", "scroll titled OS THAL", "scroll titled VEL TOR", "scroll titled SAH REN", "scroll titled OR VETH", "scroll titled NEM AL", "scroll titled TIR OS", "scroll titled KHA MER", "scroll titled LOR NEV", "scroll titled MIR VEL"]
 
 [items."rogue.identify_scroll"]
 asset = "item.scroll"
@@ -253,7 +254,7 @@ device = { ability = "rogue.wand_slow", initial_charges = { minimum = 3, maximum
 
 [appearance_pools."rogue.wands"]
 asset = "item.wand"
-appearances = ["ash wand", "copper wand", "ivory wand", "obsidian wand", "oak wand", "glass wand", "willow wand", "iron wand"]
+appearances = ["ash wand", "copper wand", "ivory wand", "obsidian wand", "oak wand", "glass wand", "willow wand", "iron wand", "elm wand", "birch wand", "cedar wand", "hazel wand", "yew wand", "maple wand"]
 
 # Finite gear. Rogue source weapon dice and existing birth distributions are
 # preserved; skill/category, uniform 60/40 timing and armor physical DR are
@@ -700,3 +701,166 @@ stackable = true
 appearance_pool = "rogue.scrolls"
 readable = { control = { kind = "nothing" }, discovery = "never" }
 ground_scare = { condition = "rogue.scared", duration = 1000 }
+
+# Opt-in catalog definition only; no live floor stock or starting-kit entry.
+[items."rogue.wand_nothing"]
+asset = "item.wand"
+name = "wand of nothing"
+identity = "rogue.wand_nothing"
+magical = true
+class = "wand"
+stackable = false
+appearance_pool = "rogue.wands"
+device = { ability = "rogue.wand_nothing", initial_charges = { minimum = 3, maximum = 7 }, discovery = "never" }
+
+# Opt-in original Light device; live floor stock is unchanged.
+[items."rogue.wand_light"]
+asset = "item.wand"
+name = "wand of light"
+identity = "rogue.wand_light"
+magical = true
+class = "wand"
+stackable = false
+appearance_pool = "rogue.wands"
+device = { ability = "rogue.wand_light", initial_charges = { minimum = 10, maximum = 19 }, discovery = "on_use" }
+
+# Opt-in original Drain Life; live floor stock is unchanged.
+[items."rogue.wand_drain_life"]
+asset = "item.wand"
+name = "wand of drain life"
+identity = "rogue.wand_drain_life"
+magical = true
+class = "wand"
+stackable = false
+appearance_pool = "rogue.wands"
+device = { ability = "rogue.wand_drain_life", initial_charges = { minimum = 3, maximum = 7 }, discovery = "never" }
+
+[items."rogue.wand_cancellation"]
+asset = "item.wand"
+name = "wand of cancellation"
+identity = "rogue.wand_cancellation"
+magical = true
+class = "wand"
+stackable = false
+appearance_pool = "rogue.wands"
+device = { ability = "rogue.wand_cancellation", initial_charges = { minimum = 3, maximum = 7 }, discovery = "never" }
+
+[items."rogue.wand_magic_missile"]
+asset = "item.wand"
+name = "wand of magic missile"
+identity = "rogue.wand_magic_missile"
+magical = true
+class = "wand"
+stackable = false
+appearance_pool = "rogue.wands"
+device = { ability = "rogue.wand_magic_missile", initial_charges = { minimum = 3, maximum = 7 }, discovery = "on_use" }
+
+# Opt-in physical light; not part of live floor stock or starting kits.
+[items."rogue.torch"]
+name = "torch"
+class = "tool"
+stackable = false
+held_light = { radius = 4, fuel_ticks = 100000 }
+equipment = { slot = "held_light", modifiers = [] }
+
+# Opt-in Haste dose shares the exact wand condition; no live stock expansion.
+[items."rogue.haste"]
+asset = "item.potion"
+name = "potion of haste"
+identity = "rogue.haste"
+magical = true
+class = "potion"
+stackable = true
+appearance_pool = "rogue.potions"
+consumable = { discovery = "on_use", effects = [{ kind = "haste_dose", condition = "rogue.hasted", rest = "rogue.haste_exhaustion" }] }
+
+[items."rogue.gain_strength"]
+asset = "item.potion"
+name = "potion of gain strength"
+identity = "rogue.gain_strength"
+magical = true
+class = "potion"
+stackable = true
+appearance_pool = "rogue.potions"
+consumable = { discovery = "on_use", effects = [{ kind = "gain_strength" }] }
+
+[items."rogue.raise_level"]
+asset = "item.potion"
+name = "potion of raise level"
+identity = "rogue.raise_level"
+magical = true
+class = "potion"
+stackable = true
+appearance_pool = "rogue.potions"
+consumable = { discovery = "on_use", effects = [{ kind = "raise_level" }] }
+
+# Opt-in only: no live stock, starter kit or generation weight change. Each dose
+# draws the source-equivalent 808..892 base-turn duration, including extensions.
+[items."rogue.hallucination"]
+asset = "item.potion"
+name = "potion of hallucination"
+identity = "rogue.hallucination"
+magical = true
+class = "potion"
+stackable = true
+appearance_pool = "rogue.potions"
+consumable = { discovery = "on_use", effects = [{ kind = "apply_condition_for_turns", condition = "rogue.hallucinating", duration = { kind = "rolled", dice = { count = 1, sides = 85, bonus = 807 } } }] }
+
+# Opt-in chart dose; absent from production stock and starter kits. Recognition
+# requires a complete admitted positive chart, not merely an active condition.
+[items."rogue.monster_detection"]
+asset = "item.potion"
+name = "potion of monster detection"
+identity = "rogue.monster_detection"
+magical = true
+class = "potion"
+stackable = true
+appearance_pool = "rogue.potions"
+consumable = { discovery = "self_effect", effects = [{ kind = "detect_monsters", condition = "rogue.detecting_monsters" }] }
+
+# Opt-in chart dose; absent from production stock and starter kits. Recognition
+# requires a complete admitted positive chart, not merely an active condition.
+[items."rogue.food_detection"]
+asset = "item.scroll"
+name = "scroll of food detection"
+identity = "rogue.food_detection"
+magical = true
+class = "scroll"
+stackable = true
+appearance_pool = "rogue.scrolls"
+readable = { discovery = "self_effect", effects = [{ kind = "detect_food" }] }
+
+# Opt-in chart dose; absent from production stock and starter kits. Recognition
+# requires a complete admitted positive chart, not merely an active condition.
+[items."rogue.magic_detection"]
+asset = "item.potion"
+name = "potion of magic detection"
+identity = "rogue.magic_detection"
+magical = true
+class = "potion"
+stackable = true
+appearance_pool = "rogue.potions"
+consumable = { discovery = "self_effect", effects = [{ kind = "detect_magic" }] }
+
+# Opt-in only. Source certification is checked before payment; an admitted
+# mapping read identifies without borrowing detection's positive-only predicate.
+[items."rogue.magic_mapping"]
+asset = "item.scroll"
+name = "scroll of magic mapping"
+identity = "rogue.magic_mapping"
+magical = true
+class = "scroll"
+stackable = true
+appearance_pool = "rogue.scrolls"
+readable = { discovery = "on_use", effects = [{ kind = "map_topology" }] }
+
+# Opt-in review content only: no live weighted stock or starting kit.
+[items."rogue.wand_polymorph"]
+asset = "item.wand"
+name = "wand of polymorph"
+identity = "rogue.wand_polymorph"
+magical = true
+class = "wand"
+stackable = false
+appearance_pool = "rogue.wands"
+device = { ability = "rogue.wand_polymorph", initial_charges = { minimum = 3, maximum = 7 }, discovery = "discernible_effect" }

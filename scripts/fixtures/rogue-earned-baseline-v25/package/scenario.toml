@@ -1,0 +1,123 @@
+format = 33
+id = "rogue-exploration"
+version = "1.0"
+ruleset = "rules.toml"
+modules = ["catalog/creatures.toml", "catalog/actors.toml", "catalog/items.toml"]
+# Both presets keep their first advancement point for an ordinary player choice.
+default_character = 1
+factions = { delvers = ["dungeon_foes"], dungeon_foes = ["delvers"] }
+ai_profiles = { rogue_hostile = { care = false, equipment = false, loot = false, flee_percent = 0 } }
+
+[[characters]]
+id = 1
+anchor = "dungeon/1/start"
+turn_ticks = 100
+unselected = "omit"
+body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 80 }
+known_identities = ["rogue.mace", "rogue.ring_mail", "rogue.clean_bandage", "rogue.ration"]
+loadout = [
+  { archetype = "rogue.mace", quantity = 1, equipped_slot = 0 },
+  { archetype = "rogue.ring_mail", quantity = 1, equipped_slot = 2 },
+  { archetype = "rogue.clean_bandage", quantity = 3 },
+  { archetype = "rogue.ration", quantity = 1 },
+]
+[characters.creature]
+species = "rogue.human"
+name = "Warrior"
+faction = "delvers"
+binding = "intellect"
+starting_skills = ["heavy_weaponry", "discipline"]
+restoration = "choose_again"
+nutrition = { kind = "required" }
+future_growth = { kind = "selected", source = { kind = "class", class = "warrior" } }
+hit_dice = [{ source = "warrior", purchases = [] }]
+
+[[characters]]
+id = 2
+anchor = "dungeon/1/start"
+turn_ticks = 100
+unselected = "omit"
+body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 80 }
+known_identities = ["rogue.mace", "rogue.ring_mail", "rogue.clean_bandage", "rogue.ration"]
+loadout = [
+  { archetype = "rogue.mace", quantity = 1, equipped_slot = 0 },
+  { archetype = "rogue.ring_mail", quantity = 1, equipped_slot = 2 },
+  { archetype = "rogue.clean_bandage", quantity = 3 },
+  { archetype = "rogue.ration", quantity = 1 },
+]
+[characters.creature]
+species = "rogue.human"
+name = "Mage"
+faction = "delvers"
+binding = "intellect"
+starting_skills = ["spellcasting", "heavy_weaponry"]
+restoration = "choose_again"
+nutrition = { kind = "required" }
+future_growth = { kind = "selected", source = { kind = "class", class = "mage" } }
+hit_dice = [{ source = "mage", purchases = [] }]
+
+[generation_recipes.exploration]
+kind = "grid_rooms"
+version = 1
+room_width = [4, 24]
+room_height = [3, 5]
+extra_connections = [0, 2]
+lighting = { darkness_roll = 10, darkness_start = 1 }
+
+[procedural_worlds.dungeon]
+kind = "grid_chain"
+version = 1
+base_region = 1
+grid = [3, 3]
+size = [26, 7, 2]
+recipe = "exploration"
+
+[procedural_worlds.dungeon.domain]
+kind = "open"
+max_depth = 1000000
+
+[capabilities]
+npc_stair_traversal = false
+
+[floor_activation]
+version = 1
+protagonist = "selected_character"
+families = { dungeon = "rogue.low_depth" }
+
+# A uniform, provisional population. This is not a calibrated depth curve.
+[floor_activation.profiles."rogue.low_depth"]
+version = 1
+
+[[floor_activation.profiles."rogue.low_depth".stages]]
+id = "rogue.emus"
+version = 1
+kind = "actors"
+count = [2, 2]
+bands = [{ depth = { kind = "open", minimum = 1 }, choices = [{ archetype = "rogue.emu", weight = 1 }] }]
+ai = "rogue_hostile"
+avoid_protagonist_sight = true
+
+[[floor_activation.profiles."rogue.low_depth".stages]]
+id = "rogue.snakes"
+version = 1
+kind = "actors"
+count = [2, 2]
+bands = [{ depth = { kind = "open", minimum = 1 }, choices = [{ archetype = "rogue.snake", weight = 1 }] }]
+ai = "rogue_hostile"
+avoid_protagonist_sight = true
+
+[[floor_activation.profiles."rogue.low_depth".stages]]
+id = "rogue.bandages"
+version = 1
+kind = "items"
+count = [1, 1]
+bands = [{ depth = { kind = "open", minimum = 1 }, choices = [{ archetype = "rogue.clean_bandage", weight = 1 }] }]
+quantity = 2
+
+[[floor_activation.profiles."rogue.low_depth".stages]]
+id = "rogue.rations"
+version = 1
+kind = "items"
+count = [1, 1]
+bands = [{ depth = { kind = "open", minimum = 1 }, choices = [{ archetype = "rogue.ration", weight = 1 }] }]
+quantity = 1

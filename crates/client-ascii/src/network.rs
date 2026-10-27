@@ -16,6 +16,8 @@ pub enum Event {
     Snapshot(Box<Snapshot>),
     Update(Box<StreamUpdate>),
     MapMemory(Box<tor_client_common::MapMemoryUpdate>),
+    ChartPresentation(tor_client_common::charts::ChartPresentation),
+    ChartCancelled(chart_pages::ChartQuery),
     Status(String),
     /// The server refused a request, in the player's words.
     Refused(String),
@@ -53,6 +55,7 @@ pub enum Event {
 
 /// What the window asks of the network worker.
 pub enum Command {
+    CancelCharts,
     Request {
         context: StreamContext,
         request: Box<Request>,
@@ -201,6 +204,16 @@ async fn run(
                         publish(tx, Event::Ready)?;
                         continue;
                     }
+                    if matches!(request.as_ref(), Request::Chart { query } if query.base != connection.state.observation_base()
+                        || query.context != *connection.state.context() || query.branch != *connection.state.branch())
+                    {
+                        publish(
+                            tx,
+                            Event::Refused("Chart view changed; select the chart again.".into()),
+                        )?;
+                        publish(tx, Event::Ready)?;
+                        continue;
+                    }
                     // Observation revisions can advance without a new input
                     // generation while the native UI is still presenting old
                     // state. Refuse that queued query before local page tracking
@@ -216,6 +229,7 @@ async fn run(
                     transact(&mut connection, &mut shown_palette, *request, tx).await?;
                     publish(tx, Event::Ready)?;
                 }
+                Some(Command::CancelCharts) => connection.cancel_charts(),
                 Some(Command::Skip) => connection.skip(),
                 Some(Command::Pace(pace)) => connection.set_pace(pace),
             },
@@ -231,18 +245,79 @@ async fn next(
     shown: &mut (Option<u64>, bool),
     tx: &SyncSender<Event>,
 ) -> Result<ServerMessage, Error> {
-    // A select branch can cancel Connection::next after it mutates the palette
-    // but before recovery I/O completes. Re-entering must publish that change
-    // before awaiting more input, using the last successful UI publication.
-    publish_palette_change(shown, &connection.palette, tx)?;
-    let message = connection.next().await?;
-    if matches!(&message, ServerMessage::MapPage {page,..} if page.next.is_none()) {
-        if let Some(update) = connection.state.map_memory_update() {
-            publish(tx, Event::MapMemory(Box::new(update)))?;
+    next_with_chart_timeout(connection, shown, tx, Duration::from_secs(10)).await
+}
+
+async fn next_with_chart_timeout(
+    connection: &mut Connection,
+    shown: &mut (Option<u64>, bool),
+    tx: &SyncSender<Event>,
+    chart_timeout: Duration,
+) -> Result<ServerMessage, Error> {
+    loop {
+        // Re-entry also preserves palette invalidations when a command cancels
+        // the previous receive future during recovery I/O.
+        publish_palette_change(shown, &connection.palette, tx)?;
+        let was_loading = connection.charts.loading();
+        let cancellation = was_loading
+            .then(|| {
+                connection
+                    .state
+                    .state()
+                    .observation
+                    .charts
+                    .iter()
+                    .find(|summary| Some(summary.kind) == connection.charts.selected())
+                    .and_then(|summary| summary.chart.as_ref())
+                    .map(|chart| chart_pages::ChartQuery {
+                        context: connection.state.context().clone(),
+                        branch: connection.state.branch().clone(),
+                        base: connection.state.observation_base(),
+                        chart: chart.clone(),
+                        cursor: None,
+                    })
+            })
+            .flatten();
+        let message = if let Some(query) = cancellation {
+            match timeout(chart_timeout, connection.next()).await {
+                Ok(result) => result?,
+                Err(_) => {
+                    // This is local presentation failure, not a fabricated
+                    // server reply or a change to the advertised sample status.
+                    connection.cancel_charts();
+                    publish(tx, Event::ChartCancelled(query))?;
+                    continue;
+                }
+            }
+        } else {
+            connection.next().await?
+        };
+        if matches!(&message, ServerMessage::MapPage {page,..} if page.next.is_none()) {
+            if let Some(update) = connection.state.map_memory_update() {
+                publish(tx, Event::MapMemory(Box::new(update)))?;
+            }
+        }
+        publish_chart_result(was_loading, &connection.charts, &message, tx)?;
+        publish_palette_change(shown, &connection.palette, tx)?;
+        return Ok(message);
+    }
+}
+
+fn publish_chart_result(
+    was_loading: bool,
+    charts: &tor_client_common::charts::ChartPages,
+    message: &ServerMessage,
+    tx: &SyncSender<Event>,
+) -> Result<(), Error> {
+    if (was_loading && !charts.loading())
+        || matches!(message, ServerMessage::ChartPage { page, .. } if page.next.is_none())
+        || matches!(message, ServerMessage::Error { request_id: Some(id), .. } if id.starts_with("chart-"))
+    {
+        if let Some(update) = charts.presentation() {
+            publish(tx, Event::ChartPresentation(update))?;
         }
     }
-    publish_palette_change(shown, &connection.palette, tx)?;
-    Ok(message)
+    Ok(())
 }
 
 fn publish_palette_change(
@@ -416,7 +491,9 @@ fn present(message: ServerMessage, tx: &SyncSender<Event>) -> Result<(), Error> 
         ServerMessage::Welcome { .. } => Err("Unexpected repeated welcome".into()),
         ServerMessage::SnapshotPart { .. } => Err("Unexpected unassembled snapshot part".into()),
         // `next` already forwarded the current palette, including stale changes.
-        ServerMessage::Palette { .. } | ServerMessage::MapPage { .. } => Ok(()),
+        ServerMessage::Palette { .. }
+        | ServerMessage::MapPage { .. }
+        | ServerMessage::ChartPage { .. } => Ok(()),
         // Input permissions arrive through ordered readiness updates.
         ServerMessage::Waiting { .. } => Ok(()),
     }
@@ -1215,5 +1292,267 @@ mod tests {
                 "original reply missing: {statuses:?}"
             );
         }
+    }
+
+    fn timeout_chart_snapshot() -> Snapshot {
+        use chart_pages::*;
+        let mut observation = tor_client_common::test_support::observation();
+        observation.charts = vec![ChartSummary {
+            supported: true,
+            kind: ChartKind::Monsters,
+            mode: ChartMode::Live,
+            status: ChartStatus::Available,
+            acquired_at: Some(observation.tick),
+            chart: Some("timeout-sample".into()),
+            latest_attempt: None,
+        }];
+        let snapshot = Snapshot {
+            context: StreamContext {
+                stream: StreamId("chart-timeout".into()),
+                epoch: 0,
+            },
+            actor: observation.actor,
+            branch: BranchId("main".into()),
+            cursor: StreamCursor {
+                sequence: 0,
+                tick: observation.tick,
+            },
+            state: std::sync::Arc::new(StateView {
+                wizard_game: false,
+                revision: 0,
+                observation,
+            }),
+            readiness: Readiness {
+                revision: 0,
+                // This attachment is a spectator: chart reads need no action admission.
+                admission: false,
+                resume: vec![],
+                cancel: vec![],
+            },
+            intentions: vec![],
+            travel: None,
+            has_control: false,
+            history: HistoryPage {
+                entries: vec![],
+                older_before: None,
+            },
+        };
+        tor_client_common::ClientState::from_snapshot(snapshot.clone()).unwrap();
+        snapshot
+    }
+
+    #[test]
+    fn chart_timeout_fixture_is_read_only_and_rejects_admission_without_control() {
+        let snapshot = timeout_chart_snapshot();
+        assert_eq!(snapshot.state.validate(), Ok(()));
+        assert!(!snapshot.has_control);
+        assert!(!snapshot.readiness.admission);
+        let state = tor_client_common::ClientState::from_snapshot(snapshot.clone()).unwrap();
+        assert!(!state.can_admit_intention());
+
+        // The former fixture contradicted its spectator authority. Preserve the
+        // negative witness instead of relaxing the production readiness check.
+        let mut malformed = snapshot;
+        malformed.readiness.admission = true;
+        assert_eq!(
+            tor_client_common::ClientState::from_snapshot(malformed),
+            Err(tor_client_common::StreamError::InconsistentState)
+        );
+    }
+
+    #[test]
+    fn chart_terminal_failure_reaches_ui_even_when_next_message_is_unrelated() {
+        use tor_client_common::charts::{ChartInput, ChartPages};
+        let initial = timeout_chart_snapshot();
+        let state = tor_client_common::ClientState::from_snapshot(initial.clone()).unwrap();
+        let mut worker = ChartPages::default();
+        let Some(Request::Chart { query }) = worker
+            .request(ChartInput::Select(chart_pages::ChartKind::Monsters), &state)
+            .unwrap()
+        else {
+            panic!("chart query")
+        };
+        worker.bind(&query, "chart-timeout", &state).unwrap();
+        let mut ui = worker.clone();
+        assert!(worker.reject("chart-timeout"));
+        let unrelated = ServerMessage::Ack {
+            context: initial.reply_context(),
+            request_id: "unrelated".into(),
+            receipt: RequestReceipt::Immediate {
+                actor: initial.actor,
+                branch: initial.branch.clone(),
+                entry_id: None,
+            },
+        };
+        let (tx, rx) = mpsc::sync_channel(8);
+        publish_chart_result(true, &worker, &unrelated, &tx).unwrap();
+        let Event::ChartPresentation(update) = rx.try_recv().unwrap() else {
+            panic!("local failure presentation")
+        };
+        ui.install(update, &state).unwrap();
+        assert!(!ui.loading());
+        assert!(ui.lines(&state).join("\n").contains("request failed"));
+        publish_chart_result(false, &worker, &unrelated, &tx).unwrap();
+        assert!(
+            rx.try_recv().is_err(),
+            "unchanged failure must not be republished"
+        );
+        assert_eq!(state.snapshot(), initial);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn silent_chart_continuation_timeout_notifies_ui_without_disconnecting_or_sending_actions(
+    ) {
+        use chart_pages::*;
+        use tor_client_common::charts::ChartInput;
+        let initial = timeout_chart_snapshot();
+        let before = initial.clone();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (continued, continuation_seen) = tokio::sync::oneshot::channel();
+        let (resume, resumed) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = accept_async(stream).await.unwrap();
+            assert!(matches!(
+                receive(&mut socket).await,
+                ClientMessage::Hello { .. }
+            ));
+            send(
+                &mut socket,
+                ServerMessage::Welcome {
+                    protocol: PROTOCOL_VERSION,
+                    capabilities: ServerCapabilities::new(MAX_RESPONSE_BYTES as u32, 16),
+                    user: "test".into(),
+                    actors: vec![initial.actor],
+                    role: AccessRole::Spectator,
+                },
+            )
+            .await;
+            assert!(
+                matches!(receive(&mut socket).await, ClientMessage::Request { request, .. } if matches!(*request, Request::Attach { .. }))
+            );
+            send(
+                &mut socket,
+                ServerMessage::Snapshot {
+                    request_id: "attach".into(),
+                    snapshot: Box::new(initial.clone()),
+                },
+            )
+            .await;
+            let ClientMessage::Request {
+                request_id,
+                request,
+            } = receive(&mut socket).await
+            else {
+                panic!("chart request")
+            };
+            let Request::Chart { query } = *request else {
+                panic!("chart is read only")
+            };
+            assert_eq!(query.cursor, None);
+            send(
+                &mut socket,
+                ServerMessage::ChartPage {
+                    context: initial.reply_context(),
+                    request_id,
+                    page: Box::new(ChartPage {
+                        context: query.context.clone(),
+                        branch: query.branch.clone(),
+                        base: query.base,
+                        chart: query.chart.clone(),
+                        kind: ChartKind::Monsters,
+                        mode: ChartMode::Live,
+                        acquired_at: initial.cursor.tick,
+                        total_components: 1,
+                        total_records: 2,
+                        start: 0,
+                        next: Some(1),
+                        records: vec![ChartRecord::Component(ChartComponent {
+                            component: 0,
+                            alignment: ChartAlignment::Aligned,
+                        })],
+                    }),
+                },
+            )
+            .await;
+            let ClientMessage::Request { request, .. } = receive(&mut socket).await else {
+                panic!("chart continuation")
+            };
+            assert!(matches!(*request, Request::Chart { query } if query.cursor == Some(1)));
+            continued.send(()).unwrap();
+            // Silence until the UI has actually received its local timeout event.
+            resumed.await.unwrap();
+            send(
+                &mut socket,
+                ServerMessage::Ack {
+                    context: initial.reply_context(),
+                    request_id: "still-connected".into(),
+                    receipt: RequestReceipt::Immediate {
+                        actor: initial.actor,
+                        branch: initial.branch,
+                        entry_id: None,
+                    },
+                },
+            )
+            .await;
+            if let Some(Ok(Message::Text(text))) = next_non_map_frame(&mut socket).await {
+                panic!("timeout must not send an action, snapshot request, or replay: {text}");
+            }
+        });
+        let mut connection = Connection::connect(address, "token".into(), before.actor, "test")
+            .await
+            .unwrap();
+        let request = connection
+            .charts
+            .request(ChartInput::Select(ChartKind::Monsters), &connection.state)
+            .unwrap()
+            .unwrap();
+        let Request::Chart {
+            query: expected_query,
+        } = &request
+        else {
+            panic!("chart query")
+        };
+        let expected_query = expected_query.clone();
+        connection.request(request).await.unwrap();
+        let (events, received) = mpsc::sync_channel(64);
+        let mut shown = (None, false);
+        assert!(
+            matches!(next(&mut connection, &mut shown, &events).await.unwrap(), ServerMessage::ChartPage { page, .. } if page.next == Some(1))
+        );
+        assert!(connection.charts.loading());
+        let worker = tokio::spawn(async move {
+            let message = next_with_chart_timeout(
+                &mut connection,
+                &mut shown,
+                &events,
+                Duration::from_millis(50),
+            )
+            .await
+            .unwrap();
+            assert!(
+                matches!(message, ServerMessage::Ack { request_id, .. } if request_id == "still-connected")
+            );
+            assert!(connection.is_synchronized());
+            assert!(!connection.charts.loading());
+            assert_eq!(connection.charts.selected(), None);
+            assert_eq!(connection.state.snapshot(), before);
+            connection.close().await.unwrap();
+        });
+        continuation_seen.await.unwrap();
+        let cancelled = tokio::task::spawn_blocking(move || loop {
+            match received.recv_timeout(Duration::from_secs(2)).unwrap() {
+                Event::ChartCancelled(query) => break query,
+                Event::Palette(_) => {}
+                _ => panic!("unexpected chart continuation presentation"),
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(cancelled, expected_query);
+        resume.send(()).unwrap();
+        worker.await.unwrap();
+        server.await.unwrap();
     }
 }

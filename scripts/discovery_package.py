@@ -47,6 +47,10 @@ def observer_fixture():
         "kind": "add", "stat": {"kind": "attribute", "attribute": "awareness"}, "value": 100}})
     manifest["creatures"]["species"]["fixture.perceptive_observer"] = species
     owner["creature"]["species"] = "fixture.perceptive_observer"
+    body = copy.deepcopy(manifest["creatures"]["body_packages"][owner["creature"]["body_package"]])
+    body["species"] = "fixture.perceptive_observer"
+    manifest["creatures"]["body_packages"]["fixture.body.perceptive_observer"] = body
+    owner["creature"]["body_package"] = "fixture.body.perceptive_observer"
     data["regions"][0]["actors"] = [{"id": 2, "at": [1, 1, 0], "turn_ticks": 100,
         "controller": "external", "creature": peer, "body": copy.deepcopy(owner["body"])}]
     return data

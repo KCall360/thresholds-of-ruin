@@ -81,6 +81,8 @@ impl<'de> Deserialize<'de> for Ability {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Fields {
+            #[serde(default)]
+            cancellable: bool,
             interaction: Interaction,
             id: AbilityId,
             #[serde(default)]
@@ -106,6 +108,7 @@ impl<'de> Deserialize<'de> for Ability {
         }
         let fields: Fields = crate::creature_authoring::named_map(deserializer)?;
         Ok(Self(AbilityDef {
+            cancellable: fields.cancellable,
             interaction: fields.interaction,
             id: fields.id,
             invocation: fields.invocation,
@@ -275,6 +278,8 @@ impl<'de> Deserialize<'de> for Strike {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Fields {
+            #[serde(default)]
+            cancellable: bool,
             offset: u64,
             unlock: Option<TalentId>,
             check: Option<CheckDef>,
@@ -293,6 +298,7 @@ impl<'de> Deserialize<'de> for Strike {
         }
         let fields: Fields = crate::creature_authoring::named_map(deserializer)?;
         Ok(Self(StrikeDef {
+            cancellable: fields.cancellable,
             offset: fields.offset,
             unlock: fields.unlock,
             check: fields.check,
@@ -310,6 +316,8 @@ impl<'de> Deserialize<'de> for Rider {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Fields {
+            #[serde(default)]
+            cancellable: bool,
             trigger: RiderTrigger,
             condition: Option<RiderCondition>,
             check: Option<RiderCheckDef>,
@@ -322,6 +330,7 @@ impl<'de> Deserialize<'de> for Rider {
         }
         let fields: Fields = crate::creature_authoring::named_map(deserializer)?;
         Ok(Self(RiderDef {
+            cancellable: fields.cancellable,
             trigger: fields.trigger,
             condition: fields.condition,
             check: fields.check,
@@ -456,5 +465,68 @@ mod tests {
             let authored = serde_json::from_value::<AuthoredEffect>(source).unwrap().0;
             assert_eq!(runtime, authored);
         }
+    }
+}
+
+#[cfg(test)]
+mod cancellation_metadata_tests {
+    use super::*;
+    use serde_json::{json, Value};
+
+    fn malformed<T: serde::de::DeserializeOwned>(good: Value) {
+        serde_json::from_value::<T>(good.clone()).unwrap();
+        for replacement in [Value::Null, json!(0), json!("false")] {
+            let mut bad = good.clone();
+            bad["cancellable"] = replacement;
+            assert!(serde_json::from_value::<T>(bad).is_err());
+        }
+        let mut extra = good.clone();
+        extra["unrelated_metadata"] = json!(true);
+        assert!(serde_json::from_value::<T>(extra).is_err());
+        let duplicate = format!(
+            "{{\"cancellable\":false,\"cancellable\":true,{}",
+            &serde_json::to_string(&good).unwrap()[1..]
+        );
+        assert!(serde_json::from_str::<T>(&duplicate).is_err());
+    }
+    #[test]
+    fn cancellation_metadata_source_defaults_are_closed_across_independent_parsers() {
+        let document: RulesetDocument = toml::from_str(DEFAULT_RULESET_TOML).unwrap();
+        Ruleset::validate(document.clone()).unwrap();
+        let mut ability = serde_json::to_value(&document.abilities[0]).unwrap();
+        ability.as_object_mut().unwrap().remove("cancellable");
+        assert!(
+            !serde_json::from_value::<Ability>(ability.clone())
+                .unwrap()
+                .0
+                .cancellable
+        );
+        malformed::<Ability>(ability);
+        let strike = json!({"offset":0,"unlock":null,"check":null,"on_success":[],"on_failure":[],"descriptors":[],"riders":[]});
+        assert!(
+            !serde_json::from_value::<Strike>(strike.clone())
+                .unwrap()
+                .0
+                .cancellable
+        );
+        malformed::<Strike>(strike.clone());
+        malformed::<crate::creature_authoring::Strike>(strike);
+        let rider = json!({"trigger":"success","condition":null,"check":null,"effects":[],"descriptors":[]});
+        assert!(
+            !serde_json::from_value::<Rider>(rider.clone())
+                .unwrap()
+                .0
+                .cancellable
+        );
+        malformed::<Rider>(rider.clone());
+        malformed::<crate::creature_authoring::Rider>(rider);
+        let modifier = json!({"scope":"always","op":{"kind":"perception","value":{"kind":"invisible","enabled":true}}});
+        assert!(
+            !serde_json::from_value::<Modifier>(modifier.clone())
+                .unwrap()
+                .cancellable
+        );
+        malformed::<Modifier>(modifier.clone());
+        malformed::<crate::creature_authoring::Modifier>(modifier);
     }
 }

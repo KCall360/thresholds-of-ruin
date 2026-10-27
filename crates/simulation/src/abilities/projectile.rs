@@ -842,6 +842,7 @@ mod definition_tests {
             },
         ] {
             let modifier = Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Add { stat, value: 1 },
             };

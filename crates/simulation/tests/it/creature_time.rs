@@ -12,6 +12,7 @@ pub(super) fn game() -> (Game, ActorId, ActorId) {
     template.modifiers = Resource::ALL
         .into_iter()
         .map(|resource| Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Add {
                 stat: Stat::ResourceMax { resource },
@@ -301,6 +302,7 @@ fn intermediate_expiry_does_not_stop_the_loop_while_all_actors_prepare_attacks()
     let mut build = super::creature_state::build();
     let mut protection = Template::new(TemplateId::new("test_defense").unwrap(), 0);
     protection.modifiers = vec![Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Add {
             stat: Stat::Defense {

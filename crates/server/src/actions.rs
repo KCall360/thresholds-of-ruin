@@ -35,6 +35,12 @@ pub enum Action {
     Unequip {
         item: u64,
     },
+    Ignite {
+        item: u64,
+    },
+    Extinguish {
+        item: u64,
+    },
     Drink {
         item: u64,
     },
@@ -46,7 +52,7 @@ pub enum Action {
     },
     Zap {
         item: u64,
-        direction: Direction,
+        aim: DeviceAim,
     },
     Identify {
         choice: tor_simulation::IntentionId,
@@ -114,6 +120,8 @@ impl Action {
                 | Self::UseAbility { .. }
                 | Self::Equip { .. }
                 | Self::Unequip { .. }
+                | Self::Ignite { .. }
+                | Self::Extinguish { .. }
                 | Self::Drink { .. }
                 | Self::Eat { .. }
                 | Self::Read { .. }
@@ -614,6 +622,18 @@ mod tests {
                 },
             ),
             (
+                Action::Ignite { item: u64::MAX },
+                sim::Action::Ignite {
+                    item: sim::ItemId(u64::MAX),
+                },
+            ),
+            (
+                Action::Extinguish { item: u64::MAX },
+                sim::Action::Extinguish {
+                    item: sim::ItemId(u64::MAX),
+                },
+            ),
+            (
                 Action::Drink { item: u64::MAX },
                 sim::Action::Drink {
                     item: sim::ItemId(u64::MAX),
@@ -734,7 +754,13 @@ mod magic_item_adapter_tests {
             Action::Read { item: u64::MAX },
             Action::Zap {
                 item: 71,
-                direction: Direction::NorthWest,
+                aim: DeviceAim::Direction {
+                    direction: Direction::NorthWest,
+                },
+            },
+            Action::Zap {
+                item: 71,
+                aim: DeviceAim::SelfTarget {},
             },
             Action::Identify {
                 choice: sim::IntentionId(17),
@@ -760,4 +786,11 @@ mod magic_item_adapter_tests {
             );
         }
     }
+}
+
+/// Captured caller aim, independent of hidden device delivery.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DeviceAim {
+    Direction { direction: Direction },
+    SelfTarget {},
 }

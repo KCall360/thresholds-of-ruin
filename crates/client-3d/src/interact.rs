@@ -589,6 +589,22 @@ pub fn panel(
                 label.push_str(&format!(" x{}", item.quantity));
             }
             let mut actions = Vec::new();
+            if let Some(light) = &item.portable_light {
+                label.push_str(&format!(
+                    " [{}; fuel: {} ticks]",
+                    if light.lit { "lit" } else { "unlit" },
+                    light.remaining
+                ));
+                if light.ignitable {
+                    actions.push(("Ignite", PanelButton::Use(item.id, ItemOperation::Ignite)));
+                }
+                if light.extinguishable {
+                    actions.push((
+                        "Extinguish",
+                        PanelButton::Use(item.id, ItemOperation::Extinguish),
+                    ));
+                }
+            }
             if item.equipped.is_some() {
                 actions.push(("Remove", PanelButton::Use(item.id, ItemOperation::Unequip)));
             } else if item.can_equip {
@@ -600,7 +616,7 @@ pub fn panel(
             if item.drinkable {
                 actions.push(("Drink", PanelButton::Use(item.id, ItemOperation::Drink)));
             }
-            if item.equipped.is_none() {
+            if item.equipped.is_none() || item.portable_light.is_some() {
                 actions.push(("Drop", PanelButton::Drop(item.id)));
             }
             row(ui, &label, item.equipped.as_deref(), &actions);

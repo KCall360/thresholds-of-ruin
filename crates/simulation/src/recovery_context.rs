@@ -325,6 +325,8 @@ mod tests {
         let mut document = crate::test_creatures::ruleset().document().clone();
         let condition = ConditionId::new("borrowed_vitality").unwrap();
         document.conditions.push(ConditionDef {
+            detecting_monsters: false,
+            hallucinating: false,
             id: condition.clone(),
             family: ConditionFamilyId::new("borrowed_vitality").unwrap(),
             lifecycle: ConditionLifecycle::Timed,
@@ -333,6 +335,7 @@ mod tests {
             preparation: tor_simulation::rules::ConditionPreparation::Preserve,
             name: "Borrowed vitality".into(),
             modifiers: vec![Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Add {
                     stat: Stat::Health,
@@ -346,6 +349,7 @@ mod tests {
         });
         let mut species = crate::test_creatures::species();
         species.modifiers.push(Modifier {
+            cancellable: false,
             scope: Scope::WhileNoSensedHostile,
             op: ModifierOp::Add {
                 stat: Stat::HealthRecoveryPeriodPercent,
@@ -478,6 +482,7 @@ mod tests {
         const OWNERS: u64 = 513;
         let mut species = crate::test_creatures::species();
         species.modifiers.push(Modifier {
+            cancellable: false,
             scope: Scope::WhileNoSensedHostile,
             op: ModifierOp::Add {
                 stat: Stat::HealthRecoveryPeriodPercent,

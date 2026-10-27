@@ -29,8 +29,15 @@ class RogueStarterChillProcesses(ProcessTestCase):
         (package / "regions").mkdir(parents=True)
         (package / "catalog").mkdir()
         production = ROOT / "scenarios/rogue-exploration"
-        for name in ("creatures.toml", "actors.toml", "items.toml"):
+        self.assertEqual(manifest["modules"], source["manifest"]["modules"])
+        mage = manifest["characters"][0]["creature"]
+        self.assertEqual(mage["body_package"], "rogue.body.human")
+        self.assertEqual(mage["hit_dice"], [
+            {"source": "racial", "purchases": []}, {"source": "mage", "purchases": []}])
+        for name in ("creatures.toml", "bodies.toml", "actors.toml", "items.toml"):
             shutil.copy2(production / "catalog" / name, package / "catalog" / name)
+            self.assertEqual((production / "catalog" / name).read_bytes(),
+                             (package / "catalog" / name).read_bytes())
         shutil.copy2(production / "rules.toml", package / "rules.toml")
         (package / "scenario.toml").write_text(toml_source(manifest), encoding="utf-8", newline="\n")
         (package / "regions/1.toml").write_text(toml_source(region), encoding="utf-8", newline="\n")

@@ -377,6 +377,7 @@ fn active_item_work_and_equipment_survive_frozen_and_detached_checkpoints() {
                 slot,
                 attack: None,
                 modifiers: vec![tor_simulation::rules::Modifier {
+                    cancellable: false,
                     scope: tor_simulation::rules::Scope::Always,
                     op: tor_simulation::rules::ModifierOp::Add {
                         stat: tor_simulation::rules::Stat::Defense {

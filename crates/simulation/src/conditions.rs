@@ -884,9 +884,14 @@ fn validate(
         return Err(ConditionError::InvalidSource);
     }
     match (def.timing, duration) {
-        (ConditionTiming::UntilRemoved, None)
+        (ConditionTiming::UntilRemoved | ConditionTiming::ActorActiveOrUntilRemoved, None)
             if def.lifecycle == ConditionLifecycle::Timed && def.stacking == Stacking::Keep => {}
         (ConditionTiming::ActorActive { .. }, Some(duration)) => {
+            ConditionTicks::new(duration)?;
+        }
+        (ConditionTiming::ActorActiveOrUntilRemoved, Some(duration))
+            if def.lifecycle == ConditionLifecycle::Timed && def.stacking == Stacking::Keep =>
+        {
             ConditionTicks::new(duration)?;
         }
         _ => return Err(ConditionError::InvalidDuration),
@@ -956,6 +961,7 @@ mod tests {
             protected.restrictions = vec![ConditionRestriction::VoluntaryActions];
             protected.preparation = ConditionPreparation::Pause;
             protected.modifiers = vec![Modifier {
+                cancellable: false,
                 scope: crate::rules::Scope::Always,
                 op: crate::rules::ModifierOp::Locomotion {
                     value: crate::locomotion::LocomotionValue::Confused {

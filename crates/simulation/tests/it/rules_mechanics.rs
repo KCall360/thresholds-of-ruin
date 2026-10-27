@@ -51,6 +51,7 @@ fn fixture_with_modifiers(
     .unwrap();
     species.modifiers.extend([
         Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Add {
                 stat: Stat::Ability {
@@ -61,6 +62,7 @@ fn fixture_with_modifiers(
             },
         },
         Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Add {
                 stat: Stat::Ability {

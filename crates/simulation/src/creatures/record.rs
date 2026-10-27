@@ -1,4 +1,5 @@
 //! Strict mutable creature records. Definitions live once in the save catalog.
+mod body;
 mod intellect;
 use super::{
     AdvancementPurchase, BuildAdvancement, BuildEpoch, BuildError, Content, CreatureBuild,
@@ -23,6 +24,8 @@ pub struct CreatureRecord {
     build_epoch: BuildEpoch,
     earned_progress: crate::earned_growth::EarnedProgress,
     restorable_losses: super::RestorableLosses,
+    cancelled: bool,
+    polymorph_return_pending: bool,
     injury: u64,
     dead: bool,
     #[serde(deserialize_with = "named_map")]
@@ -45,6 +48,8 @@ impl<'de> serde::Deserialize<'de> for CreatureRecord {
             build_epoch: BuildEpoch,
             earned_progress: crate::earned_growth::EarnedProgress,
             restorable_losses: super::RestorableLosses,
+            cancelled: bool,
+            polymorph_return_pending: bool,
             injury: u64,
             dead: bool,
             #[serde(deserialize_with = "named_map")]
@@ -63,6 +68,8 @@ impl<'de> serde::Deserialize<'de> for CreatureRecord {
             build_epoch: fields.build_epoch,
             earned_progress: fields.earned_progress,
             restorable_losses: fields.restorable_losses,
+            cancelled: fields.cancelled,
+            polymorph_return_pending: fields.polymorph_return_pending,
             injury: fields.injury,
             dead: fields.dead,
             health_recovery: fields.health_recovery,
@@ -256,6 +263,8 @@ impl CreatureRecord {
             build_epoch: creature.build_epoch(),
             earned_progress: creature.earned_progress().clone(),
             restorable_losses: creature.restorable_losses(),
+            cancelled: creature.cancelled(),
+            polymorph_return_pending: creature.polymorph_return_pending(),
             injury: creature.health().injury(),
             dead: creature.health().dead(),
             health_recovery: HealthRecoveryRecord {
@@ -316,6 +325,7 @@ impl CreatureRecord {
             self.dead,
             conditions,
             equipment,
+            self.cancelled,
             |maxima, rules| {
                 let pools = ByResource {
                     stamina: &self.pools.stamina,
@@ -339,6 +349,7 @@ impl CreatureRecord {
                 crate::costs::CostLedger::from_recorded(resources, holds).map_err(Error::Cost)
             },
         )?;
+        creature.set_polymorph_return_pending(self.polymorph_return_pending)?;
         creature.restore_health_recovery(
             self.health_recovery.elapsed,
             self.health_recovery.nutrition,
@@ -361,6 +372,9 @@ impl CreatureRecord {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BuildRecord {
+    #[serde(deserialize_with = "required_option")]
+    body_build: Option<body::BodyBuildRecord>,
+    strength_acquired: u8,
     species: SpeciesId,
     future_growth: crate::earned_growth::FutureGrowth,
     starting_skills: [Skill; 2],
@@ -418,6 +432,9 @@ struct HdRecord {
     #[serde(deserialize_with = "named_map")]
     source: SourceRecord,
     health_seed: u64,
+    health_policy: crate::progression::HealthRollPolicy,
+    #[serde(deserialize_with = "required_option")]
+    owner: Option<super::composition::HdOwner>,
     #[serde(deserialize_with = "named_map")]
     health_origin: HealthOriginRecord,
     health_improvement: u16,
@@ -444,6 +461,9 @@ impl<'de> Deserialize<'de> for HdRecord {
             #[serde(deserialize_with = "named_map")]
             source: SourceRecord,
             health_seed: u64,
+            health_policy: crate::progression::HealthRollPolicy,
+            #[serde(deserialize_with = "required_option")]
+            owner: Option<super::composition::HdOwner>,
             #[serde(deserialize_with = "named_map")]
             health_origin: HealthOriginRecord,
             health_improvement: u16,
@@ -452,6 +472,8 @@ impl<'de> Deserialize<'de> for HdRecord {
         Ok(Self {
             source: fields.source,
             health_seed: fields.health_seed,
+            health_policy: fields.health_policy,
+            owner: fields.owner,
             health_origin: fields.health_origin,
             health_improvement: fields.health_improvement,
         })
@@ -480,6 +502,10 @@ impl HdRecord {
         Self {
             source: SourceRecord::capture(die.source()),
             health_seed: die.health_seed(),
+            health_policy: die
+                .health_policy()
+                .expect("owned build binds every Health roll policy"),
+            owner: die.owner().cloned(),
             health_origin: HealthOriginRecord {
                 templates: Bounded(origin.templates.clone()),
                 kind: origin.kind.clone(),
@@ -488,8 +514,8 @@ impl HdRecord {
             health_improvement: die.health_improvement(),
         }
     }
-    fn restore(&self, ordinal: usize) -> Result<HitDie, crate::progression::HdError> {
-        HitDie::from_recorded(
+    fn restore(&self, _ordinal: usize) -> Result<HitDie, crate::progression::HdError> {
+        let die = HitDie::from_recorded_with_policy(
             self.source.restore(),
             self.health_seed,
             crate::progression::HealthOrigin {
@@ -498,13 +524,18 @@ impl HdRecord {
                 die: self.health_origin.die,
             },
             self.health_improvement,
-            ordinal,
-        )
+            self.health_policy,
+        )?;
+        match &self.owner {
+            Some(owner) => die.with_owner(owner.clone()),
+            None => Ok(die),
+        }
     }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ChoiceRecord {
+    purchase_highwater: u64,
     purchases: Bounded<PurchaseRecord, { limits::POINTS_PER_HIT_DIE }>,
     #[serde(deserialize_with = "required_option")]
     attribute: Option<Attribute>,
@@ -512,6 +543,8 @@ pub(crate) struct ChoiceRecord {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 struct PurchaseRecord {
+    #[serde(deserialize_with = "required_option")]
+    id: Option<super::composition::PurchaseId>,
     pool: crate::content_ids::PointPoolId,
     selection: SelectionRecord,
 }
@@ -520,11 +553,14 @@ impl<'de> Deserialize<'de> for PurchaseRecord {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Fields {
+            #[serde(deserialize_with = "required_option")]
+            id: Option<super::composition::PurchaseId>,
             pool: crate::content_ids::PointPoolId,
             selection: SelectionRecord,
         }
         let fields: Fields = named_map(deserializer)?;
         Ok(Self {
+            id: fields.id,
             pool: fields.pool,
             selection: fields.selection,
         })
@@ -588,12 +624,14 @@ impl SourceRecord {
 impl ChoiceRecord {
     pub(crate) fn capture(choice: &HdChoices) -> Self {
         Self {
+            purchase_highwater: choice.purchase_highwater,
             attribute: choice.attribute,
             purchases: Bounded(
                 choice
                     .purchases
                     .iter()
                     .map(|purchase| PurchaseRecord {
+                        id: purchase.id.clone(),
                         pool: purchase.pool.clone(),
                         selection: match &purchase.selection {
                             PurchaseSelection::SkillRank(skill) => {
@@ -619,12 +657,14 @@ impl ChoiceRecord {
     }
     pub(crate) fn restore(&self) -> HdChoices {
         HdChoices {
+            purchase_highwater: self.purchase_highwater,
             attribute: self.attribute,
             purchases: self
                 .purchases
                 .0
                 .iter()
                 .map(|purchase| AdvancementPurchase {
+                    id: purchase.id.clone(),
                     pool: purchase.pool.clone(),
                     selection: match &purchase.selection {
                         SelectionRecord::SkillRank { skill } => {
@@ -651,6 +691,11 @@ impl ChoiceRecord {
 impl BuildRecord {
     pub fn capture(build: &CreatureBuild) -> Self {
         Self {
+            body_build: build
+                .body_build
+                .as_ref()
+                .map(body::BodyBuildRecord::capture),
+            strength_acquired: build.strength_acquired(),
             species: build.species().id.clone(),
             future_growth: build.future_growth().clone(),
             starting_skills: *build.starting_skills(),
@@ -732,7 +777,28 @@ impl BuildRecord {
             })
             .collect::<Result<Vec<_>, BuildError>>()?;
         ledger.restore_drained(drained).map_err(BuildError::from)?;
-        let choices = self.choices.0.iter().map(ChoiceRecord::restore).collect();
+        let choices: Vec<_> = self.choices.0.iter().map(ChoiceRecord::restore).collect();
+        let body_build = match &self.body_build {
+            Some(record) => {
+                if !self.templates.0.is_empty() {
+                    return Err(BuildError::InvalidDefinition);
+                }
+                Some(record.restore(&content, &ledger, &choices, &self.species)?)
+            }
+            None => {
+                for (ordinal, die) in ledger.entries().iter().enumerate().chain(ledger.drained()) {
+                    let policy = if ordinal == 0 {
+                        crate::progression::HealthRollPolicy::Maximized
+                    } else {
+                        crate::progression::HealthRollPolicy::Seeded
+                    };
+                    if die.owner().is_some() || die.health_policy() != Some(policy) {
+                        return Err(BuildError::InvalidOwnership);
+                    }
+                }
+                None
+            }
+        };
         // Saved learning must be installed before the one permanent validation
         // fold; constructing fresh birth receipts here would be discarded work.
         let mut build = CreatureBuild::recorded_structure(
@@ -759,7 +825,9 @@ impl BuildRecord {
                 },
             },
             self.templates.0.clone(),
+            body_build,
         )?;
+        build.strength_acquired = self.strength_acquired;
         build.intellect_learning = Some(Arc::new(self.intellect_learning.restore(&build)?));
         build.derive()?;
         build.set_future_growth(self.future_growth.clone())?;
@@ -773,6 +841,93 @@ mod tests {
     use crate::creatures::{CreatureState, EquipmentSource};
     use crate::rules::{Modifier, ModifierOp, Scope, Stat};
 
+    #[test]
+    fn owned_health_records_require_policy_and_nullable_owner() {
+        use crate::progression::{HealthOrigin, HealthRollPolicy};
+        let die = HitDie::from_recorded_with_policy(
+            HdSource::Racial,
+            42,
+            HealthOrigin {
+                templates: vec![],
+                kind: crate::content_ids::TypeId::new("humanoid").unwrap(),
+                die: 8,
+            },
+            0,
+            HealthRollPolicy::Maximized,
+        )
+        .unwrap();
+        let record = HdRecord::capture(&die);
+        let encoded = serde_json::to_value(&record).unwrap();
+        let decoded: HdRecord = serde_json::from_value(encoded.clone()).unwrap();
+        assert_eq!(
+            decoded.restore(7).unwrap(),
+            die,
+            "effective ordinal cannot reinterpret the roll"
+        );
+        assert!(encoded["owner"].is_null());
+        for field in ["health_policy", "owner"] {
+            let mut missing = encoded.clone();
+            missing.as_object_mut().unwrap().remove(field);
+            assert!(
+                serde_json::from_value::<HdRecord>(missing).is_err(),
+                "missing {field}"
+            );
+        }
+        let mut forged = encoded;
+        forged["owner"] = serde_json::json!({"kind":"personal","id":1});
+        let forged: HdRecord = serde_json::from_value(forged).unwrap();
+        assert!(
+            forged.restore(0).is_err(),
+            "personal ownership cannot claim a maximized body roll"
+        );
+    }
+
+    #[test]
+    fn ordinary_manual_build_cannot_forge_extra_maximized_health_rows() {
+        let original = subject(false, false).0;
+        let encoded = serde_json::to_value(BuildRecord::capture(original.build())).unwrap();
+        let valid: BuildRecord = serde_json::from_value(encoded.clone()).unwrap();
+        assert!(valid.restore(original.build().content().clone()).is_ok());
+        let mut forged = encoded;
+        forged["health_root_seed"] = serde_json::Value::Null;
+        let mut second = forged["hd"][0].clone();
+        second["health_policy"] = serde_json::json!("maximized");
+        forged["hd"].as_array_mut().unwrap().push(second);
+        let choices = forged["choices"][0].clone();
+        forged["choices"].as_array_mut().unwrap().push(choices);
+        let forged: BuildRecord = serde_json::from_value(forged).unwrap();
+        assert!(forged.restore(original.build().content().clone()).is_err());
+    }
+
+    #[test]
+    fn personal_health_record_roundtrip_keeps_owner_when_effective_position_moves() {
+        use crate::creatures::composition::{HdOwner, PersonalHdId};
+        use crate::progression::{HealthOrigin, HealthRollPolicy};
+        let owner = HdOwner::Personal {
+            id: PersonalHdId(std::num::NonZeroU64::new(3).unwrap()),
+        };
+        let die = HitDie::from_recorded_with_policy(
+            HdSource::Racial,
+            42,
+            HealthOrigin {
+                templates: vec![],
+                kind: crate::content_ids::TypeId::new("humanoid").unwrap(),
+                die: 8,
+            },
+            0,
+            HealthRollPolicy::Seeded,
+        )
+        .unwrap()
+        .with_owner(owner.clone())
+        .unwrap();
+        let encoded = serde_json::to_value(HdRecord::capture(&die)).unwrap();
+        let decoded: HdRecord = serde_json::from_value(encoded).unwrap();
+        let restored = decoded.restore(0).unwrap();
+        assert_eq!(restored, die);
+        assert_eq!(restored.owner(), Some(&owner));
+        assert_eq!(restored.health_policy(), Some(HealthRollPolicy::Seeded));
+    }
+
     fn subject(equipped: bool, conditioned: bool) -> (CreatureState, Vec<EquipmentSource>) {
         let mut creature = CreatureState::new(crate::test_creatures::build(
             crate::test_creatures::species(),
@@ -784,6 +939,7 @@ mod tests {
                 item: crate::ItemId(1),
                 socket: crate::EquipmentSlotId(0),
                 modifiers: vec![Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Add {
                         stat: Stat::ResourceMax {
@@ -938,6 +1094,7 @@ mod tests {
             .unwrap()
             .modifiers
             .push(Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Add {
                     stat: Stat::ResourceMax {
@@ -1010,6 +1167,7 @@ mod tests {
             .unwrap()
             .modifiers
             .push(Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Set {
                     stat: attribute.clone(),
@@ -1038,6 +1196,7 @@ mod tests {
             socket: crate::EquipmentSlotId(0),
             attack: None,
             modifiers: vec![Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Add {
                     stat: attribute,
@@ -1135,6 +1294,7 @@ mod tests {
             if conditioned {
                 let mut immune = equipment;
                 immune[0].modifiers.push(Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Immunity {
                         selector: crate::rules::Selector::Descriptor {
@@ -1212,5 +1372,59 @@ mod tests {
             r#"{"stamina":null,"focus":null,"focus":null,"mana":null}"#
         )
         .is_err());
+    }
+    #[test]
+    fn purchase_provenance_is_required_and_round_trips_with_retired_serials() {
+        use super::super::composition::{HdOwner, PersonalHdId, PurchaseId};
+        use std::num::NonZeroU64;
+        let owner = HdOwner::Personal {
+            id: PersonalHdId(NonZeroU64::new(3).unwrap()),
+        };
+        let choices = HdChoices {
+            purchase_highwater: 7,
+            purchases: vec![AdvancementPurchase {
+                id: Some(PurchaseId {
+                    owner: owner.clone(),
+                    serial: NonZeroU64::new(5).unwrap(),
+                }),
+                pool: crate::content_ids::PointPoolId::new("advancement").unwrap(),
+                selection: PurchaseSelection::SkillRank(Skill::Athletics),
+            }],
+            attribute: None,
+        };
+        let value = serde_json::to_value(ChoiceRecord::capture(&choices)).unwrap();
+        let restored = serde_json::from_value::<ChoiceRecord>(value.clone())
+            .unwrap()
+            .restore();
+        assert_eq!(restored, choices);
+        restored.validate_purchase_ids(Some(&owner)).unwrap();
+        let mut missing = value.clone();
+        missing
+            .as_object_mut()
+            .unwrap()
+            .remove("purchase_highwater");
+        assert!(serde_json::from_value::<ChoiceRecord>(missing).is_err());
+        let mut missing = value;
+        missing["purchases"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("id");
+        assert!(serde_json::from_value::<ChoiceRecord>(missing).is_err());
+        let ordinary = HdChoices {
+            purchase_highwater: 0,
+            purchases: vec![AdvancementPurchase {
+                id: None,
+                pool: crate::content_ids::PointPoolId::new("advancement").unwrap(),
+                selection: PurchaseSelection::SkillRank(Skill::Athletics),
+            }],
+            attribute: None,
+        };
+        let ordinary = serde_json::to_value(ChoiceRecord::capture(&ordinary)).unwrap();
+        assert!(ordinary["purchases"][0]["id"].is_null());
+        serde_json::from_value::<ChoiceRecord>(ordinary)
+            .unwrap()
+            .restore()
+            .validate_purchase_ids(None)
+            .unwrap();
     }
 }

@@ -53,6 +53,7 @@ fn self_target_shared_roles(opposed: bool) {
                 rules.abilities.push(ability);
                 species.modifiers.extend([
                     Modifier {
+                        cancellable: false,
                         scope: Scope::Always,
                         op: ModifierOp::Add {
                             stat: Stat::Edge,
@@ -60,6 +61,7 @@ fn self_target_shared_roles(opposed: bool) {
                         },
                     },
                     Modifier {
+                        cancellable: false,
                         scope: Scope::Always,
                         op: ModifierOp::Add {
                             stat: Stat::CheckEdge,
@@ -67,6 +69,7 @@ fn self_target_shared_roles(opposed: bool) {
                         },
                     },
                     Modifier {
+                        cancellable: false,
                         scope: Scope::Always,
                         op: ModifierOp::GrantAbility {
                             ability: ability_id.clone(),
@@ -287,6 +290,7 @@ pub(super) fn sequence_game_on_world_configured(
         strikes: offsets
             .iter()
             .map(|offset| StrikeDef {
+                cancellable: false,
                 offset: *offset,
                 unlock: None,
                 check: None,
@@ -309,6 +313,7 @@ pub(super) fn sequence_game_on_world_configured(
     let id = ability.id.clone();
     let mut species = crate::test_creatures::species();
     species.modifiers.push(Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Set {
             stat: Stat::Health,
@@ -589,6 +594,7 @@ fn ordered_strikes_checkless_zero_damage_primary_runs_ordered_riders_but_death_s
             strikes[0].on_success = vec![damage(if lethal { 100 } else { 0 })];
             strikes[0].riders = vec![
                 RiderDef {
+                    cancellable: false,
                     condition: None,
                     trigger: crate::rules::RiderTrigger::Success,
                     check: None,
@@ -596,6 +602,7 @@ fn ordered_strikes_checkless_zero_damage_primary_runs_ordered_riders_but_death_s
                     descriptors: vec![],
                 },
                 RiderDef {
+                    cancellable: false,
                     condition: None,
                     trigger: crate::rules::RiderTrigger::Success,
                     check: None,
@@ -655,6 +662,7 @@ fn ordered_strikes_tokens_bind_only_first_qualifying_site_of_strike_zero() {
             if first_rider {
                 strikes[0].riders = vec![
                     RiderDef {
+                        cancellable: false,
                         condition: None,
                         trigger: crate::rules::RiderTrigger::Success,
                         check: Some(RiderCheckDef {
@@ -826,6 +834,7 @@ fn ordered_strikes_health_quiet_resets_once_across_riders_and_again_on_later_str
                 for strike in strikes {
                     strike.riders = vec![
                         RiderDef {
+                            cancellable: false,
                             condition: None,
                             trigger: crate::rules::RiderTrigger::Success,
                             check: None,
@@ -838,6 +847,7 @@ fn ordered_strikes_health_quiet_resets_once_across_riders_and_again_on_later_str
             },
             |_, species| {
                 species.modifiers.push(Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Add {
                         stat: Stat::HealthRecoveryResetPercent,
@@ -921,6 +931,7 @@ fn ordered_strikes_health_policy_is_selected_at_first_positive_damage_not_first_
                 }
                 strikes[0].riders = vec![
                     RiderDef {
+                        cancellable: false,
                         condition: None,
                         trigger: crate::rules::RiderTrigger::Success,
                         check: None,
@@ -931,6 +942,7 @@ fn ordered_strikes_health_policy_is_selected_at_first_positive_damage_not_first_
                         descriptors: vec![],
                     },
                     RiderDef {
+                        cancellable: false,
                         condition: None,
                         trigger: crate::rules::RiderTrigger::Success,
                         check: None,
@@ -948,6 +960,7 @@ fn ordered_strikes_health_policy_is_selected_at_first_positive_damage_not_first_
                     }
                 }
                 species.modifiers.push(Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Add {
                         stat: Stat::HealthRecoveryResetPercent,
@@ -960,6 +973,7 @@ fn ordered_strikes_health_policy_is_selected_at_first_positive_damage_not_first_
                     .find(|condition| condition.id.as_str() == "braced")
                     .unwrap()
                     .modifiers = vec![Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Add {
                         stat: Stat::HealthRecoveryResetPercent,
@@ -1031,6 +1045,7 @@ fn ordered_strikes_maximum_plan_reuses_capture_and_never_clones_actor_tables_per
             strike.on_success.clear();
             strike.riders = vec![
                 RiderDef {
+                    cancellable: false,
                     condition: None,
                     trigger: crate::rules::RiderTrigger::Success,
                     check: None,
@@ -1246,6 +1261,7 @@ fn ordered_strikes_natural_fixed_primary_captures_flat_modifier_and_remains_sour
         |ability| ability.strikes = StrikeSource::SelectedMelee,
         |rules, species| {
             species.modifiers.push(Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Add {
                     stat: Stat::Ability {
@@ -1294,6 +1310,7 @@ fn ordered_strikes_fixed_actor_work_counts_do_not_scale_with_uninvolved_regions(
                     for strike in strikes {
                         strike.riders = vec![
                             RiderDef {
+                                cancellable: false,
                                 condition: None,
                                 trigger: crate::rules::RiderTrigger::Success,
                                 check: Some(RiderCheckDef {
@@ -1366,6 +1383,7 @@ fn ordered_strikes_compiler_scopes_shared_sources_before_later_check_caps() {
     for condition_family in [false, true] {
         let modifiers = vec![
             Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Add {
                     stat: Stat::Edge,
@@ -1373,6 +1391,7 @@ fn ordered_strikes_compiler_scopes_shared_sources_before_later_check_caps() {
                 },
             },
             Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Add {
                     stat: Stat::CheckEdge,
@@ -1389,6 +1408,7 @@ fn ordered_strikes_compiler_scopes_shared_sources_before_later_check_caps() {
                 for strike in strikes {
                     strike.riders = vec![
                         RiderDef {
+                            cancellable: false,
                             condition: None,
                             trigger: crate::rules::RiderTrigger::Success,
                             check: Some(RiderCheckDef {
@@ -1728,6 +1748,7 @@ fn ordered_strikes_scheduler_counts_sparse_work_at_two_and_256_actor_density() {
                     for strike in strikes {
                         strike.riders = vec![
                             RiderDef {
+                                cancellable: false,
                                 condition: None,
                                 trigger: crate::rules::RiderTrigger::Success,
                                 check: Some(RiderCheckDef {
@@ -2000,6 +2021,7 @@ fn assert_captured_timing_survives_modifier(modifier: crate::rules::ModifierOp) 
             condition.family =
                 crate::content_ids::ConditionFamilyId::new("fixture_timing").unwrap();
             condition.modifiers = vec![Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: modifier,
             }];
@@ -2190,6 +2212,7 @@ fn ordered_strikes_failure_trigger_respects_whole_immunity_but_not_zero_componen
             },
             |_, species| {
                 species.modifiers.push(Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Immunity {
                         selector: if whole_immune {
@@ -2305,6 +2328,7 @@ fn ordered_strikes_unchosen_rider_branch_keeps_structural_shared_debit_and_token
             strike.riders = [RiderTrigger::Failure, RiderTrigger::Success]
                 .into_iter()
                 .map(|trigger| RiderDef {
+                    cancellable: false,
                     condition: None,
                     trigger,
                     check: Some(RiderCheckDef {
@@ -2319,6 +2343,7 @@ fn ordered_strikes_unchosen_rider_branch_keeps_structural_shared_debit_and_token
         |_, species| {
             species.modifiers.extend([
                 Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Add {
                         stat: Stat::Edge,
@@ -2326,6 +2351,7 @@ fn ordered_strikes_unchosen_rider_branch_keeps_structural_shared_debit_and_token
                     },
                 },
                 Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Add {
                         stat: Stat::CheckEdge,
@@ -2463,6 +2489,7 @@ fn ordered_strikes_natural_damage_modifiers_capture_each_primary_branch_without_
                 },
             };
             let strike = StrikeDef {
+                cancellable: false,
                 offset: 0,
                 unlock: None,
                 check: Some(CheckDef {
@@ -2482,6 +2509,7 @@ fn ordered_strikes_natural_damage_modifiers_capture_each_primary_branch_without_
                 on_failure: vec![primary, other.clone()],
                 descriptors: vec![],
                 riders: vec![RiderDef {
+                    cancellable: false,
                     condition: None,
                     trigger: RiderTrigger::Failure,
                     check: None,
@@ -2522,6 +2550,7 @@ fn ordered_strikes_natural_damage_modifiers_capture_each_primary_branch_without_
                         [(AbilityStat::Dice, 2), (AbilityStat::FlatBonus, 5)]
                             .into_iter()
                             .map(|(stat, value)| Modifier {
+                                cancellable: false,
                                 scope: Scope::Always,
                                 op: ModifierOp::Add {
                                     stat: Stat::Ability {
@@ -2617,6 +2646,7 @@ fn ordered_strikes_owned_unlock_drain_restore_affects_new_capture_not_frozen_wor
             .into_iter()
             .enumerate()
             .map(|(ordinal, offset)| StrikeDef {
+                cancellable: false,
                 offset,
                 unlock: (ordinal == 1).then(|| unlock.clone()),
                 check: None,
@@ -2796,6 +2826,7 @@ fn ordered_strikes_selected_damage_uses_only_first_natural_success_primary() {
                     success.extend([damage(3), damage(4)]);
                 }
                 let first = StrikeDef {
+                    cancellable: false,
                     offset: 0,
                     unlock: None,
                     check: Some(CheckDef {
@@ -2815,6 +2846,7 @@ fn ordered_strikes_selected_damage_uses_only_first_natural_success_primary() {
                     on_failure: vec![damage(30)],
                     descriptors: vec![],
                     riders: vec![RiderDef {
+                        cancellable: false,
                         condition: None,
                         trigger: RiderTrigger::Failure,
                         check: None,
@@ -2926,6 +2958,7 @@ fn qualified_role_game(
             });
             rules.abilities.push(ability);
             species.modifiers.push(Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::GrantAbility { ability: id },
             });
@@ -3058,6 +3091,7 @@ fn public_plan_recipient_alternating_riders_do_not_resurrect_retired_cross_actor
                 strikes[0].on_success = vec![Effect::ObservePublicPlan];
                 strikes[0].riders = vec![
                     RiderDef {
+                        cancellable: false,
                         condition: None,
                         trigger: RiderTrigger::Success,
                         check: None,
@@ -3075,6 +3109,7 @@ fn public_plan_recipient_alternating_riders_do_not_resurrect_retired_cross_actor
                         }],
                     },
                     RiderDef {
+                        cancellable: false,
                         condition: None,
                         trigger: RiderTrigger::Success,
                         check: None,
@@ -3102,6 +3137,7 @@ fn public_plan_recipient_alternating_riders_do_not_resurrect_retired_cross_actor
                 };
                 pending.strikes = StrikeSource::Authored {
                     strikes: vec![StrikeDef {
+                        cancellable: false,
                         offset: 0,
                         unlock: None,
                         check: Some(CheckDef {
@@ -3122,6 +3158,7 @@ fn public_plan_recipient_alternating_riders_do_not_resurrect_retired_cross_actor
                     }],
                 };
                 species.modifiers.push(Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::GrantAbility {
                         ability: pending.id.clone(),
@@ -3413,6 +3450,7 @@ fn public_plan_review_frozen_check_authenticates_both_directions_and_rider_roles
             };
             if rider {
                 strikes[0].riders.push(RiderDef {
+                    cancellable: false,
                     condition: None,
                     trigger: RiderTrigger::Success,
                     check: Some(RiderCheckDef {
@@ -3511,6 +3549,7 @@ fn public_plan_rider_review_dead_participants_skip_rider_summary() {
                     },
                 }];
                 strikes[0].riders = vec![RiderDef {
+                    cancellable: false,
                     condition: None,
                     trigger: RiderTrigger::Success,
                     check: None,
@@ -3521,6 +3560,7 @@ fn public_plan_rider_review_dead_participants_skip_rider_summary() {
                 }];
                 rules.abilities.push(ability);
                 species.modifiers.push(Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::GrantAbility {
                         ability: ability_id.clone(),
@@ -3574,6 +3614,7 @@ fn public_plan_rider_review_unattempted_later_strike_and_unavailable_target_do_n
             }];
         }
         strikes[1].riders = vec![RiderDef {
+            cancellable: false,
             condition: None,
             trigger: RiderTrigger::Success,
             check: None,
@@ -3650,6 +3691,7 @@ fn ordered_strikes_self_step_retreat_never_replaces_paid_prefix() {
             step.ai.priority = 100;
             step.strikes = StrikeSource::Authored {
                 strikes: vec![StrikeDef {
+                    cancellable: false,
                     offset: 0,
                     unlock: None,
                     check: None,
@@ -3860,6 +3902,7 @@ fn fatal_opening_growth_deactivating_its_grant_cancels_tail_without_erasing_debt
                     },
                 });
                 strike.riders.push(RiderDef {
+                    cancellable: false,
                     trigger: RiderTrigger::Success,
                     condition: Some(RiderCondition::SequenceSuccessfulHits { minimum: 2 }),
                     check: None,
@@ -3888,6 +3931,7 @@ fn fatal_opening_growth_deactivating_its_grant_cancels_tail_without_erasing_debt
                     present: false,
                 },
                 modifiers: vec![Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::GrantAbility {
                         ability: ability_id.clone(),

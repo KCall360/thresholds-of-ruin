@@ -530,6 +530,7 @@ fn arena_build() -> tor_simulation::creatures::CreatureBuild {
     for name in ["arena_health", "arena_fear"] {
         let mut template = Template::new(TemplateId::new(name).unwrap(), 0);
         template.modifiers.push(Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Add {
                 stat: Stat::Health,
@@ -538,6 +539,7 @@ fn arena_build() -> tor_simulation::creatures::CreatureBuild {
         });
         if name == "arena_fear" {
             template.modifiers.push(Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::GrantAbility {
                     ability: AbilityId::new("fixture_focus_fear").unwrap(),

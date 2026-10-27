@@ -295,6 +295,7 @@ pub fn run(scenario: Scenario) -> Result<ArenaEvaluation, Failure> {
                 | CombatEvent::RespecCompleted { .. }
                 | CombatEvent::ItemCurseBlocked { .. }
                 | CombatEvent::ItemCompleted { .. }
+                | CombatEvent::ItemRefused { .. }
                 | CombatEvent::Interrupted { .. }
                 | CombatEvent::Died { .. } => {}
             }

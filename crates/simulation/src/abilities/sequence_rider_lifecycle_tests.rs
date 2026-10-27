@@ -12,6 +12,7 @@ fn lifecycle_game_with(configure: impl FnOnce(&mut [StrikeDef])) -> Game {
         |ability| {
             ability.strikes = StrikeSource::NaturalMelee {
                 additional_riders: vec![RiderDef {
+                    cancellable: false,
                     trigger: RiderTrigger::Success,
                     condition: Some(RiderCondition::SequenceSuccessfulHits { minimum: 2 }),
                     check: None,
@@ -38,6 +39,7 @@ fn lifecycle_game_with(configure: impl FnOnce(&mut [StrikeDef])) -> Game {
             let mut strikes: Vec<_> = [0, 10, 20, 30]
                 .into_iter()
                 .map(|offset| StrikeDef {
+                    cancellable: false,
                     offset,
                     unlock: None,
                     check: Some(CheckDef {
@@ -376,6 +378,7 @@ fn sequence_rider_checkpoint_continuation_matches_uninterrupted_prefix_and_rng()
 fn sequence_rider_checkpoint_rejects_future_hits_and_forged_receipt_slots() {
     let mut game = lifecycle_game_with(|strikes| {
         strikes[0].riders.push(RiderDef {
+            cancellable: false,
             trigger: RiderTrigger::Success,
             condition: None,
             check: None,
@@ -424,6 +427,7 @@ fn sequence_rider_checkpoint_rejects_future_hits_and_forged_receipt_slots() {
 
     let mut later = lifecycle_game_with(|strikes| {
         strikes[3].riders.push(RiderDef {
+            cancellable: false,
             trigger: RiderTrigger::Success,
             condition: Some(RiderCondition::SequenceSuccessfulHits { minimum: 2 }),
             check: None,

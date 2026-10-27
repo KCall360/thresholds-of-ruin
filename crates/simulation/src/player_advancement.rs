@@ -326,7 +326,7 @@ impl Game {
         if creature.health().dead() {
             return Err(GameError::UnknownActor);
         }
-        if creature.build().ledger().health_root_seed().is_none() {
+        if creature.build().personal_health_root_seed().is_none() {
             return Err(GameError::Build(BuildError::UnknownHealthStream));
         }
         let mut build = creature.build().clone();

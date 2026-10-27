@@ -47,6 +47,8 @@ fn sleeping_gas_requires_finite_actor_active_incapacity() {
     ] {
         let mut document = content.rules().document().clone();
         document.conditions.push(ConditionDef {
+            detecting_monsters: false,
+            hallucinating: false,
             id: ConditionId::new("fixture_trap_sleep").unwrap(),
             family: ConditionFamilyId::new("fixture_trap_sleep").unwrap(),
             lifecycle: ConditionLifecycle::Timed,

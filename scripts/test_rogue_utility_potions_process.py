@@ -12,8 +12,9 @@ import unittest
 
 from arena_matrix import toml_source
 from process_harness import ProcessTestCase, ROOT
+from status_condition_package import actor_creature, checkpoint
 from utility_potions_package import (
-    assert_extra_healing, assert_poison, assert_sight, condition, deadline, fixture, initial_items, inventory_item, observation,
+    assert_extra_healing, assert_poison, assert_sight, condition, deadline, fixture, initial_items, inventory_item, observation, extra_healing_roll, fixture_roll,
 )
 
 
@@ -57,8 +58,27 @@ class RogueUtilityPotionsProcesses(ProcessTestCase):
         poisoned = self.drink(player, phantom, ids["poison"])
         deficit = assert_poison(self, poisoned, ids["poison"])
         blind = self.drink(player, phantom, ids["blind"])
+        before_healing = checkpoint(self, player)
+        _, rolled_amount = extra_healing_roll(before_healing["rules_rng"])
+        original_rows = actor_creature(before_healing)["build"]["hd"]
+        self.assertEqual([row["owner"] for row in original_rows], [
+            {"kind": "body", "form": "rogue.body.human", "ordinal": 0},
+            {"kind": "personal", "id": 1}])
+        self.assertEqual([row["health_policy"] for row in original_rows], ["maximized", "seeded"])
+        self.assertEqual([row["health_origin"]["die"] for row in original_rows], [8, 10])
+        _, personal_roll = fixture_roll(original_rows[1]["health_seed"], 10)
+        self.assertEqual([row["health_improvement"] for row in original_rows], [0, 0])
+        self.assertEqual([row["source"] for row in original_rows], [
+            {"kind": "racial"}, {"kind": "class", "id": "warrior"}])
         healed = self.drink(player, phantom, ids["extra"])
-        assert_extra_healing(self, blind, healed, ids["extra"])
+        improvement = assert_extra_healing(self, blind, healed, ids["extra"], rolled_amount=rolled_amount)
+        self.assertEqual(improvement, min(10 - personal_roll - original_rows[1]["health_improvement"],
+            int(rolled_amount > 0) + int(rolled_amount > 3)))
+        self.assertEqual(observation(blind)["combat"]["hp"], observation(blind)["combat"]["max_hp"],
+                         "This cure fixture has no damage; all rolled healing is excess")
+        expected_rows = [dict(row) for row in original_rows]
+        expected_rows[1]["health_improvement"] += improvement
+        self.assertEqual(actor_creature(checkpoint(self, player))["build"]["hd"], expected_rows)
         blind = self.drink(player, phantom, ids["blind"])
         self.assertIsNotNone(condition(blind, "rogue.blindness"))
         first = self.drink(player, phantom, ids["sight"])
@@ -84,6 +104,8 @@ class RogueUtilityPotionsProcesses(ProcessTestCase):
                          observation(second)["combat"]["own_stats"]["conditions"])
         self.assertEqual(deadline(restored), deadline(second))
         self.assertFalse(restored["state"]["wizard_game"])
+        self.assertEqual(actor_creature(checkpoint(self, player))["build"]["hd"], expected_rows)
+        self.assertEqual(observation(restored)["combat"]["max_hp"], observation(second)["combat"]["max_hp"])
 
 
 if __name__ == "__main__":

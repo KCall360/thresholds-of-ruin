@@ -78,7 +78,10 @@ class RoguePlayableStudyTests(unittest.TestCase):
             self.assertEqual(manifest["factions"], source["manifest"]["factions"])
             self.assertNotIn("creatures", manifest)
             self.assertNotIn("archetypes", manifest)
-            self.assertEqual(expected["creature"]["hit_dice"][0]["purchases"], [])
+            self.assertEqual(expected["creature"]["body_package"], "rogue.body.human")
+            self.assertEqual(expected["creature"]["hit_dice"], [
+                {"source": "racial", "purchases": []},
+                {"source": "warrior" if selected == 1 else "mage", "purchases": []}])
             self.assertEqual(expected["creature"]["nutrition"], {"kind": "required"})
         self.assertEqual(source, original)
 
@@ -96,7 +99,10 @@ class RoguePlayableStudyTests(unittest.TestCase):
                                            reference="playable-first-purchase")
             expected = copy.deepcopy(fresh)
             expected["id"] = purchased["id"]
-            expected["characters"][0]["creature"]["hit_dice"][0]["purchases"] = [
+            rows = expected["characters"][0]["creature"]["hit_dice"]
+            self.assertEqual(rows[0], {"source": "racial", "purchases": []})
+            self.assertEqual(rows[1]["source"], "warrior" if arm == "baseline" else "mage")
+            rows[1]["purchases"] = [
                 {"pool": "advancement", "selection": choice}]
             self.assertEqual(purchased, expected)
         for reference, spent in (("playable-unspent", 0), ("playable-first-purchase", 1)):

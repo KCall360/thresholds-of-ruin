@@ -153,6 +153,7 @@ pub(super) struct PreparedArchetype {
     pub readable: Option<tor_simulation::ReadableSpec>,
     pub ground_scare: Option<tor_simulation::control_scrolls::ScareSpec>,
     pub device: Option<tor_simulation::DeviceSpec>,
+    pub held_light: Option<tor_simulation::HeldLightSpec>,
     pub edible: Option<tor_simulation::EdibleSpec>,
     pub supply: Option<tor_simulation::content_ids::SupplyId>,
     pub magical: bool,
@@ -175,6 +176,26 @@ impl PreparedArchetype {
         manifest: &Manifest,
         catalog: &CompiledCatalog,
     ) -> Result<Self, RecipeError> {
+        // Item payloads are not part of the Ruleset ability graph. Resolve their
+        // roster references here, after catalog imports and eligibility sealing,
+        // rather than deferring an invalid authored form until item use.
+        for effect in author
+            .consumable
+            .iter()
+            .flat_map(|spec| &spec.effects)
+            .chain(author.readable.iter().flat_map(|spec| &spec.effects))
+        {
+            if let super::Effect::BalefulPolymorph { forms } = effect {
+                for form in forms {
+                    let id = tor_simulation::content_ids::BodyFormId::new(form)
+                        .map_err(|_| fail("Invalid polymorph body package ID"))?;
+                    require(
+                        catalog.content().polymorph_body_package(&id).is_some(),
+                        "Unknown or ineligible polymorph body package",
+                    )?;
+                }
+            }
+        }
         Ok(Self {
             recipe: prepare_recipe(
                 author.creature.as_ref(),
@@ -216,6 +237,10 @@ impl PreparedArchetype {
                 .device
                 .as_ref()
                 .map(|device| device.compile(catalog.content().rules()))
+                .transpose()?,
+            held_light: author
+                .held_light
+                .map(super::HeldLightSpec::compile)
                 .transpose()?,
             edible: author.edible.clone(),
             supply: author
@@ -284,7 +309,7 @@ pub(super) struct PreparedDefinitions {
 
 /// Prepare ordinary recoverable ammunition before any creature build captures
 /// Content. Reuse the exact normal item adapter, without allocating an entity.
-pub(super) fn compile_trap_ammunition(
+fn compile_trap_ammunition(
     manifest: &Manifest,
     catalog: CompiledCatalog,
 ) -> Result<CompiledCatalog, Failure> {
@@ -335,6 +360,15 @@ pub(super) fn compile_trap_ammunition(
     definitions.catalog.with_trap_ammunition(ammunition)
 }
 
+/// Shared normal/source-free immutable decorations, before any actor captures Content.
+pub(super) fn compile_content_decorations(
+    manifest: &Manifest,
+    catalog: CompiledCatalog,
+) -> Result<CompiledCatalog, Failure> {
+    let catalog = catalog.with_presentation_catalog(super::presentation::compile(manifest)?);
+    compile_trap_ammunition(manifest, catalog)
+}
+
 impl PreparedDefinitions {
     pub fn creature_catalog(&self) -> &CompiledCatalog {
         &self.catalog
@@ -375,7 +409,7 @@ impl PreparedDefinitions {
             .compile_with_context(rules, |kind, id, failure| {
                 super::source::catalog_context(provenance, kind, id, failure)
             })?;
-        let catalog = compile_trap_ammunition(manifest, catalog)?;
+        let catalog = compile_content_decorations(manifest, catalog)?;
         let ai_profiles: BTreeMap<_, _> = manifest
             .ai_profiles
             .iter()
@@ -685,6 +719,7 @@ impl PreparedDefinitions {
             readable: inherited.readable.clone(),
             ground_scare: inherited.ground_scare.clone(),
             device: inherited.device.clone(),
+            held_light: inherited.held_light,
             edible: inherited.edible.clone(),
             supply: inherited.supply.clone(),
             magical: inherited.magical,
@@ -986,6 +1021,64 @@ mod tests {
             "starting_skills": ["deception", "persuasion"], "restoration": "choose_again", "nutrition": {"kind":"exempt"}, "hit_dice": [{"source": "racial"}, {"source": "warrior"}]
         })).unwrap());
         manifest
+    }
+
+    #[test]
+    fn direct_item_polymorph_rosters_require_explicit_catalog_eligibility() {
+        let mut manifest = creature_manifest();
+        manifest.creatures.body_packages.insert(
+            "eligible_body".into(),
+            serde_json::from_value(serde_json::json!({
+                "species": "human",
+                "body": {"cells": [[0, 0, 0]], "eye": [0, 0, 0], "mass": 80},
+                "hit_dice": [{"source": "racial"}],
+                "polymorph_eligible": true
+            }))
+            .unwrap(),
+        );
+        for capability in ["consumable", "readable"] {
+            let item = serde_json::json!({
+                capability: {"effects": [{"kind": "baleful_polymorph", "forms": ["eligible_body"]}]}
+            });
+            manifest.archetypes.insert(
+                "polymorph_item".into(),
+                serde_json::from_value(item).unwrap(),
+            );
+            assert!(
+                PreparedDefinitions::new(&manifest, 1).is_ok(),
+                "{capability} positive fixture"
+            );
+            manifest
+                .creatures
+                .body_packages
+                .get_mut("eligible_body")
+                .unwrap()
+                .polymorph_eligible = false;
+            let error = PreparedDefinitions::new(&manifest, 1).unwrap_err();
+            assert!(
+                error
+                    .message
+                    .contains("Unknown or ineligible polymorph body package"),
+                "{}",
+                error.message
+            );
+            manifest
+                .creatures
+                .body_packages
+                .get_mut("eligible_body")
+                .unwrap()
+                .polymorph_eligible = true;
+            let mut missing = manifest.clone();
+            missing.creatures.body_packages.clear();
+            let error = PreparedDefinitions::new(&missing, 1).unwrap_err();
+            assert!(
+                error
+                    .message
+                    .contains("Unknown or ineligible polymorph body package"),
+                "{}",
+                error.message
+            );
+        }
     }
 
     #[test]
@@ -1442,6 +1535,7 @@ mod tests {
             .get_mut("figure")
             .unwrap()
             .modifiers = vec![crate::creature_authoring::Modifier {
+            cancellable: false,
             scope: crate::creature_authoring::Scope::Always,
             op: crate::creature_authoring::Op::Add {
                 stat: crate::creature_authoring::Stat::Health,
@@ -1462,6 +1556,7 @@ mod tests {
                 readable: None,
                 ground_scare: None,
                 device: None,
+                held_light: None,
                 edible: None,
                 supply: None,
                 magical: false,

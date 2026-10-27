@@ -3,6 +3,7 @@ use tor_protocol::{BranchId, CellView, Position, StreamContext, StreamId};
 
 fn cell(key: &str, x: i32) -> CellView {
     CellView {
+        object_presentation: None,
         lit: true,
         key: key.into(),
         position: Position { x, y: 0, z: 0 },

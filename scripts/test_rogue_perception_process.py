@@ -31,7 +31,7 @@ from process_harness import ProcessTestCase
 from process_work_budget import ProcessWorkBudget
 from rogue_roster_package import PRODUCTION, encounter_sources
 from scalar_wire import u64
-from status_condition_package import combat, observation
+from status_condition_package import combat, observation, checkpoint, actor_creature
 
 
 GAZE = "rogue.confusing_gaze"
@@ -40,7 +40,7 @@ SEARCH = "rogue.search"
 WITNESS = "Authored perception witness"
 
 
-def perception_package(test, species, arm, *, turn_ticks=25):
+def perception_package(test, species, arm, *, turn_ticks=25, cancellation=False):
     """Change only fixture geometry/control and the explicitly synthetic victim."""
     source = encounter_sources()
     manifest = {key: copy.deepcopy(source["manifest"][key]) for key in
@@ -60,9 +60,15 @@ def perception_package(test, species, arm, *, turn_ticks=25):
           for defense in ("physical", "spiritual")]]
     manifest["creatures"] = {"species": {"fixture.perception_witness": victim}}
     character = copy.deepcopy(source["manifest"]["characters"][0])
+    body = copy.deepcopy(source["body_packages"][character["creature"]["body_package"]])
+    body["species"] = "fixture.perception_witness"
+    manifest["creatures"]["body_packages"] = {"fixture.perception_witness.body": body}
+    character["creature"]["body_package"] = "fixture.perception_witness.body"
     character.update(anchor="1/start", turn_ticks=turn_ticks, loadout=[], known_identities=[])
     character["creature"].update(species="fixture.perception_witness", name=WITNESS,
                                  nutrition={"kind": "exempt"}, future_growth={"kind": "disabled"})
+    if cancellation:
+        character["loadout"] = [{"archetype": "rogue.wand_cancellation", "quantity": 1}]
     manifest.update(id="rogue-perception-" + arm, default_character=1, characters=[character])
     region = {"id": 1, "name": "Authored lit perception encounter", "size": [7, 5, 2],
               "chamber": True, "gravity": [0, 0, -1], "anchors": {"start": [1, 2, 0]},
@@ -76,6 +82,8 @@ def perception_package(test, species, arm, *, turn_ticks=25):
     shutil.copy2(PRODUCTION / "rules.toml", package / "rules.toml")
     (package / "scenario.toml").write_text(toml_source(manifest), encoding="utf-8", newline="\n")
     (package / "regions/1.toml").write_text(toml_source(region), encoding="utf-8", newline="\n")
+    for relative in (*manifest["modules"], "rules.toml"):
+        test.assertEqual((package / relative).read_bytes(), (PRODUCTION / relative).read_bytes())
     result = subprocess.run([test.bin / ("tor-scenario" + test.suffix), "validate", package],
                             capture_output=True, text=True, encoding="utf-8", timeout=30)
     (test.directory / (arm + "-validation.log")).write_text(
@@ -157,14 +165,20 @@ class RoguePerceptionProcesses(ProcessTestCase):
     def snapshot(self, client):
         return self.request(client, {"type": "snapshot"})
 
-    def start_encounter(self, species, arm, *, turn_ticks=25):
-        package = perception_package(self, species, arm, turn_ticks=turn_ticks)
+    def start_encounter(self, species, arm, *, turn_ticks=25, cancellation=False):
+        package = perception_package(self, species, arm, turn_ticks=turn_ticks, cancellation=cancellation)
         self.save = self.directory / (arm + ".db")
-        server = self.server(scenario=package, character=1, seed=42)
+        extra = ("--checkpoint-interval", 1) if cancellation else ()
+        server = self.server(*extra, scenario=package, character=1, seed=42)
         player, initial = self.client(actor=1)
         foe, foe_initial = self.client(actor=3)
         self.assertFalse(initial["state"]["wizard_game"])
-        self.assertEqual(observation(initial)["inventory"], [])
+        if cancellation:
+            self.assertEqual(len(observation(initial)["inventory"]), 1)
+            self.assertEqual(observation(initial)["inventory"][0]["class"], "wand")
+            self.assertFalse(observation(initial)["inventory"][0]["identified"])
+        else:
+            self.assertEqual(observation(initial)["inventory"], [])
         self.assertEqual((tick(initial), tick(foe_initial)), (0, 0))
         return server, (player, foe), (initial, foe_initial)
 
@@ -231,6 +245,79 @@ class RoguePerceptionProcesses(ProcessTestCase):
         rows = other_actors(frame)
         self.assertTrue(rows)
         self.assertTrue(all(row["name"] == "xeroc" and row.get("asset") == "creature.xeroc" for row in rows))
+
+    def test_production_cancellation_suppresses_active_phantom_and_xeroc_sources(self):
+        # Three isolated exact production recipes, not a full roster/balance claim.
+        for species in ("ice_monster", "phantom", "xeroc"):
+            with self.subTest(species=species):
+                server, clients, initial = self.start_encounter(
+                    species, "cancel-" + species, turn_ticks=100, cancellation=True)
+                # A real paid turn creates an accepted interval-1 checkpoint;
+                # Save merely flushes and must not be treated as a checkpoint creator.
+                self.assertTrue(observation(initial[0])["ready"])
+                waited = self.act(clients[0], {"type": "wait"})
+                self.assertIsNone(waited["error"])
+                baseline = self.advance_until(clients, lambda frames:
+                    observation(frames[0])["ready"] and not frames[0]["intentions"]
+                    and combat(frames[0])["preparation_remaining"] is None
+                    and u64(combat(frames[0])["recovery_remaining"]) == 0)
+                self.assertGreater(tick(baseline[0]), tick(initial[0]))
+                initial = baseline  # Every measured premise is refreshed after paid setup.
+                foe_before = combat(initial[1])["own_stats"]
+                before_ids = {row["id"] for row in foe_before["abilities"]}
+                self.assertIn("basic_melee", before_ids)
+                if species == "ice_monster":
+                    self.assertIn("rogue.freezing_touch", before_ids)
+                elif species == "phantom":
+                    self.assert_anonymous_contact(initial[0])
+                else:
+                    self.assert_mace_guise(initial[0])
+                    self.assertIn("rogue.object_guise", {row["id"] for row in foe_before["active_talents"]})
+                wand, = observation(initial[0])["inventory"]
+                offered = next(row for row in observation(initial[0])["interactions"]["inventory"]
+                               if row["item"] == wand["id"])
+                self.assertEqual(offered["device_activation"], "direction")
+                self.assertIsNone(offered["charges"])
+                before = checkpoint(self, clients[0])
+                self.assertFalse(actor_creature(before, 3)["cancelled"])
+                charge_rows = {key: row["charges"] for key, row in before["items"].items()
+                               if row.get("charges") is not None}
+                self.assertEqual(len(charge_rows), 1)
+                physical, charge = next(iter(charge_rows.items()))
+                self.assertTrue(3 <= charge <= 7)
+                admitted = self.act(clients[0], {"type": "zap", "item": wand["id"],
+                                               "aim": {"kind": "direction", "direction": "east"}})
+                self.assertIsNone(admitted["error"])
+                completed = self.advance_until(clients, lambda frames:
+                    observation(frames[0])["ready"] and not frames[0]["intentions"]
+                    and combat(frames[0])["preparation_remaining"] is None
+                    and u64(combat(frames[0])["recovery_remaining"]) == 0)
+                after = checkpoint(self, clients[0])
+                self.assertTrue(actor_creature(after, 3)["cancelled"])
+                self.assertEqual(after["items"][physical]["charges"], charge - 1)
+                self.assertGreater(tick(completed[0]), tick(initial[0]))
+                self.assertEqual(after["rules_rng"], before["rules_rng"])
+                self.assertEqual(combat(completed[1])["hp"], combat(initial[1])["hp"])
+                foe_after = combat(completed[1])["own_stats"]
+                after_ids = {row["id"] for row in foe_after["abilities"]}
+                self.assertIn("basic_melee", after_ids)
+                for field in ("hit_dice", "attributes", "defenses", "active_talents", "dormant_talents"):
+                    self.assertEqual(foe_after[field], foe_before[field], field)
+                if species == "ice_monster":
+                    self.assertNotIn("rogue.freezing_touch", after_ids)
+                else:
+                    rows = other_actors(completed[0])
+                    self.assertTrue(rows)
+                    self.assertTrue(all(row["name"] == species for row in rows))
+                    if species == "xeroc":
+                        self.assertEqual(observation(completed[0])["ground_items"], [])
+                        self.assertTrue(all(row.get("asset") == "creature.xeroc" for row in rows))
+                retained, = observation(completed[0])["inventory"]
+                self.assertEqual(retained["id"], wand["id"])
+                self.assertFalse(retained["identified"])
+                self.assertFalse(completed[0]["state"]["wizard_game"])
+                for process in (*clients, server):
+                    process.stop()
 
     def medusa_contract(self):
         server, clients, initial = self.start_encounter("medusa", "m")

@@ -186,9 +186,12 @@ See-invisible potions cure blindness and reveal invisible creatures through norm
 illuminated sight for 808–892 actor turns. A second dose extends the remaining
 duration. Effective use does not identify this potion. Both can occur in the
 existing one-unit random potion stock. Sustain-strength rings prevent new
-restorable Strength loss; the complete source potion catalog and hallucination
-cures remain unfinished. Extra healing
-rolls independent d8s per active HD, cures blindness and identifies on use; its
+restorable Strength loss. The opt-in Hallucination potion identifies on use, lasts
+808–892 base turns and changes observer-specific visual appearance each base turn.
+Repeating it extends the same cadence; real interaction targets and previously
+recognized stairs remain authoritative. Extra healing
+rolls independent d8s per active HD, cures blindness and Hallucination even while
+blind, and identifies on use; its
 one/two-point overflow gain is limited by existing owned-HD headroom. See the
 [exact potion mapping](../reference/items.md#reading-identification-and-charged-devices).
 
@@ -199,6 +202,75 @@ Haste halves action time; slow doubles it. Applying the opposite wand removes
 the old rate and leaves the target at normal speed until a later application.
 These effects do not change the Speed attribute. Utility use does not identify
 the wand. Status screens show these persistent effects as “until removed”.
+
+## Opt-in Nothing, Light and Drain Life wands
+
+The catalog also contains `rogue.wand_nothing`, `rogue.wand_light` and
+`rogue.wand_drain_life` for scenario selection. None is added to the existing
+eight-wand live floor pool or starting kits; ordinary Rogue floor stock is unchanged.
+
+All three use the normal paid Zap action. An unidentified wand still asks for a
+direction, so its hidden self-targeting behavior is not disclosed by the prompt.
+Once its type is known, the client can use it on yourself without that direction
+step. Remaining charges are not revealed merely by identifying the type.
+
+Nothing starts with 3–7 charges. A charged use spends one charge and ordinary
+action time, but applies no effect and does not identify the wand. Light starts
+with 10–19 charges and identifies on charged use, including when nothing changes.
+It illuminates the caster's actual room, including its canonical wall, ceiling,
+floor and door surfaces across region boundaries—not every cell of a storage
+region or every neighboring room. A passage or generated maze is a paid no-op;
+an already-lit room also spends the charge without further change. Loading remote
+surfaces does not give frozen creatures turns. Illumination persists in the save;
+it is not a map-reveal, creature-detection or targeting command.
+
+Drain Life starts with 3–7 charges and never identifies itself automatically.
+With less than 2 current HP, the attempt spends ordinary action time but refuses
+without spending a charge. With no eligible other creatures it spends a charge
+without changing HP. Otherwise, for starting HP `H` and `N` eligible recipients,
+you retain `floor(H/2)` HP and each recipient loses `floor(floor(H/2)/N)` HP.
+The recipient set is fixed before applying losses; fractional loss rounds down,
+including to zero, without suppressing attack-contact consequences.
+
+Eligibility follows canonical topology, not sight, direction or distance. Room
+interiors reach their own room; a doorway retains those room targets and adds
+its affiliated passage-interior targets, not other rooms' doorways. A passage
+interior reaches that passage and its affiliated doorways, not neighboring room
+interiors. Direct Health loss bypasses armor and resistance. Living creatures
+with Health are eligible regardless of allegiance; bodies without Health and
+the caster are excluded. Frozen recipients do not receive turns. Hidden recipients and their count are not listed in ordinary output.
+Paid results and current Health persist through source-free checkpoint reopening.
+
+## Opt-in Cancellation and Magic Missile
+
+`rogue.wand_cancellation` and `rogue.wand_magic_missile` are also available for
+scenario selection, each with 3–7 charges. They do not change the existing
+eight-wand live floor pool or starting kits. Both use ordinary paid Zap and
+require a direction even after their type is identified.
+
+These two wands follow physical geometry until the first living body or an
+obstruction. They do not bounce or use sight as their range. A body without a
+combat sheet still intercepts the ray; it cannot be skipped to hit someone
+behind it. Loading distant geometry does not give frozen creatures turns.
+A bounded work guard rejects an over-budget traversal rather than silently
+turning it into a shorter hit or miss; this is not a gameplay range limit.
+
+Cancellation suppresses explicitly marked special abilities and contributions,
+clears current pure invisibility conditions and disguise, and never identifies
+its own type. Innate invisibility is suppressed only when its contributor is
+explicitly marked, as with the Rogue Phantom.
+It performs no save or random roll and does not provoke pursuit merely by
+cancelling the target. Ordinary attacks, owned advancement, defenses, anatomy,
+flight, erratic movement and regeneration are not blanket-disabled. It removes
+only holds whose sustaining special was lost, not unrelated paralysis.
+Later independent invisibility can work again; another Cancellation can clear
+that new application. There is no global veto on future invisibility.
+
+Magic Missile identifies on charged use, even if no creature is damaged. At the
+first combat recipient it makes exactly one Agility-versus-Lore opposed save,
+not an additional launch attack followed by a second save. A failed save takes
+1d4+1 Energy damage through the ordinary universal damage-bonus and reduction
+rules. A successful save stops the missile without damage to a later body.
 
 ## Flight and linked holds
 

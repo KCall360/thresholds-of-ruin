@@ -664,6 +664,7 @@ fn ring_probe(op: crate::rules::ModifierOp, scaled: bool) -> ItemSpec {
     item.class = crate::ItemClass::Ring;
     item.concealed = true;
     let modifier = crate::rules::Modifier {
+        cancellable: false,
         scope: crate::rules::Scope::Always,
         op,
     };
@@ -834,6 +835,7 @@ fn npc_slow_digestion_values_effective_required_rate_without_vetoing_combat_upke
             false,
         );
         damage.equipment.as_mut().unwrap().modifiers.push(Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Add {
                 stat: Stat::NutritionRateThirtieths,

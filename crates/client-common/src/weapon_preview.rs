@@ -216,6 +216,7 @@ mod tests {
         view.interactions = Some(InteractionView {
             identification: None,
             completed: vec![],
+            refused: vec![],
             curse_blocked: vec![],
             slots: vec![slot.clone(); 11],
             preparation: None,
@@ -231,6 +232,8 @@ mod tests {
                 edible: false,
                 readable: false,
                 zappable: false,
+                portable_light: None,
+                device_activation: None,
                 charges: None,
             }],
         });

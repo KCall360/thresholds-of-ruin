@@ -45,7 +45,19 @@ impl Species {
                 .into_iter()
                 .chain(strike.riders.iter().map(|rider| &rider.effects))
                 .flatten()
-                .any(crate::rules::Effect::spatial)
+                .any(|effect| {
+                    effect.spatial()
+                        || matches!(
+                            effect,
+                            crate::rules::Effect::BalefulPolymorph { .. }
+                                | crate::rules::Effect::RoomLight
+                                | crate::rules::Effect::DrainLife
+                                | crate::rules::Effect::DetectMonsters { .. }
+                                | crate::rules::Effect::DetectFood
+                                | crate::rules::Effect::MapTopology
+                                | crate::rules::Effect::DetectMagic
+                        )
+                })
         }) {
             return Err(BuildError::InvalidDefinition);
         }
@@ -150,13 +162,186 @@ impl ScenarioCatalog {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Content {
+    presentation: Arc<crate::appearance_catalog::PresentationCatalog>,
+    detection_appearances: Arc<BTreeMap<SpeciesId, crate::appearance_catalog::CreatureAppearance>>,
     pub(crate) rules: Arc<Ruleset>,
     pub(crate) catalog: Arc<ScenarioCatalog>,
     /// Immutable ordinary projectile definitions, reconstructed from the saved
     /// scenario catalog. Traps reference keys, never invent item identities.
     trap_ammunition: Arc<BTreeMap<String, crate::ItemSpec>>,
+    body_packages: Arc<BTreeMap<crate::content_ids::BodyFormId, Arc<super::BodyPackage>>>,
+    polymorph_forms: Arc<BTreeSet<crate::content_ids::BodyFormId>>,
 }
 impl Content {
+    pub fn body_package(
+        &self,
+        id: &crate::content_ids::BodyFormId,
+    ) -> Option<&Arc<super::BodyPackage>> {
+        self.body_packages.get(id)
+    }
+    pub fn body_packages(
+        &self,
+    ) -> impl Iterator<Item = (&crate::content_ids::BodyFormId, &Arc<super::BodyPackage>)> {
+        self.body_packages.iter()
+    }
+    pub fn polymorph_body_package(
+        &self,
+        id: &crate::content_ids::BodyFormId,
+    ) -> Option<&Arc<super::BodyPackage>> {
+        self.polymorph_forms
+            .contains(id)
+            .then(|| self.body_packages.get(id))
+            .flatten()
+    }
+    fn supported_polymorph_package(&self, id: &crate::content_ids::BodyFormId) -> bool {
+        let Some(package) = self.body_packages.get(id) else {
+            return false;
+        };
+        let Some(species) = self.catalog.species.get(&package.species) else {
+            return false;
+        };
+        // These are canonical rule type/subtype identities, not species names.
+        // Incorporeal mechanics remain deferred, but its authored identity is
+        // already a factual exclusion. Phasing alone does not imply this type.
+        !matches!(species.kind.as_str(), "undead" | "construct")
+            && !species
+                .subtypes
+                .iter()
+                .any(|id| id.as_str() == "incorporeal")
+    }
+
+    pub fn with_body_packages(
+        content: &Arc<Self>,
+        packages: BTreeMap<crate::content_ids::BodyFormId, Arc<super::BodyPackage>>,
+    ) -> Result<Arc<Self>, BuildError> {
+        if packages.len() > crate::limits::CATALOG_ENTRIES {
+            return Err(BuildError::InvalidDefinition);
+        }
+        for (id, package) in &packages {
+            if id != &package.id {
+                return Err(BuildError::InvalidDefinition);
+            }
+            package.validate(content)?;
+        }
+        let mut candidate = (**content).clone();
+        candidate.body_packages = Arc::new(packages);
+        if candidate
+            .polymorph_forms
+            .iter()
+            .any(|id| !candidate.supported_polymorph_package(id))
+        {
+            return Err(BuildError::InvalidDefinition);
+        }
+        Ok(Arc::new(candidate))
+    }
+    /// Explicit authored support declaration: only ordinary living, corporeal,
+    /// nonunique, nonboss packages belong here. Canonical nonliving types and
+    /// incorporeal subtype are rejected. Uniqueness/boss status has no runtime
+    /// metadata yet, so those restrictions remain an author attestation; spawn
+    /// tables and movement capabilities never infer eligibility.
+    pub fn with_polymorph_forms(
+        content: &Arc<Self>,
+        forms: BTreeSet<crate::content_ids::BodyFormId>,
+    ) -> Result<Arc<Self>, BuildError> {
+        if forms.len() > crate::limits::CATALOG_ENTRIES
+            || forms
+                .iter()
+                .any(|id| !content.supported_polymorph_package(id))
+        {
+            return Err(BuildError::InvalidDefinition);
+        }
+        let mut candidate = (**content).clone();
+        candidate.polymorph_forms = Arc::new(forms);
+        let valid_effects = |effects: &[crate::rules::Effect]| {
+            effects.iter().all(|effect| match effect {
+                crate::rules::Effect::BalefulPolymorph { forms } => forms
+                    .iter()
+                    .all(|form| candidate.polymorph_body_package(form).is_some()),
+                _ => true,
+            })
+        };
+        for ability in &candidate.rules.document().abilities {
+            let valid = match &ability.strikes {
+                crate::rules::StrikeSource::Authored { strikes } => strikes.iter().all(|strike| {
+                    valid_effects(&strike.on_success)
+                        && valid_effects(&strike.on_failure)
+                        && strike
+                            .riders
+                            .iter()
+                            .all(|rider| valid_effects(&rider.effects))
+                }),
+                crate::rules::StrikeSource::NaturalMelee { additional_riders } => additional_riders
+                    .iter()
+                    .all(|rider| valid_effects(&rider.effects)),
+                crate::rules::StrikeSource::SelectedMelee
+                | crate::rules::StrikeSource::Projectile { .. } => true,
+            };
+            if !valid {
+                return Err(BuildError::InvalidDefinition);
+            }
+        }
+        for species in candidate.catalog.species.values() {
+            if species.melee.strikes().iter().any(|strike| {
+                !valid_effects(&strike.on_success)
+                    || !valid_effects(&strike.on_failure)
+                    || strike
+                        .riders
+                        .iter()
+                        .any(|rider| !valid_effects(&rider.effects))
+            }) {
+                return Err(BuildError::InvalidDefinition);
+            }
+        }
+        Ok(Arc::new(candidate))
+    }
+
+    /// Explicit species-owned labels only; no personal identity or ID prettifying.
+    pub fn detection_appearance(
+        &self,
+        species: &SpeciesId,
+    ) -> Option<&crate::appearance_catalog::CreatureAppearance> {
+        self.detection_appearances.get(species)
+    }
+    /// Independent from Hallucination's roster: adding a species label cannot
+    /// change already selected cosmetic identities or palette ordering.
+    pub fn with_detection_appearances(
+        content: &Arc<Self>,
+        appearances: BTreeMap<SpeciesId, crate::appearance_catalog::CreatureAppearance>,
+    ) -> Result<Arc<Self>, BuildError> {
+        if appearances.len() > content.catalog.species.len()
+            || appearances.iter().any(|(species, value)| {
+                !content.catalog.species.contains_key(species) || !value.valid()
+            })
+        {
+            return Err(BuildError::InvalidDefinition);
+        }
+        Ok(Arc::new(Self {
+            detection_appearances: Arc::new(appearances),
+            presentation: content.presentation.clone(),
+            rules: content.rules.clone(),
+            catalog: content.catalog.clone(),
+            trap_ammunition: content.trap_ammunition.clone(),
+            body_packages: content.body_packages.clone(),
+            polymorph_forms: content.polymorph_forms.clone(),
+        }))
+    }
+    pub fn presentation_catalog(&self) -> &Arc<crate::appearance_catalog::PresentationCatalog> {
+        &self.presentation
+    }
+    pub fn with_presentation_catalog(
+        content: &Arc<Self>,
+        presentation: Arc<crate::appearance_catalog::PresentationCatalog>,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            rules: content.rules.clone(),
+            catalog: content.catalog.clone(),
+            trap_ammunition: content.trap_ammunition.clone(),
+            body_packages: content.body_packages.clone(),
+            polymorph_forms: content.polymorph_forms.clone(),
+            presentation,
+            detection_appearances: content.detection_appearances.clone(),
+        })
+    }
     pub fn trap_ammunition(&self, key: &str) -> Option<&crate::ItemSpec> {
         self.trap_ammunition.get(key)
     }
@@ -181,9 +366,13 @@ impl Content {
             return Err(BuildError::InvalidDefinition);
         }
         Ok(Arc::new(Self {
+            presentation: content.presentation.clone(),
+            detection_appearances: content.detection_appearances.clone(),
             rules: content.rules.clone(),
             catalog: content.catalog.clone(),
             trap_ammunition: Arc::new(ammunition),
+            body_packages: content.body_packages.clone(),
+            polymorph_forms: content.polymorph_forms.clone(),
         }))
     }
     pub fn rules(&self) -> &Arc<Ruleset> {
@@ -227,7 +416,19 @@ impl Content {
         Ok(Arc::new(Self {
             rules,
             catalog: Arc::new(catalog),
+            presentation: crate::appearance_catalog::PresentationCatalog::new(vec![], vec![])?,
             trap_ammunition: Arc::new(BTreeMap::new()),
+            body_packages: Arc::new(BTreeMap::new()),
+            polymorph_forms: Arc::new(BTreeSet::new()),
+            detection_appearances: Arc::new(BTreeMap::new()),
         }))
     }
 }
+
+#[cfg(test)]
+#[path = "catalog_detection_tests.rs"]
+mod detection_tests;
+
+#[cfg(test)]
+#[path = "catalog_body_tests.rs"]
+mod body_tests;

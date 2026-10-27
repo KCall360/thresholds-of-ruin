@@ -143,7 +143,8 @@ class PersistentMapProcesses(ProcessTestCase):
                 self.assertIn(cell["key"], disclosed, "hydration must not reveal unseen geometry")
                 self.assertEqual(set(cell), {"key", "position", "wall", "material", "asset",
                                              "place_hint", "stairs_up", "stairs_down", "trap", "door",
-                                             "ground_items"})
+                                             "ground_items", "object_presentation"})
+                self.assertIsNone(cell["object_presentation"])
                 self.assertEqual(cell["position"]["x"], edge)
                 self.assertIsNone(cell["trap"])
                 self.assertIsNone(cell["door"])
@@ -249,7 +250,9 @@ class PersistentMapProcesses(ProcessTestCase):
         for entry in restored[0]["ground_items"]:
             self.assertEqual(set(entry), {"item", "position"})
             self.assertEqual(set(entry["item"]), {
-                "class", "quantity", "appearance", "identified", "description", "name", "asset"})
+                "class", "quantity", "appearance", "identified", "description", "name", "asset",
+                "presentation"})
+            self.assertIsNone(entry["item"]["presentation"])
             for value in (entry, entry["item"]):
                 for field in ("id", "reachable", "supply_reachable", "known_supply"):
                     self.assertNotIn(field, value)

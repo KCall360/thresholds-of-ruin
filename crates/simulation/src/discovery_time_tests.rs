@@ -12,6 +12,7 @@ fn at(x: i32) -> Location {
 }
 fn modifier(op: ModifierOp) -> Modifier {
     Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op,
     }

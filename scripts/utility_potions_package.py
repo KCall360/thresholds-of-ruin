@@ -28,7 +28,7 @@ def fixture():
                "turn_ticks": 1000000, "controller": "external"}
     manifest.update(id="rogue-utility-potions", default_character=1, characters=[character],
                     archetypes={**source["actors"], **source["items"]},
-                    creatures={"species": source["species"]}, appearance_pools=catalog["appearance_pools"])
+                    creatures={"species": source["species"], "body_packages": source["body_packages"]}, appearance_pools=catalog["appearance_pools"])
     region = {"id": 1, "name": "Lit utility potion encounter", "size": [7, 5, 2],
               "chamber": True, "gravity": [0, 0, -1], "anchors": {"start": [1, 2, 0]},
               "actors": [phantom]}
@@ -88,11 +88,44 @@ def assert_sight(test, frame, identity):
     test.assertNotEqual(inventory_item(frame, identity)["name"], "potion of see invisible")
 
 
-def assert_extra_healing(test, before, after, identity):
+def fixture_roll(state, sides):
+    """Independent SplitMix64 rejection draw from a saved or fixture-owned stream."""
+    mask = (1 << 64) - 1
+    while True:
+        state = (state + 0x9e3779b97f4a7c15) & mask
+        word = state
+        word = ((word ^ (word >> 30)) * 0xbf58476d1ce4e5b9) & mask
+        word = ((word ^ (word >> 27)) * 0x94d049bb133111eb) & mask
+        word ^= word >> 31
+        if word < mask - mask % sides:
+            return state, word % sides + 1
+
+
+def extra_healing_roll(state):
+    state, first = fixture_roll(state, 8)
+    state, second = fixture_roll(state, 8)
+    return state, first + second
+
+
+def assert_extra_healing(test, before, after, identity, *, rolled_amount):
     test.assertIsNotNone(condition(before, "rogue.blindness"))
     test.assertIsNone(condition(after, "rogue.blindness"))
     item = inventory_item(after, identity)
     test.assertEqual((item["name"], item["quantity"], item["identified"]),
                      ("potion of extra healing", "4", True))
-    test.assertEqual(observation(after)["combat"]["max_hp"], observation(before)["combat"]["max_hp"],
-                     "The sole first HD is already at its immutable acquisition cap")
+    prior = observation(before)["combat"]
+    current = observation(after)["combat"]
+    test.assertEqual(prior["own_stats"]["hit_dice"]["total"], "2")
+    # This unchanged, untalented human/Warrior has body d8 maximized, personal
+    # d10 seeded, and Strength added once. Poison changes Strength, not HD caps.
+    strength = prior["own_stats"]["attributes"]["strength"]
+    test.assertEqual(current["own_stats"]["attributes"]["strength"], strength)
+    remaining = 8 + 10 + strength - int(prior["max_hp"])
+    test.assertGreaterEqual(remaining, 0)
+    test.assertLessEqual(remaining, 9)
+    injury = int(prior["max_hp"]) - int(prior["hp"])
+    excess = max(0, rolled_amount - injury)
+    credits = int(excess > 0) + int(excess > 3)  # Two HD plus one, strict excess.
+    improvement = min(remaining, credits)
+    test.assertEqual(int(current["max_hp"]), int(prior["max_hp"]) + improvement)
+    return improvement

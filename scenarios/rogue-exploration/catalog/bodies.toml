@@ -1,0 +1,180 @@
+# Explicit body ownership. Existing authored physical statistics and innate rows,
+# not copied actor inventory, AI, faction, background skills or personal classes.
+# Eligibility below is an OPT-IN REVIEW roster, never live weighted stock.
+namespace = "rogue"
+
+[creatures.body_packages."rogue.body.human"]
+species = "rogue.human"
+body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 80 }
+polymorph_eligible = false
+hit_dice = [{ source = "racial", purchases = [] }]
+
+[creatures.body_packages."rogue.body.emu"]
+species = "rogue.emu"
+body = { cells = [[0, 0, 0], [0, 0, 1]], eye = [0, 0, 1], mass = 35 }
+polymorph_eligible = true
+hit_dice = [{ source = "racial", purchases = [] }]
+
+[creatures.body_packages."rogue.body.snake"]
+species = "rogue.snake"
+body = { cells = [[0, 0, 0]], eye = [0, 0, 0], mass = 3 }
+polymorph_eligible = true
+hit_dice = [{ source = "racial", purchases = [] }]
+
+[creatures.body_packages."rogue.body.rattlesnake"]
+species = "rogue.rattlesnake"
+body = { cells = [[0, 0, 0]], eye = [0, 0, 0], mass = 3 }
+polymorph_eligible = false
+hit_dice = [{ source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "rogue.venomous_bite" } }] }, { source = "racial", purchases = [] }]
+
+[creatures.body_packages."rogue.body.zombie"]
+species = "rogue.zombie"
+body = { cells = [[0, 0, 0], [0, 0, 1]], eye = [0, 0, 1], mass = 80 }
+polymorph_eligible = false
+hit_dice = [{ source = "racial", purchases = [] }, { source = "racial", purchases = [] }]
+
+[creatures.body_packages."rogue.body.quagga"]
+species = "rogue.quagga"
+body = { cells = [[0, 0, 0], [0, 0, 1]], eye = [0, 0, 1], mass = 250 }
+polymorph_eligible = false
+hit_dice = [{ source = "racial", purchases = [] }, { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "second_strike" } }] }, { source = "racial", purchases = [] }]
+
+[creatures.body_packages."rogue.body.yeti"]
+species = "rogue.yeti"
+body = { cells = [[0, 0, 0], [0, 0, 1]], eye = [0, 0, 1], mass = 250 }
+polymorph_eligible = false
+hit_dice = [{ source = "racial", purchases = [] }, { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "second_strike" } }] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }]
+
+[creatures.body_packages."rogue.body.troll"]
+species = "rogue.troll"
+body = { cells = [[0, 0, 0], [0, 0, 1]], eye = [0, 0, 1], mass = 250 }
+polymorph_eligible = true
+hit_dice = [{ source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "rogue.regeneration" } }] }, { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "second_strike" } }] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "third_strike" } }] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }]
+
+[creatures.body_packages."rogue.body.black_unicorn"]
+species = "rogue.black_unicorn"
+body = { cells = [[0, 0, 0], [0, 0, 1]], eye = [0, 0, 1], mass = 350 }
+polymorph_eligible = false
+hit_dice = [{ source = "racial", purchases = [] }, { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "second_strike" } }] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "third_strike" } }] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }]
+
+[creatures.body_packages."rogue.body.ice_monster"]
+species = "rogue.ice_monster"
+body = { cells = [[0, 0, 0], [0, 0, 1]], eye = [0, 0, 1], mass = 40 }
+polymorph_eligible = false
+hit_dice = [{ source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "rogue.freezing_touch" } }] }]
+
+[creatures.body_packages."rogue.body.vampire"]
+species = "rogue.vampire"
+body = { cells = [[0, 0, 0], [0, 0, 1]], eye = [0, 0, 1], mass = 70 }
+polymorph_eligible = false
+hit_dice = [{ source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "rogue.drain_vitality" } }] }, { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "rogue.regeneration" } }] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }]
+
+[creatures.body_packages."rogue.body.wraith"]
+species = "rogue.wraith"
+body = { cells = [[0, 0, 0], [0, 0, 1]], eye = [0, 0, 1], mass = 70 }
+polymorph_eligible = false
+hit_dice = [{ source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "rogue.energy_drain" } }] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }]
+
+[creatures.body_packages."rogue.body.jabberwock"]
+species = "rogue.jabberwock"
+body = { cells = [[0, 0, 0], [0, 0, 1]], eye = [0, 0, 1], mass = 250 }
+polymorph_eligible = false
+hit_dice = [{ source = "racial", purchases = [] }, { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "second_strike" } }] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "rending_pair" } }] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }]
+
+[creatures.body_packages."rogue.body.bat"]
+species = "rogue.bat"
+body = { cells = [[0, 0, 0]], eye = [0, 0, 0], mass = 1 }
+polymorph_eligible = false
+hit_dice = [{ source = "racial", purchases = [] }]
+
+[creatures.body_packages."rogue.body.kestrel"]
+species = "rogue.kestrel"
+body = { cells = [[0, 0, 0]], eye = [0, 0, 0], mass = 1 }
+polymorph_eligible = false
+hit_dice = [{ source = "racial", purchases = [] }]
+
+[creatures.body_packages."rogue.body.venus_flytrap"]
+species = "rogue.venus_flytrap"
+body = { cells = [[0, 0, 0], [0, 0, 1]], eye = [0, 0, 1], mass = 25 }
+polymorph_eligible = false
+hit_dice = [{ source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "clutch" } }] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "tightening_hold" } }] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }]
+
+[creatures.body_packages."rogue.body.griffin"]
+species = "rogue.griffin"
+body = { cells = [[0, 0, 0], [0, 0, 1]], eye = [0, 0, 1], mass = 160 }
+polymorph_eligible = false
+hit_dice = [{ source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "rogue.regeneration" } }] }, { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "second_strike" } }] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }]
+
+[creatures.body_packages."rogue.body.leprechaun"]
+species = "rogue.leprechaun"
+body = { cells = [[0, 0, 0], [0, 0, 1]], eye = [0, 0, 1], mass = 25 }
+polymorph_eligible = false
+hit_dice = [{ source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "filch_gold" } }] }, { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "vanish" } }] }, { source = "racial", purchases = [] }]
+
+[creatures.body_packages."rogue.body.nymph"]
+species = "rogue.nymph"
+body = { cells = [[0, 0, 0], [0, 0, 1]], eye = [0, 0, 1], mass = 55 }
+polymorph_eligible = false
+hit_dice = [{ source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "filch_charm" } }] }, { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "vanish" } }] }, { source = "racial", purchases = [] }]
+
+[creatures.body_packages."rogue.body.medusa"]
+species = "rogue.medusa"
+body = { cells = [[0, 0, 0], [0, 0, 1]], eye = [0, 0, 1], mass = 80 }
+polymorph_eligible = false
+hit_dice = [{ source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "rogue.confusing_gaze" } }] }, { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "second_strike" } }] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "third_strike" } }] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }]
+
+[creatures.body_packages."rogue.body.phantom"]
+species = "rogue.phantom"
+body = { cells = [[0, 0, 0], [0, 0, 1]], eye = [0, 0, 1], mass = 40 }
+polymorph_eligible = false
+hit_dice = [{ source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }]
+
+[creatures.body_packages."rogue.body.xeroc"]
+species = "rogue.xeroc"
+body = { cells = [[0, 0, 0]], eye = [0, 0, 0], mass = 40 }
+polymorph_eligible = false
+hit_dice = [{ source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "rogue.object_guise" } }] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "rogue.ambush_from_guise" } }] }, { source = "racial", purchases = [] }]
+
+[creatures.body_packages."rogue.body.aquator"]
+species = "rogue.aquator"
+body = { cells = [[0, 0, 0]], eye = [0, 0, 0], mass = 40 }
+polymorph_eligible = false
+hit_dice = [{ source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "rogue.corrode" } }] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }, { source = "racial", purchases = [] }]
+
+# Approved one-racial-body enrollment; existing class training stays personal.
+
+[creatures.body_packages."rogue.body.hobgoblin"]
+species = "rogue.hobgoblin"
+body = { cells = [[0, 0, 0], [0, 0, 1]], eye = [0, 0, 1], mass = 70 }
+polymorph_eligible = false
+hit_dice = [{ source = "racial", purchases = [] }]
+
+[creatures.body_packages."rogue.body.orc"]
+species = "rogue.orc"
+body = { cells = [[0, 0, 0], [0, 0, 1]], eye = [0, 0, 1], mass = 80 }
+polymorph_eligible = false
+hit_dice = [{ source = "racial", purchases = [] }]
+
+[creatures.body_packages."rogue.body.centaur"]
+species = "rogue.centaur"
+body = { cells = [[0, 0, 0], [0, 0, 1]], eye = [0, 0, 1], mass = 400 }
+polymorph_eligible = false
+hit_dice = [{ source = "racial", purchases = [] }]
+
+# Native Dragon's learned Willpower and Breath rank are explicit personal receipts.
+[creatures.body_packages."rogue.body.dragon"]
+species = "rogue.dragon"
+body = { cells = [[0, 0, 0], [0, 0, 1]], eye = [0, 0, 1], mass = 250 }
+polymorph_eligible = false
+hit_dice = [
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "second_strike" } }] },
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "third_strike" } }] },
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "rogue.breath_weapon" } }] },
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [] },
+]

@@ -177,7 +177,8 @@ impl Outcome {
         }
     }
     pub(crate) fn valid(&self) -> bool {
-        self.participation.valid(self)
+        crate::detection_lifecycle::resolved_shape_valid(self)
+            && self.participation.valid(self)
             && self.resistance.is_none_or(|check| {
                 check.actor == crate::rules::CheckActor::Target
                     && !check.opposed

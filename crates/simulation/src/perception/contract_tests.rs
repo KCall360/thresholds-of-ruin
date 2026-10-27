@@ -618,6 +618,7 @@ fn ambush_adds_exactly_one_edge_to_the_first_outgoing_primary_and_nothing_else()
     let game = fixture_with(&[guise(), ambush()], &[], |_, owner, _| {
         let mut first = owner.melee.strikes()[0].clone();
         first.riders.push(crate::rules::RiderDef {
+            cancellable: false,
             trigger: crate::rules::RiderTrigger::Success,
             condition: None,
             check: Some(crate::rules::RiderCheckDef {

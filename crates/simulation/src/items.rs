@@ -112,6 +112,8 @@ impl Item {
 pub struct ItemSpec {
     pub magical: bool,
     #[serde(deserialize_with = "crate::bounded::required_option")]
+    pub held_light: Option<crate::HeldLightSpec>,
+    #[serde(deserialize_with = "crate::bounded::required_option")]
     pub currency: Option<CurrencyKind>,
     pub equipment: Option<crate::EquipmentSpec>,
     #[serde(deserialize_with = "crate::bounded::required_option")]
@@ -150,6 +152,8 @@ impl<'de> serde::Deserialize<'de> for ItemSpec {
         struct Fields {
             magical: bool,
             #[serde(deserialize_with = "crate::bounded::required_option")]
+            held_light: Option<crate::HeldLightSpec>,
+            #[serde(deserialize_with = "crate::bounded::required_option")]
             currency: Option<CurrencyKind>,
             equipment: Option<crate::EquipmentSpec>,
             #[serde(deserialize_with = "crate::bounded::required_option")]
@@ -181,6 +185,7 @@ impl<'de> serde::Deserialize<'de> for ItemSpec {
         let fields: Fields = crate::bounded::named_map(deserializer)?;
         Ok(Self {
             magical: fields.magical,
+            held_light: fields.held_light,
             currency: fields.currency,
             equipment: fields.equipment,
             projectile: fields.projectile,
@@ -215,6 +220,7 @@ impl Clone for ItemSpec {
         ITEM_DEFINITION_COPIES.with(|copies| copies.set(copies.get() + 1));
         Self {
             magical: self.magical,
+            held_light: self.held_light,
             currency: self.currency,
             equipment: self.equipment.clone(),
             projectile: self.projectile.clone(),
@@ -247,6 +253,7 @@ impl ItemSpec {
     pub fn ordinary(name: String) -> Self {
         Self {
             magical: false,
+            held_light: None,
             currency: None,
             equipment: None,
             projectile: None,
@@ -350,6 +357,20 @@ impl ItemSpec {
     }
     pub(crate) fn valid(&self) -> bool {
         self.magic_shape_valid()
+            && self.held_light.is_none_or(|policy| {
+                policy.valid()
+                    && self.class == ItemClass::Tool
+                    && !self.stackable
+                    && self.equipment.as_ref().is_some_and(|equipment| {
+                        equipment.slot.as_str() == "held_light" && equipment.attack.is_none()
+                    })
+                    && self.device.is_none()
+                    && self.consumable.is_none()
+                    && self.readable.is_none()
+                    && self.edible.is_none()
+                    && self.projectile.is_none()
+                    && self.supply.is_none()
+            })
             && self.equipment_generation.is_none_or(|policy| {
                 policy.valid_for(
                     self.class,
@@ -400,6 +421,9 @@ impl ItemSpec {
     }
 }
 
+/// Owner and post-drop equipment placement validated before the transfer.
+type HeldLightDropPlacement = (ActorId, BTreeMap<crate::EquipmentSlotId, ItemId>);
+
 impl Game {
     fn item_is_equipped(&self, id: ItemId) -> bool {
         self.items.get(&id).is_some_and(|item| match item.location {
@@ -409,6 +433,34 @@ impl Game {
                 .is_some_and(|actor| actor.equipment.values().any(|equipped| *equipped == id)),
             ItemLocation::Ground(_) => false,
         })
+    }
+    /// Only the explicit held-light grip supports a direct lit Drop. Ordinary
+    /// equipment keeps its existing remove-first contract.
+    fn held_light_drop(
+        &self,
+        source: ItemId,
+        destination: ItemLocation,
+    ) -> Result<Option<HeldLightDropPlacement>, GameError> {
+        if !self.item_is_equipped(source) {
+            return Ok(None);
+        }
+        let item = self.items.get(&source).ok_or(GameError::ItemUnavailable)?;
+        let ItemLocation::Carried(owner) = item.location else {
+            return Err(GameError::ItemUnavailable);
+        };
+        if item.spec.held_light.is_none()
+            || item.condition.cursed
+            || !matches!(destination, ItemLocation::Ground(_))
+        {
+            return Err(GameError::ItemUnavailable);
+        }
+        let mut equipment = self.actors[&owner].equipment.clone();
+        equipment.retain(|_, item| *item != source);
+        let mut outcome = self.settled_actor_outcome(owner)?;
+        self.refresh_equipment_outcome(&mut outcome, equipment.clone())?;
+        // Validate the ordinary death destination/allocator before any transfer.
+        self.prepare_actor_outcome(outcome)?;
+        Ok(Some((owner, equipment)))
     }
     pub(crate) fn merge_destination_available(&self, id: ItemId) -> bool {
         self.items.get(&id).is_some_and(|item| {
@@ -456,9 +508,8 @@ impl Game {
         if quantity == 0 || quantity > item.quantity {
             return Err(GameError::InvalidQuantity);
         }
-        if item.free_quantity(None).is_none_or(|free| free < quantity)
-            || self.item_is_equipped(source)
-        {
+        self.held_light_drop(source, destination)?;
+        if item.free_quantity(None).is_none_or(|free| free < quantity) {
             return Err(GameError::ItemUnavailable);
         }
         if let Some(id) = merge {
@@ -520,10 +571,10 @@ impl Game {
             || plan
                 .merge
                 .is_some_and(|id| self.items.get(&id) != plan.expected_destination.as_ref())
-            || self.item_is_equipped(plan.source)
         {
             return Err(GameError::ItemUnavailable);
         }
+        let removal = self.held_light_drop(plan.source, plan.destination)?;
         if plan.crumble {
             if plan.expected_source.spec.ground_scare.is_none()
                 || !plan.expected_source.condition.cursed
@@ -559,6 +610,13 @@ impl Game {
             plan.destination,
             plan.condition_after,
         )?;
+        if let Some((owner, equipment)) = removal {
+            // Capture after carried→ground transfer. Death may drop the remaining
+            // inventory, but cannot restore or duplicate this already-ground light.
+            let mut outcome = self.settled_actor_outcome(owner)?;
+            self.refresh_equipment_outcome(&mut outcome, equipment)?;
+            self.apply_outcome(outcome)?;
+        }
         if let Some((owner, facts)) = &plan.inherited {
             if let Some(mut owner) = self.actors.get_mut(owner) {
                 owner.known_equipment.remember_inherited(facts.clone());
@@ -701,6 +759,7 @@ impl Game {
                     .as_ref()
                     .and_then(|gear| gear.periodic_relocation)
                     .map(|_| 0);
+                entry.fuel = crate::portable_light::initial_fuel(&spec);
                 entry.spec = tor_world::Shared::new(spec);
                 entry.quantity = quantity;
                 entry.charges = charges;
@@ -797,14 +856,6 @@ impl Game {
             return Err(GameError::ItemUnavailable);
         }
         let at = self.actors[&actor].location;
-        if !taking
-            && self.actors[&actor]
-                .equipment
-                .values()
-                .any(|equipped| *equipped == item)
-        {
-            return Err(GameError::ItemUnavailable);
-        }
         let (from, to) = if taking {
             (ItemLocation::Ground(at), ItemLocation::Carried(actor))
         } else {
@@ -985,6 +1036,11 @@ impl Game {
                     item.orientation = orientation;
                     item.location = location;
                     item.condition = condition;
+                    if matches!(location, ItemLocation::Carried(_)) {
+                        if let Some(fuel) = item.fuel.as_mut() {
+                            fuel.lit = false;
+                        }
+                    }
                 })
                 .ok_or(GameError::ItemUnavailable)?;
             return Ok(());
@@ -994,6 +1050,17 @@ impl Game {
             .get(&source)
             .ok_or(GameError::ItemUnavailable)?
             .charges;
+        let fuel = self
+            .items
+            .get(&source)
+            .ok_or(GameError::ItemUnavailable)?
+            .fuel
+            .map(|mut fuel| {
+                if matches!(location, ItemLocation::Carried(_)) {
+                    fuel.lit = false;
+                }
+                fuel
+            });
         let relocation_elapsed = self
             .items
             .get(&source)
@@ -1035,6 +1102,7 @@ impl Game {
                     condition,
                     charges,
                     relocation_elapsed,
+                    fuel,
                     corpse: None,
                     holds: vec![],
                     motion,

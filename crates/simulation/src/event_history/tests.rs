@@ -17,6 +17,7 @@ fn fixture() -> Game {
     let mut invisible =
         crate::creatures::Template::new(TemplateId::new("event_invisible").unwrap(), 0);
     invisible.modifiers.push(Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Perception {
             value: PerceptionValue::Invisible { enabled: true },
@@ -25,6 +26,7 @@ fn fixture() -> Game {
     let mut detecting =
         crate::creatures::Template::new(TemplateId::new("event_detecting").unwrap(), 0);
     detecting.modifiers.push(Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Perception {
             value: PerceptionValue::SeeInvisible { enabled: true },
@@ -32,6 +34,7 @@ fn fixture() -> Game {
     });
     let mut guised = crate::creatures::Template::new(TemplateId::new("event_guised").unwrap(), 0);
     guised.modifiers.push(Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Perception {
             value: PerceptionValue::ObjectGuise {

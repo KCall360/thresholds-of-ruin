@@ -37,6 +37,7 @@ fn state() -> ClientState {
     view.interactions = Some(InteractionView {
         identification: None,
         completed: vec![],
+        refused: vec![],
         curse_blocked: vec![],
         slots: vec![slot.clone(); 2],
         preparation: None,
@@ -55,6 +56,8 @@ fn state() -> ClientState {
                 edible: false,
                 readable: false,
                 zappable: false,
+                portable_light: None,
+                device_activation: None,
                 charges: None,
             })
             .collect(),

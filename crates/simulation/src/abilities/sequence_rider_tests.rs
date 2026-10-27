@@ -3,6 +3,7 @@ use crate::{combat::CombatEvent, rules::*, ActorId};
 
 fn rending_rider() -> RiderDef {
     RiderDef {
+        cancellable: false,
         trigger: RiderTrigger::Success,
         condition: Some(RiderCondition::SequenceSuccessfulHits { minimum: 2 }),
         check: None,
@@ -37,6 +38,7 @@ pub(super) fn sequence_game() -> crate::Game {
             let strikes = [0, 10]
                 .into_iter()
                 .map(|offset| StrikeDef {
+                    cancellable: false,
                     offset,
                     unlock: None,
                     check: Some(CheckDef {

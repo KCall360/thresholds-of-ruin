@@ -40,6 +40,9 @@ and never replaces, [development practices](CONTRIBUTING.md) and the
   actual-process tests at completed behavior checkpoints; repeat affected checks
   after later edits. At a stable checkpoint,
   run `scripts/verify.py quick`, unless a required higher tier covers it.
+  `quick` tests directly changed packages; `quick` and `push` defer
+  [extended-cost process tests](docs/development/testing.md#extended-cost-process-tests)
+  to full and CI. Run the ones your change targets yourself.
 - Give each Cargo target directory one owner and hand it off explicitly. Keep
   checked inputs unchanged during builds/tests; prepare other edits separately.
   On a sequential cross-worktree handoff of a shared warm target, compare source

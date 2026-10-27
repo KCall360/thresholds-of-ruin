@@ -31,6 +31,7 @@ fn snapshot(identify: bool) -> Snapshot {
     })
     .collect();
     view.interactions = Some(InteractionView {
+        refused: vec![],
         curse_blocked: vec![],
         identification: identify.then(|| IdentificationChoiceView {
             choice: IntentionId("paid-choice".into()),
@@ -55,6 +56,9 @@ fn snapshot(identify: bool) -> Snapshot {
                 edible: false,
                 readable: item.class == ItemClass::Scroll,
                 zappable: item.class == ItemClass::Wand,
+                portable_light: None,
+                device_activation: (item.class == ItemClass::Wand)
+                    .then_some(tor_protocol::DeviceActivation::Direction),
                 charges: None,
             })
             .collect(),
@@ -149,7 +153,9 @@ fn zap_selects_device_before_direction_and_never_infers_charge_eligibility() {
         action(key(&mut app, Key::NorthEast)),
         Action::Zap {
             item: super::item_target(3),
-            direction: Direction::NorthEast
+            aim: DeviceAim::Direction {
+                direction: Direction::NorthEast
+            }
         }
     );
     assert!(app.zap_item().is_none());
@@ -416,4 +422,93 @@ fn magic_pickers_and_aiming_clear_on_full_delta_and_same_revision_reset() {
     .unwrap();
     assert!(app.zap_item().is_none());
     assert_eq!(key(&mut app, Key::Enter), Effect::None);
+}
+
+#[test]
+fn identified_self_device_selection_emits_without_direction_modal() {
+    let mut snap = snapshot(false);
+    let view = &mut Arc::make_mut(&mut snap.state).observation;
+    view.inventory[1].identified = true;
+    view.interactions.as_mut().unwrap().inventory[1].device_activation =
+        Some(DeviceActivation::SelfTarget);
+    let state = ClientState::from_snapshot(snap).expect("valid disclosed self device premise");
+    let mut app = App::new();
+    app.role = AccessRole::Player;
+    app.set_state(state);
+    app.ready();
+    app.messages.skip();
+    assert_eq!(key(&mut app, Key::Zap), Effect::None);
+    assert_eq!(app.pickup.len(), 2);
+    assert_eq!(
+        action(app.input(Input::Text { text: "b".into() })),
+        Action::Zap {
+            item: super::item_target(2),
+            aim: DeviceAim::SelfTarget {}
+        }
+    );
+    assert!(app.zap_item().is_none());
+}
+
+#[test]
+fn portable_light_keys_choose_explicit_actions_cancel_and_show_fuel() {
+    for (lit, input, expected) in [(false, Key::Ignite, false), (true, Key::Extinguish, true)] {
+        let mut snap = snapshot(false);
+        Arc::make_mut(&mut snap.state).observation = test_support::portable_light_observation(lit);
+        let item = snap.state.observation.inventory[0].id;
+        let mut app = App::new();
+        app.role = AccessRole::Player;
+        app.set_state(ClientState::from_snapshot(snap).unwrap());
+        app.ready();
+        app.messages.skip();
+        let before = app.state.as_ref().unwrap().snapshot();
+        let entries = inventory_entries(&app, &before.state.observation);
+        assert!(entries[0].long().contains("fuel: 100000 ticks"));
+        assert_eq!(key(&mut app, input), Effect::None);
+        assert_eq!(app.pickup.len(), 1);
+        assert_eq!(key(&mut app, Key::Escape), Effect::None);
+        assert_eq!(app.state.as_ref().unwrap().snapshot(), before);
+        assert_eq!(key(&mut app, input), Effect::None);
+        let emitted = action(key(&mut app, Key::Enter));
+        assert_eq!(
+            emitted,
+            if expected {
+                Action::Extinguish { item }
+            } else {
+                Action::Ignite { item }
+            }
+        );
+    }
+    for (text, expected) in [("ignite", Key::Ignite), ("extinguish", Key::Extinguish)] {
+        let input: Input =
+            serde_json::from_value(serde_json::json!({"type":"key","key":text})).unwrap();
+        assert!(matches!(input, Input::Key { key } if key == expected));
+    }
+}
+
+#[test]
+fn dual_device_direction_prompt_offers_explicit_self_without_defaulting_to_it() {
+    let mut snap = snapshot(false);
+    let view = &mut Arc::make_mut(&mut snap.state).observation;
+    view.inventory[1].identified = true;
+    view.interactions.as_mut().unwrap().inventory[1].device_activation =
+        Some(DeviceActivation::DirectionOrSelf);
+    let state = ClientState::from_snapshot(snap).expect("valid dual aim premise");
+    let mut app = App::new();
+    app.role = AccessRole::Player;
+    app.set_state(state);
+    app.ready();
+    app.messages.skip();
+    assert_eq!(key(&mut app, Key::Zap), Effect::None);
+    assert_eq!(app.input(Input::Text { text: "b".into() }), Effect::None);
+    assert!(app.status.contains("targets yourself"));
+    assert_eq!(app.zap_item(), Some(super::item_target(2)));
+    assert_eq!(key(&mut app, Key::Enter), Effect::None);
+    assert_eq!(
+        action(key(&mut app, Key::Wait)),
+        Action::Zap {
+            item: super::item_target(2),
+            aim: DeviceAim::SelfTarget {}
+        }
+    );
+    assert!(app.zap_item().is_none());
 }

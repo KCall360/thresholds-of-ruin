@@ -1315,7 +1315,8 @@ from disclosed exact directional alignment without previewing collision. Optiona
 combat diagnostics attach the shared launch receipt to each real recipient
 encounter; an empty traversal has no fabricated recipient diagnostic.
 
-`directional_contact_ray` uses the same frozen launch, opposed named-skill check
+With bounded Sight reach, `directional_contact_ray` uses the same frozen launch,
+opposed named-skill check
 and physical traversal, but stops at the first creature body whether it dodges,
 is immune or receives the effect. A wall or closed door stops it without bounce;
 later creatures receive no check or effect. Its failure branch may contain the
@@ -1323,6 +1324,32 @@ same component damage or ordinary finite/persistent condition application and
 condition removal. Success effects, riders, unlocks and selected-weapon payloads
 remain unsupported. Delivery is captured explicitly and validated against the
 pinned invocation on restore; current visibility never predicts collision.
+
+`directional_contact_ray` also accepts `{ kind = "until_obstruction" }` reach.
+It captures a closed first-body traversal independently of its closed resolution:
+either the existing opposed named-skill operands or a checkless Cancellation
+payload. Checkless delivery contains no dummy skill, check token or roll.
+The supported checkless source has the sole `cancel_specials` success effect,
+no check, failure branch, riders or unlock, and hostile target authorization;
+that authorization does not add attack provocation or a stealth contest.
+Selected-weapon payloads and bouncing UntilObstruction rays are unsupported.
+
+Traversal uses World ray steps and their returned orientation. Preparation
+loads known required frontier geometry without activating frozen actors;
+missing preparable geometry is not treated as an empty successful shot. Cycle
+detection includes location, direction and whether the ray has left the launch
+footprint; a later physical return can hit the caster. The operational guard is
+65,536 visited states. Exceeding it is an atomic resource/work failure, not an
+advertised range, truncated success or fabricated miss.
+
+Source `AbilityDef`, modifiers, strikes and riders accept `cancellable = true`;
+omission defaults to false. Cancellation retains an explicit saved creature
+state, suppresses only marked effective contributions and reconciles ordinary
+lifecycle effects. It does not delete owned progression or rewrite frozen plan
+provenance. Current AI selection and execution use the same effective payload;
+ordinary previews expose timing/counts, while privileged authored-source
+inspection and historical observations remain canonical.
+Current save fields are required; omission is not an old-save compatibility path.
 
 Actor-target and self-step preparation freezes one bounded ordered strike plan.
 Earlier queue admission stores the request, not the plan. Each ability authors strikes

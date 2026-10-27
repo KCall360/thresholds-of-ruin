@@ -148,20 +148,54 @@ pub fn observation_assets(observation: &Observation) -> impl Iterator<Item = &st
     let cells = observation.visible_cells.iter().flat_map(|cell| {
         [
             cell.asset.as_deref(),
+            cell.object_presentation
+                .as_ref()
+                .and_then(|p| p.asset.as_deref()),
             cell.door.as_ref().and_then(|door| door.asset.as_deref()),
         ]
     });
     let items = observation
         .ground_items
         .iter()
-        .map(|ground| &ground.item)
-        .chain(&observation.inventory)
-        .map(|item| item.asset.as_deref());
+        .map(|ground| {
+            ground
+                .presentation
+                .as_ref()
+                .map_or(&ground.item.asset, |p| &p.asset)
+                .as_deref()
+        })
+        .chain(
+            observation
+                .inventory
+                .iter()
+                .map(|item| item.asset.as_deref()),
+        );
     let actors = observation
         .visible_actors
         .iter()
         .map(|actor| actor.asset.as_deref());
     cells.chain(items).chain(actors).flatten()
+}
+
+/// Frozen map recipes participate in palette repair without acquiring actions.
+pub(crate) fn map_assets(cells: &[tor_protocol::RememberedMapCell]) -> impl Iterator<Item = &str> {
+    cells.iter().flat_map(|cell| {
+        [
+            cell.asset.as_deref(),
+            cell.door.as_ref().and_then(|d| d.asset.as_deref()),
+            cell.object_presentation
+                .as_ref()
+                .and_then(|p| p.asset.as_deref()),
+        ]
+        .into_iter()
+        .chain(cell.ground_items.iter().map(|item| {
+            item.presentation
+                .as_ref()
+                .map_or(&item.asset, |p| &p.asset)
+                .as_deref()
+        }))
+        .flatten()
+    })
 }
 
 #[cfg(test)]
@@ -280,5 +314,55 @@ mod tests {
         // Not in the palette: the default look, even though the table has it.
         assert_eq!(palette.resolve(&table, Some("terrain.wall.cave")), None);
         assert_eq!(palette.resolve(&table, None), None);
+    }
+    #[test]
+    fn current_and_frozen_object_assets_request_the_cosmetic_palette_only() {
+        use tor_protocol::*;
+        let presentation = |name: &str| ObjectPresentation {
+            name: "object".into(),
+            asset: Some(name.into()),
+            kind: ObjectPresentationKind::Stairs,
+        };
+        let mut o = crate::test_support::observation();
+        let mut cell: CellView = serde_json::from_value(serde_json::json!({
+            "key":"here","position":{"x":0,"y":0,"z":0},"wall":false,"lit":true,
+            "door":null,"trap":null,"stairs_up":false,"stairs_down":true,"place_hint":false,
+            "object_presentation":null
+        }))
+        .unwrap();
+        cell.object_presentation = Some(presentation("item.potion.false"));
+        o.visible_cells.push(cell);
+        o.ground_items.push(GroundItemView {
+            presentation: Some(presentation("item.wand.false")),
+            reachable: false,
+            supply_reachable: false,
+            position: o.position,
+            item: ItemView {
+                corpse: None,
+                class: ItemClass::Misc,
+                quantity: 1,
+                appearance: "object".into(),
+                identified: false,
+                description: String::new(),
+                id: ItemTarget::from_digest([81; 32]),
+                name: "object".into(),
+                asset: None,
+                known_supply: None,
+                known_currency: None,
+            },
+        });
+        let found: BTreeSet<_> = observation_assets(&o).collect();
+        assert_eq!(
+            found,
+            BTreeSet::from(["item.potion.false", "item.wand.false"])
+        );
+        let remembered = crate::map_memory::appearance(&o.visible_cells[0], &[&o.ground_items[0]]);
+        let rows = [remembered];
+        assert_eq!(map_assets(&rows).collect::<BTreeSet<_>>(), found);
+        let mut palette = Palette::default();
+        palette.apply(&full(1, &[]));
+        assert!(palette.notice(map_assets(&rows)));
+        palette.apply(&full(2, &["item.potion.false", "item.wand.false"]));
+        assert!(!palette.notice(observation_assets(&o)));
     }
 }

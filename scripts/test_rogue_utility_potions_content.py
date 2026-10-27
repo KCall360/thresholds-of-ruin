@@ -21,7 +21,8 @@ class RogueUtilityPotionsContent(unittest.TestCase):
             "consumable": {"discovery": "on_use", "effects": [
                 {"kind": "heal_per_hit_die", "sides": 8, "bonus": 0,
                  "overflow": "improve_earliest_hit_dice_by_excess"},
-                {"kind": "remove_condition", "condition": "rogue.blindness"}]}})
+                {"kind": "remove_condition", "condition": "rogue.blindness"},
+                {"kind": "remove_condition", "condition": "rogue.hallucinating"}]}})
 
     def test_poison_uses_only_rolled_restorable_strength_loss_and_on_use_discovery(self):
         items = source("catalog/items.toml")["items"]
@@ -57,7 +58,7 @@ class RogueUtilityPotionsContent(unittest.TestCase):
         potion_ids = {key for key, item in catalog["items"].items()
                       if item.get("appearance_pool") == "rogue.potions"}
         self.assertEqual(potion_ids, {"rogue.restore_strength", "rogue.healing", "rogue.confusion",
-                                     "rogue.blindness", "rogue.poison", "rogue.see_invisible", "rogue.extra_healing", "rogue.levitation"})
+                                     "rogue.blindness", "rogue.poison", "rogue.see_invisible", "rogue.extra_healing", "rogue.levitation", "rogue.haste", "rogue.gain_strength", "rogue.raise_level", "rogue.hallucination", "rogue.monster_detection", "rogue.magic_detection"})
         appearances = catalog["appearance_pools"]["rogue.potions"]["appearances"]
         self.assertEqual(len(appearances), len(set(appearances)))
         self.assertEqual(len(appearances), len(potion_ids))
@@ -81,7 +82,8 @@ class RogueUtilityPotionsContent(unittest.TestCase):
         data = fixture()
         manifest = data["manifest"]
         self.assertEqual(data["rules"], (PACKAGE / "rules.toml").read_text(encoding="utf-8"))
-        self.assertEqual(manifest["creatures"], source("catalog/creatures.toml")["creatures"])
+        self.assertEqual(manifest["creatures"], {**source("catalog/creatures.toml")["creatures"],
+                         **source("catalog/bodies.toml")["creatures"]})
         for identity, item in source("catalog/items.toml")["items"].items():
             self.assertEqual(manifest["archetypes"][identity], item)
         phantom = source("catalog/actors.toml")["actors"]["rogue.phantom"]

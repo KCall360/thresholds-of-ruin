@@ -30,6 +30,152 @@ pub(crate) fn encode_region(
 ) -> Result<Vec<u8>, Failure> {
     region_frame(id, record)
 }
+#[cfg(test)]
+thread_local! {
+    static HISTORY_ADMISSION_TEST_LIMIT: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+    static HISTORY_ADMISSION_TEST_SIZE: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+}
+/// Test-only scoped fault on the actual checkpoint encoder, not an alternate
+/// storage path. Thread affinity and Drop preserve nested/parallel test isolation.
+#[cfg(test)]
+pub(crate) struct HistoryAdmissionTestLimit {
+    previous: Option<usize>,
+    previous_size: Option<usize>,
+    _thread: std::marker::PhantomData<std::rc::Rc<()>>,
+}
+#[cfg(test)]
+impl HistoryAdmissionTestLimit {
+    pub(crate) fn new(limit: usize) -> Self {
+        Self {
+            previous: HISTORY_ADMISSION_TEST_LIMIT.with(|value| value.replace(Some(limit))),
+            previous_size: HISTORY_ADMISSION_TEST_SIZE.with(|value| value.replace(None)),
+            _thread: std::marker::PhantomData,
+        }
+    }
+    pub(crate) fn required_bytes(&self) -> Option<usize> {
+        HISTORY_ADMISSION_TEST_SIZE.with(std::cell::Cell::get)
+    }
+}
+#[cfg(test)]
+impl Drop for HistoryAdmissionTestLimit {
+    fn drop(&mut self) {
+        HISTORY_ADMISSION_TEST_LIMIT.with(|value| value.set(self.previous));
+        HISTORY_ADMISSION_TEST_SIZE.with(|value| value.set(self.previous_size));
+    }
+}
+/// Measures both sides of the exact raw+compressed encoder ceiling without
+/// retaining a second payload. The encoder's last write is its raw-size trailer.
+#[cfg(test)]
+#[derive(Default)]
+struct HistoryAdmissionCounter {
+    bytes: usize,
+    trailer: [u8; 4],
+}
+#[cfg(test)]
+impl std::io::Write for HistoryAdmissionCounter {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.bytes = self
+            .bytes
+            .checked_add(bytes.len())
+            .ok_or_else(|| std::io::Error::other("test size overflow"))?;
+        if bytes.len() >= 4 {
+            self.trailer.copy_from_slice(&bytes[bytes.len() - 4..]);
+        }
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+fn admit_history_checkpoint(checkpoint: &DiskCheckpoint) -> Result<(), Failure> {
+    #[cfg(test)]
+    if let Some(limit) = HISTORY_ADMISSION_TEST_LIMIT.with(std::cell::Cell::get) {
+        let size = checkpoint_codec::write_json(checkpoint, HistoryAdmissionCounter::default())
+            .map_err(|_| storage_failure())?;
+        let required = size.bytes.max(u32::from_le_bytes(size.trailer) as usize);
+        HISTORY_ADMISSION_TEST_SIZE.with(|value| value.set(Some(required)));
+        return checkpoint_codec::write_json_with_test_limit(checkpoint, std::io::sink(), limit)
+            .map(|_| ())
+            .map_err(|_| storage_failure());
+    }
+    checkpoint_codec::write_json(checkpoint, std::io::sink())
+        .map(|_| ())
+        .map_err(|_| storage_failure())
+}
+#[cfg(test)]
+thread_local! {
+    static REGION_ADMISSION_TEST_LIMIT: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+    static REGION_ADMISSION_TEST_MEASUREMENTS: std::cell::Cell<(usize,usize)> = const { std::cell::Cell::new((0,0)) };
+}
+#[cfg(test)]
+pub(crate) struct RegionAdmissionTestLimit {
+    previous: Option<usize>,
+    measurements: (usize, usize),
+    _thread: std::marker::PhantomData<std::rc::Rc<()>>,
+}
+#[cfg(test)]
+impl RegionAdmissionTestLimit {
+    pub(crate) fn new(limit: usize) -> Self {
+        Self {
+            previous: REGION_ADMISSION_TEST_LIMIT.with(|v| v.replace(Some(limit))),
+            measurements: REGION_ADMISSION_TEST_MEASUREMENTS.with(|v| v.replace((0, 0))),
+            _thread: std::marker::PhantomData,
+        }
+    }
+    pub(crate) fn measurements(&self) -> (usize, usize) {
+        REGION_ADMISSION_TEST_MEASUREMENTS.with(std::cell::Cell::get)
+    }
+}
+#[cfg(test)]
+impl Drop for RegionAdmissionTestLimit {
+    fn drop(&mut self) {
+        REGION_ADMISSION_TEST_LIMIT.with(|v| v.set(self.previous));
+        REGION_ADMISSION_TEST_MEASUREMENTS.with(|v| v.set(self.measurements));
+    }
+}
+/// Actual detached-row JSON ceiling, without allocating a payload copy.
+fn admit_region_record(record: &tor_simulation::RegionRecord) -> Result<(), Failure> {
+    struct Counter {
+        bytes: usize,
+        limit: usize,
+    }
+    impl std::io::Write for Counter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            if bytes.len() > self.limit.saturating_sub(self.bytes) {
+                return Err(std::io::Error::other("region record exceeds capacity"));
+            }
+            self.bytes += bytes.len();
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    #[cfg(test)]
+    if let Some(limit) = REGION_ADMISSION_TEST_LIMIT.with(std::cell::Cell::get) {
+        let mut measured = Counter {
+            bytes: 0,
+            limit: codec::MAX_REGION,
+        };
+        serde_json::to_writer(&mut measured, record).map_err(|_| storage_failure())?;
+        REGION_ADMISSION_TEST_MEASUREMENTS.with(|v| {
+            let (count, max) = v.get();
+            v.set((count + 1, max.max(measured.bytes)));
+        });
+        return serde_json::to_writer(&mut Counter { bytes: 0, limit }, record)
+            .map_err(|_| storage_failure());
+    }
+    serde_json::to_writer(
+        &mut Counter {
+            bytes: 0,
+            limit: codec::MAX_REGION,
+        },
+        record,
+    )
+    .map_err(|_| storage_failure())
+}
+
 pub use codec::MAX_PAYLOAD;
 use codec::{crc32c, decode, decode_region, strict};
 
@@ -246,6 +392,19 @@ fn read_region_row(
         .map(|bytes| decode_region(&bytes, id.0, content))
         .transpose()
 }
+/// Test witness for the exact current detached record; uses the production
+/// bounded framing/CRC/schema/content decoder, never an alternate JSON reader.
+#[cfg(test)]
+pub(crate) fn test_read_region_record(
+    path: &Path,
+    id: tor_simulation::RecordId,
+    content: Arc<tor_simulation::creatures::Content>,
+) -> Result<Option<tor_simulation::RegionRecord>, Failure> {
+    let conn = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(saved_row_failure)?;
+    read_region_row(&conn, id, content)
+}
+
 /// Authority for admitted authored inputs, shared without retaining the writer
 /// or its checkpoints. Pending bytes are the same Arcs charged to queue capacity
 /// and survive worker batch draining. A failed write leaves accepted live inputs
@@ -986,13 +1145,14 @@ impl Store {
             tor_simulation::RecordId,
             tor_world::Shared<tor_simulation::RegionRecord>,
         )],
+        admit_checkpoint: bool,
         capture: impl FnOnce() -> Checkpoint,
     ) -> Result<usize, Failure> {
         let rows = made
             .iter()
             .map(|(id, record)| Ok((id.0, region_frame(id.0, record)?)))
             .collect::<Result<Vec<_>, Failure>>()?;
-        self.push(1, record, sources, rows, Some(capture))
+        self.push_with_history_admission(1, record, sources, rows, Some(capture), admit_checkpoint)
     }
     fn push<T: Serialize>(
         &self,
@@ -1001,6 +1161,17 @@ impl Store {
         sources: Vec<(u64, Arc<str>)>,
         regions: Vec<(u64, Vec<u8>)>,
         capture: Option<impl FnOnce() -> Checkpoint>,
+    ) -> Result<usize, Failure> {
+        self.push_with_history_admission(kind, record, sources, regions, capture, false)
+    }
+    fn push_with_history_admission<T: Serialize>(
+        &self,
+        kind: u16,
+        record: &T,
+        sources: Vec<(u64, Arc<str>)>,
+        regions: Vec<(u64, Vec<u8>)>,
+        capture: Option<impl FnOnce() -> Checkpoint>,
+        admit_checkpoint: bool,
     ) -> Result<usize, Failure> {
         let _admission = self.0.admission.lock().unwrap();
         let shared = &self.0.shared;
@@ -1050,11 +1221,23 @@ impl Store {
             bytes.len(),
             copied,
         )?;
-        let checkpoint = if needs_checkpoint {
+        let checkpoint = if needs_checkpoint || admit_checkpoint {
             capture.map(|capture| capture())
         } else {
             None
         };
+        if admit_checkpoint {
+            let checkpoint = checkpoint.as_ref().ok_or_else(storage_failure)?;
+            // Same exact raw+compressed storage envelope, under the producer
+            // gate with the actual sequence, before acceptance/publication.
+            admit_history_checkpoint(&checkpoint.encode(&self.0.save_id, sequence))?;
+            for record in checkpoint.records.values() {
+                admit_region_record(record)?;
+            }
+        }
+        // Admission between scheduled checkpoints must not change checkpoint
+        // cadence or enqueue an additional periodic checkpoint.
+        let checkpoint = if needs_checkpoint { checkpoint } else { None };
         let mut s = shared.state.lock().unwrap();
         // A worker failure or shutdown during preparation must reject without
         // publishing the prepared record or checkpoint.
@@ -2635,5 +2818,79 @@ mod tests {
             assert_eq!(records, i64::from(committed), "{stage}");
             assert_eq!(sources.len(), usize::from(committed), "{stage}");
         }
+    }
+}
+
+#[cfg(test)]
+mod historical_admission_guard_tests {
+    use super::*;
+    use crate::engine::{Engine, Scenario};
+    #[test]
+    fn no_history_change_does_not_capture_or_encode_between_checkpoint_intervals() {
+        let directory = tempfile::tempdir().unwrap();
+        let engine = Engine::open_with_policy(
+            directory.path().join("no-history.db"),
+            Scenario::two_room(42),
+            SavePolicy {
+                checkpoint_interval: 0,
+                ..SavePolicy::default()
+            },
+        )
+        .unwrap();
+        let store = engine.flush_handle().unwrap();
+        HISTORY_ADMISSION_TEST_LIMIT.with(|limit| limit.set(Some(0)));
+        let result = store.push_with_history_admission(
+            2,
+            &(),
+            vec![],
+            vec![],
+            Some(|| -> Checkpoint { panic!("unchanged history must not capture a checkpoint") }),
+            false,
+        );
+        HISTORY_ADMISSION_TEST_LIMIT.with(|limit| limit.set(None));
+        assert!(result.is_ok());
+        store.flush().unwrap();
+    }
+    #[test]
+    fn changed_history_capacity_failure_does_not_accept_or_publish_between_intervals() {
+        let directory = tempfile::tempdir().unwrap();
+        let engine = Engine::open_with_policy(
+            directory.path().join("history-capacity.db"),
+            Scenario::two_room(42),
+            SavePolicy {
+                checkpoint_interval: 0,
+                ..SavePolicy::default()
+            },
+        )
+        .unwrap();
+        let store = engine.flush_handle().unwrap();
+        let status = store.status();
+        let before = engine.state(tor_protocol::ActorId(1)).unwrap();
+        let captures = std::cell::Cell::new(0);
+        // Deliberate test-only capacity injection through the exact production
+        // encoder path; large-lawful-envelope controls are a separate cohort.
+        HISTORY_ADMISSION_TEST_LIMIT.with(|limit| limit.set(Some(0)));
+        let result = store.push_with_history_admission(
+            2,
+            &(),
+            vec![],
+            vec![],
+            Some(|| {
+                captures.set(captures.get() + 1);
+                Checkpoint::capture(&engine)
+            }),
+            true,
+        );
+        HISTORY_ADMISSION_TEST_LIMIT.with(|limit| limit.set(None));
+        assert_eq!(
+            result.unwrap_err().code,
+            tor_protocol::ErrorCode::StorageFailure
+        );
+        assert_eq!(captures.get(), 1);
+        let after = store.status();
+        assert_eq!(after.accepted_sequence, status.accepted_sequence);
+        assert_eq!(after.pending_bytes, status.pending_bytes);
+        assert_eq!(after.checkpoint_sequence, status.checkpoint_sequence);
+        assert_eq!(engine.state(tor_protocol::ActorId(1)).unwrap(), before);
     }
 }

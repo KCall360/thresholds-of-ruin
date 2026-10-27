@@ -80,6 +80,7 @@ fn phase5_maximum_health_changes_and_rebuild_do_not_manufacture_received_loss() 
             socket: EquipmentSlotId(0),
             attack: None,
             modifiers: vec![Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Add {
                     stat: Stat::Health,
@@ -468,6 +469,7 @@ fn phase5_environmental_loss_resets_but_immunity_and_zero_loss_do_not() {
 
     let mut species = fixture::species();
     species.modifiers.push(Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Immunity {
             selector: Selector::Category {

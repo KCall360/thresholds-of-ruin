@@ -287,7 +287,7 @@ impl<'a> Scene<'a> {
         let o = &state.observation;
         let mut referents = Vec::new();
         for item in &o.inventory {
-            let mut r = thing(item, true, true, None);
+            let mut r = thing(item, None, true, true, None);
             r.equipped = equipped(o, item.id);
             referents.push(r);
         }
@@ -306,7 +306,13 @@ impl<'a> Scene<'a> {
             }
         }
         for g in ground {
-            referents.push(thing(&g.item, false, g.reachable, Some(g.position)));
+            referents.push(thing(
+                &g.item,
+                g.presentation.as_ref(),
+                false,
+                g.reachable,
+                Some(g.position),
+            ));
         }
         for figure in figures(o, palette) {
             referents.push(figure);
@@ -567,24 +573,43 @@ impl<'a> Scene<'a> {
     }
 }
 
-fn thing(item: &ItemView, carried: bool, reachable: bool, position: Option<Position>) -> Referent {
-    let name = if item.name.trim().is_empty() {
+fn thing(
+    item: &ItemView,
+    presentation: Option<&ObjectPresentation>,
+    carried: bool,
+    reachable: bool,
+    position: Option<Position>,
+) -> Referent {
+    let display_name =
+        presentation.map_or(item.name.as_str(), tor_client_common::items::object_name);
+    let name = if display_name.trim().is_empty() {
         "thing".to_owned()
     } else {
-        safe(&item.name).to_lowercase()
+        safe(display_name).to_lowercase()
     };
-    let (words, heads) = naming(&name, Kind::Thing, Some(item.class));
+    let visual_class = presentation.map_or(Some(item.class), |p| match p.kind {
+        ObjectPresentationKind::Item { class } => Some(class),
+        ObjectPresentationKind::Stairs => None,
+    });
+    let description = if presentation.is_some() {
+        ""
+    } else {
+        &item.description
+    };
+    let appearance = if presentation.is_some() {
+        ""
+    } else {
+        &item.appearance
+    };
+    let (words, heads) = naming(&name, Kind::Thing, visual_class);
     Referent {
         key: Key::Item(item.id),
         kind: Kind::Thing,
-        identity: format!(
-            "thing:{name}|{}|{}|{carried}",
-            item.description, item.appearance
-        ),
+        identity: format!("thing:{name}|{}|{}|{carried}", description, appearance),
         name,
         words,
         heads,
-        description: safe(&item.description),
+        description: safe(description),
         quantity: item.quantity,
         carried,
         reachable: carried || reachable,
@@ -739,12 +764,14 @@ fn features(view: &dyn super::scenery::ScenicView) -> Vec<Referent> {
                 Some(way.direction),
                 None,
             ),
-            Opening::Stairs => feature(
-                "stairs",
-                &["stairs", "staircase", "stair", "steps", "stairway"],
-                Some(way.direction),
-                None,
-            ),
+            Opening::Stairs => {
+                let name = way.kind_name();
+                let heads = match way.presentation.as_ref().map(|p| p.kind) {
+                    Some(ObjectPresentationKind::Item { class }) => class_heads(class),
+                    _ => &["stairs", "staircase", "stair", "steps", "stairway"],
+                };
+                feature(&name, heads, Some(way.direction), None)
+            }
             // The disclosed terminal exit gets its single referent below.
             Opening::SurfaceExit => {}
             // Doors are things of their own.

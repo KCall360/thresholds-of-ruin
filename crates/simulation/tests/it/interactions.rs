@@ -49,6 +49,7 @@ fn fixture_with_rules(
     let mut ward =
         tor_simulation::creatures::Template::new(TemplateId::new("vital_immunity").unwrap(), 0);
     ward.modifiers = vec![Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Immunity {
             selector: Selector::Category {
@@ -623,6 +624,7 @@ fn effective_equipment_changes_attack_and_typed_damage_without_mutating_base_rul
         slot: EquipmentSlot::new("body_armor").unwrap(),
         attack: None,
         modifiers: vec![Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Reduction {
                 selector: Selector::Category {
@@ -661,6 +663,7 @@ fn effective_equipment_changes_attack_and_typed_damage_without_mutating_base_rul
 
 fn defense(value: i64) -> Vec<Modifier> {
     vec![Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Add {
             stat: Stat::Defense {

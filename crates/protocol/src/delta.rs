@@ -33,6 +33,8 @@ pub struct CollectionEdit<T> {
 /// A state view expressed as cell changes and exact ordered collection edits.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StateDelta {
+    #[serde(deserialize_with = "crate::chart_pages::read_summaries")]
+    pub charts: Vec<crate::chart_pages::ChartSummary>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub self_appearance: Option<CreatureAppearance>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -158,6 +160,7 @@ impl StateDelta {
                     let (was, is) = (&old[i], &new[j]);
                     // Exhaustive so that a new cell field cannot be missed.
                     let CellView {
+                        object_presentation,
                         lit,
                         door,
                         trap,
@@ -170,7 +173,8 @@ impl StateDelta {
                         place_hint,
                         asset,
                     } = was;
-                    if *lit != is.lit
+                    if *object_presentation != is.object_presentation
+                        || *lit != is.lit
                         || *key != is.key
                         || *asset != is.asset
                         || *door != is.door
@@ -239,6 +243,7 @@ impl StateDelta {
             )?,
             ready: observation.ready,
             linked_holds: observation.linked_holds.clone(),
+            charts: observation.charts.clone(),
         })
     }
 
@@ -247,7 +252,8 @@ impl StateDelta {
         if base.revision != self.base_revision {
             return Err(DeltaError::WrongBase);
         }
-        if self.self_target != base.observation.self_target
+        if crate::chart_pages::validate_summaries(&self.charts).is_err()
+            || self.self_target != base.observation.self_target
             || self.combat.as_ref().is_some_and(|combat| {
                 !combat.valid_sequence()
                     || combat
@@ -321,6 +327,7 @@ impl StateDelta {
                 )?,
                 ready: self.ready,
                 linked_holds: self.linked_holds,
+                charts: self.charts,
             },
         })
     }

@@ -43,7 +43,7 @@ class ConsumerDependencies(unittest.TestCase):
         self.assertEqual(helper.commands(), [
             ['timeout', '--kill-after=10s', '2m', 'sudo', 'apt-get', *options,
              '-o', 'APT::Update::Error-Mode=any', 'update'],
-            ['timeout', '--kill-after=10s', '3m', 'sudo', 'apt-get', *options,
+            ['timeout', '--kill-after=10s', '10m', 'sudo', 'apt-get', *options,
              'install', '--no-install-recommends', '-y', 'pkg-config', 'libasound2-dev', 'libudev-dev'],
             ['timeout', '--kill-after=5s', '15s', 'pkg-config', '--print-errors', '--exists', 'alsa', 'libudev'],
         ])

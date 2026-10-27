@@ -191,6 +191,7 @@ fn app(model: CreatureModel) -> App {
         is_self: false,
     };
     let cell = CellView {
+        object_presentation: None,
         lit: true,
         key: "occupied".into(),
         position: actor.position,
@@ -414,6 +415,7 @@ fn remembered_terrain_builds_dim_geometry_without_decorative_lighting() {
         .solids
         .contains_key(&IVec3::new(2, 0, 2)));
     let wall = RememberedMapCell {
+        object_presentation: None,
         key: "remembered-wall".into(),
         position: Position { x: 2, y: 2, z: 0 },
         wall: true,
@@ -427,6 +429,7 @@ fn remembered_terrain_builds_dim_geometry_without_decorative_lighting() {
         ground_items: vec![],
     };
     let floor = RememberedMapCell {
+        object_presentation: None,
         key: "remembered-floor".into(),
         wall: false,
         position: Position { x: 3, y: 2, z: 0 },
@@ -443,4 +446,183 @@ fn remembered_terrain_builds_dim_geometry_without_decorative_lighting() {
         !game.chunks.is_empty(),
         "remembered terrain must create renderable chunks"
     );
+}
+
+#[test]
+fn cosmetic_item_models_never_reuse_real_corpse_rigs_or_acquire_cell_picks() {
+    use tor_protocol::ItemTarget;
+    for model in [ItemModel::Potion, ItemModel::Stairs] {
+        let mut app = app(CreatureModel::Placeholder);
+        let id = ItemTarget::from_digest([84; 32]);
+        app.world_mut()
+            .resource_mut::<Fixture>()
+            .0
+            .items
+            .push(tor_client_3d_model::GroundItem {
+                corpse_seed: None,
+                corpse_model: CreatureModel::Placeholder,
+                model,
+                id,
+                name: "sampled object".into(),
+                class: ItemClass::Corpse,
+                quantity: 1,
+                description: String::new(),
+                position: Position { x: 1, y: 0, z: 0 },
+                reachable: true,
+            });
+        app.update();
+        let game = app.world().resource::<Game>();
+        assert!(
+            game.corpses.is_empty(),
+            "real corpse class cannot override cosmetic model"
+        );
+        assert_eq!(game.items.len(), 1);
+        assert!(
+            matches!(app.world().get::<crate::picking::Pick>(game.items[0]).unwrap().0,
+            tor_client_3d_model::Focus::Item(target) if target == id)
+        );
+    }
+}
+
+#[test]
+fn unknown_stair_recipe_changes_scene_models_and_cure_restores_real_stairs() {
+    use tor_protocol::{ObjectPresentation, ObjectPresentationKind};
+    let mut app = app(CreatureModel::Placeholder);
+    let at = Position { x: 2, y: 0, z: 0 };
+    let mut stair = app.world().resource::<Fixture>().0.visible[0].clone();
+    stair.position = at;
+    stair.key = "actual-stairs".into();
+    stair.stairs_up = true;
+    app.world_mut()
+        .resource_mut::<Fixture>()
+        .0
+        .visible
+        .push(stair);
+    app.add_systems(Update, project_terrain.after(project));
+    app.update();
+    let old = app.world().resource::<Game>().cells[&ivec(at)].0;
+    assert!(matches!(
+        app.world().resource::<Game>().cells[&ivec(at)].1,
+        CellLook::StairsUp
+    ));
+    for (kind, model) in [
+        (
+            ObjectPresentationKind::Item {
+                class: ItemClass::Potion,
+            },
+            ItemModel::Potion,
+        ),
+        (ObjectPresentationKind::Stairs, ItemModel::Stairs),
+    ] {
+        {
+            let mut fixture = app.world_mut().resource_mut::<Fixture>();
+            fixture.0.visible[1].object_presentation = Some(ObjectPresentation {
+                name: "sampled appearance".into(),
+                asset: None,
+                kind,
+            });
+            fixture.0.object_models.insert(at, model);
+        }
+        app.update();
+        let game = app.world().resource::<Game>();
+        let (entity, look) = game.cells[&ivec(at)];
+        assert!(matches!(look, CellLook::Object(selected) if selected == model));
+        assert!(!app.world().entities().contains(old));
+        assert!(
+            matches!(app.world().get::<crate::picking::Pick>(entity).unwrap().0,
+            tor_client_3d_model::Focus::Cell(position) if position == at)
+        );
+        let source = &app.world().resource::<Fixture>().0.visible[1];
+        assert!(source.stairs_up && !source.stairs_down && !source.wall);
+    }
+    {
+        let mut fixture = app.world_mut().resource_mut::<Fixture>();
+        fixture.0.visible[1].object_presentation = None;
+        fixture.0.object_models.remove(&at);
+    }
+    app.update();
+    assert!(matches!(
+        app.world().resource::<Game>().cells[&ivec(at)].1,
+        CellLook::StairsUp
+    ));
+}
+
+#[test]
+fn ordinary_corpse_rig_and_real_pick_return_after_a_cosmetic_item_is_cured() {
+    use tor_protocol::{AppearanceSeed, ItemTarget};
+    let mut app = app(CreatureModel::Placeholder);
+    let id = ItemTarget::from_digest([93; 32]);
+    let seed = AppearanceSeed::from_digest([94; 32]);
+    let corpse = tor_client_3d_model::GroundItem {
+        corpse_seed: Some(seed),
+        corpse_model: CreatureModel::Equine,
+        model: ItemModel::Corpse,
+        id,
+        name: "authored remains".into(),
+        class: ItemClass::Corpse,
+        quantity: 1,
+        description: String::new(),
+        position: Position { x: 1, y: 0, z: 0 },
+        reachable: true,
+    };
+    {
+        let mut fixture = app.world_mut().resource_mut::<Fixture>();
+        fixture.0.actors.clear();
+        fixture.0.items = vec![corpse.clone()];
+    }
+    app.update();
+    let initial = app.world().resource::<Game>().corpses[&id].entity;
+    for step in 0..3 {
+        if step == 1 {
+            let mut fixture = app.world_mut().resource_mut::<Fixture>();
+            fixture.0.items[0].model = ItemModel::Potion;
+            fixture.0.items[0].corpse_model = CreatureModel::Placeholder;
+            fixture.0.items[0].corpse_seed = None;
+        } else if step == 2 {
+            app.world_mut().resource_mut::<Fixture>().0.items[0] = corpse.clone();
+        }
+        app.update();
+        let game = app.world().resource::<Game>();
+        let entity = if step == 1 {
+            assert!(game.corpses.is_empty());
+            assert!(!app.world().entities().contains(initial));
+            assert_eq!(game.items.len(), 1);
+            game.items[0]
+        } else {
+            assert!(
+                game.items.is_empty(),
+                "ordinary corpse uses a rig, not a generic prop"
+            );
+            let body = &game.corpses[&id];
+            assert_eq!(body.model, CreatureModel::Equine);
+            assert_eq!(body.appearance_seed, Some(seed));
+            let rig = app.world().get::<creatures::Rig>(body.entity).unwrap();
+            assert_eq!(rig.plan, creatures::Plan::Quadruped);
+            // Equine's head is articulated at Snout, unlike the Head joint in
+            // the humanoid corpse fixture above. Check its actual body plan.
+            for joint in [
+                J::Body,
+                J::Neck,
+                J::Snout,
+                J::HoofFL,
+                J::HoofFR,
+                J::HoofBL,
+                J::HoofBR,
+            ] {
+                assert!(
+                    rig.joint(joint)
+                        .is_some_and(|entity| app.world().entities().contains(entity)),
+                    "equine corpse must retain its live {joint:?} articulation"
+                );
+            }
+            if step == 0 {
+                assert_eq!(body.entity, initial, "unchanged corpse retains its rig");
+            }
+            body.entity
+        };
+        assert!(
+            matches!(app.world().get::<crate::picking::Pick>(entity).unwrap().0,
+            tor_client_3d_model::Focus::Item(target) if target == id)
+        );
+    }
 }

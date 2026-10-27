@@ -2,6 +2,8 @@
 import copy
 from pathlib import Path
 import tempfile
+import subprocess
+import tomllib
 from types import SimpleNamespace
 import unittest
 from unittest import mock
@@ -10,6 +12,54 @@ from rogue_roster_package import SPECIES, encounter, encounter_sources, unrelate
 
 
 class RogueRosterPackageTests(unittest.TestCase):
+    def test_inline_fixture_catalogs_keep_canonical_body_closure_and_rebind_cloned_species(self):
+        from utility_potions_package import fixture as potions
+        from utility_wands_package import fixture as wands
+        from hallucination_package import fixture as hallucination
+        from discovery_package import observer_fixture as observers
+        from detection_process_package import fixture as detection
+        source = encounter_sources()
+        canonical = source["body_packages"]
+        human = canonical["rogue.body.human"]
+        for make in (potions, wands, hallucination, observers, detection):
+            with self.subTest(fixture=make.__module__):
+                data = make()
+                manifest = data["manifest"]
+                bodies = manifest["creatures"]["body_packages"]
+                self.assertEqual({key: bodies[key] for key in canonical}, canonical)
+                owners = [row["creature"] for row in manifest["characters"]]
+                owners.extend(row["creature"] for region in data["regions"]
+                              for row in region.get("actors", []) if "creature" in row)
+                for owner in owners:
+                    body = bodies[owner["body_package"]]
+                    self.assertEqual(body, {**human, "species": owner["species"]})
+                    self.assertEqual(owner["hit_dice"], source["manifest"]["characters"][0]["creature"]["hit_dice"])
+                    self.assertFalse(body["polymorph_eligible"], "synthetic species is not an added form destination")
+                for actor in source["actors"].values():
+                    reference = actor.get("creature", {}).get("body_package")
+                    if reference is not None:
+                        self.assertEqual(bodies[reference], canonical[reference])
+
+    def test_nothing_import_carries_definition_closure_without_enrolling_synthetic_actor(self):
+        from nothing_catalog_package import prepare, PRODUCTION
+        import shutil
+        with tempfile.TemporaryDirectory() as directory:
+            package = Path(directory) / "magic-items"
+            shutil.copytree(ROOT / "scenarios/tests/magic-items", package)
+            initial = tomllib.loads((package / "scenario.toml").read_text())
+            self.bin, self.suffix = Path(directory), ""
+            with mock.patch.object(self, "package", return_value=package, create=True), \
+                    mock.patch("nothing_catalog_package.subprocess.run", return_value=subprocess.CompletedProcess([], 0, "", "")), \
+                    mock.patch("nothing_catalog_package.load_rules", return_value={"constants": {"item_timing": {"consume_turns": 1}}}):
+                self.assertEqual(prepare(self), package)
+            actual = tomllib.loads((package / "scenario.toml").read_text())
+            self.assertEqual(actual["characters"][0]["creature"], initial["characters"][0]["creature"])
+            self.assertNotIn("body_package", actual["characters"][0]["creature"])
+            self.assertEqual(actual["creatures"], initial["creatures"])
+            self.assertEqual(actual["modules"], ["catalog/items.toml", "catalog/creatures.toml", "catalog/bodies.toml"])
+            for relative in (*actual["modules"], "rules.toml"):
+                self.assertEqual((package / relative).read_bytes(), (PRODUCTION / relative).read_bytes())
+
     def test_production_retrieval_uses_one_selected_player_bound_ordinary_amulet(self):
         source = encounter_sources()
         policy = source['manifest'].get('unique_retrieval')
@@ -82,7 +132,9 @@ class RogueRosterPackageTests(unittest.TestCase):
         first, _ = encounter("ice_monster")
         first["characters"][0]["creature"]["hit_dice"].clear()
         second, region = encounter("ice_monster", autonomous=True)
-        self.assertEqual(len(second["characters"][0]["creature"]["hit_dice"]), 1)
+        self.assertEqual(second["characters"][0]["creature"]["body_package"], "rogue.body.human")
+        self.assertEqual(second["characters"][0]["creature"]["hit_dice"], [
+            {"source": "racial", "purchases": []}, {"source": "warrior", "purchases": []}])
         self.assertEqual(region["actors"][0]["ai"], "rogue_hostile")
         for species, character in (("dragon", 1), ("emu", True), ("emu", 3)):
             with self.assertRaises(ValueError):

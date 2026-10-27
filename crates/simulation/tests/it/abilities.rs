@@ -25,6 +25,7 @@ fn tid(value: &str) -> TemplateId {
 }
 fn add(ability: &str, stat: AbilityStat, value: i64) -> Modifier {
     Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Add {
             stat: Stat::Ability {
@@ -46,6 +47,7 @@ pub(super) fn content() -> Arc<Content> {
     ]
     .into_iter()
     .map(|name| Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::GrantAbility { ability: id(name) },
     })
@@ -62,6 +64,7 @@ pub(super) fn content() -> Arc<Content> {
     zombie.adjustments.speed = -1;
     zombie.overrides.intellect = Some(0);
     zombie.modifiers.push(Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Flag {
             flag: FlagId::new("mindless").unwrap(),
@@ -69,6 +72,7 @@ pub(super) fn content() -> Arc<Content> {
     });
     let mut ward = Template::new(tid("fearward"), 10);
     ward.modifiers.push(Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Immunity {
             selector: Selector::Descriptor {
@@ -78,6 +82,7 @@ pub(super) fn content() -> Arc<Content> {
     });
     let mut fireward = Template::new(tid("fireward"), 0);
     fireward.modifiers.push(Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Immunity {
             selector: Selector::Descriptor {
@@ -87,6 +92,7 @@ pub(super) fn content() -> Arc<Content> {
     });
     let mut mindward = Template::new(tid("mindward"), 0);
     mindward.modifiers.push(Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Immunity {
             selector: Selector::Descriptor {
@@ -356,6 +362,7 @@ fn outgoing_edge_policy_uses_the_existing_check_kernel_and_never_refunds_accurac
                 (Stat::IncomingEdge { defense: None }, -1),
             ] {
                 species.modifiers.push(Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Add { stat, value },
                 });
@@ -620,6 +627,7 @@ fn effect_duration_boundary_includes_base_and_cannot_create_an_invalid_plan() {
         duration.modifiers = vec![
             add("fixture_focus_fear", AbilityStat::Duration, bonus),
             Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::GrantAbility {
                     ability: id("fixture_focus_fear"),

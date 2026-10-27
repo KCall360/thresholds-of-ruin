@@ -82,6 +82,7 @@ fn own_body_and_corpses_use_disclosed_appearance_without_parsing_names() {
     observed.self_appearance = Some(appearance.clone());
     observed.ground_items.clear();
     observed.ground_items.push(GroundItemView {
+        presentation: None,
         item: ItemView {
             corpse: Some(appearance.clone()),
             class: ItemClass::Corpse,
@@ -155,6 +156,7 @@ fn hydrated_terrain_is_dim_and_never_grants_live_occupants_or_door_controls() {
     let query = client.next_map_query().unwrap();
     client.bind_map_query(&query, "map").unwrap();
     let remembered = RememberedMapCell {
+        object_presentation: None,
         key: "remembered-only".into(),
         position: Position { x: 12, y: 4, z: 0 },
         wall: false,
@@ -218,6 +220,7 @@ fn hydrated_terrain_is_dim_and_never_grants_live_occupants_or_door_controls() {
 fn visible_terrain_uses_explicit_illumination_instead_of_visibility() {
     let mut observed = observation();
     let dark = tor_protocol::CellView {
+        object_presentation: None,
         lit: false,
         key: "dark".into(),
         position: observed.position,
@@ -231,6 +234,7 @@ fn visible_terrain_uses_explicit_illumination_instead_of_visibility() {
         door: None,
     };
     let bright = tor_protocol::CellView {
+        object_presentation: None,
         lit: true,
         key: "bright".into(),
         position: tor_protocol::Position {
@@ -244,4 +248,345 @@ fn visible_terrain_uses_explicit_illumination_instead_of_visibility() {
     let cells: Vec<_> = projected.terrain().collect();
     assert!(cells[0].seen && !cells[0].lit);
     assert!(cells[1].seen && cells[1].lit);
+}
+
+#[test]
+fn portable_light_projection_and_real_commands_follow_disclosed_eligibility() {
+    use tor_client_3d_model::{request_from, Cmd};
+    use tor_client_common::items::ItemOperation;
+    use tor_protocol::{Action, Command, Request};
+    for lit in [false, true] {
+        let observed = tor_client_common::test_support::portable_light_observation(lit);
+        let item = observed.inventory[0].id;
+        let mut snapshot = from_observation(observed).snapshot();
+        snapshot.readiness.admission = true;
+        let state = ClientState::from_snapshot(snapshot).unwrap();
+        let projected = view(&state, &Palette::default());
+        let light = projected.inventory[0].portable_light.as_ref().unwrap();
+        assert_eq!(
+            (light.lit, light.ignitable, light.extinguishable),
+            (lit, !lit, lit)
+        );
+        assert_eq!(light.remaining, 100_000);
+        let operation = if lit {
+            ItemOperation::Extinguish
+        } else {
+            ItemOperation::Ignite
+        };
+        let request = request_from(&state, &projected.shown, Cmd::Use(item, operation)).unwrap();
+        let Request::Command {
+            command: Command::Act { action, .. },
+            ..
+        } = request
+        else {
+            panic!("ordinary action")
+        };
+        assert_eq!(
+            action,
+            if lit {
+                Action::Extinguish { item }
+            } else {
+                Action::Ignite { item }
+            }
+        );
+        let wrong = if lit {
+            ItemOperation::Ignite
+        } else {
+            ItemOperation::Extinguish
+        };
+        assert!(request_from(&state, &projected.shown, Cmd::Use(item, wrong)).is_err());
+    }
+}
+
+#[test]
+fn false_corpse_and_stair_models_keep_real_handles_and_item_mechanics() {
+    use tor_protocol::{
+        AppearanceSeed, CreatureAppearance, GroundItemView, ObjectPresentation,
+        ObjectPresentationKind, Position,
+    };
+    let mut o = observation();
+    o.visible_actors.clear();
+    let real = ItemView {
+        corpse: Some(CreatureAppearance {
+            seed: AppearanceSeed::from_digest([28; 32]),
+            asset: Some("creature.equine".into()),
+        }),
+        id: ItemTarget::from_digest([29; 32]),
+        name: "true corpse".into(),
+        description: "true creature".into(),
+        class: ItemClass::Corpse,
+        quantity: 1,
+        appearance: "true corpse".into(),
+        identified: true,
+        asset: Some("item.corpse".into()),
+        known_currency: None,
+        known_supply: None,
+    };
+    let mut sanitized = real.clone();
+    sanitized.corpse = None;
+    sanitized.name = "object".into();
+    sanitized.appearance = "object".into();
+    sanitized.description.clear();
+    sanitized.asset = None;
+    o.ground_items.push(GroundItemView {
+        presentation: Some(ObjectPresentation {
+            name: "silver flask".into(),
+            asset: None,
+            kind: ObjectPresentationKind::Item {
+                class: ItemClass::Potion,
+            },
+        }),
+        item: sanitized,
+        position: Position { x: 0, y: 0, z: 0 },
+        reachable: true,
+        supply_reachable: false,
+    });
+    o.inventory.push(ItemView {
+        id: ItemTarget::from_digest([30; 32]),
+        ..real.clone()
+    });
+    let projected = view(&from_observation(o.clone()), &Palette::default());
+    let false_item = &projected.items[0];
+    assert_eq!(false_item.model, ItemModel::Potion);
+    assert_eq!(false_item.name, "silver flask");
+    assert_eq!(false_item.corpse_seed, None);
+    assert_eq!(false_item.corpse_model, CreatureModel::Placeholder);
+    assert!(false_item.description.is_empty());
+    assert_eq!(false_item.id, real.id);
+    assert_eq!(false_item.class, ItemClass::Corpse);
+    assert_eq!(projected.inventory[0].model, ItemModel::Corpse);
+    assert_eq!(projected.inventory[0].name, "true corpse");
+    o.ground_items[0].presentation.as_mut().unwrap().kind = ObjectPresentationKind::Stairs;
+    o.ground_items[0].presentation.as_mut().unwrap().name = "stairs".into();
+    let projected = view(&from_observation(o), &Palette::default());
+    assert_eq!(projected.items[0].model, ItemModel::Stairs);
+    assert!(
+        matches!(tor_client_3d_model::describe_focus(&projected, tor_client_3d_model::Focus::Item(real.id)).2,
+        Some(tor_client_3d_model::Intent::Take(id)) if id == real.id)
+    );
+    assert!(!projected
+        .terrain()
+        .any(|cell| cell.stairs_up || cell.stairs_down));
+}
+
+#[test]
+fn actual_stair_cosmetic_models_use_the_palette_and_cure_to_factual_art() {
+    use tor_protocol::{
+        CellView, ObjectPresentation, ObjectPresentationKind, PaletteBody, PaletteUpdate, Position,
+    };
+    let at = Position { x: 1, y: 0, z: 0 };
+    let mut o = observation();
+    o.visible_actors.clear();
+    o.visible_cells.push(CellView {
+        object_presentation: Some(ObjectPresentation {
+            name: "silver flask".into(),
+            asset: Some("item.wand.authored".into()),
+            kind: ObjectPresentationKind::Item {
+                class: ItemClass::Potion,
+            },
+        }),
+        lit: true,
+        door: None,
+        trap: None,
+        material: String::new(),
+        key: "real-stairs".into(),
+        stairs_up: true,
+        stairs_down: false,
+        position: at,
+        wall: false,
+        place_hint: false,
+        asset: None,
+    });
+    let mut palette = Palette::default();
+    let state = from_observation(o.clone());
+    let fallback = view(&state, &palette);
+    assert_eq!(fallback.object_models[&at], ItemModel::Potion);
+    palette.apply(&PaletteUpdate {
+        revision: 1,
+        body: PaletteBody::Full {
+            assets: ["item.wand.authored".into()].into(),
+        },
+    });
+    let projected = view(&state, &palette);
+    assert_eq!(projected.object_models[&at], ItemModel::Wand);
+    let terrain = projected
+        .terrain()
+        .find(|cell| cell.position == at)
+        .unwrap();
+    assert_eq!(terrain.object_model, Some(ItemModel::Wand));
+    assert!(terrain.stairs_up && !terrain.stairs_down);
+    assert_eq!(terrain.object_presentation.unwrap().name, "silver flask");
+    o.visible_cells[0].object_presentation = None;
+    let cured = view(&from_observation(o), &palette);
+    assert!(cured.object_models.is_empty());
+    let terrain = cured.terrain().find(|cell| cell.position == at).unwrap();
+    assert_eq!(terrain.object_model, None);
+    assert!(terrain.stairs_up && !terrain.stairs_down);
+}
+
+#[test]
+fn hydrated_stair_art_repairs_with_palette_then_current_none_overrides_only_that_cell() {
+    use tor_protocol::*;
+    let current_at = Position { x: 12, y: 4, z: 0 };
+    let retained_at = Position { x: 14, y: 4, z: 0 };
+    let mut observed = observation();
+    observed.visible_actors.clear();
+    observed.ground_items.clear();
+    // Three fixed, non-collinear disclosed anchors certify the unchanged frame
+    // across the later observation delta; retained placement is not guessed.
+    observed.visible_cells = [
+        Position { x: 0, y: 0, z: 0 },
+        Position { x: 0, y: 1, z: 0 },
+        Position { x: 1, y: 0, z: 0 },
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(index, position)| CellView {
+        object_presentation: None,
+        key: format!("anchor-{index}"),
+        position,
+        lit: true,
+        wall: false,
+        material: "stone".into(),
+        asset: None,
+        place_hint: false,
+        stairs_up: false,
+        stairs_down: false,
+        trap: None,
+        door: None,
+    })
+    .collect();
+    observed.visible_cells.sort_by_key(|cell| cell.position);
+    let mut client = from_observation(observed);
+    let query = client.next_map_query().unwrap();
+    client.bind_map_query(&query, "historical-stairs").unwrap();
+    let sample = ObjectPresentation {
+        name: "silver flask".into(),
+        asset: Some("item.wand.authored".into()),
+        kind: ObjectPresentationKind::Item {
+            class: ItemClass::Potion,
+        },
+    };
+    let cells: Vec<_> = [
+        ("current-stair", current_at),
+        ("retained-stair", retained_at),
+    ]
+    .into_iter()
+    .map(|(key, position)| RememberedMapCell {
+        object_presentation: Some(sample.clone()),
+        key: key.into(),
+        position,
+        wall: false,
+        material: "stone".into(),
+        asset: None,
+        place_hint: false,
+        stairs_up: true,
+        stairs_down: false,
+        trap: None,
+        door: None,
+        ground_items: vec![],
+    })
+    .collect();
+    let page = MapPage {
+        transfer: "historical-stair-transfer".into(),
+        actor: client.snapshot().actor,
+        branch: client.branch().clone(),
+        base: client.observation_base(),
+        window: query.window,
+        start: 0,
+        page: 0,
+        total_cells: 2,
+        complete: true,
+        ambiguous: false,
+        limited: false,
+        cells: cells.clone(),
+        next: None,
+    };
+    client
+        .accept_map_page(&client.reply_context(), "historical-stairs", &page, 2048)
+        .unwrap();
+    let mut palette = Palette::default();
+    let before = view(&client, &palette);
+    assert_eq!(before.memory, cells);
+    assert!(
+        before.items.is_empty(),
+        "remembered art never creates targetable items"
+    );
+    for at in [current_at, retained_at] {
+        let cell = before.terrain().find(|c| c.position == at).unwrap();
+        assert!(!cell.seen && !cell.lit && cell.stairs_up && !cell.stairs_down);
+        assert_eq!(cell.object_model, Some(ItemModel::Potion));
+    }
+    // The immutable stored sample stays the same; only resolving its selected
+    // asset changes. No current observation supplies this retained artwork.
+    palette.apply(&PaletteUpdate {
+        revision: 1,
+        body: PaletteBody::Full {
+            assets: ["item.wand.authored".into()].into(),
+        },
+    });
+    let repaired = view(&client, &palette);
+    assert_eq!(repaired.memory, before.memory);
+    assert_eq!(repaired.shown, before.shown);
+    for at in [current_at, retained_at] {
+        assert_eq!(repaired.object_models[&at], ItemModel::Wand);
+    }
+    let mut next = client.state().clone();
+    next.revision += 1;
+    next.observation.visible_cells.push(CellView {
+        object_presentation: None,
+        key: "current-stair".into(),
+        position: current_at,
+        lit: true,
+        wall: false,
+        material: "stone".into(),
+        asset: None,
+        place_hint: false,
+        stairs_up: true,
+        stairs_down: false,
+        trap: None,
+        door: None,
+    });
+    let delta = StateDelta::between(client.state(), &next).unwrap();
+    client
+        .apply(StreamUpdate {
+            context: client.context().clone(),
+            actor: next.observation.actor,
+            branch: client.branch().clone(),
+            cursor: StreamCursor {
+                sequence: client.cursor().sequence + 1,
+                tick: next.observation.tick,
+            },
+            body: UpdateBody::ObservationDelta {
+                base: client.observation_base(),
+                state: Box::new(delta),
+                event: None,
+            },
+        })
+        .unwrap();
+    let current = view(&client, &palette);
+    let seen = current
+        .terrain()
+        .find(|c| c.position == current_at)
+        .unwrap();
+    assert!(seen.seen && seen.lit && seen.stairs_up && !seen.stairs_down);
+    assert_eq!(seen.object_presentation, None);
+    assert_eq!(
+        seen.object_model, None,
+        "current factual None must not fall back to old art"
+    );
+    assert!(!current.object_models.contains_key(&current_at));
+    assert_eq!(
+        current.memory,
+        vec![cells[1].clone()],
+        "unseen art survives another cell's cure"
+    );
+    let retained = current
+        .terrain()
+        .find(|c| c.position == retained_at)
+        .unwrap();
+    assert!(!retained.seen && !retained.lit);
+    assert_eq!(retained.object_presentation, Some(&sample));
+    assert_eq!(retained.object_model, Some(ItemModel::Wand));
+    assert!(current.items.is_empty());
 }

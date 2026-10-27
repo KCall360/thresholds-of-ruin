@@ -1190,6 +1190,7 @@ mod operand_tests {
                 condition.lifecycle = crate::rules::ConditionLifecycle::Timed;
                 condition.source_scoped = true;
                 condition.modifiers = vec![crate::rules::Modifier {
+                    cancellable: false,
                     scope: crate::rules::Scope::VersusSource,
                     op: crate::rules::ModifierOp::Add {
                         stat: crate::rules::Stat::CheckEdge,

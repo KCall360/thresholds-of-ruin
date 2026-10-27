@@ -96,6 +96,7 @@ mod tests {
 
     fn cell(x: i32, y: i32, z: i32, wall: bool, material: &str) -> CellView {
         CellView {
+            object_presentation: None,
             lit: true,
             asset: None,
             trap: None,

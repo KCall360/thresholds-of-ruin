@@ -365,6 +365,7 @@ fn non_hostile_rejects_direct_harm_in_primary_failure_rider_and_flag_condition()
             "on_success" => strikes[0].on_success = damage,
             "on_failure" => strikes[0].on_failure = damage,
             "rider" => strikes[0].riders.push(crate::rules::RiderDef {
+                cancellable: false,
                 condition: None,
                 trigger: crate::rules::RiderTrigger::Success,
                 check: None,
@@ -384,6 +385,7 @@ fn non_hostile_rejects_direct_harm_in_primary_failure_rider_and_flag_condition()
                     modifiers: condition.modifiers.clone(),
                 });
                 condition.modifiers = vec![crate::rules::Modifier {
+                    cancellable: false,
                     scope: crate::rules::Scope::Always,
                     op: crate::rules::ModifierOp::Flag {
                         flag: crate::content_ids::FlagId::new("fixture_harm").unwrap(),
@@ -448,6 +450,7 @@ fn non_hostile_target_contact_does_not_provoke_even_with_hostile_ai_hints() {
         ability.interaction = Interaction::NonHostile;
         ability.strikes = StrikeSource::Authored {
             strikes: vec![crate::rules::StrikeDef {
+                cancellable: false,
                 offset: 0,
                 unlock: None,
                 check: None,
@@ -475,6 +478,7 @@ fn an_attempted_target_rider_provokes_once_through_the_parent_strike() {
             .unwrap();
         ability.strikes = StrikeSource::Authored {
             strikes: vec![crate::rules::StrikeDef {
+                cancellable: false,
                 offset: 0,
                 unlock: None,
                 check: None,
@@ -482,6 +486,7 @@ fn an_attempted_target_rider_provokes_once_through_the_parent_strike() {
                 on_failure: vec![],
                 descriptors: vec![],
                 riders: vec![crate::rules::RiderDef {
+                    cancellable: false,
                     condition: None,
                     trigger: crate::rules::RiderTrigger::Success,
                     check: Some(crate::rules::RiderCheckDef {
@@ -568,6 +573,7 @@ fn paired_hidden_attackers_do_not_become_identified_grudges() {
         ability.reach = crate::rules::Reach::Sight { range: 8 };
         ability.strikes = StrikeSource::Authored {
             strikes: vec![crate::rules::StrikeDef {
+                cancellable: false,
                 offset: 0,
                 unlock: None,
                 check: None,
@@ -774,6 +780,7 @@ fn engagement_expiry_segments_contextual_recovery_at_the_actor_active_boundary()
     let mut game = fixture_with(Disposition::Passive, 50, |_, species| {
         species.modifiers.extend([
             Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Set {
                     stat: Stat::HealthRecoveryPeriod,
@@ -781,6 +788,7 @@ fn engagement_expiry_segments_contextual_recovery_at_the_actor_active_boundary()
                 },
             },
             Modifier {
+                cancellable: false,
                 scope: Scope::WhileNoSensedHostile,
                 op: ModifierOp::Add {
                     stat: Stat::HealthRecoveryPeriodPercent,
@@ -856,6 +864,7 @@ fn coincident_condition_and_engagement_expiry_rephase_earned_work_once() {
         document.health_recovery.base_period = 1200;
         document.health_recovery.reduction_per_hd = 0;
         species.modifiers.push(Modifier {
+            cancellable: false,
             scope: Scope::WhileNoSensedHostile,
             op: ModifierOp::Add {
                 stat: Stat::HealthRecoveryPeriodPercent,
@@ -868,6 +877,7 @@ fn coincident_condition_and_engagement_expiry_rephase_earned_work_once() {
             .find(|condition| condition.id.as_str() == "fear")
             .unwrap();
         condition.modifiers = vec![Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Add {
                 stat: Stat::HealthRecoveryPeriod,
@@ -965,6 +975,7 @@ fn species_policy_changes_settle_old_memory_and_never_reset_rng_or_resurrect_eng
         document.health_recovery.reduction_per_hd = 0;
         document.health_recovery.minimum_period = 1;
         species.modifiers.push(Modifier {
+            cancellable: false,
             scope: Scope::WhileNoSensedHostile,
             op: ModifierOp::Add {
                 stat: Stat::HealthRecoveryPeriodPercent,

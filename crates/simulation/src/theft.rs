@@ -333,6 +333,7 @@ mod tests {
             unreachable!()
         };
         let original = StrikeDef {
+            cancellable: false,
             offset: 0,
             unlock: None,
             check: None,
@@ -557,11 +558,111 @@ impl Game {
             })
     }
 
-    fn relocation_members(
+    fn preparation_required_regions(
         &self,
         plan: &crate::abilities::Plan,
     ) -> Result<BTreeSet<RegionId>, GameError> {
         let mut members = BTreeSet::new();
+        if let Some(ray) = plan
+            .as_ray()
+            .filter(|ray| ray.traversal == crate::abilities::RayTraversal::FirstBody)
+            .filter(|_| !matches!(plan, crate::abilities::Plan::Zap { charges: 0, .. }))
+        {
+            let trace = self
+                .trace_first_body(
+                    ray.actor,
+                    ray.origin.location,
+                    tor_world::Direction::from(ray.direction).rotated(ray.origin.orientation),
+                    &ray.launch_footprint,
+                    crate::abilities::MAX_CONTACT_STATES,
+                )
+                .map_err(|_| GameError::Rule(crate::abilities::RuleError::InvalidPlan))?;
+            members.extend(trace.regions);
+            if let crate::abilities::ContactEnd::Body(target) = trace.end {
+                members.extend(self.body_effect_required_regions(target, &ray.effects)?);
+            }
+        }
+        if !matches!(plan, crate::abilities::Plan::Zap { charges: 0, .. }) {
+            if let Some(ray) = plan.as_ray() {
+                members.extend(self.bounded_body_effect_regions(ray)?);
+            }
+            members.extend(self.body_effect_required_regions(plan.target(), plan.on_success())?);
+            if let Some(ability) = plan.as_ability() {
+                for strike in &ability.strikes {
+                    members.extend(
+                        self.body_effect_required_regions(ability.target, &strike.on_success)?,
+                    );
+                    members.extend(
+                        self.body_effect_required_regions(ability.target, &strike.on_failure)?,
+                    );
+                    for rider in &strike.riders {
+                        members.extend(
+                            self.body_effect_required_regions(ability.target, &rider.effects)?,
+                        );
+                    }
+                }
+            }
+        }
+        if plan
+            .on_success()
+            .iter()
+            .any(|effect| crate::detection_lifecycle::planned_kind(effect).is_some())
+            && !matches!(plan, crate::abilities::Plan::Zap { charges: 0, .. })
+        {
+            if plan
+                .on_success()
+                .iter()
+                .any(|effect| matches!(effect, crate::abilities::PlannedEffect::MapTopology))
+            {
+                members.extend(self.mapping_required_regions(plan.actor())?);
+            } else {
+                members.extend(self.detection_required_regions(plan.actor())?);
+            }
+        }
+        let room_light = plan
+            .on_success()
+            .iter()
+            .any(|effect| matches!(effect, crate::abilities::PlannedEffect::RoomLight))
+            || plan.as_ability().is_some_and(|ability| {
+                ability.strikes.iter().any(|strike| {
+                    strike
+                        .on_success
+                        .iter()
+                        .chain(&strike.on_failure)
+                        .chain(strike.riders.iter().flat_map(|rider| &rider.effects))
+                        .any(|effect| matches!(effect, crate::abilities::PlannedEffect::RoomLight))
+                })
+            });
+        if room_light && !matches!(plan, crate::abilities::Plan::Zap { charges: 0, .. }) {
+            let actor = self
+                .actors
+                .get(&plan.actor())
+                .ok_or(GameError::UnknownActor)?;
+            members.extend(self.room_light_regions(actor.location)?);
+        }
+        let drain =
+            plan.on_success()
+                .iter()
+                .any(|effect| matches!(effect, crate::abilities::PlannedEffect::DrainLife))
+                || plan.as_ability().is_some_and(|ability| {
+                    ability.strikes.iter().any(|strike| {
+                        strike.on_success.iter().any(|effect| {
+                            matches!(effect, crate::abilities::PlannedEffect::DrainLife)
+                        })
+                    })
+                });
+        if drain
+            && !matches!(plan, crate::abilities::Plan::Zap { charges: 0, .. })
+            && self
+                .health(plan.actor())
+                .is_some_and(|(health, _)| health >= 2)
+        {
+            let actor = self
+                .actors
+                .get(&plan.actor())
+                .ok_or(GameError::UnknownActor)?;
+            members.extend(self.drain_life_regions(actor.location)?);
+        }
         if let Some(ability) = plan.as_ability() {
             for theft in ability
                 .strikes
@@ -608,7 +709,7 @@ impl Game {
             origin: preparation.origin,
             intention: preparation.intention,
             started: preparation.started,
-            members: self.relocation_members(&preparation.plan)?,
+            members: self.preparation_required_regions(&preparation.plan)?,
         };
         if self.preparation_missing_regions(&boundary).is_empty() {
             return Ok(());
@@ -628,23 +729,32 @@ impl Game {
     }
 
     /// Roots are snapshotted from the complete ordinary ACTIVE closure before
-    /// any supplemental floor is added. Loaded frozen thieves never root floors.
+    /// any supplemental floor is added. Loaded frozen actors never root floors.
+    /// Room illumination dependencies load geometry without activating residents.
     pub(crate) fn relocation_loaded_closure(
         &self,
         active: &BTreeSet<RegionId>,
         loaded: &mut BTreeSet<RegionId>,
     ) {
-        for actor in self
+        for (id, actor) in self
             .actors
-            .values()
-            .filter(|actor| active.contains(&actor.location.region))
+            .iter()
+            .filter(|(_, actor)| active.contains(&actor.location.region))
         {
+            loaded.extend(self.pending_body_return_regions(*id));
+            // Supplemental scope members remain load-only. Never add them to
+            // live_regions, whose active owner would activate their residents.
+            if self.monster_detection_active(*id) {
+                if let Ok(members) = self.detection_required_regions(*id) {
+                    loaded.extend(members);
+                }
+            }
             if let Some(preparation) = actor
                 .pending
                 .as_ref()
                 .filter(|preparation| preparation.active)
             {
-                if let Ok(members) = self.relocation_members(&preparation.plan) {
+                if let Ok(members) = self.preparation_required_regions(&preparation.plan) {
                     loaded.extend(members);
                 }
             }

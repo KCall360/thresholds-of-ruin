@@ -35,7 +35,9 @@ fn content(id: &str) -> AdvancementContentRef {
 }
 fn overview() -> AdvancementOverview {
     AdvancementOverview {
+        strength_acquired: 0,
         growth: AdvancementGrowth {
+            body_package_hit_dice: None,
             highest_applied_tier: 2,
             restorable_hit_dice: 0,
             restoration_blocker: None,
@@ -108,6 +110,7 @@ fn summary() -> AdvancementSummary {
         maximum: 1,
     };
     AdvancementSummary {
+        strength_acquired: 0,
         proposal: proposal(),
         resulting_build_epoch: 8,
         removed_count: 33,
@@ -410,6 +413,7 @@ fn respec_exact_supplies_reuse_known_touch_ground_facts_and_one_cost_ordinal() {
     let pages = opened();
     let mut view = crate::test_support::observation();
     let ground = GroundItemView {
+        presentation: None,
         reachable: false,
         supply_reachable: true,
         position: view.position,
@@ -1084,4 +1088,47 @@ fn intellect_threshold_pages_preserve_navigation_and_disclosed_dormant_choices()
     assert!(rows[0].contains("Dormant"));
     assert!(rows[0].contains("spear"));
     assert!(rows[0].contains("cannot reselect"));
+}
+
+#[test]
+fn permanent_potion_strength_has_distinct_overview_and_preview_label() {
+    for entry in [
+        AdvancementEntry::Overview {
+            value: Box::new(overview()),
+        },
+        AdvancementEntry::Summary { value: summary() },
+    ] {
+        let mut rows = Vec::new();
+        render_entry(&entry, &mut rows);
+        assert!(rows
+            .iter()
+            .all(|row| !row.contains("Permanent potion Strength")));
+    }
+    let mut current = overview();
+    current.strength_acquired = 3;
+    let mut preview = summary();
+    preview.strength_acquired = 3;
+    let refunds = preview.refund_count;
+    for entry in [
+        AdvancementEntry::Overview {
+            value: Box::new(current),
+        },
+        AdvancementEntry::Summary { value: preview },
+    ] {
+        let mut rows = Vec::new();
+        render_entry(&entry, &mut rows);
+        assert!(
+            rows.iter()
+                .any(|row| row
+                    == "Permanent potion Strength owned: 3 (not refundable; capped effect)")
+        );
+        // This is retained ownership, not a promise of +3 on the current
+        // sheet: natural5 + owned3 may contribute only2, before innate bonuses.
+        assert!(rows.iter().all(|row| !row.contains("Strength: +3")));
+        if matches!(entry, AdvancementEntry::Summary { .. }) {
+            assert!(rows
+                .iter()
+                .any(|row| row.contains(&format!("gross refund rows {refunds}"))));
+        }
+    }
 }

@@ -599,21 +599,87 @@ fn rogue_recipes_and_both_presets_forecast_disclosed_assets_including_the_potion
     for character in &manifest.characters {
         assert_eq!(character.asset.as_deref(), Some("creature.humanoid.human"));
     }
+    let mut assetless = BTreeSet::new();
     for (key, archetype) in &manifest.archetypes {
         let asset = if let Some(pool) = &archetype.appearance_pool {
             manifest.appearance_pools[pool].asset.as_deref()
         } else {
             archetype.asset.as_deref()
+        };
+        if let Some(asset) = asset {
+            assert!(
+                forecast.contains(asset),
+                "missing theme forecast for {key}: {asset}"
+            );
+        } else {
+            assetless.insert(key.as_str());
         }
-        .unwrap_or_else(|| panic!("missing disclosed asset for {key}"));
-        assert!(
-            forecast.contains(asset),
-            "missing theme forecast for {key}: {asset}"
-        );
     }
+    // The accepted opt-in physical torch has no authored asset or appearance
+    // pool. Absence means the ordinary class fallback, not an undisclosed asset
+    // needing a forecast. Keep every other archetype's explicit asset contract.
+    assert_eq!(assetless, BTreeSet::from(["rogue.torch"]));
+    assert!(manifest.archetypes["rogue.torch"].appearance_pool.is_none());
     assert_eq!(
         manifest.appearance_pools["rogue.potions"].asset.as_deref(),
         Some("item.potion")
     );
     assert!(serde_json::to_vec(&forecast).unwrap().len() + 4096 < MAX_RESPONSE_BYTES);
+}
+
+#[test]
+fn assetless_production_torch_discloses_no_asset_and_does_not_change_the_palette() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/rogue-exploration");
+    let production = scenario_package::resolve_source(&root).unwrap().manifest;
+    let torch = production.archetypes["rogue.torch"].clone();
+    assert!(torch.asset.is_none() && torch.appearance_pool.is_none());
+    assert!(torch.held_light.is_some());
+
+    let expected = Engine::memory(caves()).unwrap().palette(ActorId(1));
+    let mut scenario = caves();
+    let source = scenario.package.as_ref().unwrap();
+    let mut manifest = source.manifest.clone();
+    manifest.archetypes.insert("rogue.torch".into(), torch);
+    manifest.characters[0]
+        .loadout
+        .push(scenario_package::CharacterLoadout {
+            archetype: "rogue.torch".into(),
+            quantity: 1,
+            equipped_slot: None,
+        });
+    let package = scenario_package::Package::from_parts(
+        manifest,
+        source.region_defs().unwrap(),
+        &source.rules_source,
+    )
+    .unwrap();
+    package.check().unwrap();
+    let reads = package.sources.files_read();
+    assert_eq!(
+        package.palette(std::iter::empty()),
+        source.palette(std::iter::empty()),
+        "declaring an assetless portable item adds no synthetic asset"
+    );
+    assert_eq!(package.sources.files_read(), reads);
+    scenario.package = Some(Arc::new(package));
+    let engine = Engine::memory(scenario).unwrap();
+    let state = engine.state(ActorId(1)).unwrap();
+    let tools: Vec<_> = state
+        .observation
+        .inventory
+        .iter()
+        .filter(|item| item.class == ItemClass::Tool)
+        .collect();
+    assert_eq!(tools.len(), 1);
+    assert_eq!(tools[0].name, "torch");
+    assert_eq!(tools[0].quantity, 1);
+    assert!(
+        tools[0].asset.is_none(),
+        "observation preserves authored absence"
+    );
+    assert_eq!(
+        engine.palette(ActorId(1)),
+        expected,
+        "carrying the real production torch cannot invent palette authority"
+    );
 }

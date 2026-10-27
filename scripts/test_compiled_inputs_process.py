@@ -37,7 +37,7 @@ class CompiledInputProcesses(ProcessTestCase):
         self.assertLess(len(saved), 7, "unvisited authored chunks stay lazy")
         for region, text in saved:
             compiled = json.loads(text)
-            self.assertEqual(compiled["format"], 8)
+            self.assertEqual(compiled["format"], 9)
             self.assertEqual(compiled["region"]["id"], region)
         shutil.rmtree(package)
         server = self.server(scenario=exported, seed=None)
@@ -126,9 +126,9 @@ class CompiledInputProcesses(ProcessTestCase):
         with sqlite3.connect(self.save) as db:
             row = db.execute("SELECT region,source FROM region_sources ORDER BY region LIMIT 1").fetchone()
             value = json.loads(row[1])
-            self.assertEqual(value["format"], 8)
+            self.assertEqual(value["format"], 9)
             current_format = value["format"]
-            value["format"] = 7
+            value["format"] = 8
             self.assertNotEqual(value["format"], current_format)
             db.execute("UPDATE region_sources SET source=? WHERE region=?", (json.dumps(value), row[0]))
         before = self.save.read_bytes()

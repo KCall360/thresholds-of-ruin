@@ -34,3 +34,5 @@ fn door_target(index: u64) -> tor_protocol::DoorTarget {
 mod supply_selection;
 
 mod advancement;
+
+mod charts;

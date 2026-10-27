@@ -749,8 +749,10 @@ fn ownership_limit_subject() -> CreatureBuild {
     let build = subject(document, vec![HdSource::Racial; 3]);
     let choices = vec![
         HdChoices {
+            purchase_highwater: 0,
             purchases: (0..256)
                 .map(|index| AdvancementPurchase {
+                    id: None,
                     pool: pool("advancement"),
                     selection: PurchaseSelection::Talent(talent(&format!("limit_{index:03}"))),
                 })
@@ -758,7 +760,9 @@ fn ownership_limit_subject() -> CreatureBuild {
             attribute: None,
         },
         HdChoices {
+            purchase_highwater: 0,
             purchases: vec![AdvancementPurchase {
+                id: None,
                 pool: pool("advancement"),
                 selection: PurchaseSelection::SkillRank(Skill::Athletics),
             }],
@@ -816,6 +820,8 @@ fn total_talent_ownership_counts_active_and_dormant_without_capping_points_or_ra
 fn saved_current_and_authored_purchases_reject_the_257th_owned_talent() {
     let build = authored(ownership_limit_subject());
     let record = BuildRecord::capture(&build);
+    assert_eq!(record.restore(build.content().clone()).unwrap(), build);
+    assert!(serde_json::to_value(&record).unwrap()["body_build"].is_null());
     for blueprint in [false, true] {
         let mut value = serde_json::to_value(&record).unwrap();
         let choices = if blueprint {
@@ -823,7 +829,7 @@ fn saved_current_and_authored_purchases_reject_the_257th_owned_talent() {
         } else {
             &mut value["choices"][1]
         };
-        choices["purchases"].as_array_mut().unwrap().push(serde_json::json!({"pool":"advancement", "selection":{"kind":"talent", "talent":"limit_256"}}));
+        choices["purchases"].as_array_mut().unwrap().push(serde_json::json!({"id":null, "pool":"advancement", "selection":{"kind":"talent", "talent":"limit_256"}}));
         let forged: BuildRecord = serde_json::from_value(value).unwrap();
         assert!(
             forged.restore(build.content().clone()).is_err(),

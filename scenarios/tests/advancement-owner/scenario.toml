@@ -2,7 +2,7 @@
 # All initial talents are active. Refund HD 2 purchase 3 (Thievery rank) through
 # ordinary respec to retain Dormant Anchor as dormant at its free starting rank.
 # This spends one carried ration and restores the five-talent ledger baseline.
-format = 31
+format = 33
 id = "advancement-owner"
 version = "1.0"
 ruleset = "rules.toml"

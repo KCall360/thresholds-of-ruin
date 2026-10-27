@@ -87,6 +87,7 @@ fn checkpoint_population_pool_reuses_decoded_storage_and_isolates_mutation() {
     let (snapshots, shared): (Vec<Snapshot>, SharedState) =
         serde_json::from_value(encoded).unwrap();
     let mut context = RestoreContext::new(&shared, game.content.clone());
+    context.bind_spatial_roots(&snapshots.iter().collect::<Vec<_>>()).unwrap();
     let mut restored: Vec<_> = snapshots
         .into_iter()
         .map(|snapshot| context.restore(snapshot).unwrap())
@@ -126,6 +127,8 @@ fn checkpoint_population_pool_keeps_tick_and_identity_validation_per_boundary() 
     let shared: SharedState =
         serde_json::from_value(serde_json::to_value(shared).unwrap()).unwrap();
     let mut context = RestoreContext::new(&shared, game.content.clone());
+    let spatial_binding:crate::checkpoint::Snapshot=serde_json::from_value(snapshot.clone()).unwrap();
+    context.bind_spatial_roots(&[&spatial_binding]).unwrap();
     assert_eq!(
         context
             .restore(serde_json::from_value(snapshot.clone()).unwrap())
@@ -157,6 +160,8 @@ fn checkpoint_population_pool_rejects_invalid_references_and_unknown_fields() {
     let mut shared = SharedState::default();
     let snapshot = serde_json::to_value(game.checkpoint(&mut shared)).unwrap();
     let mut context = RestoreContext::new(&shared, game.content.clone());
+    let spatial_binding:crate::checkpoint::Snapshot=serde_json::from_value(snapshot.clone()).unwrap();
+    context.bind_spatial_roots(&[&spatial_binding]).unwrap();
     for index in [1, usize::MAX] {
         let mut invalid = snapshot.clone();
         invalid["floor_activation"]["state"] = serde_json::json!(index);
@@ -247,6 +252,7 @@ fn checkpoint_population_plan_validation_is_once_per_decoded_pool_entry() {
     let (snapshots, shared): (Vec<Snapshot>, SharedState) =
         serde_json::from_value(serde_json::to_value((snapshots, shared)).unwrap()).unwrap();
     let mut context = RestoreContext::new(&shared, game.content.clone());
+    context.bind_spatial_roots(&snapshots.iter().collect::<Vec<_>>()).unwrap();
     for snapshot in snapshots {
         assert_eq!(context.restore(snapshot).unwrap(), game);
     }
@@ -269,8 +275,10 @@ fn checkpoint_population_plan_cache_never_trusts_another_pool_or_context() {
         .as_array_mut()
         .unwrap()
         .push(invalid.clone());
-    let shared: SharedState = serde_json::from_value(encoded).unwrap();
+    let shared: SharedState = serde_json::from_value(encoded.clone()).unwrap();
     let mut context = RestoreContext::new(&shared, game.content.clone());
+    let spatial_binding:crate::checkpoint::Snapshot=serde_json::from_value(snapshot.clone()).unwrap();
+    context.bind_spatial_roots(&[&spatial_binding]).unwrap();
     assert_eq!(
         context
             .restore(serde_json::from_value(snapshot.clone()).unwrap())
@@ -288,6 +296,8 @@ fn checkpoint_population_plan_cache_never_trusts_another_pool_or_context() {
     assert_eq!(context.population_plan_validation_count(), 3);
 
     let mut fresh = RestoreContext::new(&shared, game.content.clone());
+    let spatial_binding:crate::checkpoint::Snapshot=serde_json::from_value(snapshot.clone()).unwrap();
+    fresh.bind_spatial_roots(&[&spatial_binding]).unwrap();
     assert_eq!(
         fresh
             .restore(serde_json::from_value(snapshot.clone()).unwrap())
@@ -298,10 +308,11 @@ fn checkpoint_population_plan_cache_never_trusts_another_pool_or_context() {
 
     // The same numeric pool index in another decoded checkpoint has no trust
     // relationship with the first context, even when Content is unchanged.
-    let mut encoded = serde_json::to_value(&shared).unwrap();
     encoded["floor_activations"][0] = invalid;
-    let other_shared: SharedState = serde_json::from_value(encoded).unwrap();
+    let other_shared: SharedState = serde_json::from_value(encoded.clone()).unwrap();
     let mut other_context = RestoreContext::new(&other_shared, game.content.clone());
+    let spatial_binding:crate::checkpoint::Snapshot=serde_json::from_value(snapshot.clone()).unwrap();
+    other_context.bind_spatial_roots(&[&spatial_binding]).unwrap();
     assert_eq!(
         other_context.restore(serde_json::from_value(snapshot).unwrap()),
         Err(PersistError::Population),
@@ -318,6 +329,8 @@ fn checkpoint_population_cached_plan_still_checks_selected_character() {
     let shared: SharedState =
         serde_json::from_value(serde_json::to_value(shared).unwrap()).unwrap();
     let mut context = RestoreContext::new(&shared, game.content.clone());
+    let spatial_binding:crate::checkpoint::Snapshot=serde_json::from_value(snapshot.clone()).unwrap();
+    context.bind_spatial_roots(&[&spatial_binding]).unwrap();
     assert_eq!(
         context
             .restore(serde_json::from_value(snapshot.clone()).unwrap())
@@ -370,6 +383,7 @@ fn wandering_clocks_keep_every_boundary_without_repeating_population_inputs() {
     let bytes = serde_json::to_vec(&(snapshots, shared)).unwrap();
     let (snapshots, shared): (Vec<Snapshot>, SharedState) = serde_json::from_slice(&bytes).unwrap();
     let mut context = RestoreContext::new(&shared, game.content.clone());
+    context.bind_spatial_roots(&snapshots.iter().collect::<Vec<_>>()).unwrap();
     for (snapshot, expected) in snapshots.into_iter().zip(states) {
         assert_eq!(context.restore(snapshot).unwrap(), expected);
     }
@@ -384,6 +398,8 @@ fn wandering_snapshot_shape_and_boundary_validation_remain_strict_after_pool_hit
     let snapshot = serde_json::to_value(game.checkpoint(&mut shared)).unwrap();
     let pooled = serde_json::to_value(&shared).unwrap();
     let mut context = RestoreContext::new(&shared, game.content.clone());
+    let spatial_binding:crate::checkpoint::Snapshot=serde_json::from_value(snapshot.clone()).unwrap();
+    context.bind_spatial_roots(&[&spatial_binding]).unwrap();
     assert_eq!(
         context
             .restore(serde_json::from_value(snapshot.clone()).unwrap())

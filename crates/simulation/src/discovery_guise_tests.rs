@@ -273,6 +273,7 @@ fn environmental_attempt_reveals_on_hit_or_miss_but_not_immunity_or_private_reco
             let mut game = fixture_with(&[], &[guise(), ambush()], |_, _, subject| {
                 if immune {
                     subject.modifiers.push(crate::rules::Modifier {
+                        cancellable: false,
                         scope: crate::rules::Scope::Always,
                         op: crate::rules::ModifierOp::Immunity {
                             selector: crate::rules::Selector::Descriptor {

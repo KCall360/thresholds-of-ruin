@@ -63,15 +63,92 @@ impl PurchaseSelection {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AdvancementPurchase {
+    pub id: Option<super::composition::PurchaseId>,
     pub pool: PointPoolId,
     pub selection: PurchaseSelection,
 }
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct HdChoices {
+    /// Monotonic per-HD allocation watermark; removing a purchase never lowers it.
+    pub purchase_highwater: u64,
     pub purchases: Vec<AdvancementPurchase>,
     pub attribute: Option<Attribute>,
 }
 impl HdChoices {
+    /// Bind an authored row once. Recomposition retains these IDs unchanged.
+    pub fn enroll_owner(&mut self, owner: &super::composition::HdOwner) -> Result<(), BuildError> {
+        if self.purchases.is_empty() || self.purchases.iter().any(|purchase| purchase.id.is_some())
+        {
+            return self.validate_purchase_ids(Some(owner));
+        }
+        if self.purchase_highwater != 0 {
+            return Err(BuildError::InvalidOwnership);
+        }
+        let mut candidate = self.clone();
+        for purchase in &mut candidate.purchases {
+            candidate.purchase_highwater = candidate
+                .purchase_highwater
+                .checked_add(1)
+                .ok_or(BuildError::Arithmetic)?;
+            purchase.id = Some(super::composition::PurchaseId {
+                owner: owner.clone(),
+                serial: std::num::NonZeroU64::new(candidate.purchase_highwater)
+                    .ok_or(BuildError::Arithmetic)?,
+            });
+        }
+        candidate.validate_purchase_ids(Some(owner))?;
+        *self = candidate;
+        Ok(())
+    }
+    pub(crate) fn validate_purchase_ids(
+        &self,
+        owner: Option<&super::composition::HdOwner>,
+    ) -> Result<(), BuildError> {
+        let mut ids = std::collections::BTreeSet::new();
+        if owner.is_none() && self.purchase_highwater != 0 {
+            return Err(BuildError::InvalidOwnership);
+        }
+        for purchase in &self.purchases {
+            match (owner, &purchase.id) {
+                (None, None) => {}
+                (Some(owner), Some(id))
+                    if &id.owner == owner
+                        && id.serial.get() <= self.purchase_highwater
+                        && ids.insert(id.serial) => {}
+                _ => return Err(BuildError::InvalidOwnership),
+            }
+        }
+        Ok(())
+    }
+    pub(super) fn allocate_purchase(
+        &mut self,
+        owner: Option<&super::composition::HdOwner>,
+        pool: PointPoolId,
+        selection: PurchaseSelection,
+    ) -> Result<AdvancementPurchase, BuildError> {
+        self.validate_purchase_ids(owner)?;
+        let id = if let Some(owner) = owner {
+            if !owner.is_personal() {
+                return Err(BuildError::InvalidOwnership);
+            }
+            let serial = self
+                .purchase_highwater
+                .checked_add(1)
+                .ok_or(BuildError::Arithmetic)?;
+            self.purchase_highwater = serial;
+            Some(super::composition::PurchaseId {
+                owner: owner.clone(),
+                serial: std::num::NonZeroU64::new(serial).ok_or(BuildError::Arithmetic)?,
+            })
+        } else {
+            None
+        };
+        Ok(AdvancementPurchase {
+            id,
+            pool,
+            selection,
+        })
+    }
     pub fn talents(&self) -> impl Iterator<Item = &TalentId> {
         self.purchases
             .iter()
@@ -148,6 +225,31 @@ impl CreatureBuild {
     pub fn starting_skills(&self) -> &[Skill; 2] {
         &self.advancement.starting_skills
     }
+    /// Effective declared personal restoration policy. The recorded outer
+    /// positional recipe remains normalized for explicitly composed bodies.
+    pub fn uses_authored_restoration(&self) -> bool {
+        self.body_build.as_ref().map_or_else(
+            || matches!(self.restoration_policy(), RestorationPolicy::Authored(_)),
+            |body| {
+                matches!(
+                    body.personal_restoration,
+                    super::body::PersonalRestorationPolicy::Authored(_)
+                )
+            },
+        )
+    }
+    pub(crate) fn next_authored_restoration_source(&self) -> Option<HdSource> {
+        if self.body_build.is_some() {
+            return self.owned_personal_restoration_source();
+        }
+        match self.restoration_policy() {
+            RestorationPolicy::Authored(plan) => {
+                plan.get(self.choices().len()).map(|row| row.source.clone())
+            }
+            RestorationPolicy::ChooseAgain => None,
+        }
+    }
+    /// Raw positional record policy; use uses_authored_restoration for semantics.
     pub fn restoration_policy(&self) -> &RestorationPolicy {
         &self.advancement.restoration
     }
@@ -167,7 +269,25 @@ impl CreatureBuild {
             .choices()
             .get(owner)
             .ok_or(BuildError::InvalidOwnership)?;
-        if choice.purchases.len() > crate::limits::POINTS_PER_HIT_DIE {
+        choice.validate_purchase_ids(entry.owner())?;
+        // A retained personal acquisition spends its original donor's pool,
+        // not the unrelated current form's pool. Body rows remain locked.
+        let retained = match (&self.body_build, entry.owner()) {
+            (Some(body), Some(super::composition::HdOwner::Body { form, ordinal }))
+                if form == &body.base.id =>
+            {
+                body.personal_body_grants.get(ordinal)
+            }
+            _ => None,
+        };
+        if retained.is_some() {
+            self.body_build
+                .as_ref()
+                .expect("retained body receipt")
+                .validate_personal_body_grants(self.content())?;
+        }
+        let retained_purchases = retained.map_or(&[][..], |grant| grant.purchases.as_slice());
+        if choice.purchases.len() + retained_purchases.len() > crate::limits::POINTS_PER_HIT_DIE {
             return Err(BuildError::NoAdvancementPoint);
         }
         let grants = self
@@ -187,7 +307,7 @@ impl CreatureBuild {
                 )
             })
             .collect();
-        for purchase in &choice.purchases {
+        for purchase in choice.purchases.iter().chain(retained_purchases) {
             let pool = self
                 .ruleset()
                 .point_pool(&purchase.pool)
@@ -211,6 +331,11 @@ impl CreatureBuild {
     pub fn unspent_points(&self) -> u64 {
         // All public construction and editing paths validate the immutable build.
         (0..self.choices().len())
+            .filter(|owner| {
+                self.ledger().entries()[*owner]
+                    .owner()
+                    .is_none_or(|owner| owner.is_personal())
+            })
             .flat_map(|owner| {
                 self.point_balances(crate::HdIndex::from_usize(owner).expect("resident HD index"))
                     .expect("validated ledger")
@@ -249,13 +374,20 @@ impl CreatureBuild {
                     return Err(BuildError::DuplicateTalent);
                 }
             }
-            build
+            let ownership = build
+                .ledger()
+                .entries()
+                .get(owner)
+                .ok_or(BuildError::InvalidOwnership)?
+                .owner()
+                .cloned();
+            let choice = build
                 .advancement
                 .choices
                 .get_mut(owner)
-                .ok_or(BuildError::InvalidOwnership)?
-                .purchases
-                .push(AdvancementPurchase { pool, selection });
+                .ok_or(BuildError::InvalidOwnership)?;
+            let purchase = choice.allocate_purchase(ownership.as_ref(), pool, selection)?;
+            choice.purchases.push(purchase);
             Ok(())
         })?;
         Ok(AdvancementPreview { candidate, derived })
@@ -346,8 +478,7 @@ impl CreatureBuild {
         source: HdSource,
         root_seed: u64,
     ) -> Result<GrowthBuildOutcome, BuildError> {
-        let restores_authored = matches!(self.restoration_policy(),
-            RestorationPolicy::Authored(plan) if plan.get(self.choices().len()).is_some());
+        let restores_authored = self.next_authored_restoration_source().is_some();
         match self.add_hit_die(source, root_seed) {
             Ok(()) => Ok(GrowthBuildOutcome::Applied),
             Err(
@@ -371,6 +502,12 @@ impl CreatureBuild {
     /// replacing surviving choices or borrowing combat randomness. `ChooseAgain`
     /// builds append an empty ordinal with `add_hit_die` and choose separately.
     pub fn restore_hit_die(&mut self, root_seed: u64) -> Result<(), BuildError> {
+        if self.body_build.is_some() {
+            let source = self
+                .next_authored_restoration_source()
+                .ok_or(BuildError::NoAuthoredRestoration)?;
+            return self.add_personal_hit_die(source, root_seed);
+        }
         let RestorationPolicy::Authored(plan) = self.restoration_policy() else {
             return Err(BuildError::NoAuthoredRestoration);
         };
@@ -491,5 +628,74 @@ mod tests {
             .unwrap();
         assert_eq!(super::super::derive::fold_count() - before, 1);
         assert_eq!(preview.into_build(), build);
+    }
+    #[test]
+    fn owned_purchase_ids_survive_removal_and_reenrollment_without_reuse() {
+        use super::super::composition::{HdOwner, PersonalHdId};
+        use std::num::NonZeroU64;
+        let owner = HdOwner::Personal {
+            id: PersonalHdId(NonZeroU64::new(7).unwrap()),
+        };
+        let pool = PointPoolId::new("advancement").unwrap();
+        let selection = PurchaseSelection::SkillRank(Skill::Athletics);
+        let mut choice = HdChoices {
+            purchase_highwater: 0,
+            purchases: vec![AdvancementPurchase {
+                id: None,
+                pool: pool.clone(),
+                selection: selection.clone(),
+            }],
+            attribute: None,
+        };
+        choice.enroll_owner(&owner).unwrap();
+        let first = choice.purchases[0].id.clone().unwrap();
+        assert_eq!(first.serial.get(), 1);
+        let retained = choice.clone();
+        choice.enroll_owner(&owner).unwrap();
+        assert_eq!(choice, retained);
+        choice.purchases.clear();
+        choice.enroll_owner(&owner).unwrap();
+        let second = choice
+            .allocate_purchase(Some(&owner), pool, selection)
+            .unwrap();
+        assert_eq!(second.id.as_ref().unwrap().serial.get(), 2);
+        assert_ne!(second.id, Some(first));
+        choice.purchases.push(second);
+        assert_eq!(choice.purchase_highwater, 2);
+        choice.validate_purchase_ids(Some(&owner)).unwrap();
+        let wrong = HdOwner::Personal {
+            id: PersonalHdId(NonZeroU64::new(8).unwrap()),
+        };
+        let before = choice.clone();
+        assert_eq!(
+            choice.enroll_owner(&wrong),
+            Err(BuildError::InvalidOwnership)
+        );
+        assert_eq!(choice, before);
+        choice.purchases.push(choice.purchases[0].clone());
+        assert_eq!(
+            choice.validate_purchase_ids(Some(&owner)),
+            Err(BuildError::InvalidOwnership)
+        );
+    }
+    #[test]
+    fn package_purchase_budget_is_locked_and_ordinary_purchases_remain_unowned() {
+        use super::super::composition::HdOwner;
+        let owner = HdOwner::Body {
+            form: crate::content_ids::BodyFormId::new("human").unwrap(),
+            ordinal: 0,
+        };
+        let pool = PointPoolId::new("advancement").unwrap();
+        let selection = PurchaseSelection::SkillRank(Skill::Athletics);
+        let mut choice = HdChoices::default();
+        let before = choice.clone();
+        assert_eq!(
+            choice.allocate_purchase(Some(&owner), pool.clone(), selection.clone()),
+            Err(BuildError::InvalidOwnership)
+        );
+        assert_eq!(choice, before);
+        let purchase = choice.allocate_purchase(None, pool, selection).unwrap();
+        assert!(purchase.id.is_none());
+        assert_eq!(choice.purchase_highwater, 0);
     }
 }

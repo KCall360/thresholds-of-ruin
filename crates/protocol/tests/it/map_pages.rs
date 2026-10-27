@@ -25,6 +25,7 @@ fn query() -> MapQuery {
 }
 fn cell(index: i32) -> RememberedMapCell {
     RememberedMapCell {
+        object_presentation: None,
         key: format!("remembered-{index}"),
         position: Position {
             x: index % 63 - 31,
@@ -97,6 +98,7 @@ fn appearance_response() -> Value {
         asset: None,
     });
     p.cells[0].ground_items.push(MapItemAppearance {
+        presentation: None,
         class: ItemClass::Potion,
         description: "A red flask".into(),
         name: "red potion".into(),
@@ -434,6 +436,7 @@ fn map_records_reject_positional_missing_duplicate_and_unknown_fields_recursivel
                 "place_hint",
                 "stairs_up",
                 "stairs_down",
+                "object_presentation",
                 "trap",
                 "door",
                 "ground_items",
@@ -449,6 +452,7 @@ fn map_records_reject_positional_missing_duplicate_and_unknown_fields_recursivel
             "/page/cells/0/ground_items/0",
             vec![
                 "class",
+                "presentation",
                 "description",
                 "name",
                 "appearance",

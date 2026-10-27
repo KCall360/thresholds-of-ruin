@@ -4,6 +4,7 @@ fn replacement_purchase(
     selection: PurchaseSelection,
 ) -> tor_simulation::creatures::AdvancementPurchase {
     tor_simulation::creatures::AdvancementPurchase {
+        id: None,
         pool: pool("advancement"),
         selection,
     }
@@ -430,6 +431,7 @@ fn replacement_refunds_each_same_hd_purchase_once_without_borrowing_other_pools(
         .unwrap();
     let before = build.clone();
     let rank = tor_simulation::creatures::AdvancementPurchase {
+        id: None,
         pool: pool("skills"),
         selection: PurchaseSelection::SkillRank(Skill::Lore),
     };
@@ -439,6 +441,7 @@ fn replacement_refunds_each_same_hd_purchase_once_without_borrowing_other_pools(
     );
     assert_eq!(build, before);
     let replacement = tor_simulation::creatures::AdvancementPurchase {
+        id: None,
         pool: pool("talents"),
         selection: PurchaseSelection::Talent(talent("fixture_defense")),
     };
@@ -575,6 +578,7 @@ fn replacement_preserves_health_work_and_nutrition_while_rephasing_periods() {
                 .unwrap()
                 .modifiers
                 .push(Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Add {
                         stat: Stat::HealthRecoveryPeriodPercent,
@@ -625,4 +629,100 @@ fn replacement_preserves_health_work_and_nutrition_while_rephasing_periods() {
             );
         }
     }
+}
+
+#[test]
+fn unrelated_respec_preserves_identical_package_and_personal_talent_funding() {
+    use std::sync::Arc;
+    use tor_simulation::content_ids::BodyFormId;
+    use tor_simulation::creatures::BodyPackage;
+    let original = replacement_graph(1);
+    let package = |id: &str, choice| {
+        Arc::new(BodyPackage {
+            id: BodyFormId::new(id).unwrap(),
+            species: original.species_id().clone(),
+            body: tor_simulation::BodySpec::default(),
+            advancement: vec![PlannedAdvancement {
+                source: HdSource::Racial,
+                choices: choice,
+            }],
+        })
+    };
+    let base = package("replacement_base", original.choices()[0].clone());
+    let duplicate = package("replacement_duplicate", original.choices()[1].clone());
+    let build = original
+        .with_body_package(base, 42)
+        .unwrap()
+        .replace_body_package(duplicate)
+        .unwrap();
+    let package_purchase = build.choices()[0].purchases[0].clone();
+    let personal_purchase = build.choices()[1].purchases[0].clone();
+    let preview = build.preview_replacement(location(5), None).unwrap();
+    assert_eq!(preview.removed().len(), 1);
+    assert_eq!(preview.refunds().len(), 1);
+    assert_eq!(
+        preview.build().choices()[0].purchases,
+        vec![package_purchase]
+    );
+    assert_eq!(
+        preview.build().choices()[1].purchases,
+        vec![personal_purchase]
+    );
+    assert!(
+        matches!(
+            build.preview_replacement(
+                location(5),
+                Some(replacement_purchase(PurchaseSelection::Talent(talent(
+                    "root_b"
+                ))))
+            ),
+            Err(BuildError::DuplicateTalent)
+        ),
+        "another personal copy remains forbidden"
+    );
+}
+
+#[test]
+fn dependent_package_purchase_becomes_dormant_without_removal_or_personal_refund() {
+    use std::sync::Arc;
+    use tor_simulation::content_ids::BodyFormId;
+    use tor_simulation::creatures::BodyPackage;
+    let original = replacement_graph(1);
+    let mut advancement = original.advancement().clone();
+    advancement.choices.swap(0, 2); // Package branch; both prerequisite roots personal.
+    let build = CreatureBuild::from_recorded(
+        original.content().clone(),
+        original.species_id().clone(),
+        original.initial_attributes(),
+        original.ledger().clone(),
+        original.binding(),
+        advancement,
+        vec![],
+    )
+    .unwrap();
+    let package = Arc::new(BodyPackage {
+        id: BodyFormId::new("dependent_package").unwrap(),
+        species: build.species_id().clone(),
+        body: tor_simulation::BodySpec::default(),
+        advancement: vec![PlannedAdvancement {
+            source: HdSource::Racial,
+            choices: build.choices()[0].clone(),
+        }],
+    });
+    let mut build = build.with_body_package(package, 42).unwrap();
+    let package_choice = build.choices()[0].clone();
+    let preview = build.preview_replacement(location(1), None).unwrap();
+    build.commit_replacement(preview).unwrap();
+    let preview = build.preview_replacement(location(2), None).unwrap();
+    assert_eq!(preview.removed().len(), 1);
+    assert_eq!(preview.refunds().len(), 1);
+    assert_eq!(preview.refunds()[0].owner, tor_simulation::HdIndex(2));
+    assert_eq!(preview.build().choices()[0], package_choice);
+    assert!(!preview.derived().active_talents.contains(&talent("branch")));
+    assert!(
+        preview.build().choices()[3]
+            .talents()
+            .any(|id| id == &talent("left")),
+        "a still-owned dormant package root is not an ownership loss"
+    );
 }

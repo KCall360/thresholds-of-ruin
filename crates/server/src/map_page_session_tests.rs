@@ -264,6 +264,7 @@ fn oversized_single_cell_and_transfer_byte_or_page_limits_refuse_without_advanci
     let mut transfer = synthetic_transfer(&service, client.id, 1);
     Arc::get_mut(&mut transfer.projection).unwrap().cells[0].ground_items = vec![
         MapItemAppearance {
+            presentation: None,
             class: ItemClass::Misc,
             description: "x".repeat(1024),
             name: "token".into(),

@@ -102,6 +102,7 @@ mod tests {
     fn fixture(rate: ActionDuration) -> crate::Game {
         let mut species = crate::test_creatures::species();
         species.modifiers.push(Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::ActionDuration { value: rate },
         });
@@ -417,6 +418,7 @@ mod tests {
             let modifiers = rates
                 .into_iter()
                 .map(|value| Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::ActionDuration { value },
                 })
@@ -479,6 +481,7 @@ mod tests {
                 .find(|condition| condition.id.as_str() == "braced")
                 .unwrap()
                 .modifiers = vec![Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::ActionDuration { value },
             }];
@@ -505,11 +508,14 @@ mod tests {
             category: crate::expertise::ExpertiseCategory::Equipment,
         });
         document.conditions.push(crate::rules::ConditionDef {
+            detecting_monsters: false,
+            hallucinating: false,
             id: crate::content_ids::ConditionId::new("fixture_action_rate").unwrap(),
             family: crate::content_ids::ConditionFamilyId::new("fixture_action_rate").unwrap(),
             lifecycle: crate::rules::ConditionLifecycle::Timed,
             name: "Timing test condition".into(),
             modifiers: vec![Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::ActionDuration { value: rate },
             }],

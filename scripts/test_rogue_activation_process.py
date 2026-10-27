@@ -1,6 +1,6 @@
 """Real selected-character entry for explicit diagnostics and promoted production.
 
-Later-floor starts are bounded receipt diagnostics with the actual HD-one kit.
+Later-floor starts use the actual two-HD body/class starter and unchanged kit.
 They do not stand in for earned descent, dangerous encounters or escape evidence.
 """
 import copy
@@ -125,7 +125,7 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
         self.assertEqual({row["name"]: int(row["quantity"]) for row in view["inventory"]},
                          {"mace": 1, "ring mail": 1, "clean bandage": 3, "food ration": 1})
         self.assertEqual(hit_die_counts(view["combat"]["own_stats"]["hit_dice"]),
-                         {("class", "warrior" if selected == 1 else "mage"): 1})
+                         {("racial", "racial"): 1, ("class", "warrior" if selected == 1 else "mage"): 1})
         names = {row["id"]: row["name"] for row in view["inventory"]}
         self.assertEqual({names[row["item"]]: row["slot"]["id"]
                           for row in view["interactions"]["inventory"] if row["equipped_slot"] is not None},
@@ -227,7 +227,6 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
                 expected = len(recipe["hit_dice"]) + max(0, depth - 26)
                 self.assertEqual(len(born["build"]["hd"]), expected)
                 self.assertEqual(born["build"]["species"], row["content"])
-                self.assertEqual(len(born["build"]["restoration"]["entries"]), expected)
                 expected_choices = [{"purchases": die["purchases"], "attribute": die.get("attribute")}
                                     for die in recipe["hit_dice"]]
                 expected_sources = [{"kind": "racial"} if die["source"] == "racial" else
@@ -242,16 +241,93 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
                     if future["ordinal"] <= expected:
                         expected_choices[future["ordinal"] - 1] = {
                             "purchases": future["purchases"], "attribute": future.get("attribute")}
-                self.assertEqual([die["source"] for die in born["build"]["hd"]], expected_sources)
-                self.assertEqual(born["build"]["choices"], expected_choices)
-                self.assertEqual(born["build"]["restoration"], {"kind": "authored", "entries": [
-                    {"source": hd_source, "choices": choice}
-                    for hd_source, choice in zip(expected_sources, expected_choices, strict=True)]})
-                for health_seed in [born["build"]["health_root_seed"],
-                                    *(die["health_seed"] for die in born["build"]["hd"])]:
+                # The recipe, not the recorded owner, determines this birth partition.
+                form = recipe.get("body_package")
+                if form is not None:
+                    body_catalog = tomllib.loads((package / "catalog/bodies.toml").read_text(encoding="utf-8"))["creatures"]["body_packages"]
+                    body_recipe = body_catalog[form]
+                    self.assertEqual(body_recipe["species"], recipe["species"])
+                    body_count = len(body_recipe["hit_dice"])
+                    combined = [{**hd, "purchases": list(hd["purchases"])} for hd in body_recipe["hit_dice"]]
+                    expected_grants = []
+                    for grant in recipe.get("personal_body_grants", []):
+                        ordinal = grant["ordinal"]
+                        innate_count = len(combined[ordinal]["purchases"])
+                        combined[ordinal]["purchases"] += grant["purchases"]
+                        if grant.get("attribute") is not None:
+                            combined[ordinal]["attribute"] = grant["attribute"]
+                        owner = {"kind": "body", "form": form, "ordinal": ordinal}
+                        expected_grants.append({"ordinal": ordinal, "choices": {
+                            "purchase_highwater": innate_count + len(grant["purchases"]),
+                            "attribute": grant.get("attribute"),
+                            "purchases": [dict(purchase, id={"owner": owner, "serial": innate_count + index + 1})
+                                          for index, purchase in enumerate(grant["purchases"])],
+                        }})
+                    self.assertEqual(recipe["hit_dice"][:body_count], combined)
+                    expected_choices[:body_count] = [{"purchases": list(hd["purchases"]), "attribute": hd.get("attribute")}
+                                                     for hd in body_recipe["hit_dice"]]
+                else:
+                    body_count = 0
+                owners = ([{"kind": "body", "form": form, "ordinal": ordinal}
+                           for ordinal in range(body_count)] +
+                          [{"kind": "personal", "id": ordinal + 1}
+                           for ordinal in range(expected - body_count)]) if form is not None else [None] * expected
+                for choice, owner in zip(expected_choices, owners, strict=True):
+                    choice["purchase_highwater"] = len(choice["purchases"]) if owner is not None else 0
+                    choice["purchases"] = [dict(purchase, id={"owner": owner, "serial": serial}
+                                                if owner is not None else None)
+                                           for serial, purchase in enumerate(choice["purchases"], 1)]
+                build = born["build"]
+                self.assertEqual([die["source"] for die in build["hd"]], expected_sources)
+                self.assertEqual([die["owner"] for die in build["hd"]], owners)
+                self.assertEqual([die["health_policy"] for die in build["hd"]],
+                                 ["maximized"] + ["seeded"] * (expected - 1))
+                self.assertEqual(build["choices"], expected_choices)
+                self.assertEqual(build["drained_hd"], [])
+                if form is not None:
+                    self.assertIsNone(build["health_root_seed"])
+                    self.assertEqual(build["restoration"], {"kind": "choose_again"})
+                    body = build["body_build"]
+                    self.assertEqual(body["personal_body_grants"], expected_grants)
+                    self.assertEqual(body["base"], body["active"])
+                    self.assertEqual(body["base"]["id"], form)
+                    self.assertEqual(body["base"]["species"], recipe["species"])
+                    self.assertEqual(body["base"]["body"], source[row["content"]]["body"])
+                    self.assertEqual(body["personal_seed_offset"], body_count)
+                    self.assertEqual(body["birth_personal_count"], expected - body_count)
+                    if recipe["restoration"] == "authored":
+                        self.assertEqual(body["personal_restoration"], {"kind": "authored", "entries": [
+                            {"id": owner["id"], "source": hd_source, "choices": choice}
+                            for owner, hd_source, choice in zip(owners[body_count:],
+                                expected_sources[body_count:], expected_choices[body_count:], strict=True)]})
+                    else:
+                        self.assertEqual(recipe["restoration"], "choose_again")
+                        self.assertEqual(body["personal_restoration"], {"kind": "choose_again"})
+                    self.assertEqual(body["next_personal_id"], expected - body_count + 1)
+                    self.assertEqual(body["inactive"], [])
+                    self.assertEqual(body["drained"], [])
+                    self.assertEqual(body["acquisition_species"],
+                                     [{"owner": owner, "species": recipe["species"]} for owner in owners])
+                    root_seed = body["health_root"]
+                else:
+                    # Dragon and class-only authored actors retain the ordinary ledger.
+                    self.assertIsNone(build["body_build"])
+                    self.assertEqual(build["restoration"], {"kind": "authored", "entries": [
+                        {"source": hd_source, "choices": choice}
+                        for hd_source, choice in zip(expected_sources, expected_choices, strict=True)]})
+                    root_seed = build["health_root_seed"]
+                for health_seed in [root_seed, *(die["health_seed"] for die in build["hd"])]:
                     self.assertIs(type(health_seed), int)
                     self.assertGreaterEqual(health_seed, 0)
                     self.assertLess(health_seed, 1 << 64)
+                # Independently pin the retained root's SplitMix64 row stream. Birth
+                # body ordinals and personal IDs share the authored offset, not RNG draws.
+                mask = (1 << 64) - 1
+                for ordinal, die in enumerate(build["hd"]):
+                    word = (root_seed + 0x9e3779b97f4a7c15 * (ordinal + 1)) & mask
+                    word = ((word ^ (word >> 30)) * 0xbf58476d1ce4e5b9) & mask
+                    word = ((word ^ (word >> 27)) * 0x94d049bb133111eb) & mask
+                    self.assertEqual(die["health_seed"], word ^ (word >> 31))
                 stock = row["entity"]["carried_loot"]
                 owned_items = {identity: item for identity, item in saved["items"].items()
                                if item["location"] == {"Carried": row["entity"]["id"]}}
@@ -262,12 +338,20 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
                     self.assertEqual(set(owned_items), {str(stock["item"])})
                 else:
                     self.assertFalse(owned_items, "A missed/no-stock birth cannot own an undeclared item")
-            self.assertEqual(len(actor_creature(saved, selected)["build"]["hd"]), 1,
-                             "Later-depth starts never grant the player progression")
             mage_or_warrior = actor_creature(saved, selected)
-            self.assertEqual(mage_or_warrior["build"]["hd"][0]["source"],
+            body, personal = mage_or_warrior["build"]["hd"]
+            self.assertEqual(body["source"], {"kind": "racial"})
+            self.assertEqual(body["owner"], {"kind": "body", "form": "rogue.body.human", "ordinal": 0})
+            self.assertEqual(body["health_policy"], "maximized")
+            self.assertEqual(personal["source"],
                              {"kind": "class", "id": "warrior" if selected == 1 else "mage"})
-            self.assertEqual(mage_or_warrior["build"]["choices"], [{"purchases": [], "attribute": None}])
+            self.assertEqual(personal["owner"], {"kind": "personal", "id": 1})
+            self.assertEqual(personal["health_policy"], "seeded")
+            self.assertEqual(mage_or_warrior["build"]["choices"], [
+                {"purchase_highwater": 0, "purchases": [], "attribute": None},
+                {"purchase_highwater": 0, "purchases": [], "attribute": None}])
+            self.assertEqual(mage_or_warrior["earned_progress"]["highest_applied_tier"], 1,
+                             "Later-depth starts never grant the player's personal progression")
             self.assertEqual(mage_or_warrior["earned_progress"]["earned_xp"], 0)
         before = self.request(player, {"type": "snapshot"})
         self.assertEqual(before["state"]["observation"]["inventory"], view["inventory"],
@@ -418,7 +502,10 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
         expected_base += [{"source": "racial", "purchases": []}] * 6
         self.assertEqual(actors["rogue.vampire"]["creature"]["hit_dice"], expected_base,
                          "DR1/RG1 must remain owned by the first/second Vampire racial rows")
-        self.assertEqual(mage["creature"]["hit_dice"], [{"source": "mage", "purchases": []}])
+        self.assertEqual(mage["creature"]["body_package"], "rogue.body.human")
+        self.assertEqual(mage["creature"]["hit_dice"], [
+            {"source": "racial", "purchases": []},
+            {"source": "mage", "purchases": []}])
         self.assertEqual(mage["creature"]["starting_skills"], ["spellcasting", "heavy_weaponry"])
         self.package_restart(output, 2, 27, 1, eligible_actors(manifest, 27),
                                         seed=42, production_policy=True)
