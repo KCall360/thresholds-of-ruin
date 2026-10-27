@@ -2295,6 +2295,97 @@ fn cosmetic_ground_names_and_noun_heads_never_change_item_authority() {
 }
 
 #[test]
+fn magical_staff_and_wand_nouns_follow_disclosed_form_not_shared_class() {
+    for staff_name in ["mahogany staff", "staff of fire"] {
+        let mut s = state();
+        for (row, name) in s
+            .observation
+            .ground_items
+            .iter_mut()
+            .zip([staff_name, "silver wand"])
+        {
+            row.item.name = name.into();
+            row.item.class = ItemClass::Wand;
+            row.item.description.clear();
+            row.reachable = true;
+        }
+        let before = s.clone();
+        assert_eq!(goals("take staff", &s), [take(1)]);
+        assert_eq!(goals("take staves", &s), [take(1)]);
+        assert_eq!(goals("take wand", &s), [take(2)]);
+        assert_eq!(goals("take wands", &s), [take(2)]);
+        let description = said("examine staff", &s);
+        assert!(description.contains("is a staff."), "{description}");
+        assert!(!description.contains("is a wand."), "{description}");
+        assert!(said("examine wand", &s).contains("is a wand."));
+        let palette = Palette::default();
+        let scene = Scene::new(&s, &palette);
+        let staff = scene
+            .get(tor_client_text::engine::scene::Key::Item(
+                super::item_target(1),
+            ))
+            .unwrap();
+        assert!(staff.heads.iter().any(|head| head == "staff"));
+        assert!(!staff.heads.iter().any(|head| head == "wand"));
+        assert_eq!(s, before);
+        assert_eq!(
+            meaning("wield staff", &s),
+            Interpretation::Sequence(vec![
+                Interpretation::Goals(vec![take(1)]),
+                Interpretation::Reread("wield my staff".into()),
+            ]),
+            "ground convenience must take first and re-read current capabilities"
+        );
+        // Receiving the item is not evidence that it can be equipped. The
+        // re-read uses the newly disclosed carried affordance, not its class.
+        let mut carried = s.clone();
+        carried.observation.inventory = vec![carried.observation.ground_items.remove(0).item];
+        let item = super::item_target(1);
+        carried.observation.interactions = Some(InteractionView {
+            refused: vec![],
+            curse_blocked: vec![],
+            identification: None,
+            completed: vec![],
+            slots: vec![equipment_slot("weapon", "in hand", false)],
+            preparation: None,
+            inventory: vec![ItemInteractionView {
+                item,
+                slot: Some(equipment_slot("weapon", "in hand", false)),
+                equipped_slot: None,
+                known_cursed: None,
+                known_protected: None,
+                known_projectile_bonus: None,
+                known_equipment: None,
+                drinkable: false,
+                edible: false,
+                readable: false,
+                zappable: true,
+                portable_light: None,
+                device_activation: Some(DeviceActivation::Direction),
+                charges: None,
+            }],
+        });
+        assert_eq!(
+            goals("wield my staff", &carried),
+            [Goal::UseItem {
+                item,
+                operation: tor_client_common::items::ItemOperation::Equip,
+            }]
+        );
+        carried.observation.interactions.as_mut().unwrap().inventory[0].slot = None;
+        assert_eq!(
+            said("wield my staff", &carried),
+            "You can't equip that item."
+        );
+    }
+    let mut s = state();
+    s.observation.ground_items[0].item.name = "amber rod".into();
+    s.observation.ground_items[0].item.class = ItemClass::Wand;
+    s.observation.ground_items[0].item.description.clear();
+    assert!(said("examine rod", &s).contains("is a device."));
+}
+
+#[test]
 fn fake_ground_stairs_are_an_object_not_a_way_and_known_stairs_stay_factual() {
     let mut s = state();
     s.observation.ground_items[0].item.name = "object".into();

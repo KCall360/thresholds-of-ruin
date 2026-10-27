@@ -6,15 +6,15 @@ record accepted work that is not yet complete. “Implemented” describes code 
 this tree, not a promise that every related product or performance goal is closed.
 Every change still requires the [testing policy](development/testing.md).
 
-**Current formats:** protocol **64**, save format **62**, scenario format **34**, ruleset
-**`interactions-v55`**, scenario validator **`tor-scenario-46`**. Unsupported
+**Current formats:** protocol **64**, save format **63**, scenario format **35**, ruleset
+**`interactions-v56`**, scenario validator **`tor-scenario-47`**. Unsupported
 protocol/save/rules identities are rejected rather than migrated. Current private
 creature records also require explicit Health roll policy, stable HD/purchase
 ownership, body snapshots and pending-return state; authored packages may
 explicitly register body forms and eligibility. Other current guides refer here
 instead of copying these identities.
 
-The independent compiled inputs use RulesInput **26**, ContentPackage **31** and
+The independent compiled inputs use RulesInput **26**, ContentPackage **32** and
 RegionInput **9**. Physical TORB/TORJ/TORR framing stays at **6** and TORC at **1**;
 rooms **2**, grid-rooms **1** and world-family **1** are unchanged. The independent
 arena run report is **`tor-arena-run-v5`**; its enclosing batch/matrix/search
@@ -36,6 +36,15 @@ frozen equipped-item alterations, signed weapon
 damage enchantment and explicit Psychic damage, and owned-HD Health improvements with immutable
 acquisition witnesses and bounded dormant drain records. Prior payload identities
 remain rejection-only. Physical framing remains unchanged.
+
+Rogue spears now support ordinary expertise-gated Throw with explicit 1d6 Keen
+payload and recoverable hits. Each of the fourteen charged-effect identities
+selects one stable wand/staff form per run, with shuffled metal/wood appearances.
+One-grip melee deals fixed 1 Impact for wands or 2d3 Impact for staves without
+spending charges; existing Zap effects and live effect weights are unchanged.
+The current retained authoring/content format stores bounded physical forms;
+protocol item class `wand` remains the shared wands-and-staves category. See the
+[item contracts](reference/items.md#magical-wand-and-staff-forms).
 
 The opt-in Rogue content catalog now includes ordinary fruit and standalone
 stackable darts/shuriken with distinct melee/throw payloads and consumed-hit

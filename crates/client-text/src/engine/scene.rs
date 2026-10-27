@@ -160,11 +160,27 @@ fn class_heads(class: ItemClass) -> &'static [&'static str] {
         ItemClass::Ring => &["ring"],
         ItemClass::Scroll => &["scroll"],
         ItemClass::Spellbook => &["book", "spellbook", "tome"],
-        ItemClass::Wand => &["wand"],
+        ItemClass::Wand => &["device"],
         ItemClass::Coin => &["coin", "money"],
         ItemClass::Gem => &["gem", "jewel"],
         ItemClass::Misc => &[],
     }
+}
+
+/// The visible physical form, never an effect or a private catalog identity.
+/// The wire's Wand class is the shared magical-stick category.
+pub(super) fn device_form(name: &str) -> &'static str {
+    name.split_whitespace()
+        .find_map(|word| {
+            if word.eq_ignore_ascii_case("staff") {
+                Some("staff")
+            } else if word.eq_ignore_ascii_case("wand") {
+                Some("wand")
+            } else {
+                None
+            }
+        })
+        .unwrap_or("device")
 }
 
 fn naming(name: &str, kind: Kind, class: Option<ItemClass>) -> (Vec<String>, Vec<String>) {
@@ -183,6 +199,9 @@ fn naming(name: &str, kind: Kind, class: Option<ItemClass>) -> (Vec<String>, Vec
     }
     if let Some(class) = class {
         heads.extend(class_heads(class).iter().map(|s| (*s).to_owned()));
+        if class == ItemClass::Wand {
+            heads.push(device_form(name).to_owned());
+        }
     }
     let generic: &[&str] = match kind {
         Kind::Thing => &["thing", "item", "object"],

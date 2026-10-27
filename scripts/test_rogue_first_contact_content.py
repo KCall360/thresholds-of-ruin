@@ -3,6 +3,8 @@ from pathlib import Path
 import tomllib
 import unittest
 
+from rogue_staves_package import expected_forms
+
 PRODUCTION = Path(__file__).resolve().parents[1] / "scenarios/rogue-exploration"
 
 
@@ -14,7 +16,7 @@ def expected_item(kind, name, discovery):
     identity = "rogue.wand_" + kind
     return {"asset": "item.wand", "name": "wand of " + name, "identity": identity,
             "magical": True, "class": "wand", "stackable": False,
-            "appearance_pool": "rogue.wands", "device": {"ability": identity,
+            "appearance_pool": "rogue.wands", "forms": expected_forms(name), "device": {"ability": identity,
             "initial_charges": {"minimum": 3, "maximum": 7}, "discovery": discovery}}
 
 

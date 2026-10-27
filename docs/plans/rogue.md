@@ -299,7 +299,11 @@ The equipment risk/recovery batch adds instance curses, signed weapon enchantmen
 physical armor penalties, five-category magical armor wards and rust protection.
 Psychic damage is deliberately excluded from the ward. The finite authored gear
 catalog contains five nonlauncher weapons (mace, long sword, dagger, two handed
-sword and spear) and all eight source armor identities. Weapon melee dice follow
+sword and spear) and all eight source armor identities. Spear Throw now has an
+explicit 1d6 payload and ordinary paid Spear expertise; its melee remains 2d3.
+Each charged-effect identity selects a run-stable wand or staff physical form,
+with separate shuffled metal/wood appearances and one-grip charge-free melee.
+This does not change magical effect numbers or add staff Throw. Weapon melee dice follow
 the [pinned weapon source](https://github.com/phs/rogue/blob/c7c119f893bd2f8255f2ad78d58a32664ddb9a97/weapons.c);
 common 60/40 wind-up/recovery timing remains provisional TOR tuning. Armor physical
 DR 1/2/2/3/4/5/5/6 preserves source ordering and ties while retaining 2 DR ring mail;
@@ -455,7 +459,7 @@ now preserve the existing dagger damage, use published 20/60 and 80/320 foot
 bands, and supply arrows with the pinned Rogue 2d3 payload. Shortbows join the
 ordinary equipment pool; a finite six-arrow stack is attempted once per newly
 entered floor. Timing, stock and combat-expertise threat prices remain provisional
-TOR tuning. Knife and shortbow expertise require ordinary HD or Intellect choices,
+TOR tuning. Knife, shortbow and spear expertise require ordinary HD or Intellect choices,
 with no free grant. Discreet has no noncombat
 consumer yet and is explicitly unsupported rather than an inert displayed trait.
 

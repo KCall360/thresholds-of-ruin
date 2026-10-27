@@ -32,7 +32,7 @@ fn text_size(name: &str, asset: Option<&str>) -> Result<usize, Failure> {
     add(name.len(), asset.map_or(0, str::len))
 }
 fn plain_item(author: &Archetype) -> Option<&str> {
-    (author.creature.is_none() && author.appearance_pool.is_none())
+    (author.creature.is_none() && author.appearance_pool.is_none() && author.forms.is_empty())
         .then_some(author.name.as_deref())
         .flatten()
 }
@@ -43,8 +43,17 @@ fn preflight(manifest: &Manifest) -> Result<Layout<'_>, Failure> {
     let references = manifest
         .archetypes
         .values()
-        .filter(|author| author.creature.is_none() && author.appearance_pool.is_some())
-        .try_fold(0usize, |count, _| add(count, 1))?;
+        .filter(|author| author.creature.is_none())
+        .try_fold(0usize, |count, author| {
+            add(
+                count,
+                if author.forms.is_empty() {
+                    usize::from(author.appearance_pool.is_some())
+                } else {
+                    author.forms.len()
+                },
+            )
+        })?;
     let directory_bytes = bytes(references, size_of::<UsedPool<'_>>())?;
     let mut pools = Vec::new();
     pools
@@ -55,7 +64,13 @@ fn preflight(manifest: &Manifest) -> Result<Layout<'_>, Failure> {
         .values()
         .filter(|author| author.creature.is_none())
     {
-        if let Some(key) = &author.appearance_pool {
+        for key in author.forms.iter().map(|form| &form.appearance_pool).chain(
+            author
+                .forms
+                .is_empty()
+                .then_some(author.appearance_pool.as_ref())
+                .flatten(),
+        ) {
             let pool = manifest
                 .appearance_pools
                 .get(key)

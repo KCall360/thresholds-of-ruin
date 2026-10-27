@@ -238,7 +238,12 @@ skill/damage-category mapping are conservative provisional tuning, not Rogue
 attack-speed claims. The dagger's typed profile adds Thrown 20/60 feet and
 Offhand only while Knife expertise is active; its existing LightWeaponry 1d6 Keen
 melee math and 60/40 timing are unchanged. A thrown dagger remains recoverable
-on a successful hit.
+on a successful hit. The spear likewise gains expert-only Throw after an ordinary
+Spear expertise purchase: its explicit thrown payload is 1d6 Keen, while melee
+remains HeavyWeaponry 2d3 Keen. Its 20/60-foot range, 60/40 timing and recoverable
+hit policy are TOR handling choices. It is a singleton weapon, not ammunition or
+a stack; existing exact-item holds, curse restrictions and landing rules apply.
+Neither spear availability nor starting expertise is changed.
 
 The opt-in `rogue.dart` and `rogue.shuriken` are standalone stackable weapons,
 not ammunition. Dart melee is fixed 1 Keen (not an invalid one-sided die) and its
@@ -434,6 +439,37 @@ The finite `rogue.rings` birth stage chooses one ring with weights
 Fourteen concealed appearances are shared by the catalog. The paid identify-ring-or-wand
 scroll permits either class through one server-owned choice, without exposing
 unidentified potency or curse state.
+
+## Magical wand and staff forms
+
+At the start of each run, every one of the fourteen Rogue device-effect identities
+is assigned either a wand or a staff, following the
+[pinned per-effect form choice](https://github.com/phs/rogue/blob/c7c119f893bd2f8255f2ad78d58a32664ddb9a97/init.c#L319-L355). Every later instance of that effect keeps the
+same form and concealed appearance in that run. Wand labels are shuffled metals;
+staff labels are shuffled woods. A new seed can change both assignments. Existing
+live effect weights, charge ranges, discovery policies and magical effect numbers
+are unchanged; opt-in effects remain opt-in.
+
+Both forms can be wielded as one-grip weapons with ordinary HeavyWeaponry melee,
+60 wind-up / 40 recovery ticks: a wand deals fixed **1 Impact** and a staff **2d3
+Impact**. These physical attacks neither Zap nor spend charges, and remain usable
+when empty. Physical skill, damage category, grip and timing are explicit TOR
+adaptations; the [pinned melee values](https://github.com/phs/rogue/blob/c7c119f893bd2f8255f2ad78d58a32664ddb9a97/sticks.c#L25-L31)
+distinguish staff 2d3 and wand 1d1. Neither form has a
+Throw profile in this batch. Existing exact-item holds and cursed-equipment
+restrictions apply. They start with neutral physical condition, rather than a new
+random weapon-enchantment roll; the ordinary weapon-enchantment scroll still
+selects the `weapon` class, not these magical implements.
+
+The existing serialized `wand` class now means the shared **wands and staves**
+identification category. Both retain the `/` glyph and shared device asset; this
+change does not add a bespoke 3D staff mesh. The current worn-equipment projection
+and 3D held model display only the `weapon` and `armor` classes, so wielded magical
+implements are not yet rendered there; their class is not relabeled to bypass
+that disclosure contract. Inventory, equipment, melee and Zap still work normally.
+The identify-ring-or-wand scroll can identify either form without a new action or
+wire category. Names and noun
+matching describe the disclosed form, never its hidden effect.
 
 ## Reading, identification and charged devices
 
@@ -829,7 +865,7 @@ so these facts cannot reveal a hidden effect.
 Classes are appearance facts, independent of mechanics, and survive transfer,
 identification, rewind and persistence. They participate in stack compatibility.
 ASCII uses `)` weapon, `[` armor, `!` potion, `%` food/corpse, `(` misc/tool,
-`"` amulet, `=` ring, `?` scroll, `+` spellbook, `/` wand, `$` coin and `*` gem.
+`"` amulet, `=` ring, `?` scroll, `+` spellbook, `/` wand or staff, `$` coin and `*` gem.
 An item pile draws the first disclosed item. Actors/terrain keep their existing
 precedence, and remembered items keep the last disclosed class and grey color.
 These classes do not implement food, spells, tools or other item-use mechanics.

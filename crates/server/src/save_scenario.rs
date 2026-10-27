@@ -907,8 +907,22 @@ enum CurrencyKind {
 }
 
 #[derive(Serialize, Deserialize)]
+#[serde(remote = "source::ItemForm", deny_unknown_fields)]
+struct ItemForm {
+    name: String,
+    appearance_pool: String,
+    #[serde(with = "mapped")]
+    equipment: source::EquipmentSpec,
+}
+
+#[derive(Serialize, Deserialize)]
 #[serde(remote = "source::Archetype", deny_unknown_fields)]
 struct Archetype {
+    #[serde(
+        serialize_with = "mapped::serialize",
+        deserialize_with = "bounded_stored::<_, source::ItemForm, 16>"
+    )]
+    forms: Vec<source::ItemForm>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde(with = "mapped")]
     creature: Option<crate::creature_authoring::BuildSpec>,
@@ -4299,6 +4313,7 @@ remote!(
     Zone => source::Zone,
     TerrainAssets => source::TerrainAssets,
     AppearancePool => source::AppearancePool,
+    ItemForm => source::ItemForm,
     Archetype => source::Archetype,
     CurrencyKind => source::CurrencyKind,
     RelocationPolicy => source::RelocationPolicy,
@@ -4493,7 +4508,7 @@ struct ContentPackage {
     #[serde(with = "mapped")]
     index: source::RegionIndex,
 }
-const CONTENT_PACKAGE_FORMAT: u32 = 31;
+const CONTENT_PACKAGE_FORMAT: u32 = 32;
 pub(crate) fn check_metadata_capacity(package: &source::Package) -> Result<(), crate::Failure> {
     let bytes = serde_json::to_vec(&Borrowed(package)).map_err(|_| storage_failure())?;
     if bytes.len() > MAX_SAVE_METADATA_BYTES {
@@ -4965,7 +4980,7 @@ mod tests {
                 super::CONTENT_PACKAGE_FORMAT,
                 crate::arena_evaluation::FORMAT,
             ),
-            (62, 34, "interactions-v55", 26, 9, 31, "tor-arena-run-v5")
+            (63, 35, "interactions-v56", 26, 9, 32, "tor-arena-run-v5")
         );
     }
 
@@ -10616,3 +10631,94 @@ mod raise_level_effect_tests {
 #[cfg(test)]
 #[path = "save_detection_species_tests.rs"]
 mod detection_species_tests;
+
+#[cfg(test)]
+mod item_form_record_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn author() -> source::Archetype {
+        serde_json::from_value(json!({
+            "name": "wand of light", "class": "wand", "identity": "fixture.light",
+            "forms": [
+                {"name":"wand of light", "appearance_pool":"metal", "equipment":{
+                    "slot":"weapon", "attack":{"skill":"heavy_weaponry", "bonus":0,
+                        "wind_up":60, "recovery":40, "damage":{"primary":{"category":"impact"},
+                        "components":[{"category":"impact", "amount":{"type":"fixed", "value":1}}]}},
+                    "modifiers":[]}},
+                {"name":"staff of light", "appearance_pool":"wood", "equipment":{
+                    "slot":"weapon", "attack":{"skill":"heavy_weaponry", "bonus":0,
+                        "wind_up":60, "recovery":40, "damage":{"primary":{"category":"impact", "sides":3},
+                        "components":[{"category":"impact", "amount":{"type":"rolled", "count":2,"sides":3,"bonus":0}}]}},
+                    "modifiers":[]}}
+            ]
+        })).unwrap()
+    }
+
+    #[test]
+    fn saved_item_forms_are_explicit_bounded_named_and_keep_physical_operands() {
+        let saved = serde_json::to_value(Borrowed(&author())).unwrap();
+        let restored: Owned<source::Archetype> = serde_json::from_value(saved.clone()).unwrap();
+        assert_eq!(serde_json::to_value(Borrowed(&restored.0)).unwrap(), saved);
+        assert_eq!(
+            saved["forms"][0]["equipment"]["attack"]["damage"]["components"][0]["amount"],
+            json!({"type":"fixed", "value":1})
+        );
+        assert_eq!(
+            saved["forms"][1]["equipment"]["attack"]["damage"]["components"][0]["amount"],
+            json!({"type":"rolled", "count":2, "sides":3, "bonus":0})
+        );
+        for pointer in [
+            "/forms",
+            "/forms/0/name",
+            "/forms/0/appearance_pool",
+            "/forms/0/equipment",
+        ] {
+            let mut bad = saved.clone();
+            let (parent, key) = pointer.rsplit_once('/').unwrap();
+            bad.pointer_mut(parent)
+                .unwrap()
+                .as_object_mut()
+                .unwrap()
+                .remove(key);
+            assert!(
+                serde_json::from_value::<Owned<source::Archetype>>(bad).is_err(),
+                "{pointer}"
+            );
+        }
+        let mut unknown = saved.clone();
+        unknown["forms"][0]["class"] = json!("weapon");
+        assert!(serde_json::from_value::<Owned<source::Archetype>>(unknown).is_err());
+        let mut positional = saved.clone();
+        positional["forms"][0] = json!(["staff of light", "wood", saved["forms"][1]["equipment"]]);
+        assert!(crate::storage::codec::strict::<Owned<source::Archetype>>(
+            &serde_json::to_vec(&positional).unwrap()
+        )
+        .is_err());
+        let mut oversized = saved.clone();
+        oversized["forms"] = json!(vec![saved["forms"][0].clone(); 17]);
+        assert!(serde_json::from_value::<Owned<source::Archetype>>(oversized).is_err());
+        let ordinary = serde_json::to_value(Borrowed(&source::Archetype::default())).unwrap();
+        assert_eq!(ordinary["forms"], json!([]));
+        assert!(serde_json::from_value::<Owned<source::Archetype>>(ordinary).is_ok());
+    }
+
+    #[test]
+    fn saved_form_duplicate_members_are_rejected_by_strict_reader() {
+        let encoded = serde_json::to_string(&Borrowed(&author())).unwrap();
+        let duplicate = encoded.replacen("\"forms\":", "\"forms\":[],\"forms\":", 1);
+        assert!(
+            crate::storage::codec::strict::<Owned<source::Archetype>>(duplicate.as_bytes())
+                .is_err()
+        );
+        let duplicate = encoded.replacen(
+            "\"appearance_pool\":\"metal\"",
+            "\"appearance_pool\":\"metal\",\"appearance_pool\":\"wood\"",
+            1,
+        );
+        assert!(
+            crate::storage::codec::strict::<Owned<source::Archetype>>(duplicate.as_bytes())
+                .is_err()
+        );
+    }
+}

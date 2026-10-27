@@ -23,10 +23,16 @@ def rosters(root):
     objects = {('', None, 'stairs')}
     pools = {}
     for item in catalog['items'].values():
-        if 'appearance_pool' in item:
-            pools[item['appearance_pool']] = item.get('class', 'misc')
-        elif 'name' in item:
-            objects.add((item['name'], item.get('asset'), item.get('class', 'misc')))
+        # A seeded physical form changes the run's item, not the complete cosmetic
+        # roster. Include every declared form pool once, never only one seed.
+        variants = item.get('forms') or [item]
+        for form in variants:
+            if 'appearance_pool' in form:
+                key, kind = form['appearance_pool'], item.get('class', 'misc')
+                assert key not in pools or pools[key] == kind
+                pools[key] = kind
+            elif 'name' in form:
+                objects.add((form['name'], form.get('asset'), item.get('class', 'misc')))
     for key, kind in pools.items():
         pool = catalog['appearance_pools'][key]
         objects.update((name, pool.get('asset'), kind) for name in pool['appearances'])
@@ -51,12 +57,12 @@ class RoguePresentationVectors(unittest.TestCase):
 
     def test_complete_authored_rosters_keep_visual_and_monster_sense_channels_distinct(self):
         self.assertEqual(vectors(PRODUCTION), {
-            'creatures': 26, 'objects': 84, 'phases': [
+            'creatures': 26, 'objects': 98, 'phases': [
                 {'phase': 0, 'visual': ('emu', 'creature.bird.emu'),
-                 'object': ('scroll titled NEM AL', 'item.scroll', 'scroll'),
+                 'object': ('gold wand', 'item.wand', 'wand'),
                  'monster_sense': ('snake', 'creature.serpent.snake')},
                 {'phase': 1, 'visual': ('bat', 'creature.bat'),
-                 'object': ('scroll titled IV MEM', 'item.scroll', 'scroll'),
+                 'object': ('cedar staff', 'item.wand', 'wand'),
                  'monster_sense': ('leprechaun', 'creature.fey.leprechaun')} ]})
 
 if __name__ == '__main__':

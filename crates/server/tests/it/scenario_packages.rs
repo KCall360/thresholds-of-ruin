@@ -486,7 +486,7 @@ fn rogue_projectile_content_is_default_available_and_expertise_is_an_ordinary_ch
                 .abilities
                 .contains(&AbilityId::new(ability).unwrap()));
         }
-        for name in ["rogue.knife", "rogue.shortbow"] {
+        for name in ["rogue.knife", "rogue.shortbow", "rogue.spear"] {
             let id = ExpertiseId::new(name).unwrap();
             assert_eq!(
                 rules.expertise(&id).unwrap().category,

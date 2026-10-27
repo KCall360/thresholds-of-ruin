@@ -144,7 +144,7 @@ An actor definition accepts `creature`, `anatomy`, `body`, `turn_ticks` and
 `asset`. Actor names belong to `creature.name`; a standalone actor `name` field
 is rejected because the current engine has no anatomy-only naming mechanism. An item definition accepts `name`, `class`, `equipment`,
 `consumable`, `readable`, `device`, `edible`, `supply`, `magical`, `currency`,
-`identity`, `appearance_pool`, `stackable`, `properties` and `asset`.
+`identity`, `appearance_pool`, `forms`, `stackable`, `properties` and `asset`.
 A supply names a rules-defined finite-cost capability; declaring it alone does
 not grant an eating or drinking action.
 Irrelevant fields are rejected: an actor cannot declare item stacking or
@@ -160,7 +160,23 @@ resource, finite-supply or cooldown cost;
 item ownership supplies invocation authority without permanently granting it.
 Initial charges are sampled once when each instance is created, while remaining
 charges are mutable state and never part of the archetype or appearance mapping.
-Equipment, consumable, readable and device capabilities cannot be combined.
+Consumable and readable capabilities cannot be combined with equipment or devices.
+The narrow exception is a nonstackable charged device with ordinary weapon-slot
+melee equipment: it has no projectile, launcher, thrown profile, light, edible,
+supply or currency capability. Zap and melee retain separate payments and effects.
+
+An item may declare `forms`, a list of 2–16 distinct named physical alternatives.
+Each has exactly `name`, `appearance_pool` and `equipment`; identity and all other
+capabilities remain on the common archetype. Every alternative is validated,
+including pool existence, uniform public affordances and enough distinct labels.
+The saved run seed and stable identity choose one form, independently of gameplay
+RNG and instance creation order. All instances/aliases of that identity use it;
+aliases must declare the same form policy. Appearance labels are then shuffled
+among only the identities assigned each pool. Catalog cosmetics include all
+possible pools without disclosing which form an actual hidden identity received.
+Retained content stores the full policy explicitly; lazy population and source-free
+restoration reconstruct the same chosen physical definition. Empty authoring forms
+mean no alternatives; saved records always contain the explicit list.
 
 Consumables and effect-bearing readables author `discovery = "self_effect"`,
 `"on_use"` or `"never"`; author omission defaults to `self_effect`. Identification
@@ -783,7 +799,7 @@ The manifest’s `ruleset = "rules.toml"` names a relative TOML file inside the
 package. Ordinary scenarios import the general rules rather than copy them:
 
 ```toml
-import = "interactions-v55"
+import = "interactions-v56"
 
 [[overrides]]
 op = "set"

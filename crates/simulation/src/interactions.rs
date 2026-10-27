@@ -129,6 +129,19 @@ fn read_equipment_modifiers<'de, D: serde::Deserializer<'de>>(
     Ok(crate::bounded::Bounded::<crate::rules::Modifier, { crate::limits::MODIFIERS_PER_SOURCE }>::deserialize(d)?.0)
 }
 impl EquipmentSpec {
+    /// A magical stick can also be a plain one-grip melee weapon. Keep this
+    /// author/runtime allowlist separate from stackable or projectile weapons.
+    pub fn supports_device(&self, class: ItemClass) -> bool {
+        class == ItemClass::Wand
+            && self.slot.as_str() == "weapon"
+            && self.attack.is_some()
+            && self.armor.is_none()
+            && self.weapon_profile.is_none()
+            && self.periodic_relocation.is_none()
+            && self.modifiers.is_empty()
+            && self.potency_modifiers.is_empty()
+    }
+
     /// Shared author/runtime allowlist for homogeneous standalone weapon stacks.
     /// The containing item must still reject other capabilities and validate rules.
     pub fn supports_stacking(&self, class: ItemClass) -> bool {

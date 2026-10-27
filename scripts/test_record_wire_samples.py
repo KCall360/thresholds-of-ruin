@@ -1205,8 +1205,8 @@ class HallucinationRecordingContracts(unittest.TestCase):
             "combat": {"own_stats": {"conditions": [condition]}},
             "visible_actors": [{"id": "a_peer", "name": "emu", "asset": "creature.bird.emu", "description": "",
                                 "appearance_seed": "p_" + "00" * 32}],
-            "ground_items": [{"presentation": {"name": "scroll titled NEM AL", "asset": "item.scroll",
-                "kind": {"kind": "item", "class": "scroll"}}, "item": {
+            "ground_items": [{"presentation": {"name": "gold wand", "asset": "item.wand",
+                "kind": {"kind": "item", "class": "wand"}}, "item": {
                     "class": "coin", "quantity": "7", "known_currency": "gold", "name": "object", "appearance": "object", "description": ""}}],
             "visible_cells": [{"stairs_up": False, "stairs_down": False}]}
         raw = {"type": "snapshot", "request_id": "exact-hallucination-request",
@@ -1216,8 +1216,8 @@ class HallucinationRecordingContracts(unittest.TestCase):
         extended["tick"] = "200"
         extended["combat"]["own_stats"]["conditions"][0]["remaining_ticks"] = "161500"
         extended["visible_actors"][0].update(name="bat", asset="creature.bat")
-        extended["ground_items"][0]["presentation"] = {"name": "scroll titled IV MEM", "asset": "item.scroll",
-            "kind": {"kind": "item", "class": "scroll"}}
+        extended["ground_items"][0]["presentation"] = {"name": "cedar staff", "asset": "item.wand",
+            "kind": {"kind": "item", "class": "wand"}}
         cured = source["cured"]["snapshot"]["state"]["observation"]
         cured["tick"] = "300"
         cured["visible_actors"][0].update(name="actual visible peer", asset=None)

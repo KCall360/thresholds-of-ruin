@@ -19,6 +19,27 @@ def override(*path):
 
 
 class RogueProjectileContent(unittest.TestCase):
+    def test_spear_retains_melee_and_generation_with_expert_only_durable_throw(self):
+        item = source("catalog/items.toml")["items"]["rogue.spear"]
+        self.assertEqual(item["equipment_generation"], {"kind": "weapon", "curse_percent": 10,
+                         "enchant_percent": 5, "minimum": 1, "maximum": 3})
+        self.assertFalse(item.get("stackable", False))
+        self.assertEqual(item["equipment"]["attack"], {
+            "skill": "heavy_weaponry", "bonus": 0, "wind_up": 60, "recovery": 40,
+            "damage": {"primary": {"category": "keen", "sides": 3}, "components": [
+                {"category": "keen", "amount": {"type": "rolled", "count": 2,
+                                                "sides": 3, "bonus": 0}}]}})
+        self.assertIn("weapon_profile", item["equipment"])
+        self.assertEqual(item["equipment"]["weapon_profile"], {
+            "expertise": "rogue.spear", "base_traits": [], "expert_traits": {
+                "add": [{"kind": "thrown", "range": {"short_feet": 20, "long_feet": 60}}],
+                "remove": []}, "thrown_payload": {"recovery": "recoverable", "damage": {
+                    "primary": {"category": "keen", "sides": 6}, "components": [
+                        {"category": "keen", "amount": {"type": "rolled", "count": 1,
+                                                        "sides": 6, "bonus": 0}}]}}})
+        self.assertNotIn("projectile", item)
+        self.assertEqual(item["equipment"]["modifiers"], [])
+
     def test_dagger_retains_damage_and_timing_with_expert_only_throw_and_offhand(self):
         equipment = source("catalog/items.toml")["items"]["rogue.dagger"]["equipment"]
         self.assertEqual(equipment["attack"], {
@@ -83,12 +104,13 @@ class RogueProjectileContent(unittest.TestCase):
             self.assertNotIn("cooldown", ability)
 
     def test_expertises_are_choices_with_explicit_combat_prices_and_no_automatic_grants(self):
-        for name in ("knife", "shortbow"):
+        for name in ("knife", "shortbow", "spear"):
             self.assertEqual(override("expertises", "rogue." + name), {
                 "id": "rogue." + name, "name": name.title(), "category": "equipment"})
         self.assertEqual(override("growth", "threat", "overrides"), [
             {"source": {"kind": "expertise", "id": "rogue.knife"}, "points": 10},
-            {"source": {"kind": "expertise", "id": "rogue.shortbow"}, "points": 10}])
+            {"source": {"kind": "expertise", "id": "rogue.shortbow"}, "points": 10},
+            {"source": {"kind": "expertise", "id": "rogue.spear"}, "points": 10}])
         shared = tomllib.loads((ROOT / "crates/simulation/data/default-ruleset.toml").read_text())
         self.assertEqual(shared["growth"]["threat"]["expertise"], 0)
         pool = next(row for row in shared["point_pools"] if row["id"] == "advancement")

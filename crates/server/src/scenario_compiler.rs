@@ -286,6 +286,30 @@ pub(super) fn item_asset<'a>(author: &'a Archetype, manifest: &'a Manifest) -> O
     }
 }
 
+/// Forecast every possible concealed form, never an identity-specific asset.
+pub(super) fn item_assets<'a>(
+    author: &'a Archetype,
+    manifest: &'a Manifest,
+) -> impl Iterator<Item = &'a str> {
+    author
+        .forms
+        .iter()
+        .filter_map(|form| {
+            manifest
+                .appearance_pools
+                .get(&form.appearance_pool)?
+                .asset
+                .as_deref()
+        })
+        .chain(
+            author
+                .forms
+                .is_empty()
+                .then(|| item_asset(author, manifest))
+                .flatten(),
+        )
+}
+
 #[derive(Debug)]
 pub(super) struct PreparedCharacter {
     pub id: u64,
@@ -502,6 +526,29 @@ impl PreparedDefinitions {
             omitted,
             objective_item: manifest.objective.as_ref().and_then(|o| o.item),
         })
+    }
+
+    /// Resolve only physical form, once for each identity and run. The retained
+    /// source and full cosmetic roster stay unchanged; later births reuse this
+    /// prepared context and a reopened context repeats the same seeded choice.
+    pub(super) fn select_item_forms(
+        &mut self,
+        manifest: &Manifest,
+        seed: u64,
+        provenance: &BTreeMap<String, String>,
+    ) -> Result<(), Failure> {
+        for (key, author) in &manifest.archetypes {
+            let Some(form) = super::item_forms::selected(author, key, seed) else {
+                continue;
+            };
+            let resolved = super::item_forms::apply(author, form);
+            let prepared =
+                PreparedArchetype::new(&resolved, manifest, &self.catalog).map_err(|failure| {
+                    failure.into_failure(super::source::archetype_origin(provenance, key), || None)
+                })?;
+            self.archetypes.insert(key.clone(), prepared);
+        }
+        Ok(())
     }
 
     /// Borrow only catalog labels; listing never copies or instantiates HD rows.
@@ -1569,6 +1616,7 @@ mod tests {
                 }),
                 identity: Some("guard-item".into()),
                 appearance_pool: Some("hidden".into()),
+                forms: vec![],
                 stackable: true,
                 properties: BTreeMap::from([("quality".into(), "fine".into())]),
                 name: Some("guard token".into()),

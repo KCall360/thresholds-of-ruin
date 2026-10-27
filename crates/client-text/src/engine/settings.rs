@@ -53,7 +53,7 @@ pub fn class_name(class: ItemClass) -> &'static str {
         ItemClass::Ring => "rings",
         ItemClass::Scroll => "scrolls",
         ItemClass::Spellbook => "spellbooks",
-        ItemClass::Wand => "wands",
+        ItemClass::Wand => "wands and staves",
         ItemClass::Coin => "coins",
         ItemClass::Gem => "gems",
     }
@@ -72,7 +72,7 @@ pub fn class_of(word: &str) -> Option<ItemClass> {
         "ring" | "rings" => ItemClass::Ring,
         "scroll" | "scrolls" => ItemClass::Scroll,
         "spellbook" | "spellbooks" | "book" | "books" => ItemClass::Spellbook,
-        "wand" | "wands" => ItemClass::Wand,
+        "wand" | "wands" | "staff" | "staves" | "staffs" => ItemClass::Wand,
         "coin" | "coins" | "money" => ItemClass::Coin,
         "gem" | "gems" | "jewel" | "jewels" => ItemClass::Gem,
         "misc" | "other" | "others" => ItemClass::Misc,
@@ -149,5 +149,21 @@ mod tests {
         );
         assert_eq!(classes("nothing"), Ok(vec![]));
         assert!(classes("sandwiches").is_err());
+    }
+
+    #[test]
+    fn wand_and_staff_aliases_share_the_disclosed_device_category() {
+        for word in ["wand", "wands", "staff", "staves", "staffs"] {
+            assert_eq!(class_of(word), Some(ItemClass::Wand), "{word}");
+        }
+        assert_eq!(classes("wands and staves"), Ok(vec![ItemClass::Wand]));
+        assert_eq!(class_name(ItemClass::Wand), "wands and staves");
+        assert_eq!(
+            Settings {
+                all_skips: vec![ItemClass::Wand]
+            }
+            .all_sentence(),
+            "Take all leaves wands and staves where they lie; name them to take them."
+        );
     }
 }

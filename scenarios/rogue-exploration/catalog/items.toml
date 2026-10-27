@@ -202,6 +202,9 @@ stackable = true
 appearance_pool = "rogue.scrolls"
 readable = { identify = ["ring", "wand"], discovery = "on_use" }
 
+# Each effect chooses exactly one physical form per run; aliases keep the same
+# identity, effect, charges and discovery. Physical melee never zaps. Both use
+# one grip and existing 60/40 TOR timing; magical sticks have no Throw profile.
 [items."rogue.wand_fire"]
 asset = "item.wand"
 name = "wand of fire"
@@ -210,6 +213,7 @@ magical = true
 class = "wand"
 stackable = false
 appearance_pool = "rogue.wands"
+forms = [{ name = "wand of fire", appearance_pool = "rogue.wands", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact" }, components = [{ category = "impact", amount = { type = "fixed", value = 1 } }] } }, modifiers = [] } }, { name = "staff of fire", appearance_pool = "rogue.staves", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact", sides = 3 }, components = [{ category = "impact", amount = { type = "rolled", count = 2, sides = 3, bonus = 0 } }] } }, modifiers = [] } }]
 device = { ability = "rogue.wand_fire", initial_charges = { minimum = 3, maximum = 7 }, discovery = "on_use" }
 
 [items."rogue.wand_cold"]
@@ -220,6 +224,7 @@ magical = true
 class = "wand"
 stackable = false
 appearance_pool = "rogue.wands"
+forms = [{ name = "wand of cold", appearance_pool = "rogue.wands", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact" }, components = [{ category = "impact", amount = { type = "fixed", value = 1 } }] } }, modifiers = [] } }, { name = "staff of cold", appearance_pool = "rogue.staves", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact", sides = 3 }, components = [{ category = "impact", amount = { type = "rolled", count = 2, sides = 3, bonus = 0 } }] } }, modifiers = [] } }]
 device = { ability = "rogue.wand_cold", initial_charges = { minimum = 3, maximum = 7 }, discovery = "on_use" }
 
 [items."rogue.wand_lightning"]
@@ -230,6 +235,7 @@ magical = true
 class = "wand"
 stackable = false
 appearance_pool = "rogue.wands"
+forms = [{ name = "wand of lightning", appearance_pool = "rogue.wands", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact" }, components = [{ category = "impact", amount = { type = "fixed", value = 1 } }] } }, modifiers = [] } }, { name = "staff of lightning", appearance_pool = "rogue.staves", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact", sides = 3 }, components = [{ category = "impact", amount = { type = "rolled", count = 2, sides = 3, bonus = 0 } }] } }, modifiers = [] } }]
 device = { ability = "rogue.wand_lightning", initial_charges = { minimum = 3, maximum = 7 }, discovery = "on_use" }
 
 # Utility devices remain unknown after use; each spends one ordinary charge.
@@ -241,6 +247,7 @@ magical = true
 class = "wand"
 stackable = false
 appearance_pool = "rogue.wands"
+forms = [{ name = "wand of invisibility", appearance_pool = "rogue.wands", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact" }, components = [{ category = "impact", amount = { type = "fixed", value = 1 } }] } }, modifiers = [] } }, { name = "staff of invisibility", appearance_pool = "rogue.staves", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact", sides = 3 }, components = [{ category = "impact", amount = { type = "rolled", count = 2, sides = 3, bonus = 0 } }] } }, modifiers = [] } }]
 device = { ability = "rogue.wand_invisibility", initial_charges = { minimum = 3, maximum = 7 }, discovery = "never" }
 
 [items."rogue.wand_haste"]
@@ -251,6 +258,7 @@ magical = true
 class = "wand"
 stackable = false
 appearance_pool = "rogue.wands"
+forms = [{ name = "wand of haste monster", appearance_pool = "rogue.wands", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact" }, components = [{ category = "impact", amount = { type = "fixed", value = 1 } }] } }, modifiers = [] } }, { name = "staff of haste monster", appearance_pool = "rogue.staves", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact", sides = 3 }, components = [{ category = "impact", amount = { type = "rolled", count = 2, sides = 3, bonus = 0 } }] } }, modifiers = [] } }]
 device = { ability = "rogue.wand_haste", initial_charges = { minimum = 3, maximum = 7 }, discovery = "never" }
 
 [items."rogue.wand_slow"]
@@ -261,11 +269,17 @@ magical = true
 class = "wand"
 stackable = false
 appearance_pool = "rogue.wands"
+forms = [{ name = "wand of slow monster", appearance_pool = "rogue.wands", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact" }, components = [{ category = "impact", amount = { type = "fixed", value = 1 } }] } }, modifiers = [] } }, { name = "staff of slow monster", appearance_pool = "rogue.staves", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact", sides = 3 }, components = [{ category = "impact", amount = { type = "rolled", count = 2, sides = 3, bonus = 0 } }] } }, modifiers = [] } }]
 device = { ability = "rogue.wand_slow", initial_charges = { minimum = 3, maximum = 7 }, discovery = "never" }
 
 [appearance_pools."rogue.wands"]
 asset = "item.wand"
-appearances = ["ash wand", "copper wand", "ivory wand", "obsidian wand", "oak wand", "glass wand", "willow wand", "iron wand", "elm wand", "birch wand", "cedar wand", "hazel wand", "yew wand", "maple wand"]
+appearances = ["aluminum wand", "bronze wand", "copper wand", "electrum wand", "gold wand", "iron wand", "lead wand", "magnesium wand", "nickel wand", "platinum wand", "silver wand", "steel wand", "tin wand", "zinc wand"]
+
+# A separate wood palette is shuffled only among identities assigned staff form.
+[appearance_pools."rogue.staves"]
+asset = "item.wand"
+appearances = ["ash staff", "birch staff", "cedar staff", "cherry staff", "elm staff", "hazel staff", "mahogany staff", "maple staff", "oak staff", "pine staff", "teak staff", "walnut staff", "willow staff", "yew staff"]
 
 # Finite gear. Rogue source weapon dice and existing birth distributions are
 # preserved; skill/category, uniform 60/40 timing and armor physical DR are
@@ -328,13 +342,16 @@ class = "weapon"
 equipment_generation = { kind = "weapon", curse_percent = 10, enchant_percent = 5, minimum = 1, maximum = 3 }
 equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "keen", sides = 4 }, components = [{ category = "keen", amount = { type = "rolled", count = 4, sides = 4, bonus = 0 } }] } }, modifiers = [] }
 
+# Spear keeps Rogue melee 2d3 and its distinct 1d6 thrown payload.
+# Expert-only Throw, 20/60 feet and durable hit recovery are TOR handling;
+# the existing HeavyWeaponry check, 60/40 timing and birth rolls are unchanged.
 [items."rogue.spear"]
 asset = "item.weapon"
 name = "spear"
 identity = "rogue.spear"
 class = "weapon"
 equipment_generation = { kind = "weapon", curse_percent = 10, enchant_percent = 5, minimum = 1, maximum = 3 }
-equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "keen", sides = 3 }, components = [{ category = "keen", amount = { type = "rolled", count = 2, sides = 3, bonus = 0 } }] } }, modifiers = [] }
+equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "keen", sides = 3 }, components = [{ category = "keen", amount = { type = "rolled", count = 2, sides = 3, bonus = 0 } }] } }, weapon_profile = { expertise = "rogue.spear", base_traits = [], expert_traits = { add = [{ kind = "thrown", range = { short_feet = 20, long_feet = 60 } }], remove = [] }, thrown_payload = { recovery = "recoverable", damage = { primary = { category = "keen", sides = 6 }, components = [{ category = "keen", amount = { type = "rolled", count = 1, sides = 6, bonus = 0 } }] } } }, modifiers = [] }
 
 [items."rogue.leather_armor"]
 asset = "item.armor.leather"
@@ -624,6 +641,7 @@ magical = true
 class = "wand"
 stackable = false
 appearance_pool = "rogue.wands"
+forms = [{ name = "wand of teleport away", appearance_pool = "rogue.wands", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact" }, components = [{ category = "impact", amount = { type = "fixed", value = 1 } }] } }, modifiers = [] } }, { name = "staff of teleport away", appearance_pool = "rogue.staves", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact", sides = 3 }, components = [{ category = "impact", amount = { type = "rolled", count = 2, sides = 3, bonus = 0 } }] } }, modifiers = [] } }]
 device = { ability = "rogue.wand_teleport_away", initial_charges = { minimum = 3, maximum = 7 }, discovery = "never" }
 
 [items."rogue.wand_teleport_to"]
@@ -634,6 +652,7 @@ magical = true
 class = "wand"
 stackable = false
 appearance_pool = "rogue.wands"
+forms = [{ name = "wand of teleport to", appearance_pool = "rogue.wands", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact" }, components = [{ category = "impact", amount = { type = "fixed", value = 1 } }] } }, modifiers = [] } }, { name = "staff of teleport to", appearance_pool = "rogue.staves", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact", sides = 3 }, components = [{ category = "impact", amount = { type = "rolled", count = 2, sides = 3, bonus = 0 } }] } }, modifiers = [] } }]
 device = { ability = "rogue.wand_teleport_to", initial_charges = { minimum = 3, maximum = 7 }, discovery = "never" }
 
 # Balance defaults: continual Stealth gets one advantage, not invisibility.
@@ -722,6 +741,7 @@ magical = true
 class = "wand"
 stackable = false
 appearance_pool = "rogue.wands"
+forms = [{ name = "wand of nothing", appearance_pool = "rogue.wands", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact" }, components = [{ category = "impact", amount = { type = "fixed", value = 1 } }] } }, modifiers = [] } }, { name = "staff of nothing", appearance_pool = "rogue.staves", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact", sides = 3 }, components = [{ category = "impact", amount = { type = "rolled", count = 2, sides = 3, bonus = 0 } }] } }, modifiers = [] } }]
 device = { ability = "rogue.wand_nothing", initial_charges = { minimum = 3, maximum = 7 }, discovery = "never" }
 
 # Opt-in original Light device; live floor stock is unchanged.
@@ -733,6 +753,7 @@ magical = true
 class = "wand"
 stackable = false
 appearance_pool = "rogue.wands"
+forms = [{ name = "wand of light", appearance_pool = "rogue.wands", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact" }, components = [{ category = "impact", amount = { type = "fixed", value = 1 } }] } }, modifiers = [] } }, { name = "staff of light", appearance_pool = "rogue.staves", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact", sides = 3 }, components = [{ category = "impact", amount = { type = "rolled", count = 2, sides = 3, bonus = 0 } }] } }, modifiers = [] } }]
 device = { ability = "rogue.wand_light", initial_charges = { minimum = 10, maximum = 19 }, discovery = "on_use" }
 
 # Opt-in original Drain Life; live floor stock is unchanged.
@@ -744,6 +765,7 @@ magical = true
 class = "wand"
 stackable = false
 appearance_pool = "rogue.wands"
+forms = [{ name = "wand of drain life", appearance_pool = "rogue.wands", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact" }, components = [{ category = "impact", amount = { type = "fixed", value = 1 } }] } }, modifiers = [] } }, { name = "staff of drain life", appearance_pool = "rogue.staves", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact", sides = 3 }, components = [{ category = "impact", amount = { type = "rolled", count = 2, sides = 3, bonus = 0 } }] } }, modifiers = [] } }]
 device = { ability = "rogue.wand_drain_life", initial_charges = { minimum = 3, maximum = 7 }, discovery = "never" }
 
 [items."rogue.wand_cancellation"]
@@ -754,6 +776,7 @@ magical = true
 class = "wand"
 stackable = false
 appearance_pool = "rogue.wands"
+forms = [{ name = "wand of cancellation", appearance_pool = "rogue.wands", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact" }, components = [{ category = "impact", amount = { type = "fixed", value = 1 } }] } }, modifiers = [] } }, { name = "staff of cancellation", appearance_pool = "rogue.staves", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact", sides = 3 }, components = [{ category = "impact", amount = { type = "rolled", count = 2, sides = 3, bonus = 0 } }] } }, modifiers = [] } }]
 device = { ability = "rogue.wand_cancellation", initial_charges = { minimum = 3, maximum = 7 }, discovery = "never" }
 
 [items."rogue.wand_magic_missile"]
@@ -764,6 +787,7 @@ magical = true
 class = "wand"
 stackable = false
 appearance_pool = "rogue.wands"
+forms = [{ name = "wand of magic missile", appearance_pool = "rogue.wands", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact" }, components = [{ category = "impact", amount = { type = "fixed", value = 1 } }] } }, modifiers = [] } }, { name = "staff of magic missile", appearance_pool = "rogue.staves", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact", sides = 3 }, components = [{ category = "impact", amount = { type = "rolled", count = 2, sides = 3, bonus = 0 } }] } }, modifiers = [] } }]
 device = { ability = "rogue.wand_magic_missile", initial_charges = { minimum = 3, maximum = 7 }, discovery = "on_use" }
 
 # Opt-in physical light; not part of live floor stock or starting kits.
@@ -874,6 +898,7 @@ magical = true
 class = "wand"
 stackable = false
 appearance_pool = "rogue.wands"
+forms = [{ name = "wand of polymorph", appearance_pool = "rogue.wands", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact" }, components = [{ category = "impact", amount = { type = "fixed", value = 1 } }] } }, modifiers = [] } }, { name = "staff of polymorph", appearance_pool = "rogue.staves", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact", sides = 3 }, components = [{ category = "impact", amount = { type = "rolled", count = 2, sides = 3, bonus = 0 } }] } }, modifiers = [] } }]
 device = { ability = "rogue.wand_polymorph", initial_charges = { minimum = 3, maximum = 7 }, discovery = "discernible_effect" }
 
 # Opt-in standalone throwing weapons: no starter, population, or birth-stack

@@ -17,6 +17,12 @@ mod compiler;
 mod diagnostics;
 #[path = "scenario_instantiation.rs"]
 mod instantiation;
+#[path = "scenario_item_forms.rs"]
+mod item_forms;
+#[cfg(test)]
+#[path = "physical_device_authoring_tests.rs"]
+mod physical_device_tests;
+pub use item_forms::ItemForm;
 #[path = "scenario_population.rs"]
 mod population;
 #[path = "scenario_presentation.rs"]
@@ -65,13 +71,13 @@ pub use tor_simulation::EdibleSpec;
 use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
-pub const RULESET: &str = "interactions-v55";
-const VALIDATOR: &str = "tor-scenario-46";
+pub const RULESET: &str = "interactions-v56";
+const VALIDATOR: &str = "tor-scenario-47";
 /// The manifest and the validator's files are bounded to this.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 /// The package layout this version reads: `scenario.toml`, one file per
 /// region in `regions/`, and the validator's `index.json`.
-pub const FORMAT: u32 = 34;
+pub const FORMAT: u32 = 35;
 const REGION_DIR: &str = "regions";
 /// Regions a package may have.
 pub const MAX_REGIONS: usize = 65_536;
@@ -270,6 +276,8 @@ pub struct Archetype {
     pub identity: Option<String>,
     pub appearance_pool: Option<String>,
     #[serde(default)]
+    pub forms: Vec<ItemForm>,
+    #[serde(default)]
     pub stackable: bool,
     #[serde(default)]
     pub properties: BTreeMap<String, String>,
@@ -304,6 +312,8 @@ impl<'de> serde::Deserialize<'de> for Archetype {
             body: Option<BodySpec>,
             identity: Option<String>,
             appearance_pool: Option<String>,
+            #[serde(default)]
+            forms: Vec<ItemForm>,
             #[serde(default)]
             stackable: bool,
             #[serde(default)]
@@ -342,6 +352,7 @@ impl<'de> serde::Deserialize<'de> for Archetype {
             body: fields.body,
             identity: fields.identity,
             appearance_pool: fields.appearance_pool,
+            forms: fields.forms,
             stackable: fields.stackable,
             properties: fields.properties,
             name: fields.name,
@@ -378,6 +389,7 @@ impl Clone for Archetype {
             body: self.body.clone(),
             identity: self.identity.clone(),
             appearance_pool: self.appearance_pool.clone(),
+            forms: self.forms.clone(),
             stackable: self.stackable,
             properties: self.properties.clone(),
             name: self.name.clone(),
@@ -2622,7 +2634,7 @@ impl Package {
             self.manifest
                 .archetypes
                 .values()
-                .filter_map(|archetype| compiler::item_asset(archetype, &self.manifest))
+                .flat_map(|archetype| compiler::item_assets(archetype, &self.manifest))
                 .map(str::to_owned),
         );
         assets
@@ -2636,7 +2648,7 @@ impl Package {
                 .manifest
                 .archetypes
                 .values()
-                .any(|a| compiler::item_asset(a, &self.manifest).is_some())
+                .any(|a| compiler::item_assets(a, &self.manifest).next().is_some())
     }
 
     /// Assets a region's content may show: its terrain, and its actors' and
@@ -2695,7 +2707,7 @@ impl Package {
                         key,
                     )
                 })?;
-                assets.extend(compiler::item_asset(archetype, &self.manifest).map(str::to_owned));
+                assets.extend(compiler::item_assets(archetype, &self.manifest).map(str::to_owned));
             }
         }
         for key in r
@@ -2704,7 +2716,7 @@ impl Package {
             .flat_map(|g| g.items.iter().flat_map(|p| &p.archetypes))
         {
             assets.extend(
-                compiler::item_asset(self.author_archetype(key)?, &self.manifest)
+                compiler::item_assets(self.author_archetype(key)?, &self.manifest)
                     .map(str::to_owned),
             );
         }
@@ -3359,6 +3371,8 @@ impl Package {
     fn check_item_identities(&self) -> Result<(), Failure> {
         let mut signatures = BTreeMap::new();
         for (key, item) in &self.manifest.archetypes {
+            item_forms::validate(item)
+                .map_err(|failure| self.archetype_origin(key).context(failure))?;
             let identity = item.identity.as_ref().unwrap_or(key);
             require(label(identity), "Invalid item identity")
                 .map_err(|failure| self.archetype_origin(key).context(failure))?;
@@ -3374,10 +3388,11 @@ impl Package {
                 &item.held_light,
                 &item.edible,
                 &item.supply,
+                &item.forms,
             );
             if let Some(previous) = signatures.insert(identity, signature) {
                 require(previous == signature,
-                    "One identity must have one name, appearance pool, physical class, item effects, projectile profile and supply")
+                    "One identity must have one name, appearance pool, physical class, item effects, projectile profile, supply and forms")
                     .map_err(|failure| self.archetype_origin(key).context(failure))?;
             }
         }
@@ -3387,7 +3402,9 @@ impl Package {
         self.check_item_identities()?;
         let rules = self.rules()?;
         let mut result = BTreeMap::new();
-        for (key, a) in &self.manifest.archetypes {
+        // Validate every alternative, even when this seed does not select it.
+        let alternatives = item_forms::alternatives(&self.manifest);
+        for (key, a) in &alternatives {
             (|| -> Result<(), Failure> {
                 require(
                     a.anatomy.as_ref().is_none_or(|anatomy| {
@@ -3453,7 +3470,7 @@ impl Package {
                                 && spec.supports_stacking(a.class.into())))
                             && a.consumable.is_none()
                             && a.readable.is_none()
-                            && a.device.is_none()
+                            && (a.device.is_none() || spec.supports_device(a.class.into()))
                             && a.edible.is_none()
                             && a.supply.is_none()
                             && spec.validate_rules(a.class.into(), &rules).is_ok(),
@@ -3485,9 +3502,18 @@ impl Package {
                 }
                 if let Some(device) = &a.device {
                     device.compile(&rules)?;
+                    let physical_device = a
+                        .equipment
+                        .as_ref()
+                        .map(|equipment| equipment.compile(&rules))
+                        .transpose()?
+                        .is_none_or(|equipment| equipment.supports_device(a.class.into()));
                     require(
                         !a.stackable
-                            && a.equipment.is_none()
+                            && physical_device
+                            && a.projectile.is_none()
+                            && a.held_light.is_none()
+                            && a.ground_scare.is_none()
                             && a.consumable.is_none()
                             && a.edible.is_none()
                             && a.readable.is_none()
@@ -3535,10 +3561,9 @@ impl Package {
             }
         }
         for (key, pool) in &self.manifest.appearance_pools {
-            let classes: BTreeSet<_> = self
-                .manifest
-                .archetypes
-                .values()
+            let classes: BTreeSet<_> = alternatives
+                .iter()
+                .map(|(_, a)| a)
                 .filter(|a| a.appearance_pool.as_ref() == Some(key))
                 .map(|a| {
                     (
@@ -3567,17 +3592,22 @@ impl Package {
                 pool.confounding || unique.len() == pool.appearances.len(),
                 "Duplicate appearances require confounding",
             )?;
+            let possible_identities: BTreeSet<_> = alternatives
+                .iter()
+                .filter(|(_, a)| a.appearance_pool.as_ref() == Some(key))
+                .map(|(id, a)| a.identity.as_deref().unwrap_or(id))
+                .collect();
+            require(
+                pool.confounding || possible_identities.len() <= pool.appearances.len(),
+                "Appearance pool too small",
+            )?;
             let identities: BTreeSet<_> = self
                 .manifest
                 .archetypes
                 .iter()
-                .filter(|(_, a)| a.appearance_pool.as_ref() == Some(key))
+                .filter(|(id, a)| item_forms::selected_pool(a, id, seed) == Some(key.as_str()))
                 .map(|(id, a)| a.identity.as_ref().unwrap_or(id))
                 .collect();
-            require(
-                pool.confounding || identities.len() <= pool.appearances.len(),
-                "Appearance pool too small",
-            )?;
             let mut appearances: Vec<_> = pool.appearances.iter().enumerate().collect();
             appearances.sort_by_key(|(index, _)| {
                 let mut hash = Sha256::new();
@@ -3805,13 +3835,15 @@ impl Package {
     /// Whole-package facts that building regions needs, computed once so
     /// building one region reads only that region and its neighbours.
     pub(crate) fn index(&self, seed: u64) -> Result<PackageIndex, Failure> {
-        let definitions = Arc::new(PreparedDefinitions::new_with_sources(
+        let mut definitions = PreparedDefinitions::new_with_sources(
             &self.manifest,
             self.selected,
             self.rules()?,
             &self.source_provenance,
             |file| self.diagnostic_source(file),
-        )?);
+        )?;
+        definitions.select_item_forms(&self.manifest, seed, &self.source_provenance)?;
+        let definitions = Arc::new(definitions);
         let mut anchors = self.anchors(seed)?;
         let mut stairs: BTreeMap<u64, Vec<StairExit>> = BTreeMap::new();
         for (id, pair) in &self.manifest.stair_pairs {
@@ -5096,6 +5128,7 @@ mod tests {
             "body",
             "identity",
             "appearance_pool",
+            "forms",
             "stackable",
             "properties",
             "name",
@@ -5177,8 +5210,8 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let original = read_package(&root).unwrap();
         original.check_identity().unwrap();
-        assert_eq!(original.certificate.validator, "tor-scenario-46");
-        assert_eq!(original.certificate.ruleset, "interactions-v55");
+        assert_eq!(original.certificate.validator, "tor-scenario-47");
+        assert_eq!(original.certificate.ruleset, "interactions-v56");
         let current_artifact = artifact::relative_root(&original);
         for (boundary, identity) in [
             ("validator", "tor-scenario-27"),
@@ -5503,7 +5536,11 @@ mod tests {
             "class conversion must cover the exact complete appearance group"
         );
         for id in ids {
-            package.manifest.archetypes.get_mut(id).unwrap().class = ItemClass::Tool;
+            let item = package.manifest.archetypes.get_mut(id).unwrap();
+            // This owner isolates class-independent charged use, not the new
+            // Wand-class physical equipment overlap; keep the former pure-device shape.
+            item.forms.clear();
+            item.class = ItemClass::Tool;
         }
         package.appearance_mapping(42).unwrap();
         let mut stackable = package.clone();
@@ -6851,7 +6888,7 @@ mod tests {
 
     #[test]
     fn shared_rules_import_accepts_validated_scenario_override() {
-        let source = r#"import = "interactions-v55"
+        let source = r#"import = "interactions-v56"
 [[overrides]]
 op = "set"
 path = ["constants", "base_defense"]

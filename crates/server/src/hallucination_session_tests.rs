@@ -135,22 +135,22 @@ fn ground(view: &Observation) -> &GroundItemView {
 
 fn assert_sample(view: &Observation, phase: u64) {
     // Frozen values independently evaluated from the documented integer recipe
-    // against the actual production 26-creature/84-object cosmetic roster.
+    // against the actual production 26-creature/98-object cosmetic roster.
     // Seed42, observer1, peer2 / item40. Not a probabilistic inequality.
     let (name, asset, object, object_asset, class) = match phase {
         0 => (
             "emu",
             "creature.bird.emu",
-            "scroll titled NEM AL",
-            Some("item.scroll"),
-            ItemClass::Scroll,
+            "gold wand",
+            Some("item.wand"),
+            ItemClass::Wand,
         ),
         1 => (
             "bat",
             "creature.bat",
-            "scroll titled IV MEM",
-            Some("item.scroll"),
-            ItemClass::Scroll,
+            "cedar staff",
+            Some("item.wand"),
+            ItemClass::Wand,
         ),
         _ => panic!("unlisted literal phase witness"),
     };

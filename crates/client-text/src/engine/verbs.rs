@@ -316,7 +316,11 @@ fn suits(operation: ItemOperation, class: ItemClass) -> bool {
     match operation {
         ItemOperation::Equip => matches!(
             class,
-            ItemClass::Weapon | ItemClass::Armor | ItemClass::Amulet | ItemClass::Ring
+            ItemClass::Weapon
+                | ItemClass::Armor
+                | ItemClass::Amulet
+                | ItemClass::Ring
+                | ItemClass::Wand
         ),
         ItemOperation::Drink => class == ItemClass::Potion,
         ItemOperation::Eat => class == ItemClass::Food,
@@ -1754,7 +1758,7 @@ fn kind_of_thing(r: &Referent) -> String {
         Some(ItemClass::Ring) => format!("{the} {is} a ring, to wear."),
         Some(ItemClass::Scroll) => format!("{the} {is} a scroll."),
         Some(ItemClass::Spellbook) => format!("{the} {is} a spellbook."),
-        Some(ItemClass::Wand) => format!("{the} {is} a wand."),
+        Some(ItemClass::Wand) => format!("{the} {is} a {}.", super::scene::device_form(&r.name)),
         Some(ItemClass::Coin) => format!("{the} {is} money."),
         Some(ItemClass::Gem) => format!("{the} {is} a gem."),
         Some(ItemClass::Misc) | None => {

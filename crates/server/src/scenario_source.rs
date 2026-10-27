@@ -67,6 +67,8 @@ struct ItemDefinition {
     identity: Option<String>,
     appearance_pool: Option<String>,
     #[serde(default)]
+    forms: Vec<ItemForm>,
+    #[serde(default)]
     stackable: bool,
     #[serde(default)]
     properties: BTreeMap<String, String>,
@@ -126,6 +128,7 @@ fn normalize_catalog_views(
                     currency: item.currency,
                     identity: item.identity,
                     appearance_pool: item.appearance_pool,
+                    forms: item.forms,
                     stackable: item.stackable,
                     properties: item.properties,
                     asset: item.asset,

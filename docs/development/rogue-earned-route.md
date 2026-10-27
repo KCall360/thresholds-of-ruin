@@ -18,21 +18,23 @@ The route arm named `production` is the explicit, frozen preactivation E/S sourc
 snapshot at `8d09063840c51aa4189b146c287829102856b279`, with an explicitly recorded
 adaptation for the current scenario format. Its ordinary population remains two
 emus and two snakes. The source-only fixture
-`scripts/fixtures/rogue-earned-baseline-v26` retains exact package inputs and its
+`scripts/fixtures/rogue-earned-baseline-v27` retains exact package inputs and its
 current bundled-rule source hash. Its latest source-only transition advances
-the scenario header from 33 to 34 and the bundled import from its prior pinned
-identity to current `interactions-v55` for treasure-room/thrown-payload formats.
-The [prior source receipt](../../scripts/fixtures/rogue-earned-baseline-v25/source.json)
-and [current transition receipt](../../scripts/fixtures/rogue-earned-baseline-v26/format-transition.json)
+the scenario header from 34 to 35 and the bundled import from its prior pinned
+identity to current `interactions-v56` for seeded item forms and physical charged
+devices.
+The [prior source receipt](../../scripts/fixtures/rogue-earned-baseline-v26/source.json)
+and [current transition receipt](../../scripts/fixtures/rogue-earned-baseline-v27/format-transition.json)
 retain the exact old/new identities and hashes; their historical proof is not
 rewritten. The dependency digest attests to actual bundled source bytes, not a
 compiler certificate. No body-package enrollment, two-HD player kit, treasure-room stages, darts,
-shuriken, fruit, roster or loot changes enter this frozen comparator. Shared rules may change outcomes;
+shuriken, fruit, spear throwing, item forms, staves, roster or loot changes enter
+this frozen comparator. Shared rules may change outcomes;
 this transition does not qualify compiler output or route outcomes.
 All other authored package bytes, including anatomy, items, player kits and
 population stages, are unchanged; no maze or room-omission policy, wandering policy, control
 scrolls, utility-magic or ring loot, discovery stages, traps or secret closures are
-imported. Frozen v6–v25 inputs and their source/transition receipts remain immutable research
+imported. Frozen v6–v26 inputs and their source/transition receipts remain immutable research
 evidence. Shared living-dungeon, awareness, hazards, levitation, discovery, wearable, utility-magic, persistent-condition and
 action-duration rules
 make this a new experiment input, with no claim of identical outcomes or a

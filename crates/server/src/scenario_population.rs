@@ -822,16 +822,17 @@ impl Package {
                 .unwrap_or(&self.manifest.themes);
             let forecast = self.theme_assets(themes);
             let mut assets = BTreeSet::new();
-            let item_asset = |key: &str| -> Result<Option<String>, Failure> {
+            let item_assets = |key: &str| -> Result<Vec<String>, Failure> {
                 Ok(
-                    compiler::item_asset(self.author_archetype(key)?, &self.manifest)
-                        .map(str::to_owned),
+                    compiler::item_assets(self.author_archetype(key)?, &self.manifest)
+                        .map(str::to_owned)
+                        .collect(),
                 )
             };
             for stage in &plan.profiles[profile].stages {
                 if let Some(bands) = stage.item_bands() {
                     for choice in bands.iter().flat_map(|band| &band.choices) {
-                        assets.extend(item_asset(&choice.archetype)?);
+                        assets.extend(item_assets(&choice.archetype)?);
                     }
                 }
                 if let Some(bands) = stage.actor_bands() {
@@ -839,7 +840,7 @@ impl Package {
                         assets.extend(self.author_archetype(&choice.archetype)?.asset.clone());
                         if let Some(policy) = &choice.carried_loot {
                             for item in &plan.carried_item_pools[&policy.pool].choices {
-                                assets.extend(item_asset(&item.archetype)?);
+                                assets.extend(item_assets(&item.archetype)?);
                             }
                         }
                     }
@@ -1713,6 +1714,64 @@ mod tests {
         let palette = complete.palette(complete.manifest.themes.iter());
         assert!(palette.contains("item.potion"));
         assert!(!palette.contains("item.secret"));
+    }
+
+    #[test]
+    fn future_floor_and_carried_pools_require_every_physical_form_asset() {
+        for carried in [false, true] {
+            let source = if carried {
+                carried_fixture()
+            } else {
+                fixture()
+            };
+            let complete = changed(&source, |value| {
+                value["themes"] = json!(["floor"]);
+                value["assets"] = json!({"floor":["item.metal", "item.wood"]});
+                value["appearance_pools"] = json!({
+                    "metal":{"appearances":["copper scepter"], "asset":"item.metal"},
+                    "wood":{"appearances":["oak scepter"], "asset":"item.wood"}
+                });
+                let equipment = json!({"slot":"weapon", "modifiers":[], "attack":{
+                    "skill":"heavy_weaponry", "bonus":0, "wind_up":60, "recovery":40,
+                    "damage":{"primary":{"category":"impact"}, "components":[
+                        {"category":"impact", "amount":{"type":"fixed", "value":1}}
+                    ]}
+                }});
+                let key = if carried { "stock" } else { "marker" };
+                value["archetypes"][key] = json!({
+                    "name":"scepter", "class":"weapon", "appearance_pool":"metal",
+                    "forms":[
+                        {"name":"metal scepter", "appearance_pool":"metal", "equipment":equipment},
+                        {"name":"wooden scepter", "appearance_pool":"wood", "equipment":equipment}
+                    ]
+                });
+                let stage = &mut value["floor_activation"]["profiles"]["plain"]["stages"][0];
+                stage["count"] = json!([0, 0]);
+                stage["bands"][0]["depth"]["minimum"] = json!(100);
+                if carried {
+                    stage["bands"][0]["choices"][0]["carried_loot"]["chance"]["numerator"] =
+                        json!(0);
+                    value["floor_activation"]["carried_item_pools"]["supplies"]["choices"] =
+                        json!([{"archetype":"stock", "weight":1, "quantity":1}]);
+                }
+            })
+            .unwrap();
+            // A real all-alternatives positive precedes every negative. Neither
+            // late depth, zero births nor zero carried chance may hide an asset.
+            complete.check().unwrap();
+            complete.appearance_mapping(42).unwrap();
+            let missing_alternate = changed(&complete, |value| {
+                value["assets"]["floor"] = json!(["item.metal"]);
+            })
+            .unwrap();
+            let error = missing_alternate.check().unwrap_err();
+            assert!(
+                error
+                    .message
+                    .contains("Activation family dungeon: asset item.wood"),
+                "carried={carried}: {error}"
+            );
+        }
     }
 
     #[test]

@@ -3,6 +3,8 @@ from pathlib import Path
 import tomllib
 import unittest
 
+from rogue_staves_package import expected_forms
+
 PRODUCTION = Path(__file__).resolve().parents[1] / "scenarios/rogue-exploration"
 
 
@@ -15,6 +17,7 @@ class RogueLightContent(unittest.TestCase):
         self.assertEqual(source("catalog/items.toml")["items"]["rogue.wand_light"], {
             "asset": "item.wand", "name": "wand of light", "identity": "rogue.wand_light",
             "magical": True, "class": "wand", "stackable": False, "appearance_pool": "rogue.wands",
+            "forms": expected_forms("light"),
             "device": {"ability": "rogue.wand_light", "initial_charges": {"minimum": 10, "maximum": 19}, "discovery": "on_use"}})
         definitions = [row["value"] for row in source("rules.toml")["overrides"]
                        if row["path"] == ["abilities", "rogue.wand_light"]]
