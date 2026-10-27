@@ -388,8 +388,9 @@ The ordinary advancement API has no detailed per-HD history page; do not invent
 one or use a wizard command in the route.
 
 All acceptance failures, timed-out segments, unavailable diagnostics and original
-cohort attrition remain visible. Local focused checks do not replace the repository's
-quick/push/full and exact-head cross-platform CI publication gates.
+cohort attrition remain visible. Use the repository's
+[risk-based local checkpoint](testing.md#broader-checkpoints); local focused
+checks do not replace exact-head cross-platform CI qualification.
 
 Revision 3 adds only the blocked-combat disclosed-frontier fallback and explicit
 no-route censor. The revision-2 fixed-seed42 acceptance reached starvation after

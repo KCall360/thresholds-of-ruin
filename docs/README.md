@@ -44,6 +44,7 @@ rather than treating a historical plan as current behavior.
 - [Setup](development/setup.md): tools, platform/display prerequisites and environments
 - [Testing](development/testing.md): required layers, local tiers, CI and evidence
 - [Test objectives and owners](development/test-objectives.md): independent contract witnesses, affected selection and cadence
+- [Test effectiveness](development/test-effectiveness.md): evidenced defects, stale-test failures and bounded counting
 - [CI cost baseline](development/ci-cost-baseline.md): measured runner cost, elapsed time and comparison limits
 - [Service contract pilot](development/service-contracts.md): opt-in catalog host, assertion ownership and qualification experiment
 - [Performance](development/performance.md): targets, workloads, comparisons and evidence
@@ -89,8 +90,10 @@ completed implementation diaries are not maintained as current references.
    development guides, exact contracts in references and unfinished requirements
    in plans. Delete fulfilled plan items after preserving useful rationale.
 5. Preserve meaningful negative results, measurement boundaries and uncertain
-   findings with immutable evidence links. Routine test counts, rollout status,
-   local logs and session/deployment diaries belong outside maintained guides.
+   findings with immutable evidence links. Keep classified, bounded failure
+   findings in the [test-effectiveness ledger](development/test-effectiveness.md);
+   routine pass counts, rollout status, local logs and session/deployment diaries
+   belong outside maintained guides.
 6. Check a new reader's path. Every Markdown page must be reachable from this
    index, directly or through another indexed page. Moves must update local links,
    heading anchors, source comments, help pointers and script references.
