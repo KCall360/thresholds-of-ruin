@@ -103,7 +103,9 @@ impl Game {
                     && self
                         .projectile_item_profile(actor, item)
                         .is_some_and(|profile| profile.thrown().is_some())
-                    && self.capture_equip_allocation(actor, item, socket).is_ok()
+                    && self
+                        .capture_carried_weapon_allocation(actor, item, socket)
+                        .is_ok()
             }
             ProjectileDeliverySelection::Launch {
                 launcher,

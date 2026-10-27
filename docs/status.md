@@ -6,15 +6,15 @@ record accepted work that is not yet complete. “Implemented” describes code 
 this tree, not a promise that every related product or performance goal is closed.
 Every change still requires the [testing policy](development/testing.md).
 
-**Current formats:** protocol **63**, save format **61**, scenario format **33**, ruleset
-**`interactions-v54`**, scenario validator **`tor-scenario-45`**. Unsupported
+**Current formats:** protocol **63**, save format **62**, scenario format **34**, ruleset
+**`interactions-v55`**, scenario validator **`tor-scenario-46`**. Unsupported
 protocol/save/rules identities are rejected rather than migrated. Current private
 creature records also require explicit Health roll policy, stable HD/purchase
 ownership, body snapshots and pending-return state; authored packages may
 explicitly register body forms and eligibility. Other current guides refer here
 instead of copying these identities.
 
-The independent compiled inputs use RulesInput **26**, ContentPackage **30** and
+The independent compiled inputs use RulesInput **26**, ContentPackage **31** and
 RegionInput **9**. Physical TORB/TORJ/TORR framing stays at **6** and TORC at **1**;
 rooms **2**, grid-rooms **1** and world-family **1** are unchanged. The independent
 arena run report is **`tor-arena-run-v5`**; its enclosing batch/matrix/search
@@ -36,6 +36,19 @@ frozen equipped-item alterations, signed weapon
 damage enchantment and explicit Psychic damage, and owned-HD Health improvements with immutable
 acquisition witnesses and bounded dormant drain records. Prior payload identities
 remain rejection-only. Physical framing remains unchanged.
+
+The opt-in Rogue content catalog now includes ordinary fruit and standalone
+stackable darts/shuriken with distinct melee/throw payloads and consumed-hit
+recovery. A bounded shared-room population stage supports treasure rooms with
+explicit effective actor birth depth and strict nested entry receipts. The
+inert [authoring example](../scenarios/rogue-exploration/examples/treasure-stage.toml)
+must be selected explicitly; existing live stage IDs/order, weights, starter
+kits, dagger/arrow behavior and food rules are unchanged. See the
+[item contracts](reference/items.md#ordinary-fruit) and
+[population schema](reference/scenario-packages.md#first-entry-population).
+Focused local and real-process evidence is distinct from required final-head
+hosted qualification; native carried-stack input is a hosted owner, not a claimed
+local graphical pass. This does not establish balance or complete Rogue parity.
 
 The approved [missing-consumables batch](plans/rogue-missing-consumables.md) is
 being reconstructed from published source after its previous local implementation

@@ -1096,6 +1096,8 @@ mod tests {
             let region = &first.regions[&group.members[slot]];
             assert!(room.cells.iter().all(|cell| cell.region.0 == region.id
                 && cell.position.z == 0
+                && (1..region.size[0] - 1).contains(&cell.position.x)
+                && (1..region.size[1] - 1).contains(&cell.position.y)
                 && !region
                     .walls
                     .contains(&[cell.position.x, cell.position.y, 0])));

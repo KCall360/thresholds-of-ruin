@@ -343,6 +343,22 @@ impl CarriedLoot {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PopulationStage {
+    RoomCluster {
+        id: String,
+        version: u32,
+        chance: CarryChance,
+        item_count: [u16; 2],
+        actor_count: [u16; 2],
+        actor_depth_offset: u32,
+        item_bands: Vec<PopulationBand>,
+        actor_bands: Vec<ActorPopulationBand>,
+        quantity: QuantityExpression,
+        ai: Option<String>,
+        #[serde(default)]
+        depth_growth: PopulationDepthGrowth,
+        #[serde(default)]
+        avoid_protagonist_sight: bool,
+    },
     RoomItems {
         id: String,
         version: u32,
@@ -381,9 +397,209 @@ pub struct CharacterLoadout {
 }
 
 impl PopulationStage {
+    fn compiled(
+        &self,
+        births: &mut PopulationBirthValidation<'_>,
+    ) -> Result<runtime::PopulationContent, Failure> {
+        let index = births.index;
+        Ok(match self {
+            Self::RoomCluster {
+                chance,
+                item_count,
+                actor_count,
+                actor_depth_offset,
+                avoid_protagonist_sight,
+                ..
+            } => {
+                let parts = self.parts();
+                let runtime::PopulationContent::Items { bands: item_bands } =
+                    parts[0].compiled(births)?
+                else {
+                    unreachable!()
+                };
+                let runtime::PopulationContent::Actors {
+                    bands: actor_bands, ..
+                } = parts[1].compiled(births)?
+                else {
+                    unreachable!()
+                };
+                runtime::PopulationContent::RoomCluster {
+                    chance: runtime::CarryChance {
+                        numerator: chance.numerator,
+                        denominator: chance.denominator,
+                    },
+                    item_count: *item_count,
+                    actor_count: *actor_count,
+                    actor_depth_offset: *actor_depth_offset,
+                    item_bands,
+                    actor_bands,
+                    avoid_protagonist_sight: *avoid_protagonist_sight,
+                }
+            }
+            PopulationStage::Items {
+                quantity, bands, ..
+            }
+            | PopulationStage::RoomItems {
+                quantity, bands, ..
+            } => {
+                let bands = bands
+                    .iter()
+                    .map(|band| {
+                        Ok(runtime::DepthBand {
+                            depth: band.depth.compiled(),
+                            choices: band
+                                .choices
+                                .iter()
+                                .map(|choice| {
+                                    Ok(runtime::PreparedItemChoice {
+                                        content: choice.archetype.clone(),
+                                        weight: choice.weight,
+                                        quantity: quantity.compiled(),
+                                        spec: index.definitions.population_item(
+                                            &choice.archetype,
+                                            quantity.maximum()?,
+                                            index.seed,
+                                            &index.appearances,
+                                        )?,
+                                    })
+                                })
+                                .collect::<Result<_, Failure>>()?,
+                        })
+                    })
+                    .collect::<Result<_, Failure>>()?;
+                match self {
+                    PopulationStage::RoomItems { chance, .. } => {
+                        runtime::PopulationContent::RoomItems {
+                            bands,
+                            chance: runtime::CarryChance {
+                                numerator: chance.numerator,
+                                denominator: chance.denominator,
+                            },
+                        }
+                    }
+                    _ => runtime::PopulationContent::Items { bands },
+                }
+            }
+            PopulationStage::Actors {
+                ai,
+                bands,
+                depth_growth,
+                avoid_protagonist_sight,
+                ..
+            } => runtime::PopulationContent::Actors {
+                bands: bands
+                    .iter()
+                    .map(|band| {
+                        Ok(runtime::DepthBand {
+                            depth: band.depth.compiled(),
+                            choices: band
+                                .choices
+                                .iter()
+                                .map(|choice| {
+                                    let mut prepared = index.definitions.population_actor(
+                                        &choice.archetype,
+                                        choice.weight,
+                                        ai.as_deref(),
+                                    )?;
+                                    prepared.carried_loot =
+                                        choice.carried_loot.as_ref().map(CarriedLoot::compiled);
+                                    prepared.depth_growth = depth_growth.compiled();
+                                    prepared.advancement = choice
+                                        .advancement
+                                        .iter()
+                                        .map(|entry| {
+                                            Ok(tor_simulation::prepared_spawn::OrdinalAdvancement {
+                                                ordinal: tor_simulation::HdCount(entry.ordinal),
+                                                choices:
+                                                    crate::creature_authoring::compile_choices(
+                                                        &entry.purchases,
+                                                        entry.attribute.as_ref(),
+                                                        index.creature_catalog().content().rules(),
+                                                    )?,
+                                            })
+                                        })
+                                        .collect::<Result<_, Failure>>()?;
+                                    births.validate(&prepared)?;
+                                    Ok(prepared)
+                                })
+                                .collect::<Result<_, Failure>>()?,
+                        })
+                    })
+                    .collect::<Result<_, Failure>>()?,
+                avoid_protagonist_sight: *avoid_protagonist_sight,
+            },
+        })
+    }
+    fn maximum_attempts(&self) -> u32 {
+        match self {
+            Self::RoomCluster {
+                item_count,
+                actor_count,
+                ..
+            } => u32::from(item_count[1]) + u32::from(actor_count[1]),
+            _ => u32::from(self.header().2[1]),
+        }
+    }
+    pub(super) fn item_bands(&self) -> Option<&[PopulationBand]> {
+        match self {
+            Self::Items { bands, .. }
+            | Self::RoomItems { bands, .. }
+            | Self::RoomCluster {
+                item_bands: bands, ..
+            } => Some(bands),
+            _ => None,
+        }
+    }
+    pub(super) fn actor_bands(&self) -> Option<&[ActorPopulationBand]> {
+        match self {
+            Self::Actors { bands, .. }
+            | Self::RoomCluster {
+                actor_bands: bands, ..
+            } => Some(bands),
+            _ => None,
+        }
+    }
+    fn parts(&self) -> Vec<std::borrow::Cow<'_, Self>> {
+        use std::borrow::Cow;
+        match self {
+            Self::RoomCluster {
+                id,
+                version,
+                item_count,
+                actor_count,
+                item_bands,
+                actor_bands,
+                quantity,
+                ai,
+                depth_growth,
+                avoid_protagonist_sight,
+                ..
+            } => vec![
+                Cow::Owned(Self::Items {
+                    id: id.clone(),
+                    version: *version,
+                    count: *item_count,
+                    bands: item_bands.clone(),
+                    quantity: *quantity,
+                }),
+                Cow::Owned(Self::Actors {
+                    id: id.clone(),
+                    version: *version,
+                    count: *actor_count,
+                    bands: actor_bands.clone(),
+                    ai: ai.clone(),
+                    depth_growth: *depth_growth,
+                    avoid_protagonist_sight: *avoid_protagonist_sight,
+                }),
+            ],
+            _ => vec![Cow::Borrowed(self)],
+        }
+    }
     fn header(&self) -> (&str, u32, [u16; 2]) {
         match self {
-            Self::RoomItems { id, version, .. } => (id, *version, [1, 1]),
+            Self::RoomItems { id, version, .. } | Self::RoomCluster { id, version, .. } => {
+                (id, *version, [1, 1])
+            }
             Self::Items {
                 id, version, count, ..
             }
@@ -501,7 +717,7 @@ impl Package {
                     && profile
                         .stages
                         .iter()
-                        .map(|stage| u32::from(stage.header().2[1]))
+                        .map(PopulationStage::maximum_attempts)
                         .sum::<u32>()
                         <= u32::from(MAX_ATTEMPTS),
                 "Invalid population profile or unsupported version",
@@ -517,50 +733,76 @@ impl Package {
                         && count[1] <= MAX_ATTEMPTS,
                     "Invalid population stage",
                 )?;
-                if let PopulationStage::Actors { depth_growth, .. } = stage {
+                if let PopulationStage::RoomCluster {
+                    chance,
+                    item_count,
+                    actor_count,
+                    actor_depth_offset,
+                    ..
+                } = stage
+                {
                     require(
-                        depth_growth.compiled().valid(),
-                        "Invalid population depth growth",
+                        chance.denominator > 0
+                            && chance.numerator <= chance.denominator
+                            && *actor_depth_offset <= 1
+                            && [item_count, actor_count].iter().all(|count| {
+                                count[0] > 0 && count[0] <= count[1] && count[1] <= MAX_ATTEMPTS
+                            })
+                            && stage.maximum_attempts() <= u32::from(MAX_ATTEMPTS),
+                        "Invalid room cluster policy",
                     )?;
                 }
-                match stage {
-                    PopulationStage::Items {
-                        bands, quantity, ..
+                for part in stage.parts() {
+                    let stage = part.as_ref();
+                    if let PopulationStage::Actors { depth_growth, .. } = stage {
+                        require(
+                            depth_growth.compiled().valid(),
+                            "Invalid population depth growth",
+                        )?;
                     }
-                    | PopulationStage::RoomItems {
-                        bands, quantity, ..
-                    } => {
-                        quantity.maximum()?;
-                        if let PopulationStage::RoomItems { chance, .. } = stage {
-                            require(
-                                chance.denominator > 0 && chance.numerator <= chance.denominator,
-                                "Invalid room population chance",
-                            )?;
+                    match stage {
+                        PopulationStage::RoomCluster { .. } => {
+                            unreachable!("ordinary validation parts")
                         }
-                        self.check_population_bands(bands, |choice| {
-                            (&choice.archetype, choice.weight)
-                        })?;
-                    }
-                    PopulationStage::Actors { bands, ai, .. } => {
-                        self.check_population_bands(bands, |choice| {
-                            (&choice.archetype, choice.weight)
-                        })?;
-                        if let Some(ai) = ai {
-                            require(
-                                self.manifest.ai_profiles.contains_key(ai),
-                                "Unknown population AI profile",
-                            )?;
+                        PopulationStage::Items {
+                            bands, quantity, ..
                         }
-                        for choice in bands.iter().flat_map(|band| &band.choices) {
-                            if let Some(policy) = &choice.carried_loot {
+                        | PopulationStage::RoomItems {
+                            bands, quantity, ..
+                        } => {
+                            quantity.maximum()?;
+                            if let PopulationStage::RoomItems { chance, .. } = stage {
                                 require(
-                                    policy.version == 1
-                                        && label(&policy.pool)
-                                        && plan.carried_item_pools.contains_key(&policy.pool)
-                                        && policy.chance.denominator > 0
-                                        && policy.chance.numerator <= policy.chance.denominator,
-                                    "Invalid carried loot policy or unknown item pool",
+                                    chance.denominator > 0
+                                        && chance.numerator <= chance.denominator,
+                                    "Invalid room population chance",
                                 )?;
+                            }
+                            self.check_population_bands(bands, |choice| {
+                                (&choice.archetype, choice.weight)
+                            })?;
+                        }
+                        PopulationStage::Actors { bands, ai, .. } => {
+                            self.check_population_bands(bands, |choice| {
+                                (&choice.archetype, choice.weight)
+                            })?;
+                            if let Some(ai) = ai {
+                                require(
+                                    self.manifest.ai_profiles.contains_key(ai),
+                                    "Unknown population AI profile",
+                                )?;
+                            }
+                            for choice in bands.iter().flat_map(|band| &band.choices) {
+                                if let Some(policy) = &choice.carried_loot {
+                                    require(
+                                        policy.version == 1
+                                            && label(&policy.pool)
+                                            && plan.carried_item_pools.contains_key(&policy.pool)
+                                            && policy.chance.denominator > 0
+                                            && policy.chance.numerator <= policy.chance.denominator,
+                                        "Invalid carried loot policy or unknown item pool",
+                                    )?;
+                                }
                             }
                         }
                     }
@@ -587,20 +829,17 @@ impl Package {
                 )
             };
             for stage in &plan.profiles[profile].stages {
-                match stage {
-                    PopulationStage::Items { bands, .. }
-                    | PopulationStage::RoomItems { bands, .. } => {
-                        for choice in bands.iter().flat_map(|band| &band.choices) {
-                            assets.extend(item_asset(&choice.archetype)?);
-                        }
+                if let Some(bands) = stage.item_bands() {
+                    for choice in bands.iter().flat_map(|band| &band.choices) {
+                        assets.extend(item_asset(&choice.archetype)?);
                     }
-                    PopulationStage::Actors { bands, .. } => {
-                        for choice in bands.iter().flat_map(|band| &band.choices) {
-                            assets.extend(self.author_archetype(&choice.archetype)?.asset.clone());
-                            if let Some(policy) = &choice.carried_loot {
-                                for item in &plan.carried_item_pools[&policy.pool].choices {
-                                    assets.extend(item_asset(&item.archetype)?);
-                                }
+                }
+                if let Some(bands) = stage.actor_bands() {
+                    for choice in bands.iter().flat_map(|band| &band.choices) {
+                        assets.extend(self.author_archetype(&choice.archetype)?.asset.clone());
+                        if let Some(policy) = &choice.carried_loot {
+                            for item in &plan.carried_item_pools[&policy.pool].choices {
+                                assets.extend(item_asset(&item.archetype)?);
                             }
                         }
                     }
@@ -711,82 +950,7 @@ impl Package {
                     .iter()
                     .map(|stage| {
                         let (id, version, count) = stage.header();
-                        let population = match stage {
-                            PopulationStage::Items { quantity, bands, .. }
-                            | PopulationStage::RoomItems { quantity, bands, .. } => {
-                                let bands = bands
-                                    .iter()
-                                    .map(|band| {
-                                        Ok(runtime::DepthBand {
-                                            depth: band.depth.compiled(),
-                                            choices: band
-                                                .choices
-                                                .iter()
-                                                .map(|choice| {
-                                                    Ok(runtime::PreparedItemChoice {
-                                                        content: choice.archetype.clone(),
-                                                        weight: choice.weight,
-                                                        quantity: quantity.compiled(),
-                                                        spec: index.definitions.population_item(
-                                                            &choice.archetype,
-                                                            quantity.maximum()?,
-                                                            index.seed,
-                                                            &index.appearances,
-                                                        )?,
-                                                    })
-                                                })
-                                                .collect::<Result<_, Failure>>()?,
-                                        })
-                                    })
-                                    .collect::<Result<_, Failure>>()?;
-                                match stage {
-                                    PopulationStage::RoomItems { chance, .. } => runtime::PopulationContent::RoomItems { bands, chance: runtime::CarryChance { numerator: chance.numerator, denominator: chance.denominator } },
-                                    _ => runtime::PopulationContent::Items { bands },
-                                }
-                            },
-                            PopulationStage::Actors {
-                                ai,
-                                bands,
-                                depth_growth,
-                                avoid_protagonist_sight,
-                                ..
-                            } => runtime::PopulationContent::Actors {
-                                bands: bands
-                                    .iter()
-                                    .map(|band| {
-                                        Ok(runtime::DepthBand {
-                                            depth: band.depth.compiled(),
-                                            choices: band
-                                                .choices
-                                                .iter()
-                                                .map(|choice| {
-                                                    let mut prepared =
-                                                        index.definitions.population_actor(
-                                                            &choice.archetype,
-                                                            choice.weight,
-                                                            ai.as_deref(),
-                                                        )?;
-                                                    prepared.carried_loot = choice
-                                                        .carried_loot
-                                                        .as_ref()
-                                                        .map(CarriedLoot::compiled);
-                                                    prepared.depth_growth = depth_growth.compiled();
-                                                    prepared.advancement = choice.advancement.iter().map(|entry| {
-                                                        Ok(tor_simulation::prepared_spawn::OrdinalAdvancement {
-                                                            ordinal: tor_simulation::HdCount(entry.ordinal),
-                                                            choices: crate::creature_authoring::compile_choices(&entry.purchases, entry.attribute.as_ref(), index.creature_catalog().content().rules())?,
-                                                        })
-                                                    }).collect::<Result<_, Failure>>()?;
-                                                    births.validate(&prepared)?;
-                                                    Ok(prepared)
-                                                })
-                                                .collect::<Result<_, Failure>>()?,
-                                        })
-                                    })
-                                    .collect::<Result<_, Failure>>()?,
-                                avoid_protagonist_sight: *avoid_protagonist_sight,
-                            },
-                        };
+                        let population = stage.compiled(births)?;
                         Ok(runtime::PopulationStage {
                             id: id.into(),
                             version,
@@ -905,6 +1069,7 @@ impl Package {
             item_floor,
             capabilities: self.capabilities(),
             expected_scopes: Default::default(),
+            expected_room_space: Default::default(),
         })
     }
 
@@ -1037,6 +1202,9 @@ pub(crate) struct PopulationConfiguration<'a> {
     item_floor: u64,
     capabilities: runtime::ScenarioCapabilities,
     expected_scopes: std::cell::RefCell<BTreeMap<String, runtime::PreparedScope>>,
+    // Only profiles containing clusters need a retained immutable room volume.
+    // This is recovery-only derived data, not new saved/generated metadata.
+    expected_room_space: std::cell::RefCell<BTreeMap<String, BTreeSet<Location>>>,
 }
 
 impl PopulationConfiguration<'_> {
@@ -1112,6 +1280,29 @@ impl PopulationConfiguration<'_> {
         };
         record.profile == scope.profile
             && record.decisions.iter().all(|decision| {
+                if let runtime::StageResult::RoomCluster { selection } = &decision.result {
+                    let Some(profile) = self
+                        .plan
+                        .as_ref()
+                        .and_then(|plan| plan.profiles.get(&record.profile))
+                    else {
+                        return false;
+                    };
+                    let Some(stage) = profile.stages.iter().find(|stage| stage.id == decision.id)
+                    else {
+                        return false;
+                    };
+                    let room_space = self.expected_room_space.borrow();
+                    let Some(room_space) = room_space.get(&record.scope) else {
+                        return false;
+                    };
+                    if !stage.cluster_scope_valid(self.seed, profile, scope, selection)
+                        || !stage
+                            .cluster_body_geometry_valid(selection, |at| room_space.contains(&at))
+                    {
+                        return false;
+                    }
+                }
                 if let runtime::StageResult::RoomsEvaluated { rooms } = &decision.result {
                     if rooms
                         .iter()
@@ -1156,13 +1347,58 @@ impl PopulationConfiguration<'_> {
             family.group(family_id, self.seed, depth).ok()?;
             let definitions = self.package.generated_group(identity, self.seed).ok()?;
             let members: Vec<_> = definitions.regions.values().collect();
-            self.package
+            let scope = self
+                .package
                 .activation_scope(identity, depth, &members, &definitions.rooms)
-                .ok()?
+                .ok()??;
+            let has_cluster = self
+                .plan
+                .as_ref()?
+                .profiles
+                .get(&scope.profile)?
+                .stages
+                .iter()
+                .any(|stage| {
+                    matches!(
+                        stage.population,
+                        runtime::PopulationContent::RoomCluster { .. }
+                    )
+                });
+            let mut room_space = BTreeSet::new();
+            if has_cluster {
+                // Same immutable walls/openings order as activation_scope and
+                // add_geometry. Room columns cannot touch generated portals;
+                // mutable doors/occupancy are intentionally not consulted.
+                for region in &members {
+                    let mut walls: BTreeSet<_> = region.walls.iter().copied().collect();
+                    for at in &region.openings {
+                        walls.remove(at);
+                    }
+                    for floor in scope
+                        .rooms
+                        .iter()
+                        .flat_map(|room| &room.cells)
+                        .filter(|at| at.region.0 == region.id)
+                    {
+                        for z in 0..region.size[2] {
+                            let position = [floor.position.x, floor.position.y, z];
+                            if !walls.contains(&position) {
+                                room_space.insert(loc(region.id, position));
+                            }
+                        }
+                    }
+                }
+            }
+            Some((scope, has_cluster.then_some(room_space)))
         })();
-        let Some(expected) = expected else {
+        let Some((expected, room_space)) = expected else {
             return false;
         };
+        if let Some(room_space) = room_space {
+            self.expected_room_space
+                .borrow_mut()
+                .insert(identity.into(), room_space);
+        }
         self.expected_scopes
             .borrow_mut()
             .insert(identity.into(), expected);

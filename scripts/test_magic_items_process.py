@@ -1717,7 +1717,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         self.assertEqual((clock["phase"], clock["period"], clock["remaining_to_shift"]), (0, 100, 100))
         seen = self.say(text, "look")
         self.assertIn("emu", seen.lower())
-        self.assertIn("smoky potion", seen.lower())
+        self.assertIn("scroll titled nem al", seen.lower())
         self.assertNotIn("actual visible peer", seen.lower())
         self.assertNotIn("gold coin", seen.lower())
         for _ in range(3):

@@ -175,6 +175,16 @@ impl ItemCondition {
                     .with_enchantment(self.hit_enchantment, self.damage_enchantment)
                     .is_ok()
             })
+            && equipment
+                .and_then(|gear| gear.weapon_profile.as_ref())
+                .and_then(|profile| profile.thrown_payload.as_ref())
+                .is_none_or(|payload| {
+                    payload.validate_shape().is_ok()
+                        && payload
+                            .damage
+                            .with_melee_modifiers(0, self.damage_enchantment, 0)
+                            .is_ok()
+                })
             && projectile.is_none_or(|projectile| {
                 projectile.validate_shape().is_ok()
                     && projectile
@@ -357,7 +367,7 @@ impl Item {
         socket: EquipmentSlotId,
         rules: &crate::rules::Ruleset,
     ) -> Option<crate::creatures::EquipmentSource> {
-        if !self.condition_valid() {
+        if self.quantity != 1 || !self.condition_valid() {
             return None;
         }
         let equipment = self.equipment_view()?;

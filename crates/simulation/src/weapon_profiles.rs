@@ -186,6 +186,7 @@ impl<'de> Deserialize<'de> for LauncherProfile {
 pub struct WeaponProfileSpec {
     pub expertise: ExpertiseId,
     pub launcher: Option<LauncherProfile>,
+    pub thrown_payload: Option<Box<crate::projectile_profiles::ThrownPayload>>,
     pub base_traits: Vec<WeaponTrait>,
     pub expert_traits: WeaponTraitChanges,
 }
@@ -198,6 +199,8 @@ impl<'de> Deserialize<'de> for WeaponProfileSpec {
             expertise: ExpertiseId,
             #[serde(deserialize_with = "crate::bounded::required_option")]
             launcher: Option<LauncherProfile>,
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            thrown_payload: Option<Box<crate::projectile_profiles::ThrownPayload>>,
             base_traits: crate::bounded::Bounded<WeaponTrait, TRAIT_LIMIT>,
             expert_traits: WeaponTraitChanges,
         }
@@ -205,6 +208,7 @@ impl<'de> Deserialize<'de> for WeaponProfileSpec {
         let result = Self {
             expertise: fields.expertise,
             launcher: fields.launcher,
+            thrown_payload: fields.thrown_payload,
             base_traits: fields.base_traits.0,
             expert_traits: fields.expert_traits,
         };
@@ -218,6 +222,7 @@ impl<'de> Deserialize<'de> for WeaponProfileSpec {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum WeaponProfileError {
     InvalidRange,
+    InvalidThrownPayload,
     TooManyTraits,
     DuplicateTrait(WeaponTraitKind),
     MissingBaseTrait(WeaponTraitKind),
@@ -230,6 +235,9 @@ impl std::fmt::Display for WeaponProfileError {
             Self::InvalidRange => f.write_str(
                 "weapon ranges must be positive five-foot multiples, ordered and bounded",
             ),
+            Self::InvalidThrownPayload => {
+                f.write_str("thrown payload requires valid primary damage and a thrown state")
+            }
             Self::TooManyTraits => f.write_str("weapon trait collection exceeds limit"),
             Self::DuplicateTrait(kind) => write!(f, "duplicate weapon trait: {kind:?}"),
             Self::MissingBaseTrait(kind) => {
@@ -287,13 +295,25 @@ impl WeaponProfileSpec {
         // Removal first permits an explicit replacement, such as a new thrown range.
         expert_traits.extend_from_slice(&self.expert_traits.add);
         validate_traits(&expert_traits)?;
+        if self.thrown_payload.as_ref().is_some_and(|payload| {
+            payload.validate_shape().is_err()
+                || !self
+                    .base_traits
+                    .iter()
+                    .chain(&expert_traits)
+                    .any(|trait_| matches!(trait_, WeaponTrait::Thrown { .. }))
+        }) {
+            return Err(WeaponProfileError::InvalidThrownPayload);
+        }
         Ok((
             EffectiveWeaponProfile {
                 launcher: self.launcher.clone(),
+                thrown_payload: self.thrown_payload.clone(),
                 traits: self.base_traits.clone(),
             },
             EffectiveWeaponProfile {
                 launcher: self.launcher.clone(),
+                thrown_payload: self.thrown_payload.clone(),
                 traits: expert_traits,
             },
         ))
@@ -314,6 +334,11 @@ impl WeaponProfileSpec {
             ));
         }
         let (base, expert) = self.effective_states()?;
+        if let Some(payload) = &self.thrown_payload {
+            ruleset
+                .validate_damage(&payload.damage)
+                .map_err(|_| WeaponProfileError::InvalidThrownPayload)?;
+        }
         Ok(ValidatedWeaponProfile {
             spec: self.clone(),
             base,
@@ -352,6 +377,11 @@ impl ValidatedWeaponProfile {
         rules
             .expertise(&self.spec.expertise)
             .is_some_and(|definition| definition.category == ExpertiseCategory::Equipment)
+            && self
+                .spec
+                .thrown_payload
+                .as_ref()
+                .is_none_or(|payload| rules.validate_damage(&payload.damage).is_ok())
     }
     pub fn minimum_grip_demand(&self) -> u8 {
         self.base.grip_demand().min(self.expert.grip_demand())
@@ -364,6 +394,7 @@ impl ValidatedWeaponProfile {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EffectiveWeaponProfile {
     launcher: Option<LauncherProfile>,
+    thrown_payload: Option<Box<crate::projectile_profiles::ThrownPayload>>,
     traits: Vec<WeaponTrait>,
 }
 impl EffectiveWeaponProfile {
@@ -387,6 +418,10 @@ impl EffectiveWeaponProfile {
             WeaponTrait::Thrown { range } => Some(*range),
             _ => None,
         })
+    }
+    pub fn thrown_payload(&self) -> Option<&crate::projectile_profiles::ThrownPayload> {
+        self.thrown()?;
+        self.thrown_payload.as_deref()
     }
     pub fn grip_demand(&self) -> u8 {
         if self.two_handed() {

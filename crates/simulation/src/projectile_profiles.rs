@@ -114,67 +114,56 @@ impl<'de> Deserialize<'de> for Component {
         })
     }
 }
-impl Serialize for ProjectileSpec {
-    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        self.validate_shape().map_err(serde::ser::Error::custom)?;
-        #[derive(Serialize)]
-        struct Fields<'a> {
-            family: &'a LauncherFamilyId,
-            damage: Payload,
-            recovery: HitRecovery,
-        }
-        let key = self
-            .damage
-            .primary()
-            .ok_or_else(|| serde::ser::Error::custom(ProjectileProfileError::MissingPrimary))?;
-        Fields {
-            family: &self.family,
-            recovery: self.recovery,
-            damage: Payload {
-                primary: Primary {
-                    category: key.category,
-                    descriptor: key.descriptor,
-                    sides: key.sides,
-                },
-                components: Bounded(
-                    self.damage
-                        .components()
-                        .iter()
-                        .map(|component| {
-                            let key = component.key();
-                            Component {
-                                category: key.category,
-                                descriptor: key.descriptor,
-                                amount: match component.amount() {
-                                    DamageAmount::Fixed(value) => Amount::Fixed { value },
-                                    DamageAmount::Rolled(pool) => Amount::Rolled {
-                                        count: pool.count(),
-                                        sides: pool.sides(),
-                                        bonus: pool.bonus(),
-                                    },
-                                },
-                            }
-                        })
-                        .collect(),
-                ),
-            },
-        }
-        .serialize(s)
+/// Standalone weapons own their melee attack and a separate optional thrown
+/// payload. No launcher family or ammunition identity is implied.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ThrownPayload {
+    pub damage: DamageSpec,
+    pub recovery: HitRecovery,
+}
+impl ThrownPayload {
+    pub fn validate_shape(&self) -> Result<(), ProjectileProfileError> {
+        Payload::capture(&self.damage).map(|_| ())
     }
 }
-impl<'de> Deserialize<'de> for ProjectileSpec {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Fields {
-            family: LauncherFamilyId,
-            #[serde(deserialize_with = "named_map")]
-            damage: Payload,
-            recovery: HitRecovery,
-        }
-        let fields: Fields = named_map(d)?;
-        let components = fields
-            .damage
+impl Payload {
+    fn capture(damage: &DamageSpec) -> Result<Self, ProjectileProfileError> {
+        let key = damage
+            .primary()
+            .ok_or(ProjectileProfileError::MissingPrimary)?;
+        DamageSpec::new(damage.components().to_vec(), Some(key.clone()))
+            .map_err(|_| ProjectileProfileError::InvalidDamage)?;
+        Ok(Self {
+            primary: Primary {
+                category: key.category,
+                descriptor: key.descriptor,
+                sides: key.sides,
+            },
+            components: Bounded(
+                damage
+                    .components()
+                    .iter()
+                    .map(|component| {
+                        let key = component.key();
+                        Component {
+                            category: key.category,
+                            descriptor: key.descriptor,
+                            amount: match component.amount() {
+                                DamageAmount::Fixed(value) => Amount::Fixed { value },
+                                DamageAmount::Rolled(pool) => Amount::Rolled {
+                                    count: pool.count(),
+                                    sides: pool.sides(),
+                                    bonus: pool.bonus(),
+                                },
+                            },
+                        }
+                    })
+                    .collect(),
+            ),
+        })
+    }
+    fn restore(self) -> Result<DamageSpec, ProjectileProfileError> {
+        let components = self
             .components
             .0
             .into_iter()
@@ -190,34 +179,85 @@ impl<'de> Deserialize<'de> for ProjectileSpec {
                     } => DamageComponent::rolled(
                         component.category,
                         component.descriptor,
-                        DicePool::new(count, sides, bonus).map_err(|_| {
-                            <D::Error as serde::de::Error>::custom(
-                                ProjectileProfileError::InvalidDamage,
-                            )
-                        })?,
+                        DicePool::new(count, sides, bonus)
+                            .map_err(|_| ProjectileProfileError::InvalidDamage)?,
                     ),
                 })
             })
-            .collect::<Result<Vec<_>, D::Error>>()?;
-        let primary = fields.damage.primary;
-        let damage = DamageSpec::new(
+            .collect::<Result<Vec<_>, ProjectileProfileError>>()?;
+        DamageSpec::new(
             components,
             Some(DamageKey {
-                category: primary.category,
-                descriptor: primary.descriptor,
-                sides: primary.sides,
+                category: self.primary.category,
+                descriptor: self.primary.descriptor,
+                sides: self.primary.sides,
             }),
         )
-        .map_err(|_| {
-            <D::Error as serde::de::Error>::custom(ProjectileProfileError::InvalidDamage)
-        })?;
-        let result = Self {
-            family: fields.family,
-            damage,
+        .map_err(|_| ProjectileProfileError::InvalidDamage)
+    }
+}
+impl Serialize for ThrownPayload {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        #[derive(Serialize)]
+        struct Fields {
+            damage: Payload,
+            recovery: HitRecovery,
+        }
+        Fields {
+            damage: Payload::capture(&self.damage).map_err(serde::ser::Error::custom)?,
+            recovery: self.recovery,
+        }
+        .serialize(s)
+    }
+}
+impl<'de> Deserialize<'de> for ThrownPayload {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            #[serde(deserialize_with = "named_map")]
+            damage: Payload,
+            recovery: HitRecovery,
+        }
+        let fields: Fields = named_map(d)?;
+        Ok(Self {
+            damage: fields.damage.restore().map_err(serde::de::Error::custom)?,
             recovery: fields.recovery,
-        };
-        result.validate_shape().map_err(serde::de::Error::custom)?;
-        Ok(result)
+        })
+    }
+}
+impl Serialize for ProjectileSpec {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        #[derive(Serialize)]
+        struct Fields<'a> {
+            family: &'a LauncherFamilyId,
+            damage: Payload,
+            recovery: HitRecovery,
+        }
+        Fields {
+            family: &self.family,
+            damage: Payload::capture(&self.damage).map_err(serde::ser::Error::custom)?,
+            recovery: self.recovery,
+        }
+        .serialize(s)
+    }
+}
+impl<'de> Deserialize<'de> for ProjectileSpec {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            family: LauncherFamilyId,
+            #[serde(deserialize_with = "named_map")]
+            damage: Payload,
+            recovery: HitRecovery,
+        }
+        let fields: Fields = named_map(d)?;
+        Ok(Self {
+            family: fields.family,
+            damage: fields.damage.restore().map_err(serde::de::Error::custom)?,
+            recovery: fields.recovery,
+        })
     }
 }
 

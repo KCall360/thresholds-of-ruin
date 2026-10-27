@@ -129,6 +129,19 @@ fn read_equipment_modifiers<'de, D: serde::Deserializer<'de>>(
     Ok(crate::bounded::Bounded::<crate::rules::Modifier, { crate::limits::MODIFIERS_PER_SOURCE }>::deserialize(d)?.0)
 }
 impl EquipmentSpec {
+    /// Shared author/runtime allowlist for homogeneous standalone weapon stacks.
+    /// The containing item must still reject other capabilities and validate rules.
+    pub fn supports_stacking(&self, class: ItemClass) -> bool {
+        class == ItemClass::Weapon
+            && self.attack.is_some()
+            && self.armor.is_none()
+            && self.periodic_relocation.is_none()
+            && self.modifiers.is_empty()
+            && self.potency_modifiers.is_empty()
+            && self.weapon_profile.as_ref().is_some_and(|profile| {
+                profile.launcher.is_none() && profile.thrown_payload.is_some()
+            })
+    }
     pub fn valid_shape(&self) -> bool {
         self.potency_modifiers
             .len()
@@ -725,6 +738,7 @@ impl Game {
                 .equipment_slot(anatomy.slots.get(usize::from(socket.0))?)?;
             let item = self.items.get(item)?;
             if item.location != ItemLocation::Carried(actor)
+                || item.quantity != 1
                 || item.spec.equipment.as_ref()?.slot != slot.id
             {
                 return None;
@@ -836,6 +850,26 @@ impl Game {
         let prepared = self.prepare_actor_outcome(outcome)?;
         self.publish_actor_effect(prepared, false)
     }
+    /// A throw temporarily allocates one unit to a free socket without equipping
+    /// its entire carried stack. Ordinary equip additionally requires a singleton.
+    pub(crate) fn item_socket_available(
+        &self,
+        actor: ActorId,
+        item: ItemId,
+        slot: EquipmentSlotId,
+    ) -> bool {
+        let Some(owner) = self.actors.get(&actor).filter(|owner| owner.alive()) else {
+            return false;
+        };
+        self.items.get(&item).is_some_and(|source| {
+            source.location == ItemLocation::Carried(actor)
+                && source.spec.equipment.as_ref().is_some_and(|gear| {
+                    owner.anatomy.slots.get(usize::from(slot.0)) == Some(&gear.slot)
+                        && !owner.equipment.contains_key(&slot)
+                        && !owner.equipment.values().any(|id| *id == item)
+                })
+        })
+    }
     /// Recheck only live item references and socket eligibility. Captured effects,
     /// costs and timing remain owned by the original plan.
     pub(crate) fn item_work_available(&self, actor: ActorId, work: &Work) -> bool {
@@ -853,11 +887,9 @@ impl Game {
             return false;
         };
         match work {
-            Work::Equip { slot, .. } => i.spec.equipment.as_ref().is_some_and(|equipment| {
-                a.anatomy.slots.get(usize::from(slot.0)) == Some(&equipment.slot)
-                    && !a.equipment.contains_key(slot)
-                    && !a.equipment.values().any(|id| *id == item)
-            }),
+            Work::Equip { slot, .. } => {
+                i.quantity == 1 && self.item_socket_available(actor, item, *slot)
+            }
             Work::Unequip { .. } => {
                 i.spec.equipment.is_some() && a.equipment.values().any(|id| *id == item)
             }

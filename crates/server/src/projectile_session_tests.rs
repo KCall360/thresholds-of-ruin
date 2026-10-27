@@ -537,3 +537,235 @@ fn encoded_paid_throw_pending_completed_source_free_reopen_recovers_exact_unit()
 fn encoded_paid_launch_pending_completed_source_free_reopen_consumes_one_arrow() {
     paid_projectile_reopens(ProjectileDeliveryKind::Launch);
 }
+
+fn standalone_stack_scenario() -> crate::Scenario {
+    let mut scenario = projectile_scenario(ProjectileDeliveryKind::Throw);
+    let package = scenario.package.take().unwrap();
+    let mut manifest = serde_json::to_value(&package.manifest).unwrap();
+    manifest["archetypes"]["fixture.secondary"]["stackable"] = json!(true);
+    manifest["archetypes"]["fixture.secondary"]["equipment"]["weapon_profile"]["thrown_payload"] = json!({
+        "recovery":"consumed_on_hit", "damage":{"components":[{"category":"keen","amount":{"type":"fixed","value":11}}],
+        "primary":{"category":"keen"}}});
+    manifest["characters"][0]["loadout"][1] = json!({"archetype":"fixture.secondary","quantity":3});
+    scenario.package = Some(Arc::new(
+        crate::scenario_package::Package::from_parts(
+            serde_json::from_value(manifest).unwrap(),
+            package.region_defs().unwrap(),
+            &toml::to_string(package.rules().unwrap().document()).unwrap(),
+        )
+        .unwrap(),
+    ));
+    scenario
+}
+
+#[test]
+fn encoded_standalone_stack_storage_rejection_preserves_admission_and_actual_release() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("standalone-stack.db");
+    let initial = Engine::open(&path, standalone_stack_scenario()).unwrap();
+    initial.flush().unwrap();
+    drop(initial);
+    let rejecting = crate::SavePolicy {
+        max_pending_bytes: 1,
+        ..Default::default()
+    };
+    let mut wire = Wire::connect(
+        Engine::open_with_policy(&path, crate::Scenario::two_room(999), rejecting.clone()).unwrap(),
+    );
+    let weapon = wire
+        .service
+        .engine
+        .observation(SOURCE)
+        .unwrap()
+        .inventory
+        .into_iter()
+        .find(|item| item.name == "secondary sword")
+        .unwrap()
+        .id;
+    let action = Action::UseAbility {
+        id: "fixture.throw".into(),
+        invocation: AbilityInvocation {
+            aim: AbilityAim::DirectionalProjectile {
+                direction: Direction::East,
+                delivery: ProjectileDeliverySelection::Throw {
+                    source: ThrownSourceSelection::Carried {
+                        item: weapon,
+                        socket: 10,
+                    },
+                },
+            },
+            weapon: WeaponSelection::Default,
+        },
+        supplies: SupplySelection::Carried,
+    };
+    let request = wire.request(SOURCE, action.clone());
+    let before = saved(&wire.service);
+    let paid = live_items(&before)
+        .iter()
+        .find(|(_, row)| row["spec"]["name"] == "secondary sword")
+        .unwrap()
+        .0
+        .clone();
+    assert_eq!(live_items(&before)[&paid]["quantity"], 3);
+    assert!(live_actor(&before, SOURCE)["equipment"].get("10").is_none());
+    let accepted = wire.service.engine.save_status().accepted_sequence;
+    let history = wire
+        .service
+        .engine
+        .history(SOURCE, "weapon-1", None, 100)
+        .unwrap();
+    for _ in 0..2 {
+        let replies = wire.send(SOURCE, "stack-release", request.clone());
+        assert!(
+            replies.iter().any(|reply| matches!(
+                reply,
+                ServerMessage::Error {
+                    code: ErrorCode::StorageFailure,
+                    ..
+                }
+            )),
+            "{replies:?}"
+        );
+        assert!(!replies
+            .iter()
+            .any(|reply| matches!(reply, ServerMessage::Ack { .. })));
+        assert_eq!(
+            saved(&wire.service),
+            before,
+            "rejected admission claims, pays and allocates nothing"
+        );
+        assert_eq!(
+            wire.service
+                .engine
+                .history(SOURCE, "weapon-1", None, 100)
+                .unwrap(),
+            history
+        );
+        assert_eq!(
+            wire.service.engine.save_status().accepted_sequence,
+            accepted
+        );
+    }
+    drop(wire);
+    let mut wire = Wire::connect(Engine::open(&path, crate::Scenario::two_room(0)).unwrap());
+    let request = wire.request(SOURCE, action);
+    let admitted = ack(wire.send(SOURCE, "stack-release", request.clone()));
+    let queued = saved(&wire.service);
+    assert_ne!(
+        queued, before,
+        "the same valid action publishes once storage permits it"
+    );
+    assert_eq!(ack(wire.send(SOURCE, "stack-release", request)), admitted);
+    assert_eq!(saved(&wire.service), queued);
+    let health = hp(&wire.service, TARGET);
+    wire.service.engine.flush().unwrap();
+    drop(wire);
+
+    // Refuse each real candidate before publishing it, then retry that exact
+    // operation with healthy storage. The terminal candidate must release the
+    // held unit and damage the target, not merely reject a setup transaction.
+    let mut completed = false;
+    for ordinal in 0..12 {
+        let mut engine =
+            Engine::open_with_policy(&path, crate::Scenario::two_room(0), rejecting.clone())
+                .unwrap();
+        let execute = engine.next_intention_actor().is_some();
+        let actor = engine.next_actor().unwrap_or(SOURCE);
+        let branch = engine.branch().clone();
+        let command = crate::journal::Command::Act {
+            expected_revision: engine.revision(actor).unwrap(),
+            action: crate::actions::Action::Wait,
+        };
+        let before = saved_engine(&engine);
+        let sequence = engine.save_status().accepted_sequence;
+        let history = engine.history(SOURCE, "weapon-1", None, 100).unwrap();
+        let durable = crate::inspect_save(&path).unwrap();
+        for _ in 0..2 {
+            let error = if execute {
+                engine.execute_next_intention().unwrap_err()
+            } else {
+                engine
+                    .command(
+                        "weapon-2",
+                        "stack-fault",
+                        actor,
+                        &format!("clock-{ordinal}"),
+                        &branch,
+                        command.clone(),
+                    )
+                    .unwrap_err()
+            };
+            assert_eq!(error.code, ErrorCode::StorageFailure);
+            assert_eq!(saved_engine(&engine), before, "candidate {ordinal}: exact inventory, claim, payment, RNG, actor and revision rollback");
+            assert_eq!(
+                engine.history(SOURCE, "weapon-1", None, 100).unwrap(),
+                history
+            );
+            assert_eq!(engine.save_status().accepted_sequence, sequence);
+            assert_eq!(crate::inspect_save(&path).unwrap(), durable);
+        }
+        drop(engine);
+        let mut healthy = Engine::open(&path, crate::Scenario::two_room(999)).unwrap();
+        if execute {
+            healthy
+                .execute_next_intention()
+                .unwrap()
+                .expect("queued candidate executes");
+        } else {
+            let accepted = healthy
+                .command(
+                    "weapon-2",
+                    "stack-fault",
+                    actor,
+                    &format!("clock-{ordinal}"),
+                    &branch,
+                    command.clone(),
+                )
+                .unwrap();
+            let after = saved_engine(&healthy);
+            let retry = healthy
+                .command(
+                    "weapon-2",
+                    "stack-fault",
+                    actor,
+                    &format!("clock-{ordinal}"),
+                    &branch,
+                    command,
+                )
+                .unwrap();
+            assert!(retry.duplicate);
+            assert_eq!(retry.entry, accepted.entry);
+            assert_eq!(saved_engine(&healthy), after);
+        }
+        let after = saved_engine(&healthy);
+        assert_ne!(
+            after, before,
+            "successful candidate must make the withheld transition"
+        );
+        if live_items(&after)[&paid]["quantity"] == 2 {
+            assert_eq!(live_items(&before)[&paid]["quantity"], 3);
+            assert_eq!(live_items(&before)[&paid]["holds"][0]["quantity"], 1);
+            assert!(live_items(&after)[&paid]["holds"]
+                .as_array()
+                .unwrap()
+                .is_empty());
+            assert_eq!(
+                healthy.observation(TARGET).unwrap().combat.unwrap().hp,
+                health - 11
+            );
+            assert!(live_actor(&after, SOURCE)["equipment"].get("10").is_none());
+            assert!(live_actor(&after, SOURCE)["pending"].is_null());
+            healthy.flush().unwrap();
+            drop(healthy);
+            let reopened = Engine::open(&path, crate::Scenario::two_room(42)).unwrap();
+            assert_eq!(saved_engine(&reopened), after);
+            completed = true;
+            break;
+        }
+        healthy.flush().unwrap();
+    }
+    assert!(
+        completed,
+        "bounded ordinary waits must reach the actual refused then retried release"
+    );
+}
