@@ -255,6 +255,48 @@ A no-link preflight is not a replacement for that witness. The other selected
 server owners, including the genuine current save writer/reader and encoded
 standalone-stack storage-rejection/retry contract, passed in the same local run.
 
+### First hosted content-batch checkpoint: cosmetic palette oracle
+
+The initial [PR #200 run](https://github.com/KCall360/thresholds-of-ruin/actions/runs/40462237905)
+at head `ade368b78bfeb0658636ccb9fe8b13db4f5ad8bb` exposed **1 stale-test root**:
+current Hallucination expectations still described the 81-object catalog rather
+than the 84-object catalog after opt-in dart, fruit and shuriken definitions.
+The unchanged presentation adapter deliberately includes named catalog entries,
+not only live loot. Independent source-tuple projection and the documented
+unsigned selector yield `scroll titled NEM AL` at phase zero and
+`scroll titled IV MEM` at phase one; creature samples are unchanged. Neither
+the selector nor gameplay behavior needed correction.
+
+This bounded six-job inspection covers Linux debug/release Rust jobs
+`122049377146` and `122049377204`, Linux debug/release Python jobs
+`122049377227` and `122049377124`, and Windows debug/release Python shard 2 jobs
+`122052230753` and `122052230786`: **7 distinct stale methods / 18 failed
+executions**, not eighteen bugs. Four Service methods failed in each Linux Rust
+lane at their shared exact cosmetic assertion (8 executions); two actual-process
+methods failed in each of the four Python lanes (8 executions); the independent
+roster-vector method failed in both debug Python lanes (2 executions):
+
+- `session::magic_item_tests::self_devices::hallucination::acquired_map_and_paid_public_plan_keep_historical_cosmetics_after_door_cure_and_source_free_reopen`
+- `session::magic_item_tests::self_devices::hallucination::paid_production_dose_selects_exact_visual_cosmetics_without_query_rng_or_authority_changes`
+- `session::magic_item_tests::self_devices::hallucination::peer_driven_exact_base_period_publishes_unsolicited_owner_and_followed_visual_updates`
+- `session::magic_item_tests::self_devices::hallucination::pending_paid_dose_and_active_palette_reopen_interval_one_without_sources_before_service_pause`
+- `test_magic_items_process.MagicItemProcesses.test_imported_hallucination_acquired_map_and_paid_history_survive_door_cure_reopen`
+- `test_magic_items_process.MagicItemProcesses.test_imported_hallucination_text_visual_cadence_and_source_free_reopen`
+- `test_rogue_presentation_vectors.RoguePresentationVectors.test_complete_authored_rosters_keep_visual_and_monster_sense_channels_distinct`
+
+The repair updates only fixed expected tuples and their palette count across
+the current Rust/Python owners, Text assertion, Service adapter, recording
+validator and its pure fixtures. Exact identity, privacy, cadence, historical
+memory, source-free recovery and negative checks remain intact; expectations
+are not computed by the production selector under test. Both actual processes
+and ten independent-vector/recording-validator checks passed locally using
+unchanged qualified applications (**12 methods total**). Runtime reruns of the
+Rust Service owners and hosted partitions remain required; no local relink or
+broad rerun is claimed. The still-running Windows Rust lanes are outside this occurrence count.
+Historical wire-format examples stay unchanged and valid. The previously
+corrected depth-four expired-history owner passed both inspected Linux Rust
+lanes; those lanes still failed overall on the cosmetic expectations above.
+
 ## Add the next useful finding
 
 One compact row or paragraph per diagnosed cause is enough:

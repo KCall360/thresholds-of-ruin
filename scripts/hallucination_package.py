@@ -55,10 +55,10 @@ def initial_items(test, frame):
 def assert_sample(test, observation, phase):
     # Frozen values independently evaluated from the documented selector recipe
     # and canonical production tuple roster: seed42, observer1, peer2/item40.
-    # The opt-in Polymorph maple-wand label makes81 object tuples, not80;
+    # Opt-in dart/fruit/shuriken entries make 84 object tuples, not 81;
     # no combat RNG or actor-HD operand participates in this selector.
-    expected = {0: ("emu", "creature.bird.emu", "smoky potion", "item.potion", "potion"),
-                1: ("bat", "creature.bat", "ivory ring", "item.ring", "ring")}[phase]
+    expected = {0: ("emu", "creature.bird.emu", "scroll titled NEM AL", "item.scroll", "scroll"),
+                1: ("bat", "creature.bat", "scroll titled IV MEM", "item.scroll", "scroll")}[phase]
     name, asset, object_name, object_asset, cosmetic_class = expected
     peers = [row for row in observation["visible_actors"] if row["id"] != observation["self_target"]]
     # One creature may have several genuinely disclosed body-cell occurrences.

@@ -51,12 +51,12 @@ class RoguePresentationVectors(unittest.TestCase):
 
     def test_complete_authored_rosters_keep_visual_and_monster_sense_channels_distinct(self):
         self.assertEqual(vectors(PRODUCTION), {
-            'creatures': 26, 'objects': 81, 'phases': [
+            'creatures': 26, 'objects': 84, 'phases': [
                 {'phase': 0, 'visual': ('emu', 'creature.bird.emu'),
-                 'object': ('smoky potion', 'item.potion', 'potion'),
+                 'object': ('scroll titled NEM AL', 'item.scroll', 'scroll'),
                  'monster_sense': ('snake', 'creature.serpent.snake')},
                 {'phase': 1, 'visual': ('bat', 'creature.bat'),
-                 'object': ('ivory ring', 'item.ring', 'ring'),
+                 'object': ('scroll titled IV MEM', 'item.scroll', 'scroll'),
                  'monster_sense': ('leprechaun', 'creature.fey.leprechaun')} ]})
 
 if __name__ == '__main__':
