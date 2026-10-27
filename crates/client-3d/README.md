@@ -256,6 +256,17 @@ dedicated `client-3d.yml` workflow. On Ubuntu this includes
 Logs and source/toolchain receipts stay under `.local/verify-3d/`.
 Failed native processes retain their bounded diagnostics in that run's
 `process-failures/` directory, which the independent workflow uploads with its logs.
+Process tests run through the shared test runner, which writes each outcome and
+traceback to `process-tests-tests.jsonl` as it happens. A failed or timed-out
+step prints the slowest tests and every recorded failure.
+
+Process tests that generate and animate models (lineups, the bestiary, outfit
+and equipment studies, scripted reviews, the live playlist and the model
+benchmark) run locally only. GitHub's runners have no GPU and run them 10 to
+17 times slower, so by the maintainer's decision CI doesn't gate on model
+generation. CI still runs every gameplay, launch and input-rejection process
+test, and `TOR_3D_MODEL_TESTS=1` runs the model tests there too. Run both
+profiles locally before relying on a model change.
 
 With explicit maintainer authorization for an unavailable local display, the
 independent verifier also accepts `--waive-local-graphical MANIFEST` for either

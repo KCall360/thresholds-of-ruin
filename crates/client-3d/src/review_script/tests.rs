@@ -54,7 +54,7 @@ fn events_validate_order_and_compositions_in_sequence() {
     let mut v = fixture();
     v["captures"][0]["tick"] = json!(10);
     v["events"] = json!([
-        {"tick":1,"actor":"woman","operation":{"type":"dress","outfit":"sylvan-duelist"}},
+        {"tick":1,"actor":"woman","operation":{"type":"dress","outfit":"leotard"}},
         {"tick":1,"actor":"woman","operation":{"type":"equipment","items":["breastplate"]}},
         {"tick":2,"actor":"woman","operation":{"type":"action","name":"jump"}}]);
     let script = parse(v.clone()).unwrap();
@@ -190,7 +190,7 @@ fn composition_events_preserve_motion_and_skip_identical_requests() {
     let mut anim = Anim::new(spec.seed, transform.translation);
     anim.action = Some((creatures::Move::Jump, 0.3));
     let dress = Operation::Dress {
-        outfit: "sylvan-duelist".into(),
+        outfit: "leotard".into(),
     };
     assert!(apply_operation(
         &mut spec,
@@ -223,7 +223,7 @@ fn composition_events_preserve_motion_and_skip_identical_requests() {
         &mut transform,
         &gear
     ));
-    assert_eq!(spec.outfit, "sylvan-duelist");
+    assert_eq!(spec.outfit, "leotard");
     assert_eq!(spec.equipment, ["breastplate"]);
     assert_eq!(velocity, Vec3::X);
     assert_eq!(transform.translation, Vec3::new(2.0, 0.0, 3.0));

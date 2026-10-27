@@ -20,6 +20,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from process_harness import ProcessTestCase, SPECTATOR_TOKEN, creature_package, door, non_graphical
 from arena_matrix import toml_source
 from stream_relay import StreamRelay
+import model_generation
 
 
 class AbilityTrace:
@@ -54,6 +55,7 @@ class AbilityTrace:
 class Native3DProcesses(ProcessTestCase):
     graphical = True
 
+    @model_generation.local
     def test_art_lineup_presents_generated_bodies_and_accepts_native_close(self):
         executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
         captures = self.directory / "art-lineup"
@@ -128,6 +130,7 @@ class Native3DProcesses(ProcessTestCase):
                   if "ERROR" in line and any(term in line.lower() for term in ("shader", "pipeline", "wgpu"))]
         self.assertFalse(errors, "\n".join(errors)[-2500:])
 
+    @model_generation.local
     def test_rogue_family_lineups_render_their_own_bodies_and_finish(self):
         """Shared humanoid contours, fitted adult eyes and Rogue recipes reach
         real GPU frames, including a glowing vampire, feathered and membrane-winged
@@ -153,6 +156,7 @@ class Native3DProcesses(ProcessTestCase):
         # Only the named families are lined up.
         self.assertEqual(len(list(captures.glob("*.png"))), len(families) * 3)
 
+    @model_generation.local
     def test_women_lineups_study_each_individuals_own_bust(self):
         """A figure study lines up only women of each people, each with her
         own resolved bust, and renders them to real GPU frames."""
@@ -179,6 +183,7 @@ class Native3DProcesses(ProcessTestCase):
             self.assertGreater(len(set(busts)), 1, f"{name}: individuals differ: {busts}")
         self.assertNotIn("panicked", log)
 
+    @model_generation.local
     def test_equipment_conflicts_restore_compositions_in_one_native_run(self):
         executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
         source = CLIENT / "review-scripts/equipment-conflicts.json"
@@ -214,6 +219,7 @@ class Native3DProcesses(ProcessTestCase):
             self.assertGreater(initial["root_children"], 0)
             self.assertNotEqual(restored["joints"], initial["joints"], "the equipped model must actually animate")
 
+    @model_generation.local
     def test_scripted_review_replays_composition_motion_and_capture_ticks(self):
         executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
         script = {
@@ -226,7 +232,7 @@ class Native3DProcesses(ProcessTestCase):
             "events": [
                 {"tick": 1, "actor": "woman", "operation": {"type": "action", "name": "jump"}},
                 {"tick": 1, "actor": "woman", "operation": {"type": "velocity", "value": [1, 0, 0]}},
-                {"tick": 5, "actor": "woman", "operation": {"type": "dress", "outfit": "sylvan-duelist"}},
+                {"tick": 5, "actor": "woman", "operation": {"type": "dress", "outfit": "leotard"}},
                 {"tick": 5, "actor": "woman", "operation": {"type": "equipment", "items": ["breastplate"]}},
             ],
             "captures": [{"tick": 0, "name": "initial-front", "camera": "front"},
@@ -250,7 +256,7 @@ class Native3DProcesses(ProcessTestCase):
             actor = shots[2]["actors"][0]
             # Velocity begins at tick 1; capture tick 10 follows nine intervals.
             self.assertAlmostEqual(actor["position"][0], 9 / 50, places=5)
-            self.assertEqual(actor["composition"]["outfit"], "sylvan-duelist")
+            self.assertEqual(actor["composition"]["outfit"], "leotard")
             self.assertEqual(actor["composition"]["equipment"], ["breastplate"])
             self.assertEqual(actor["action"]["name"], "Jump")
             self.assertEqual(actor["root_children"], shots[0]["actors"][0]["root_children"], "same-tick changes must not leave duplicate rigs")
@@ -266,6 +272,7 @@ class Native3DProcesses(ProcessTestCase):
         self.assertEqual([s["actors"] for s in manifests[0]["captures"]],
                          [s["actors"] for s in manifests[1]["captures"]], "resolved poses replay independently of renderer delay")
 
+    @model_generation.local
     def test_scripted_motion_events_apply_at_their_timestamp(self):
         executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
         expected = [(0, 0.0), (10, 0.0), (11, 0.02), (19, 0.18),
@@ -304,6 +311,7 @@ class Native3DProcesses(ProcessTestCase):
                                        msg="events affect the following interval, never the preceding one")
                 self.assertEqual(position[1:], [0.0, 0.0])
 
+    @model_generation.local
     def test_scripted_action_boundaries_do_not_consume_a_step(self):
         executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
         script = {
@@ -337,6 +345,7 @@ class Native3DProcesses(ProcessTestCase):
                 self.assertAlmostEqual(shots[index]["actors"][0]["action"]["phase"], phase, places=6)
         self.assertIsNone(shots[3]["actors"][0]["action"])
 
+    @model_generation.local
     def test_scripted_jump_hands_do_not_snap_at_flight_boundaries(self):
         executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
         ticks = [16, 17, 18, 19, 39, 40, 41, 42]
@@ -377,6 +386,7 @@ class Native3DProcesses(ProcessTestCase):
             self.assertEqual(image[:8], b"\x89PNG\r\n\x1a\n")
             self.assertGreater(len(image), 4096)
 
+    @model_generation.local
     def test_live_playlist_loops_in_one_window_with_timing_and_no_capture_holds(self):
         executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
         scene = {
@@ -504,6 +514,7 @@ class Native3DProcesses(ProcessTestCase):
                 self.assertFalse(output.exists())
                 self.assertIn("subject: " + reason, process.stdout_path.read_text(encoding="utf-8"))
 
+    @model_generation.local
     def test_princess_gown_presents_on_female_bodies_in_motion(self):
         executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
         captures = self.directory / "princess"
@@ -527,9 +538,11 @@ class Native3DProcesses(ProcessTestCase):
         for family in families:
             self.assertEqual(len(re.findall(rf"Lineup individual family={family} index=\d bust=", log)), 5)
 
+    @model_generation.local
     def test_lineup_readback_holds_and_resumes_the_presentation_clock(self):
         self._check_review_clock()
 
+    @model_generation.local
     def test_fixed_step_lineup_captures_on_the_selected_clock(self):
         self._check_review_clock(50)
 
@@ -538,7 +551,7 @@ class Native3DProcesses(ProcessTestCase):
         captures = self.directory / "capture-clock"
         captures.mkdir()
         window = self.launch("tor-client-3d", [
-            "--women", "--family", "Warrior", "--outfit", "sylvan-duelist",
+            "--women", "--family", "Warrior", "--outfit", "leotard",
             "--jump", "--capture-every", "0.5", "--capture", captures,
             "--capture-warmup", "2",
         ] + ([] if hz is None else ["--review-step-hz", str(hz)]), executable=executable, extra_env={"RUST_LOG": "info"})
@@ -566,6 +579,7 @@ class Native3DProcesses(ProcessTestCase):
             self.assertGreater(image.stat().st_size, 4096)
         self.assertNotIn("panicked", log)
 
+    @model_generation.local
     def test_sylvan_duelist_panels_present_on_women_in_motion(self):
         executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
         captures = self.directory / "sylvan-duelist"
@@ -586,6 +600,7 @@ class Native3DProcesses(ProcessTestCase):
                 self.assertGreater(image.stat().st_size, 4096)
         self.assertNotIn("panicked", window.stdout_path.read_text(encoding="utf-8"))
 
+    @model_generation.local
     def test_skinned_lineup_has_no_depth_prepass_speckles(self):
         from render_pixels import dark_fraction
         executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
@@ -602,6 +617,7 @@ class Native3DProcesses(ProcessTestCase):
         fraction = dark_fraction(image, (0.475, 0.54, 0.512, 0.59))
         self.assertLess(fraction, 0.002, f"dark holes in exposed skin: {fraction:.3%}")
 
+    @model_generation.local
     def test_character_study_outfits_present_paired_bodies(self):
         """Every study recipe reaches real GPU frames on the mixed-sex lineup."""
         executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
@@ -633,6 +649,7 @@ class Native3DProcesses(ProcessTestCase):
                     self.assertGreater(len(data), 4096, f"{outfit}: {image.name}")
                 self.assertNotIn("panicked", window.stdout_path.read_text(encoding="utf-8"))
 
+    @model_generation.local
     def test_wardrobe_dresses_lineups_and_redresses_them_live(self):
         """Humanoids of different kinds are dressed in one outfit from the
         wardrobe, then redressed while they move, reaching real GPU frames."""
@@ -665,6 +682,7 @@ class Native3DProcesses(ProcessTestCase):
         self.assertTrue(any(" 0 humanoids" not in line for line in redressed), log[-2000:])
         self.assertNotIn("panicked", log)
 
+    @model_generation.local
     def test_both_mages_redress_live_without_losing_their_lineups(self):
         """Both caster palettes accept shared outfits on the mixed-sex lineup."""
         executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
@@ -690,6 +708,7 @@ class Native3DProcesses(ProcessTestCase):
         self.assertEqual([line.rsplit(" as ", 1)[-1] for line in redressed][:2], ["Knight", "Courtier"])
         self.assertNotIn("panicked", log)
 
+    @model_generation.local
     def test_equipment_overlays_present_and_survive_live_wardrobe_changes(self):
         executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
         for outfit, cycle in [("royal-princess", False), ("native", True)]:
@@ -721,6 +740,7 @@ class Native3DProcesses(ProcessTestCase):
                     self.assertNotIn("Wardrobe redressed 0 humanoids", log)
                 self.assertNotIn("panicked", log)
 
+    @model_generation.local
     def test_held_sword_presents_in_native_bestiary(self):
         executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
         captures = self.directory / "held-sword"

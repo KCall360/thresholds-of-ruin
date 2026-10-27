@@ -144,6 +144,25 @@ direction. Local evidence on the final source:
 - **Not run locally:** the 3D release library suite, the 3D `verify.py`, the
   quick, push and full tiers, and Linux. CI covers them before merge.
 
+The first CI runs of the independent 3D workflow failed on both platforms:
+
+- **Process-step cap:** the step stopped at its 1200-second cap after 4 or 5 of
+  the 37 process tests. It now runs through the shared test runner, so a
+  timeout keeps each test's outcome and traceback. The cap is now 3000 seconds.
+- **Model generation is slow without a GPU:** GitHub's runners have no GPU, and
+  there lineups and outfit studies ran 10 to 17 times slower than locally. For
+  example, a readback lineup took 18 s locally and timed out after 180 s on CI.
+  By the maintainer's decision, CI no longer gates on model generation. The 19
+  model process tests and the model benchmark are skipped on CI unless
+  `TOR_3D_MODEL_TESTS=1` is set; they still run locally.
+- **Linux key auto-repeat:** the keyboard tests held each key until a captured
+  frame showed its effect, and X auto-repeated it. Linux CI typed "ledger" as
+  runs of each letter. A shared helper now releases the key once the client
+  reports it pressed, and auto-repeat is off on the test display.
+- **Leotard test outfit:** tests and fixtures that used the sylvan duelist only
+  as a stand-in now dress figures in the leotard. Tests about the duelist keep
+  it. The 7 affected Rust tests and 4 affected process tests pass locally.
+
 
 The consolidated Windows release contract check passes 387 renderer-library
 checks, one model-library check and 31 model integration checks, plus tooling,

@@ -9,9 +9,11 @@ ROOT = CLIENT.parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from process_harness import ProcessTestCase
 from model_performance_report import validate
+import model_generation
 
 
 class ModelBenchmarkProcesses(ProcessTestCase):
+    @model_generation.local
     def test_construction_producer_emits_complete_repeatable_samples(self):
         client = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug/tor-client-3d"))
         executable = client.parent / "examples" / ("model_bench" + self.suffix)

@@ -1123,7 +1123,7 @@ fn loose_front_locks_clear_equipped_torso_surface() {
             ..default()
         }),
     )
-    .dressed(Wardrobe::SylvanDuelist)
+    .dressed(Wardrobe::Leotard)
     .equipped(equipment);
     let support = Support::new(torso(&look).into_iter().filter(|t| t.metal).collect());
     let (world, rig, _, meshes) = crate::creatures::rogue_tests::spawn_one(&look);

@@ -3006,7 +3006,7 @@ mod support_tests {
                 ..default()
             }),
         )
-        .dressed(Wardrobe::SylvanDuelist);
+        .dressed(Wardrobe::Leotard);
         let (mut world, rig, _, meshes) = spawn_one(&look);
         let root = world
             .get::<ChildOf>(rig.joint(J::Lift).unwrap())

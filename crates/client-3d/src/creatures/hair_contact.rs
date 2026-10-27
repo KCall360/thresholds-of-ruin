@@ -605,7 +605,7 @@ mod tests {
                 ..default()
             }),
         )
-        .dressed(Wardrobe::SylvanDuelist);
+        .dressed(Wardrobe::Leotard);
         let (_, rig, _, _) = super::super::rogue_tests::spawn_one(&look);
         let hair = rig.hair.as_ref().expect("loose hair fixture");
         let mut witnessed = std::collections::BTreeSet::new();
@@ -644,7 +644,7 @@ mod tests {
                 ..default()
             }),
         )
-        .dressed(Wardrobe::SylvanDuelist);
+        .dressed(Wardrobe::Leotard);
         let (mut world, mut first, mut library, mut meshes) =
             super::super::rogue_tests::spawn_one(&look);
         let positions = |meshes: &Assets<Mesh>| -> std::collections::HashMap<_, Vec<[f32; 3]>> {
@@ -805,7 +805,7 @@ mod tests {
                 ..default()
             }),
         )
-        .dressed(Wardrobe::SylvanDuelist)
+        .dressed(Wardrobe::Leotard)
         .equipped(equipment);
         assert_jump_contact(look);
     }
