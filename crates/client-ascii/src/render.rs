@@ -978,6 +978,7 @@ mod borrowed_map_tests {
             description: String::new(),
             asset: None,
             appearance_seed: None,
+            worn: Vec::new(),
             position: position(1, 0),
         });
         let occupied = map::appearance_tiles(&o, &prepared, &Default::default(), &is_current);

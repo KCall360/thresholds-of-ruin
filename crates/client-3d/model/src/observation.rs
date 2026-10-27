@@ -1,5 +1,8 @@
 //! A renderer-independent projection of disclosed client state.
-use crate::{actor_model, creature_model, item_model, object_model, CreatureModel, ItemModel};
+use crate::{
+    actor_model, creature_model, item_model, object_model, wearing, CreatureModel, ItemModel,
+    Wearing,
+};
 use tor_client_common::{ClientState, Palette};
 use tor_protocol::*;
 
@@ -8,6 +11,10 @@ use tor_protocol::*;
 pub struct Actor {
     pub appearance_seed: Option<AppearanceSeed>,
     pub model: CreatureModel,
+    /// Disclosed visible equipment; empty when none is disclosed.
+    pub wearing: Wearing,
+    /// The same equipment as names, for describing the creature.
+    pub attire: tor_client_common::narration::Attire,
     pub id: ActorTarget,
     pub name: String,
     pub description: String,
@@ -32,11 +39,30 @@ pub struct View {
     pub actors: Vec<Actor>,
     pub items: Vec<GroundItem>,
     pub inventory: Vec<Carried>,
+    /// Holds on the character it may try to escape, labelled by holder.
+    pub holds: Vec<tor_client_common::holds::HoldChoice>,
+    /// Granted abilities beyond the basic attack, in the server's order.
+    pub abilities: Vec<Ability>,
+    /// Carried items the server's pending identification choice accepts;
+    /// `None` when no choice is waiting.
+    pub identify: Option<Vec<ItemTarget>>,
     pub narration: Vec<String>,
+    /// The shared status rows: attributes and place, then health, pools,
+    /// gold, hunger, time, holds and combat state.
+    pub status: [String; 2],
     pub hp: Option<(u64, u64)>,
     pub has_control: bool,
     /// Whether a new action would be admitted now (no journey or work under way).
     pub can_act: bool,
+    /// The latest retained history, oldest first, as "T:tick  what happened".
+    pub history: Vec<String>,
+    /// The detection charts disclosed so far, in catalog order.
+    pub chart_kinds: Vec<tor_protocol::chart_pages::ChartKind>,
+    /// Places the character knows, with where each name came from.
+    pub places: Vec<PlaceView>,
+    /// Whether the server offers to resume or cancel work now.
+    pub can_resume: bool,
+    pub can_cancel: bool,
     pub tick: u64,
     /// Changes whenever the server's state does; events belong to one revision.
     pub revision: u64,
@@ -76,6 +102,15 @@ pub struct GroundItem {
     pub reachable: bool,
 }
 
+/// A granted ability as the player chooses it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Ability {
+    pub id: String,
+    /// Its name with cooldown and supply needs, as the shared label reads.
+    pub label: String,
+    pub target: AbilityTargetKind,
+}
+
 /// An item the character carries, with what can be done with it now.
 #[derive(Clone)]
 pub struct Carried {
@@ -91,7 +126,13 @@ pub struct Carried {
     pub drinkable: bool,
     pub portable_light: Option<PortableLightView>,
     pub edible: bool,
+    pub readable: bool,
+    /// How a zappable device is aimed, when it can be zapped now.
+    pub device: Option<DeviceActivation>,
 }
+
+/// How much retained history the history screen shows.
+pub const HISTORY_LINES: usize = 40;
 
 pub fn view(state: &ClientState, palette: &Palette) -> View {
     let o = &state.state().observation;
@@ -106,6 +147,8 @@ pub fn view(state: &ClientState, palette: &Palette) -> View {
         .map(|a| Actor {
             appearance_seed: a.appearance_seed,
             model: actor_model(palette, a),
+            wearing: wearing(palette, &a.worn),
+            attire: tor_client_common::narration::Attire::of(&a.worn),
             id: a.id,
             name: a.name.clone(),
             description: a.description.clone(),
@@ -137,6 +180,18 @@ pub fn view(state: &ClientState, palette: &Palette) -> View {
                         .as_ref()
                         .and_then(|appearance| appearance.asset.as_deref()),
                 ),
+                wearing: o
+                    .self_appearance
+                    .as_ref()
+                    .map_or_else(Wearing::default, |appearance| {
+                        wearing(palette, &appearance.worn)
+                    }),
+                attire: o
+                    .self_appearance
+                    .as_ref()
+                    .map_or_else(Default::default, |appearance| {
+                        tor_client_common::narration::Attire::of(&appearance.worn)
+                    }),
                 id: o.self_target,
                 name: String::new(),
                 description: String::new(),
@@ -242,13 +297,57 @@ pub fn view(state: &ClientState, palette: &Palette) -> View {
                     drinkable: affordance.is_some_and(|a| a.drinkable),
                     portable_light: affordance.and_then(|a| a.portable_light.clone()),
                     edible: affordance.is_some_and(|a| a.edible),
+                    readable: affordance.is_some_and(|a| a.readable),
+                    device: affordance
+                        .filter(|a| a.zappable)
+                        .and_then(|a| a.device_activation),
                 }
             })
             .collect(),
+        holds: tor_client_common::holds::hold_choices(o),
+        abilities: tor_client_common::abilities::choices(o)
+            .into_iter()
+            .map(|ability| Ability {
+                label: tor_client_common::abilities::ability_label(&ability),
+                id: ability.id,
+                target: ability.target_kind,
+            })
+            .collect(),
+        identify: o
+            .interactions
+            .as_ref()
+            .and_then(|i| i.identification.as_ref())
+            .map(|pending| {
+                o.inventory
+                    .iter()
+                    .filter(|item| {
+                        pending.items.contains(&item.id) && pending.classes.contains(&item.class)
+                    })
+                    .map(|item| item.id)
+                    .collect()
+            }),
         narration: state.narration().to_vec(),
+        status: tor_client_common::status::lines(state, &[]),
         hp: o.combat.as_ref().map(|c| (c.hp, c.max_hp)),
         has_control: state.has_control(),
         can_act: state.can_admit_intention(),
+        history: {
+            let entries = state.history();
+            entries[entries.len().saturating_sub(HISTORY_LINES)..]
+                .iter()
+                .map(|entry| {
+                    format!(
+                        "T:{}  {}",
+                        entry.tick,
+                        tor_client_common::history::text(entry)
+                    )
+                })
+                .collect()
+        },
+        chart_kinds: o.charts.iter().map(|summary| summary.kind).collect(),
+        places: o.places.clone(),
+        can_resume: state.can_resume_intention(),
+        can_cancel: state.can_cancel_intention(),
         tick: o.tick,
         revision: state.state().revision,
         events: happenings(o),
@@ -337,6 +436,8 @@ pub struct Terrain<'a> {
     pub stairs_up: bool,
     pub stairs_down: bool,
     pub door: Option<bool>,
+    /// A discovered trap, by family once that is known.
+    pub trap: Option<Option<TrapFamily>>,
     pub seen: bool,
     pub lit: bool,
 }
@@ -353,6 +454,7 @@ impl View {
                 stairs_up: c.stairs_up,
                 stairs_down: c.stairs_down,
                 door: c.door.as_ref().map(|d| d.open),
+                trap: c.trap.as_ref().map(|t| t.family),
                 seen: true,
                 lit: c.lit,
             })
@@ -365,6 +467,7 @@ impl View {
                 stairs_up: c.stairs_up,
                 stairs_down: c.stairs_down,
                 door: c.door.as_ref().map(|d| d.open),
+                trap: c.trap.as_ref().map(|t| t.family),
                 seen: false,
                 lit: false,
             }))

@@ -273,6 +273,17 @@ item names and arbitrary authored properties do not identify its source. Other
 item classes and unidentified items cannot disclose corpse metadata. Full views
 and deltas carry the same appearance facts.
 
+A disclosed creature's actor entries, and `self_appearance`, list what it visibly
+wears and holds as `worn: [{slot, occurrence?, class, appearance, asset?}]`. That
+is at most 64 entries in canonical slot order, and every cell of one body repeats
+the same list. Each entry names the rules slot, which of that body's sockets of
+the slot it fills (0 when omitted), and the item's class, unidentified appearance
+and asset: no more than the item shows on the ground. Only weapons and armour
+are listed. Rings, amulets and other classes never are, and neither is any
+private fact such as enchantment, curse or true name. Anonymous contacts,
+guises and hallucinated figures carry no list, and corpse appearances are always empty. An absent or empty
+list means nothing is disclosed, not that the body is bare.
+
 A discovered trap discloses exactly `id`, required nullable `family` (`rust` or
 `sleeping_gas`), and `reachable`. The record never includes a discovery DC,
 effect operands, hidden-feature counts or undiscovered neighbors. Presence and
@@ -305,7 +316,7 @@ of this wire representation.
 The first frame authenticates and declares a frontend label:
 
 ```json client-message
-{"type":"hello","protocol":63,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":64,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and

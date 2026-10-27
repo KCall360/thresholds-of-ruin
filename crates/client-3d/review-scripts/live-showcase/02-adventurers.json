@@ -1,0 +1,426 @@
+{
+  "version": 1,
+  "hz": 60,
+  "viewport": [
+    1280,
+    720
+  ],
+  "actors": [
+    {
+      "id": "actor-1",
+      "model": "RedMage",
+      "seed": 7,
+      "body": {
+        "woman": true,
+        "hair": 2,
+        "build": 1,
+        "skin": 2
+      },
+      "outfit": "sylvan-duelist",
+      "equipment": [],
+      "position": [
+        -1.15,
+        -0.5,
+        0
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "actor-2",
+      "model": "Orc",
+      "seed": 19,
+      "body": {
+        "woman": true,
+        "hair": 2,
+        "build": 1,
+        "skin": 1
+      },
+      "outfit": "barbarian",
+      "equipment": [],
+      "position": [
+        0.0,
+        -0.5,
+        0
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "actor-3",
+      "model": "Leprechaun",
+      "seed": 31,
+      "body": {
+        "woman": true,
+        "hair": 3,
+        "build": 2,
+        "skin": 2
+      },
+      "outfit": "bard",
+      "equipment": [],
+      "position": [
+        1.15,
+        -0.5,
+        0
+      ],
+      "yaw": 0
+    }
+  ],
+  "cameras": [
+    {
+      "id": "front",
+      "position": [
+        0,
+        1.0,
+        3.3
+      ],
+      "target": [
+        0,
+        0.22,
+        0
+      ],
+      "fov_degrees": 48
+    },
+    {
+      "id": "three-quarter",
+      "position": [
+        2.5,
+        1.3,
+        3.8
+      ],
+      "target": [
+        0,
+        0.25,
+        0
+      ],
+      "fov_degrees": 52
+    },
+    {
+      "id": "low-front",
+      "position": [
+        0,
+        0.65,
+        3.5
+      ],
+      "target": [
+        0,
+        0.35,
+        0
+      ],
+      "fov_degrees": 48
+    },
+    {
+      "id": "actor-1",
+      "position": [
+        -1.15,
+        0.65,
+        2.2
+      ],
+      "target": [
+        -1.15,
+        0.25,
+        0
+      ],
+      "fov_degrees": 46
+    },
+    {
+      "id": "actor-2",
+      "position": [
+        0.0,
+        0.65,
+        2.2
+      ],
+      "target": [
+        0.0,
+        0.25,
+        0
+      ],
+      "fov_degrees": 46
+    },
+    {
+      "id": "actor-3",
+      "position": [
+        1.15,
+        0.65,
+        2.2
+      ],
+      "target": [
+        1.15,
+        0.25,
+        0
+      ],
+      "fov_degrees": 46
+    }
+  ],
+  "events": [
+    {
+      "tick": 60,
+      "actor": "actor-1",
+      "operation": {
+        "type": "action",
+        "name": "gesture"
+      }
+    },
+    {
+      "tick": 72,
+      "actor": "actor-2",
+      "operation": {
+        "type": "action",
+        "name": "gesture"
+      }
+    },
+    {
+      "tick": 84,
+      "actor": "actor-3",
+      "operation": {
+        "type": "action",
+        "name": "gesture"
+      }
+    },
+    {
+      "tick": 300,
+      "actor": "actor-1",
+      "operation": {
+        "type": "velocity",
+        "value": [
+          0,
+          0,
+          0.35
+        ]
+      }
+    },
+    {
+      "tick": 300,
+      "actor": "actor-2",
+      "operation": {
+        "type": "velocity",
+        "value": [
+          0,
+          0,
+          0.35
+        ]
+      }
+    },
+    {
+      "tick": 300,
+      "actor": "actor-3",
+      "operation": {
+        "type": "velocity",
+        "value": [
+          0,
+          0,
+          0.35
+        ]
+      }
+    },
+    {
+      "tick": 372,
+      "actor": "actor-1",
+      "operation": {
+        "type": "velocity",
+        "value": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "tick": 372,
+      "actor": "actor-2",
+      "operation": {
+        "type": "velocity",
+        "value": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "tick": 372,
+      "actor": "actor-3",
+      "operation": {
+        "type": "velocity",
+        "value": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "tick": 540,
+      "actor": "actor-1",
+      "operation": {
+        "type": "action",
+        "name": "strike"
+      }
+    },
+    {
+      "tick": 555,
+      "actor": "actor-2",
+      "operation": {
+        "type": "action",
+        "name": "heavy"
+      }
+    },
+    {
+      "tick": 570,
+      "actor": "actor-3",
+      "operation": {
+        "type": "action",
+        "name": "thrust"
+      }
+    },
+    {
+      "tick": 900,
+      "actor": "actor-1",
+      "operation": {
+        "type": "action",
+        "name": "focus"
+      }
+    },
+    {
+      "tick": 912,
+      "actor": "actor-2",
+      "operation": {
+        "type": "action",
+        "name": "focus"
+      }
+    },
+    {
+      "tick": 924,
+      "actor": "actor-3",
+      "operation": {
+        "type": "action",
+        "name": "focus"
+      }
+    },
+    {
+      "tick": 1200,
+      "actor": "actor-1",
+      "operation": {
+        "type": "action",
+        "name": "jump"
+      }
+    },
+    {
+      "tick": 1212,
+      "actor": "actor-2",
+      "operation": {
+        "type": "action",
+        "name": "jump"
+      }
+    },
+    {
+      "tick": 1224,
+      "actor": "actor-3",
+      "operation": {
+        "type": "action",
+        "name": "jump"
+      }
+    },
+    {
+      "tick": 1500,
+      "actor": "actor-1",
+      "operation": {
+        "type": "velocity",
+        "value": [
+          0,
+          0,
+          -0.35
+        ]
+      }
+    },
+    {
+      "tick": 1500,
+      "actor": "actor-2",
+      "operation": {
+        "type": "velocity",
+        "value": [
+          0,
+          0,
+          -0.35
+        ]
+      }
+    },
+    {
+      "tick": 1500,
+      "actor": "actor-3",
+      "operation": {
+        "type": "velocity",
+        "value": [
+          0,
+          0,
+          -0.35
+        ]
+      }
+    },
+    {
+      "tick": 1572,
+      "actor": "actor-1",
+      "operation": {
+        "type": "velocity",
+        "value": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "tick": 1572,
+      "actor": "actor-2",
+      "operation": {
+        "type": "velocity",
+        "value": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "tick": 1572,
+      "actor": "actor-3",
+      "operation": {
+        "type": "velocity",
+        "value": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "tick": 1800,
+      "actor": "actor-1",
+      "operation": {
+        "type": "action",
+        "name": "gesture"
+      }
+    },
+    {
+      "tick": 1812,
+      "actor": "actor-2",
+      "operation": {
+        "type": "action",
+        "name": "gesture"
+      }
+    },
+    {
+      "tick": 1824,
+      "actor": "actor-3",
+      "operation": {
+        "type": "action",
+        "name": "gesture"
+      }
+    }
+  ],
+  "captures": [
+    {
+      "tick": 2400,
+      "name": "end",
+      "camera": "front"
+    }
+  ]
+}

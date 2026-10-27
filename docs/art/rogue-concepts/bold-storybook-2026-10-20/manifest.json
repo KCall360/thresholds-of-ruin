@@ -1,0 +1,138 @@
+{
+  "reference_date": "2026-10-20",
+  "provenance": "Maintainer-supplied Bold Storybook reference set selected for ongoing Rogue full-cast refinement on 2026-10-20. Files copied byte-for-byte without modifying the source originals. The separately named humanoid body reference is the approved anatomy anchor.",
+  "creature_count": 26,
+  "creature_sheet_count": 24,
+  "file_count": 25,
+  "humanoid_anchor": "approved-humanoid-body-reference.png",
+  "humanoid_anchor_duplicates": [
+    "03-nymph.png"
+  ],
+  "files": [
+    {
+      "filename": "01-orc.png",
+      "size_bytes": 2207631,
+      "sha256": "0b12524fa238c5c0b1ec9fb5efd90cab9249258fe6f844afef565051ebaec1d6"
+    },
+    {
+      "filename": "02-leprechaun.png",
+      "size_bytes": 2327867,
+      "sha256": "a05eef4324e3d5fe40ecb2757fe4bfd7c2dd3498f427179756f12fd0bdbb0caf"
+    },
+    {
+      "filename": "03-nymph.png",
+      "size_bytes": 2300479,
+      "sha256": "ec3aada0d911cd75a74476b42a08c46e9b36cc6a9548ada31a0b4adb5a0ffc0e"
+    },
+    {
+      "filename": "04-medusa.png",
+      "size_bytes": 2505812,
+      "sha256": "1fe24953c45189061375091579aa3c2c386e424199d76d2de18fbff945f4f231"
+    },
+    {
+      "filename": "05-phantom.png",
+      "size_bytes": 2539802,
+      "sha256": "6d681b106ca18d16be896c6e6a859d5d78a55e17c9e75c5070a1b41f0c88af28"
+    },
+    {
+      "filename": "06-bat-kestrel.png",
+      "size_bytes": 2231936,
+      "sha256": "e9a0c6aced85247d155d140003bc15b8137e443f97c2032f1190112be2765e42"
+    },
+    {
+      "filename": "07-griffin.png",
+      "size_bytes": 2257337,
+      "sha256": "c821958d9ebabf7dc0778306b7d11d6c6b1f136694809c22ea116c36381d4420"
+    },
+    {
+      "filename": "08-dragon.png",
+      "size_bytes": 2307543,
+      "sha256": "4462652728f28152fcafa5e64c70f0971b72d9a1abe2c41610a102274a6622ba"
+    },
+    {
+      "filename": "09-aquator.png",
+      "size_bytes": 2382743,
+      "sha256": "50c906cd5a00e504d4c95de194cba3f85cb220c0e81959e404d05a5be30adfbb"
+    },
+    {
+      "filename": "10-xeroc-flytrap.png",
+      "size_bytes": 2399947,
+      "sha256": "acd621eca6665d2b7500a5f9ff55cac67578d45d62c621c9830b4133875c91eb"
+    },
+    {
+      "filename": "11-emu.png",
+      "size_bytes": 2273761,
+      "sha256": "a0a7649ede495ef9f298ef062dc86142394abaca75abf7e57ab9d9b99a1bb388"
+    },
+    {
+      "filename": "12-snake.png",
+      "size_bytes": 2027176,
+      "sha256": "6eedddb3ce5c62877c997f1c233943cfe69b843421b084e1f5d63a31ea112dd6"
+    },
+    {
+      "filename": "13-rattlesnake.png",
+      "size_bytes": 2317955,
+      "sha256": "8768e0904a08f58714098b44f0036d310170927e925349e09bc8757823f8385c"
+    },
+    {
+      "filename": "14-hobgoblin.png",
+      "size_bytes": 2095532,
+      "sha256": "50dde5c46c9605df689a83ad023122f816466db58410f6dc2f702a1b91fb04f2"
+    },
+    {
+      "filename": "15-zombie.png",
+      "size_bytes": 2259057,
+      "sha256": "efd7021e501c00029fa0eb20bd246998505d8665298af2467fb0cf6213b902ae"
+    },
+    {
+      "filename": "16-quagga.png",
+      "size_bytes": 2185816,
+      "sha256": "c75e07ebb17c9ccb33aa6050127c0197505a88231014ca14dfd10d42d8c731c7"
+    },
+    {
+      "filename": "17-centaur.png",
+      "size_bytes": 2268840,
+      "sha256": "4828b990c889e2f1790b2e3e9aa19f5cb17f162dfeab98315c97a406dd289196"
+    },
+    {
+      "filename": "18-yeti.png",
+      "size_bytes": 2274247,
+      "sha256": "5ddebd578f3d49462c12fc94705b65c4a7c7f0b3f71b7ecc33e0811d4f6d49dd"
+    },
+    {
+      "filename": "19-troll.png",
+      "size_bytes": 2360927,
+      "sha256": "4731c1cecb1a84ec01a429b55a6f9b5c3f4b19857c94f0db3130ab9aa95fb755"
+    },
+    {
+      "filename": "20-black-unicorn.png",
+      "size_bytes": 2141894,
+      "sha256": "e0229029570db2222bff2bbd54d6323fec5deea172791c454574977d786ee55f"
+    },
+    {
+      "filename": "21-ice-monster.png",
+      "size_bytes": 2175123,
+      "sha256": "c7f52aaed3b7a4221278df78bb607465825584f886aee0966310bc1aff78cf9f"
+    },
+    {
+      "filename": "22-vampire.png",
+      "size_bytes": 2121511,
+      "sha256": "f6b1bfa8b7afd3c009ed863063a68d70a7e56db50877afaee3c002fa3e290ce4"
+    },
+    {
+      "filename": "23-wraith.png",
+      "size_bytes": 2583500,
+      "sha256": "bbf3fec0b8163f79f1a5e452e90cc6d8a08566ec41146edb1fc74f5589fd9105"
+    },
+    {
+      "filename": "24-jabberwock.png",
+      "size_bytes": 2293894,
+      "sha256": "827c48ab0f8d3f52d377dde7c26e9b401af51bbbe2379528dfdcb70240cbad29"
+    },
+    {
+      "filename": "approved-humanoid-body-reference.png",
+      "size_bytes": 2300479,
+      "sha256": "ec3aada0d911cd75a74476b42a08c46e9b36cc6a9548ada31a0b4adb5a0ffc0e"
+    }
+  ]
+}

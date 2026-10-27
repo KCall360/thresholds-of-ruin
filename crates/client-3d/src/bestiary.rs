@@ -47,16 +47,43 @@ const BEASTS: [&str; 8] = [
     "ember wisp",
     "ice monster",
 ];
+/// The Rogue scenario's own people and beasts, from their concept sheets.
+const ROGUE_FOLK: [&str; 7] = [
+    "orc",
+    "troll",
+    "leprechaun",
+    "nymph",
+    "medusa",
+    "phantom",
+    "wraith",
+];
+const ROGUE_BEASTS: [&str; 9] = [
+    "bat",
+    "kestrel",
+    "griffin",
+    "dragon",
+    "jabberwock",
+    "aquator",
+    "xeroc",
+    "venus flytrap",
+    "rattlesnake",
+];
+/// Each row performs as one group, in this order.
+const ROWS: [&[&str]; 4] = [&PEOPLE, &BEASTS, &ROGUE_FOLK, &ROGUE_BEASTS];
+const GROUP_TAGS: [&str; 4] = ["people", "beasts", "rogue-folk", "rogue-beasts"];
+const GROUPS: usize = ROWS.len();
 const WALK_TIME: f32 = 6.0;
 const MOVES_AT: f32 = 7.0;
-const CYCLE: f32 = 35.0;
+/// Seconds between the moves, all of them done before the reactions at 34.
+const MOVE_SPACING: f32 = 1.33;
+const CYCLE: f32 = 40.0;
 /// Close-up time for each creature after the group cycles.
 const PORTRAIT: f32 = 2.6;
 /// Seconds each row stands at rest with `--idles`.
 const IDLE: f32 = 12.0;
 
 /// Every move, in the order the groups perform them.
-const MOVES: [Move; 16] = [
+const MOVES: [Move; 20] = [
     Move::Strike,
     Move::Thrust,
     Move::Combo(false),
@@ -73,6 +100,10 @@ const MOVES: [Move; 16] = [
     Move::Guard(Accent::Gold),
     Move::Step,
     Move::Mend,
+    Move::Breath(Accent::Ember),
+    Move::Gaze,
+    Move::Bite(Accent::Teal),
+    Move::Jump,
 ];
 
 #[derive(Clone, Copy)]
@@ -89,13 +120,13 @@ fn schedule() -> Vec<(f32, Cue)> {
     let mut cues: Vec<(f32, Cue)> = MOVES
         .iter()
         .enumerate()
-        .map(|(i, m)| (MOVES_AT + i as f32 * 1.38, Cue::Do(*m)))
+        .map(|(i, m)| (MOVES_AT + i as f32 * MOVE_SPACING, Cue::Do(*m)))
         .collect();
     cues.extend([
-        (29.2, Cue::Hit),
-        (30.0, Cue::Miss),
-        (30.8, Cue::Die),
-        (34.4, Cue::Revive),
+        (34.0, Cue::Hit),
+        (34.8, Cue::Miss),
+        (35.6, Cue::Die),
+        (39.2, Cue::Revive),
     ]);
     cues
 }
@@ -113,13 +144,13 @@ fn shots() -> Vec<(f32, String)> {
         (6.6, "walk-settled".to_string()),
     ];
     for (i, m) in MOVES.iter().enumerate() {
-        let at = MOVES_AT + i as f32 * 1.38;
+        let at = MOVES_AT + i as f32 * MOVE_SPACING;
         shots.push((at + m.impact() * m.duration() + 0.03, label(*m)));
     }
     shots.extend([
-        (29.3, "hurt".to_string()),
-        (30.2, "dodge".to_string()),
-        (33.0, "dead".to_string()),
+        (34.1, "hurt".to_string()),
+        (35.0, "dodge".to_string()),
+        (37.8, "dead".to_string()),
     ]);
     shots
 }
@@ -242,6 +273,15 @@ fn signature(name: &str) -> Move {
         "ice monster" => Move::Touch(Accent::Travel),
         "zombie" => Move::Hook,
         "hobgoblin" => Move::Bash,
+        "troll" | "jabberwock" => Move::Combo(false),
+        "leprechaun" => Move::Touch(Accent::Gold),
+        "nymph" => Move::Hex,
+        "medusa" => Move::Gaze,
+        "wraith" => Move::Drain,
+        "dragon" => Move::Breath(Accent::Ember),
+        "aquator" => Move::Touch(Accent::Amber),
+        "xeroc" => Move::Shove,
+        "rattlesnake" => Move::Bite(Accent::Teal),
         _ => Move::Strike,
     }
 }
@@ -252,10 +292,12 @@ struct Pacer {
     height: f32,
     name: &'static str,
     index: usize,
+    row: usize,
 }
 
 #[derive(Component)]
-struct Caption(Vec3, String);
+/// A name label: where it hangs, its text, and its row.
+struct Caption(Vec3, String, usize);
 
 #[derive(Resource, Default)]
 struct Director {
@@ -267,14 +309,20 @@ struct Director {
 
 pub fn run(diagnostics: Diagnostics) {
     let mut app = App::new();
+    if let Some(hz) = diagnostics.review_step_hz {
+        app.insert_resource(
+            crate::review_clock::ReviewStep::new(hz).expect("validated review rate"),
+        );
+    }
     app.add_plugins(crate::graphics::plugins().set(WindowPlugin {
         primary_window: Some(Window {
-            title: "Thresholds of Ruin — bestiary".into(),
+            title: "Thresholds of Ruin \u{2014} bestiary".into(),
             resolution: WindowResolution::new(1600., 1000.),
             ..default()
         }),
         ..default()
     }))
+    .add_plugins(crate::review_clock::ReviewClockPlugin)
     .add_plugins(MaterialPlugin::<CaveMaterial>::default())
     .insert_resource(ClearColor(FOG))
     .insert_resource(AmbientLight {
@@ -290,13 +338,25 @@ pub fn run(diagnostics: Diagnostics) {
     .insert_resource(diagnostics)
     .init_resource::<Director>()
     .add_systems(Startup, setup)
+    .add_systems(
+        Startup,
+        |mut commands: Commands, diagnostics: Res<Diagnostics>| {
+            commands.insert_resource(Dress {
+                wardrobe: diagnostics.outfit,
+                since: 0.0,
+            });
+        },
+    )
     .init_resource::<Lineup>()
     .add_systems(
         Update,
         (
             direct,
             lineup,
+            lineup_jumps,
+            redress,
             creatures::animate,
+            creatures::soften,
             creatures::snuff,
             creatures::effects,
             camera,
@@ -310,15 +370,154 @@ pub fn run(diagnostics: Diagnostics) {
 }
 
 fn spot(row: usize, i: usize) -> Vec3 {
-    if row == 0 {
-        Vec3::new(i as f32 * 1.6, -0.5, 0.0)
-    } else {
-        Vec3::new(1.0 + i as f32 * 1.75, -0.5, 4.5)
+    match row {
+        0 => Vec3::new(i as f32 * 1.6, -0.5, 0.0),
+        1 => Vec3::new(1.0 + i as f32 * 1.75, -0.5, ROW_DEPTH),
+        2 => Vec3::new(1.5 + i as f32 * 2.0, -0.5, ROW_DEPTH * 2.0),
+        _ => Vec3::new(i as f32 * 1.85, -0.5, ROW_DEPTH * 3.0),
     }
 }
 
+/// Distance between the rows of the stage.
+const ROW_DEPTH: f32 = 4.5;
+
+/// Where a row's first creature falls in the whole roster.
+fn row_start(row: usize) -> usize {
+    ROWS[..row].iter().map(|names| names.len()).sum()
+}
+
+/// A roster index as its row and its place in that row.
+fn row_of(index: usize) -> (usize, usize) {
+    let mut start = 0;
+    for (row, names) in ROWS.iter().enumerate() {
+        if index < start + names.len() {
+            return (row, index - start);
+        }
+        start += names.len();
+    }
+    (GROUPS - 1, ROWS[GROUPS - 1].len() - 1)
+}
+
 fn everyone() -> Vec<&'static str> {
-    PEOPLE.iter().chain(BEASTS.iter()).copied().collect()
+    ROWS.iter()
+        .flat_map(|names| names.iter().copied())
+        .collect()
+}
+
+/// The line-up roster: everyone, or only the families asked for by name.
+fn roster(diagnostics: &Diagnostics) -> Vec<&'static str> {
+    everyone()
+        .into_iter()
+        .filter(|name| {
+            diagnostics.families.is_empty()
+                || diagnostics.families.iter().any(|family| family == name)
+        })
+        .collect()
+}
+
+/// What the bestiary's humanoids are wearing, and since when.
+#[derive(Resource)]
+struct Dress {
+    wardrobe: creatures::Wardrobe,
+    since: f32,
+}
+
+/// A creature as it was made, before it was dressed, and what it holds.
+#[derive(Component)]
+struct Wearer {
+    look: Look,
+    sword: bool,
+}
+
+impl Wearer {
+    /// Build its model dressed from the wardrobe under `entity`, armed as before.
+    fn dress(
+        &self,
+        commands: &mut Commands,
+        library: &mut PropLibrary,
+        meshes: &mut Assets<Mesh>,
+        entity: Entity,
+        wardrobe: creatures::Wardrobe,
+    ) -> creatures::Rig {
+        let look = self.look.clone().dressed(wardrobe);
+        if !look.equipment().is_empty() {
+            eprintln!("Equipped wardrobe {wardrobe:?}: {:?}", look.equipment());
+        }
+        let rig = creatures::spawn(commands, library, meshes, entity, &look);
+        if self.sword {
+            let sword = library.item(tor_client_3d_model::ItemModel::Greatsword, meshes);
+            if let Some(hand) = rig.joint(creatures::J::HandR) {
+                let held = commands
+                    .spawn((
+                        crate::props::held_transform(tor_client_3d_model::ItemModel::Greatsword),
+                        Visibility::default(),
+                    ))
+                    .with_children(|p| sword.attach(p))
+                    .id();
+                commands.entity(hand).add_child(held);
+            }
+        }
+        rig
+    }
+}
+
+/// Swap every humanoid into the next outfit on O, or on the diagnostics'
+/// cycle. Only the model is replaced: each keeps its motion, pose clock and
+/// place, so the change lands mid-stride.
+#[allow(clippy::too_many_arguments)]
+fn redress(
+    mut commands: Commands,
+    time: Res<Time<Real>>,
+    keys: Option<Res<ButtonInput<KeyCode>>>,
+    diagnostics: Res<Diagnostics>,
+    lineup: Res<Lineup>,
+    dress: Option<ResMut<Dress>>,
+    mut library: ResMut<PropLibrary>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    wearers: Query<(Entity, &Wearer, &creatures::Rig)>,
+) {
+    let Some(mut dress) = dress else {
+        return;
+    };
+    // Captures hold the lineup clock until a frame is presented. Keep automatic
+    // outfit changes on that same clock so slow rebuilds/readbacks cannot
+    // trigger another rebuild on every update.
+    let now = if diagnostics.lineups {
+        lineup.elapsed
+    } else {
+        time.elapsed_secs()
+    };
+    let pressed = keys.is_some_and(|keys| keys.just_pressed(KeyCode::KeyO));
+    let due = diagnostics
+        .wardrobe_cycle
+        .is_some_and(|every| now - dress.since >= every);
+    if !pressed && !due {
+        return;
+    }
+    dress.wardrobe = dress.wardrobe.next();
+    dress.since = now;
+    let mut redressed = 0;
+    for (entity, wearer, rig) in &wearers {
+        if !wearer.look.dresses() {
+            continue;
+        }
+        if let Some(model) = rig.joint(creatures::J::Lift) {
+            commands.entity(model).despawn();
+        }
+        let rig = wearer.dress(
+            &mut commands,
+            &mut library,
+            &mut meshes,
+            entity,
+            dress.wardrobe,
+        );
+        commands.entity(entity).insert(rig);
+        redressed += 1;
+    }
+    eprintln!(
+        "Wardrobe redressed {redressed} humanoids as {:?}",
+        dress.wardrobe
+    );
 }
 
 fn setup(
@@ -333,7 +532,7 @@ fn setup(
     let mut solids = HashMap::new();
     let mut open = HashSet::new();
     for x in -3..=17 {
-        for z in -3..=8 {
+        for z in -3..=17 {
             let key = (x as u64) << 32 ^ (z as u64) ^ 0x51;
             solids.insert(
                 IVec3::new(x, -1, z),
@@ -382,12 +581,12 @@ fn setup(
     }
     let cave_ms = profile_started.map(|time| time.elapsed().as_secs_f64() * 1000.0);
     let cast_started = profile_started.map(|_| std::time::Instant::now());
-    let rows: &[(usize, &[&str])] = if diagnostics.lineups {
-        &[]
+    let rows: Vec<(usize, &[&str])> = if diagnostics.lineups {
+        Vec::new()
     } else {
-        &[(0, &PEOPLE[..]), (1, &BEASTS[..])]
+        ROWS.iter().copied().enumerate().collect()
     };
-    for &(row, names) in rows {
+    for (row, names) in rows {
         for (i, name) in names.iter().enumerate() {
             let home = spot(row, i);
             let look = Look::preview(
@@ -406,34 +605,28 @@ fn setup(
                         home,
                         height: look.height(),
                         name,
-                        index: row * PEOPLE.len() + i,
+                        index: row_start(row) + i,
+                        row,
                     },
                     anim,
                     Transform::from_translation(home),
                     Visibility::default(),
                 ))
                 .id();
-            let rig = creatures::spawn(&mut commands, &mut library, &mut meshes, entity, &look);
-            if *name == "Warrior" {
-                let sword = library.item(tor_client_3d_model::ItemModel::Greatsword, &mut meshes);
-                if let Some(hand) = rig.joint(creatures::J::HandR) {
-                    let held = commands
-                        .spawn((
-                            Transform::from_rotation(
-                                Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2)
-                                    * Quat::from_rotation_x(std::f32::consts::FRAC_PI_2),
-                            )
-                            .with_translation(Vec3::new(0.0, -0.02, 0.29)),
-                            Visibility::default(),
-                        ))
-                        .with_children(|p| sword.attach(p))
-                        .id();
-                    commands.entity(hand).add_child(held);
-                }
-            }
-            commands.entity(entity).insert(rig);
+            let wearer = Wearer {
+                look: look.equipped(diagnostics.equipment),
+                sword: *name == "Warrior",
+            };
+            let rig = wearer.dress(
+                &mut commands,
+                &mut library,
+                &mut meshes,
+                entity,
+                diagnostics.outfit,
+            );
+            commands.entity(entity).insert((rig, wearer));
             commands.spawn((
-                Caption(home + Vec3::new(0.0, 0.0, 0.7), name.to_string()),
+                Caption(home + Vec3::new(0.0, 0.0, 0.7), name.to_string(), row),
                 Text::new(*name),
                 TextFont {
                     font_size: 13.0,
@@ -448,7 +641,7 @@ fn setup(
         }
     }
     for x in [1.0, 7.0, 13.0] {
-        for z in [1.8, 6.0] {
+        for z in [1.8, 6.0, 10.5, 15.0] {
             commands.spawn((
                 PointLight {
                     color: Color::srgb(1.0, 0.75, 0.48),
@@ -521,8 +714,8 @@ fn direct(
         Some(
             diagnostics
                 .quit_after
-                .unwrap_or(CYCLE * 2.0)
-                .min(CYCLE * 2.0),
+                .unwrap_or(CYCLE * GROUPS as f32)
+                .min(CYCLE * GROUPS as f32),
         )
     } else {
         diagnostics.quit_after
@@ -548,22 +741,24 @@ fn direct(
     let group = (now / CYCLE) as usize;
     let mut shots_now: Vec<String> = Vec::new();
     if diagnostics.idles {
-        // Everyone at rest, people then beasts, with a shot every so often.
-        for (_, mut anim, _, _) in &mut actors {
+        // Everyone at rest, one row at a time, with a shot every so often.
+        let showing = ((now / IDLE) as usize).min(GROUPS - 1);
+        for (pacer, mut anim, _, mut visibility) in &mut actors {
             anim.target_yaw = Some(0.0);
+            *visibility = shown(pacer.row == showing);
         }
         let mut at = 1.0;
-        while at < IDLE * 2.0 {
+        while at < IDLE * GROUPS as f32 {
             if crossed(at) {
-                let tag = if at < IDLE { "people" } else { "beasts" };
+                let tag = GROUP_TAGS[((at / IDLE) as usize).min(GROUPS - 1)];
                 shots_now.push(format!("idle-{tag}-{at:04.1}"));
             }
             at += 1.1;
         }
-        if diagnostics.capture.is_some() && now > IDLE * 2.0 + 0.5 && pending.is_empty() {
+        if diagnostics.capture.is_some() && now > IDLE * GROUPS as f32 + 0.5 && pending.is_empty() {
             exit.write(AppExit::Success);
         }
-    } else if group < 2 {
+    } else if group < GROUPS {
         let base = group as f32 * CYCLE;
         let t = now - base;
         let study_offset = diagnostics.travel_study.then(|| travel_study_offset(t));
@@ -572,7 +767,10 @@ fn direct(
         } else {
             schedule()
         };
-        for (pacer, mut anim, mut transform, _) in &mut actors {
+        for (pacer, mut anim, mut transform, mut visibility) in &mut actors {
+            // Only the performing row is shown, so no other row stands
+            // between it and the camera.
+            *visibility = shown(pacer.row == group);
             // Both paths return home and keep neighbours apart. The study
             // retains heading through stops to expose actual contact recovery.
             if let Some(offset) = study_offset {
@@ -599,7 +797,7 @@ fn direct(
                 }
             }
         }
-        let tag = if group == 0 { "people" } else { "beasts" };
+        let tag = GROUP_TAGS[group];
         let moments = if diagnostics.travel_study {
             travel_study_shots()
         } else {
@@ -612,7 +810,7 @@ fn direct(
         }
     } else {
         // Portraits: each creature close up, at rest and then in its signature move.
-        let start = CYCLE * 2.0;
+        let start = CYCLE * GROUPS as f32;
         let current = ((now - start) / PORTRAIT).max(0.0) as usize;
         for (pacer, mut anim, mut transform, mut visibility) in &mut actors {
             transform.translation = pacer.home;
@@ -635,6 +833,8 @@ fn direct(
                 }
                 continue;
             }
+            // Neighbours may stand in front; show only the creature in view.
+            *visibility = shown(pacer.index == current);
             if crossed(start) {
                 anim.dead = None;
             }
@@ -726,8 +926,8 @@ fn perform(
 }
 
 /// `--lineups`: each creature in turn, five individuals of it side by side,
-/// women and men alternating among people. `--fallen-lineups` reuses those
-/// individuals in their settled corpse poses.
+/// women and men alternating among people, or only women with `--women`.
+/// `--fallen-lineups` reuses those individuals in their settled corpse poses.
 #[derive(Resource, Default)]
 struct Lineup {
     elapsed: f32,
@@ -736,10 +936,39 @@ struct Lineup {
     shot: usize,
     height: f32,
     fallen_bounds: Vec<(Vec3, Vec3)>,
+    /// When the next `--capture-every` motion frame is due.
+    next_motion: f32,
 }
 
 /// Seconds each line-up stands before the next.
 const LINEUP: f32 = 4.0;
+
+/// Seconds a line-up stands: longer while studying an antic, which lasts
+/// eight seconds.
+fn lineup_secs(diagnostics: &Diagnostics) -> f32 {
+    if diagnostics.antic.is_some() {
+        9.0
+    } else {
+        LINEUP
+    }
+}
+fn lineup_capture_deadline(
+    named: f32,
+    warmup: f32,
+    next_motion: f32,
+    interval: Option<f32>,
+) -> f32 {
+    let Some(interval) = interval.filter(|value| value.is_finite() && *value > 0.0) else {
+        return named;
+    };
+    let motion = if next_motion <= warmup {
+        warmup + interval.max(1.0 / 60.0)
+    } else {
+        next_motion
+    };
+    named.min(motion)
+}
+
 const LINEUP_SHOTS: [(f32, &str, usize); 3] =
     [(1.9, "line", 0), (2.8, "close-a", 1), (3.8, "close-b", 2)];
 
@@ -747,6 +976,7 @@ const LINEUP_SHOTS: [(f32, &str, usize); 3] =
 fn lineup(
     mut commands: Commands,
     time: Res<Time<Real>>,
+    presentation: Res<Time>,
     diagnostics: Res<Diagnostics>,
     mut state: ResMut<Lineup>,
     mut library: ResMut<PropLibrary>,
@@ -761,7 +991,7 @@ fn lineup(
     if !diagnostics.lineups {
         return;
     }
-    let names = everyone();
+    let names = roster(&diagnostics);
     // Preview deadlines use real time: animation time clamps slow frames to
     // 250 ms, making a four-second capture take minutes on software DX12.
     // Stop at each view and family boundary so a long frame cannot skip a
@@ -773,9 +1003,21 @@ fn lineup(
     } else {
         LINEUP_SHOTS[state.shot % LINEUP_SHOTS.len()].0
     };
-    let deadline = diagnostics.capture_warmup + next_family as f32 * LINEUP + next_moment;
+    let deadline =
+        diagnostics.capture_warmup + next_family as f32 * lineup_secs(&diagnostics) + next_moment;
+    let deadline = lineup_capture_deadline(
+        deadline,
+        diagnostics.capture_warmup,
+        state.next_motion,
+        diagnostics.capture.as_ref().and(diagnostics.capture_every),
+    );
     if pending.is_empty() {
-        state.elapsed = (state.elapsed + time.delta_secs()).min(deadline);
+        let delta = if diagnostics.review_step_hz.is_some() {
+            presentation.delta_secs()
+        } else {
+            time.delta_secs()
+        };
+        state.elapsed = (state.elapsed + delta).min(deadline);
     }
     let index = if changing_family && state.elapsed >= deadline {
         next_family
@@ -804,23 +1046,44 @@ fn lineup(
             let seed = base.wrapping_add(j * 7919);
             j += 1;
             let look = Look::preview(crate::showcase::creature(name), false, seed);
-            let want = seeds.len() % 2 == 0;
+            let want = diagnostics.women || seeds.len() % 2 == 0;
             if look.woman() == want
                 || j > 60
-                || !matches!(name, n if PEOPLE.contains(&n) || n == "centaur")
+                || !matches!(name, n if PEOPLE.contains(&n) || ROGUE_FOLK.contains(&n) || n == "centaur")
             {
                 seeds.push(seed);
             }
         }
         let mut height: f32 = 0.0;
         for (k, seed) in seeds.into_iter().enumerate() {
-            let look = Look::preview(crate::showcase::creature(name), false, seed);
+            let model = crate::showcase::creature(name);
+            let look = match diagnostics.bust_study {
+                None => Look::preview(model, false, seed),
+                Some(study) => Look::preview_adjusted(model, seed, |v| {
+                    v.woman = true;
+                    v.bust_lean = 0;
+                    match study {
+                        crate::BustStudy::Contours => {
+                            v.bust = 2;
+                            v.bust_form = 3 + k as u8;
+                        }
+                        crate::BustStudy::Volumes => {
+                            v.bust = k as u8;
+                            v.bust_form = 0;
+                        }
+                    }
+                }),
+            };
             height = height.max(look.height());
-            let home = Vec3::new(3.4 + k as f32 * 1.6, -0.5, 1.2);
+            if let Some(bust) = look.bust_summary() {
+                info!("Lineup individual family={name} index={k} bust={bust}");
+            }
+            let home = Vec3::new(3.4 + k as f32 * lineup_spacing(&diagnostics), -0.5, 1.2);
             let mut anim = Anim::new(seed, home);
-            anim.yaw = -0.45;
-            anim.target_yaw = Some(-0.45);
-            anim.quiet = true;
+            anim.yaw = -0.45 + diagnostics.turn;
+            anim.target_yaw = Some(anim.yaw);
+            anim.quiet = !diagnostics.lively;
+            anim.antic = diagnostics.antic;
             if diagnostics.fallen_lineups {
                 anim.dead = Some(1.0);
                 anim.target_yaw = None;
@@ -832,14 +1095,24 @@ fn lineup(
                     Visibility::default(),
                 ))
                 .id();
-            let rig = creatures::spawn(&mut commands, &mut library, &mut meshes, entity, &look);
-            commands.entity(entity).insert(rig);
+            let wearer = Wearer {
+                look: look.equipped(diagnostics.equipment),
+                sword: false,
+            };
+            let rig = wearer.dress(
+                &mut commands,
+                &mut library,
+                &mut meshes,
+                entity,
+                diagnostics.outfit,
+            );
+            commands.entity(entity).insert((rig, wearer));
             state.group.push(entity);
         }
         state.height = height;
     }
     // The whole line first, then close on the first two individuals.
-    let t = now - index as f32 * LINEUP;
+    let t = now - index as f32 * lineup_secs(&diagnostics);
     let height = state.height;
     let close = t > 2.1;
     if diagnostics.fallen_lineups && t > 0.2 && state.fallen_bounds.len() != state.group.len() {
@@ -859,10 +1132,25 @@ fn lineup(
             fallen_lineup_camera(&state, t, projection, &diagnostics)
         } else if close {
             // Each of the first two in turn, the upper body filling the frame.
-            let x = if t > 3.0 { 5.0 } else { 3.4 };
+            let x = 3.4
+                + if t > 3.0 {
+                    lineup_spacing(&diagnostics)
+                } else {
+                    0.0
+                };
             (
                 Vec3::new(x, -0.5 + height * 0.78, 1.2),
                 Vec3::new(0.0, 0.22, 1.0) * (height * 0.75).max(1.1),
+            )
+        } else if diagnostics.women {
+            // A figure study: the five upper bodies side by side.
+            (
+                Vec3::new(
+                    3.4 + 2.0 * lineup_spacing(&diagnostics),
+                    -0.5 + height * 0.68,
+                    1.2,
+                ),
+                Vec3::new(0.0, 0.12, 1.0) * (height * 2.2).max(3.4),
             )
         } else {
             (
@@ -872,9 +1160,10 @@ fn lineup(
         };
         *transform = diagnostics.preview_camera(focus, offset, &mut cave_materials);
     }
+    let mut requested_named = false;
     for (when, tag, step) in LINEUP_SHOTS {
         let wanted = index * LINEUP_SHOTS.len() + step;
-        let due = diagnostics.capture_warmup + index as f32 * LINEUP + when;
+        let due = diagnostics.capture_warmup + index as f32 * lineup_secs(&diagnostics) + when;
         if state.elapsed >= due && state.shot <= wanted {
             state.shot = wanted + 1;
             if let Some(dir) = diagnostics.capture.clone() {
@@ -895,8 +1184,55 @@ fn lineup(
                 commands
                     .spawn(Screenshot::primary_window())
                     .observe(save_to_disk(path));
+                requested_named = true;
             }
         }
+    }
+    // Motion frames between the named shots, for studying movement.
+    if let (Some(interval), Some(dir)) = (diagnostics.capture_every, diagnostics.capture.clone()) {
+        if interval.is_finite()
+            && interval > 0.0
+            && now > 0.0
+            && state.elapsed >= state.next_motion
+            && !requested_named
+            && pending.is_empty()
+        {
+            state.next_motion = state.elapsed + interval.max(1.0 / 60.0);
+            let path = dir.join(format!(
+                "{:02}-motion-{t:06.3}-{}.png",
+                index,
+                name.replace(' ', "_")
+            ));
+            commands
+                .spawn(Screenshot::primary_window())
+                .observe(save_to_disk(path));
+        }
+    }
+}
+
+/// `--jump`: each individual in the line-up jumps on the spot every two
+/// seconds, a little after the one before, so captures catch every phase.
+fn lineup_jumps(diagnostics: Res<Diagnostics>, state: Res<Lineup>, mut anims: Query<&mut Anim>) {
+    if !diagnostics.jump {
+        return;
+    }
+    for (k, &entity) in state.group.iter().enumerate() {
+        let Ok(mut anim) = anims.get_mut(entity) else {
+            continue;
+        };
+        let phase = (state.elapsed - 0.3 * k as f32).rem_euclid(2.0);
+        if anim.action.is_none() && phase < 0.1 {
+            anim.act(Move::Jump);
+        }
+    }
+}
+
+/// Distance between line-up individuals: closer for a study of women's figures.
+fn lineup_spacing(diagnostics: &Diagnostics) -> f32 {
+    if diagnostics.women {
+        0.95
+    } else {
+        1.6
     }
 }
 
@@ -985,7 +1321,7 @@ fn clock(time: &Time, diagnostics: &Diagnostics, director: &Director) -> f32 {
     }
     (time.elapsed_secs() - diagnostics.capture_warmup).max(0.0)
         + if diagnostics.portraits {
-            CYCLE * 2.0
+            CYCLE * GROUPS as f32
         } else {
             0.0
         }
@@ -1003,28 +1339,30 @@ fn camera(
     }
     let now = clock(&time, &diagnostics, &director);
     let group = if diagnostics.idles {
-        usize::from(now >= IDLE)
+        ((now / IDLE) as usize).min(GROUPS - 1)
     } else if diagnostics.travel_study {
-        ((now / CYCLE) as usize).min(1)
+        ((now / CYCLE) as usize).min(GROUPS - 1)
     } else {
         (now / CYCLE) as usize
     };
-    let (focus, offset) = if group < 2 {
-        let (focus, width) = if group == 0 {
-            (Vec3::new(7.2, 0.45, 0.0), 14.4)
-        } else {
-            (Vec3::new(7.1, 0.35, 4.5), 17.0)
+    let (focus, offset) = if group < GROUPS {
+        // Frame the whole row from its first to its last creature.
+        let names = ROWS[group];
+        let (first, last) = (spot(group, 0), spot(group, names.len() - 1));
+        let (focus, width) = match group {
+            0 => (Vec3::new(7.2, 0.45, 0.0), 14.4),
+            1 => (Vec3::new(7.1, 0.35, ROW_DEPTH), 17.0),
+            _ => (
+                Vec3::new((first.x + last.x) * 0.5, 0.4, first.z),
+                (last.x - first.x) * 1.25 + 3.0,
+            ),
         };
         let d = diagnostics.distance.unwrap_or(width * 0.62);
         (focus, Vec3::new(0.0, d * 0.42, d * 0.9))
     } else {
         let names = everyone();
-        let index = (((now - CYCLE * 2.0) / PORTRAIT) as usize).min(names.len() - 1);
-        let (row, i) = if index < PEOPLE.len() {
-            (0, index)
-        } else {
-            (1, index - PEOPLE.len())
-        };
+        let index = (((now - CYCLE * GROUPS as f32) / PORTRAIT) as usize).min(names.len() - 1);
+        let (row, i) = row_of(index);
         let home = spot(row, i);
         let name = names[index];
         let height = Look::preview(
@@ -1044,6 +1382,14 @@ fn camera(
     }
 }
 
+fn shown(visible: bool) -> Visibility {
+    if visible {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    }
+}
+
 fn captions(
     time: Res<Time>,
     diagnostics: Res<Diagnostics>,
@@ -1054,14 +1400,15 @@ fn captions(
     let Ok((camera, eye)) = camera.single() else {
         return;
     };
-    let portraits =
-        !diagnostics.travel_study && clock(&time, &diagnostics, &director) >= CYCLE * 2.0;
+    let now = clock(&time, &diagnostics, &director);
+    let portraits = !diagnostics.travel_study && now >= CYCLE * GROUPS as f32;
+    let row = if diagnostics.idles {
+        ((now / IDLE) as usize).min(GROUPS - 1)
+    } else {
+        ((now / CYCLE) as usize).min(GROUPS - 1)
+    };
     for (caption, mut node, mut visibility) in &mut captions {
-        *visibility = if portraits {
-            Visibility::Hidden
-        } else {
-            Visibility::Inherited
-        };
+        *visibility = shown(!portraits && caption.2 == row);
         if let Ok(at) = camera.world_to_viewport(eye, caption.0) {
             node.left = Val::Px(at.x - caption.1.len() as f32 * 3.4);
             node.top = Val::Px(at.y);

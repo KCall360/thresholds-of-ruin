@@ -183,6 +183,8 @@ fn app(model: CreatureModel) -> App {
         appearance_seed: None,
         id: ActorTarget::from_digest([4; 32]),
         model,
+        wearing: Default::default(),
+        attire: Default::default(),
         name: "first name".into(),
         description: String::new(),
         position: Position { x: 1, y: 0, z: 0 },
@@ -448,6 +450,59 @@ fn remembered_terrain_builds_dim_geometry_without_decorative_lighting() {
     );
 }
 
+/// The single held weapon a one-figure fixture shows.
+fn held_one(app: &App) -> (Entity, (ItemModel, Entity)) {
+    let held = &app.world().resource::<Game>().held;
+    assert_eq!(held.len(), 1, "one figure holds one weapon");
+    held.iter()
+        .map(|(hand, value)| (*hand, *value))
+        .next()
+        .unwrap()
+}
+
+fn present_held(
+    mut commands: Commands,
+    mut game: ResMut<Game>,
+    mut library: ResMut<PropLibrary>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    view: Res<Fixture>,
+) {
+    update_held(&mut commands, &mut game, &mut library, &mut meshes, &view.0);
+}
+
+#[test]
+fn other_figures_hold_their_disclosed_weapon_and_nothing_when_none_is_disclosed() {
+    let mut app = app(CreatureModel::Human);
+    app.add_systems(Update, present_held.after(project));
+    app.update();
+    assert!(
+        app.world().resource::<Game>().held.is_empty(),
+        "no disclosed weapon, no guessed one"
+    );
+    app.world_mut().resource_mut::<Fixture>().0.actors[0]
+        .wearing
+        .weapons[0] = Some(ItemModel::Mace);
+    app.update();
+    let (hand, (kind, model)) = held_one(&app);
+    assert_eq!(kind, ItemModel::Mace);
+    assert_eq!(
+        app.world()
+            .get::<ChildOf>(model)
+            .map(|parent| parent.parent()),
+        Some(hand),
+        "the mace hangs from the figure's hand"
+    );
+    app.world_mut().resource_mut::<Fixture>().0.actors[0]
+        .wearing
+        .weapons[0] = None;
+    app.update();
+    assert!(app.world().resource::<Game>().held.is_empty());
+    assert!(
+        app.world().get_entity(model).is_err(),
+        "the mace is removed"
+    );
+}
+
 #[test]
 fn cosmetic_item_models_never_reuse_real_corpse_rigs_or_acquire_cell_picks() {
     use tor_protocol::ItemTarget;
@@ -625,4 +680,169 @@ fn ordinary_corpse_rig_and_real_pick_return_after_a_cosmetic_item_is_cured() {
             tor_client_3d_model::Focus::Item(target) if target == id)
         );
     }
+}
+
+#[test]
+fn live_sword_swaps_align_handles_and_clear_unequipped_meshes() {
+    fn present(
+        mut commands: Commands,
+        mut game: ResMut<Game>,
+        mut library: ResMut<PropLibrary>,
+        mut meshes: ResMut<Assets<Mesh>>,
+        view: Res<Fixture>,
+    ) {
+        update_held(&mut commands, &mut game, &mut library, &mut meshes, &view.0);
+    }
+    let mut app = app(CreatureModel::Human);
+    app.add_systems(Update, present.after(project));
+    {
+        let mut fixture = app.world_mut().resource_mut::<Fixture>();
+        fixture.0.actors[0].is_self = true;
+        fixture.0.inventory.push(tor_client_3d_model::Carried {
+            model: ItemModel::Greatsword,
+            id: tor_protocol::ItemTarget::from_digest([87; 32]),
+            name: "test sword".into(),
+            class: ItemClass::Weapon,
+            quantity: 1,
+            description: String::new(),
+            equipped: Some("hand".into()),
+            can_equip: true,
+            drinkable: false,
+            edible: false,
+            portable_light: None,
+            readable: false,
+            device: None,
+        });
+    }
+    let mut previous = None;
+    for (kind, scale) in [(ItemModel::Greatsword, 1.0), (ItemModel::ShortSword, 0.62)] {
+        app.world_mut().resource_mut::<Fixture>().0.inventory[0].model = kind;
+        app.update();
+        let (hand, (actual, entity)) = held_one(&app);
+        assert_eq!(actual, kind);
+        let held = app.world().get::<Transform>(entity).unwrap();
+        // Independent authored handle midpoint, checked against the transform
+        // actually spawned by live inventory presentation, not just a helper.
+        let center = Vec3::new(-0.3175, 0.03, 0.0) * scale;
+        assert!(
+            held.transform_point(center)
+                .distance(Vec3::new(-0.03, -0.02, 0.0))
+                < 0.0001
+        );
+        assert!(app.world().get::<Transform>(hand).is_some());
+        if let Some(old) = previous {
+            assert!(
+                app.world().get_entity(old).is_err(),
+                "swapped weapon must be removed"
+            );
+        }
+        previous = Some(entity);
+        app.update();
+        assert_eq!(
+            held_one(&app).1 .1,
+            entity,
+            "unchanged loadout must retain the visible entity"
+        );
+    }
+    app.world_mut().resource_mut::<Fixture>().0.inventory[0].equipped = None;
+    app.update();
+    assert!(app.world().resource::<Game>().held.is_empty());
+    assert!(app.world().get_entity(previous.unwrap()).is_err());
+}
+
+#[test]
+fn disclosed_equipment_changes_rebuild_the_rig_and_removal_restores_the_costume() {
+    let mut app = app(CreatureModel::Human);
+    let rendered = |app: &mut App, wearing: tor_client_3d_model::Wearing| {
+        app.world_mut().resource_mut::<Fixture>().0.actors[0].wearing = wearing;
+        app.update();
+        let entity = *app
+            .world()
+            .resource::<Game>()
+            .actors
+            .values()
+            .next()
+            .unwrap();
+        let key = app
+            .world()
+            .get::<ActorBody>(entity)
+            .unwrap()
+            .appearance_key
+            .clone();
+        (entity, key)
+    };
+    let (plain, costume) = rendered(&mut app, Default::default());
+    let armoured = tor_client_3d_model::Wearing {
+        body: Some(tor_client_3d_model::ItemModel::RingMail),
+        ..Default::default()
+    };
+    let (rebuilt, worn) = rendered(&mut app, armoured);
+    assert_ne!(rebuilt, plain, "a disclosed change rebuilds the rig");
+    assert_ne!(worn, costume, "the worn piece is part of the composition");
+    let (same, again) = rendered(&mut app, armoured);
+    assert_eq!(
+        (same, &again),
+        (rebuilt, &worn),
+        "an unchanged view reuses it"
+    );
+    let (_, restored) = rendered(&mut app, Default::default());
+    assert_eq!(restored, costume, "removal restores the body's own costume");
+}
+
+#[test]
+fn a_weapon_change_alone_keeps_the_rig() {
+    let mut app = app(CreatureModel::Human);
+    app.add_systems(Update, present_held.after(project));
+    app.update();
+    let body = |app: &App| {
+        *app.world()
+            .resource::<Game>()
+            .actors
+            .values()
+            .next()
+            .unwrap()
+    };
+    let before = body(&app);
+    app.world_mut().resource_mut::<Fixture>().0.actors[0]
+        .wearing
+        .weapons[0] = Some(ItemModel::ShortSword);
+    app.update();
+    assert_eq!(body(&app), before, "only the hand's prop changes");
+    assert_eq!(held_one(&app).1 .0, ItemModel::ShortSword);
+}
+
+#[test]
+fn a_discovered_trap_is_drawn_and_redrawn_once_its_family_is_known() {
+    let mut app = app(CreatureModel::Placeholder);
+    app.add_systems(Update, project_terrain.after(project));
+    let at = Position { x: 2, y: 0, z: 0 };
+    let mut floor = app.world().resource::<Fixture>().0.visible[0].clone();
+    floor.position = at;
+    floor.key = "trap-floor".into();
+    floor.trap = Some(tor_protocol::TrapView {
+        id: tor_protocol::TrapTarget::from_digest([51; 32]),
+        family: None,
+        reachable: false,
+    });
+    app.world_mut()
+        .resource_mut::<Fixture>()
+        .0
+        .visible
+        .push(floor);
+    app.update();
+    let (first, look) = app.world().resource::<Game>().cells[&ivec(at)];
+    assert!(matches!(look, CellLook::Trap(None)));
+    app.world_mut().resource_mut::<Fixture>().0.visible[1]
+        .trap
+        .as_mut()
+        .unwrap()
+        .family = Some(tor_protocol::TrapFamily::Teleport);
+    app.update();
+    let (second, look) = app.world().resource::<Game>().cells[&ivec(at)];
+    assert!(matches!(
+        look,
+        CellLook::Trap(Some(tor_protocol::TrapFamily::Teleport))
+    ));
+    assert_ne!(first, second, "the identified trap is redrawn");
+    assert!(!app.world().entities().contains(first));
 }

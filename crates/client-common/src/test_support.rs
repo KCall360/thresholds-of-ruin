@@ -129,6 +129,7 @@ pub fn observation() -> Observation {
         linked_holds: vec![],
         visible_actors: vec![ActorView {
             appearance_seed: None,
+            worn: Vec::new(),
             asset: None,
             id: ActorTarget::from_digest([2; 32]),
             name: "sentinel".into(),

@@ -46,6 +46,7 @@ fn narration_rejects_gaps_atomically_and_resets_on_snapshot() {
         .visible_actors
         .push(ActorView {
             appearance_seed: None,
+            worn: Vec::new(),
             asset: None,
             id: tor_protocol::ActorTarget::from_digest([2; 32]),
             name: "figure".into(),
@@ -109,6 +110,7 @@ fn map_aligns_every_update_and_refreshes_items_without_retaining_actors() {
         .visible_actors
         .push(ActorView {
             appearance_seed: None,
+            worn: Vec::new(),
             asset: None,
             id: tor_protocol::ActorTarget::from_digest([2; 32]),
             position: Position { x: 3, y: 0, z: 0 },

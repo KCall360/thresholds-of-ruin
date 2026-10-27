@@ -9,7 +9,10 @@ use bevy::{
     math::Affine3A,
     prelude::*,
     render::{
-        mesh::{Indices, PrimitiveTopology},
+        mesh::{
+            skinning::{SkinnedMesh, SkinnedMeshInverseBindposes},
+            Indices, PrimitiveTopology, VertexAttributeValues,
+        },
         render_asset::RenderAssetUsages,
     },
 };
@@ -85,12 +88,22 @@ pub struct PropMaterials {
     /// Leather and other surfaces with a soft sheen.
     satin: Handle<StandardMaterial>,
     metal: Handle<StandardMaterial>,
+    /// Translucent spectral surfaces, faintly lit from within.
+    ghost: Handle<StandardMaterial>,
+    /// Sheer fabric: chiffon, gauze and veils, seen through from both sides.
+    sheer: Handle<StandardMaterial>,
     glow: HashMap<Accent, Handle<StandardMaterial>>,
     /// The same accents nearly put out, for the glow on the dead.
     dim: HashMap<Accent, Handle<StandardMaterial>>,
 }
 
 impl PropMaterials {
+    /// The polished metal every model's armour and fittings share.
+    #[cfg(test)]
+    pub fn metal(&self) -> &Handle<StandardMaterial> {
+        &self.metal
+    }
+
     pub fn new(materials: &mut Assets<StandardMaterial>) -> Self {
         let glow = [
             Accent::Teal,
@@ -148,6 +161,22 @@ impl PropMaterials {
                 reflectance: 0.5,
                 ..default()
             }),
+            ghost: materials.add(StandardMaterial {
+                base_color: Color::srgba(1.0, 1.0, 1.0, 0.78),
+                emissive: LinearRgba::rgb(0.035, 0.05, 0.09),
+                perceptual_roughness: 0.6,
+                alpha_mode: AlphaMode::Blend,
+                ..default()
+            }),
+            sheer: materials.add(StandardMaterial {
+                base_color: Color::srgba(1.0, 1.0, 1.0, 0.52),
+                perceptual_roughness: 0.85,
+                reflectance: 0.3,
+                alpha_mode: AlphaMode::Blend,
+                cull_mode: None,
+                double_sided: true,
+                ..default()
+            }),
             glow,
             dim,
         }
@@ -168,16 +197,176 @@ impl PropMaterials {
     pub fn glow(&self, accent: Accent) -> Handle<StandardMaterial> {
         self.glow[&accent].clone()
     }
+
+    /// The leather and sheened cloth material.
+    #[cfg(test)]
+    pub fn satin(&self) -> Handle<StandardMaterial> {
+        self.satin.clone()
+    }
+
+    /// The translucent material spectral bodies are drawn with.
+    #[cfg(test)]
+    pub fn ghost(&self) -> Handle<StandardMaterial> {
+        self.ghost.clone()
+    }
 }
 
-/// A finished model: meshes with their materials, positioned in model space.
+/// A finished model: meshes with their materials, positioned in model space,
+/// and the centre, give and facing of any soft regions its meshes are
+/// skinned to.
 #[derive(Clone, Default)]
-pub struct Model(pub Vec<(Handle<Mesh>, Handle<StandardMaterial>)>);
+pub struct Model(
+    pub Vec<(Handle<Mesh>, Handle<StandardMaterial>)>,
+    pub Vec<(Vec3, f32, f32)>,
+);
+
+/// A soft region of a model: flesh that lags and settles as its frame
+/// moves. The bone rests at the region's centre; its offset is the give.
+#[derive(Component, Clone, Copy, Debug)]
+pub(crate) struct SoftBone {
+    pub rest: Vec3,
+    /// How readily the region gives, 0 holding it rigid.
+    pub give: f32,
+    /// How much it rises and falls with her breath: a chest does, a seat not.
+    pub breath: f32,
+    pub offset: Vec3,
+    pub velocity: Vec3,
+    /// The rest point's last two world positions, for the frame's acceleration.
+    pub history: Option<(Vec3, Vec3)>,
+}
+
+/// A soft mass of a model: flesh attached on one side, free on the other.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct SoftRegion {
+    pub center: Vec3,
+    pub radii: Vec3,
+    /// Which way along z it faces: 1 forward (a chest), -1 back (a seat).
+    /// Its attachment lies on the far side.
+    pub facing: f32,
+    /// How readily it gives, 0 holding it rigid.
+    pub give: f32,
+}
+
+/// Bind each vertex partly to the soft regions it lies in: fully at a
+/// region's heart, fading to the rigid frame before its attachment, so the
+/// region moves without opening a seam.
+fn skin(mesh: &mut Mesh, soft: &[SoftRegion]) {
+    let Some(VertexAttributeValues::Float32x3(positions)) =
+        mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+    else {
+        return;
+    };
+    let mut indices = Vec::with_capacity(positions.len());
+    let mut weights = Vec::with_capacity(positions.len());
+    for &p in positions {
+        let p = Vec3::from(p);
+        let mut w = [0.0f32; 4];
+        for (k, region) in soft.iter().take(3).enumerate() {
+            let (center, radii) = (region.center, region.radii);
+            let q = (p - center) / (radii * Vec3::new(1.4, 1.5, 1.7));
+            let inside = (1.0 - q.length_squared()).max(0.0);
+            // The side it is attached by stays with the frame.
+            let out = (p.z - center.z) * region.facing;
+            let free = ((out + 1.2 * radii.z) / (0.9 * radii.z)).clamp(0.0, 1.0);
+            w[k + 1] = inside * inside * free;
+        }
+        let soft_total: f32 = w[1..].iter().sum();
+        if soft_total > 1.0 {
+            for v in &mut w[1..] {
+                *v /= soft_total;
+            }
+        }
+        w[0] = 1.0 - w[1..].iter().sum::<f32>();
+        indices.push([0u16, 1, 2, 3]);
+        weights.push(w);
+    }
+    mesh.insert_attribute(
+        Mesh::ATTRIBUTE_JOINT_INDEX,
+        VertexAttributeValues::Uint16x4(indices),
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_JOINT_WEIGHT, weights);
+}
 
 impl Model {
     /// Spawn the model's meshes as children of an entity.
     pub fn attach(&self, parent: &mut ChildSpawnerCommands) {
         self.attach_scaled(parent, Vec3::ONE);
+    }
+
+    /// Spawn a model with soft regions under `parent`: a rigid frame at the
+    /// mesh proportions, a bone per region beneath it, and the meshes skinned
+    /// to them. Returns the bones.
+    pub(crate) fn attach_soft(
+        &self,
+        commands: &mut Commands,
+        parent: Entity,
+        scale: Vec3,
+    ) -> Vec<Entity> {
+        let frame = commands.spawn(Transform::from_scale(scale)).id();
+        commands.entity(parent).add_child(frame);
+        let bones: Vec<Entity> = self
+            .1
+            .iter()
+            .map(|&(rest, give, facing)| {
+                let bone = commands
+                    .spawn((
+                        Transform::from_translation(rest),
+                        SoftBone {
+                            rest,
+                            give,
+                            breath: facing.max(0.0),
+                            offset: Vec3::ZERO,
+                            velocity: Vec3::ZERO,
+                            history: None,
+                        },
+                    ))
+                    .id();
+                commands.entity(frame).add_child(bone);
+                bone
+            })
+            .collect();
+        // Unused joint slots bind to the frame with no weight.
+        let mut joints = vec![frame];
+        joints.extend(&bones);
+        let mut inverse = vec![Mat4::IDENTITY];
+        inverse.extend(
+            self.1
+                .iter()
+                .map(|&(rest, ..)| Mat4::from_translation(-rest)),
+        );
+        while joints.len() < 4 {
+            joints.push(frame);
+            inverse.push(Mat4::IDENTITY);
+        }
+        let skinned: Vec<Entity> = self
+            .0
+            .iter()
+            .map(|(mesh, material)| {
+                let e = commands
+                    .spawn((
+                        Mesh3d(mesh.clone()),
+                        MeshMaterial3d(material.clone()),
+                        Transform::from_scale(scale),
+                    ))
+                    .id();
+                commands.entity(parent).add_child(e);
+                e
+            })
+            .collect();
+        commands.queue(move |world: &mut World| {
+            let inverse_bindposes = world
+                .get_resource_or_init::<Assets<SkinnedMeshInverseBindposes>>()
+                .add(SkinnedMeshInverseBindposes::from(inverse));
+            for e in skinned {
+                if let Ok(mut e) = world.get_entity_mut(e) {
+                    e.insert(SkinnedMesh {
+                        inverse_bindposes: inverse_bindposes.clone(),
+                        joints: joints.clone(),
+                    });
+                }
+            }
+        });
+        bones
     }
 
     /// Art-directed mesh proportions without changing the rig's joint lengths.
@@ -199,23 +388,39 @@ pub(crate) struct Parts {
     pub satin: Builder,
     pub metal: Builder,
     pub glow: Builder,
+    /// Seen through: drawn with the translucent spectral material.
+    pub ghost: Builder,
+    /// Sheer fabric, seen through from both sides.
+    pub sheer: Builder,
     pub accent: Option<Accent>,
+    /// Soft regions every mesh is skinned to.
+    pub soft: Vec<SoftRegion>,
 }
 
 impl Parts {
     pub(crate) fn finish(self, meshes: &mut Assets<Mesh>, materials: &PropMaterials) -> Model {
         let mut model = Model::default();
-        if let Some(mesh) = self.matte.finish() {
-            model.0.push((meshes.add(mesh), materials.matte.clone()));
-        }
-        if let Some(mesh) = self.satin.finish() {
-            model.0.push((meshes.add(mesh), materials.satin.clone()));
-        }
-        if let Some(mesh) = self.metal.finish() {
-            model.0.push((meshes.add(mesh), materials.metal.clone()));
-        }
-        if let (Some(mesh), Some(accent)) = (self.glow.finish(), self.accent) {
-            model.0.push((meshes.add(mesh), materials.glow(accent)));
+        let soft = self.soft;
+        model.1 = soft
+            .iter()
+            .take(3)
+            .map(|r| (r.center, r.give, r.facing))
+            .collect();
+        let mut add = |mesh: Option<Mesh>, material: Handle<StandardMaterial>| {
+            if let Some(mut mesh) = mesh {
+                if !soft.is_empty() {
+                    skin(&mut mesh, &soft);
+                }
+                model.0.push((meshes.add(mesh), material));
+            }
+        };
+        add(self.matte.finish(), materials.matte.clone());
+        add(self.satin.finish(), materials.satin.clone());
+        add(self.metal.finish(), materials.metal.clone());
+        add(self.ghost.finish(), materials.ghost.clone());
+        add(self.sheer.finish(), materials.sheer.clone());
+        if let Some(accent) = self.accent {
+            add(self.glow.finish(), materials.glow(accent));
         }
         model
     }
@@ -227,6 +432,8 @@ impl Parts {
             &mut self.satin,
             &mut self.metal,
             &mut self.glow,
+            &mut self.ghost,
+            &mut self.sheer,
         ] {
             b.res = (9, 16);
             b.sides_mul = 2;
@@ -239,6 +446,22 @@ impl Parts {
         self.satin.xf = xf;
         self.metal.xf = xf;
         self.glow.xf = xf;
+        self.ghost.xf = xf;
+        self.sheer.xf = xf;
+    }
+
+    /// Move every opaque surface into the translucent spectral layer; glowing
+    /// eyes and accents stay solid so they still read through the body.
+    pub(crate) fn ghostify(&mut self) {
+        for b in [
+            &mut self.matte,
+            &mut self.satin,
+            &mut self.metal,
+            &mut self.sheer,
+        ] {
+            let taken = std::mem::take(b);
+            self.ghost.absorb(taken);
+        }
     }
 }
 
@@ -424,6 +647,15 @@ impl PropLibrary {
         self.get("stairs-down".into(), meshes, stairs_down)
     }
 
+    /// A discovered trap's floor plate, marked by its family once known.
+    pub fn trap(
+        &mut self,
+        family: Option<tor_protocol::TrapFamily>,
+        meshes: &mut Assets<Mesh>,
+    ) -> Model {
+        self.get(format!("trap:{family:?}"), meshes, move || trap(family))
+    }
+
     pub fn glint(&mut self, meshes: &mut Assets<Mesh>) -> Model {
         self.get("glint".into(), meshes, || {
             let mut p = Parts {
@@ -501,6 +733,44 @@ pub(crate) fn maintain_cache(
 
 pub use tor_client_3d_model::ItemModel as Kind;
 
+/// Authored in prop-local coordinates, also used to emit the handle shaft.
+const SWORD_HANDLE_START: Vec3 = Vec3::new(-0.235, 0.03, 0.0);
+const SWORD_HANDLE_END: Vec3 = Vec3::new(-0.4, 0.03, 0.0);
+
+fn sword_scale(kind: Kind) -> Option<f32> {
+    match kind {
+        Kind::Greatsword => Some(1.0),
+        Kind::ShortSword => Some(0.62),
+        _ => None,
+    }
+}
+
+/// Prop-local frame: origin at the handle's midpoint, +X toward the blade.
+/// Missing metadata remains explicit; other item recipes are not sword grips.
+fn sword_handle_frame(kind: Kind) -> Option<Transform> {
+    sword_scale(kind).map(|scale| {
+        Transform::from_translation((SWORD_HANDLE_START + SWORD_HANDLE_END) * (0.5 * scale))
+    })
+}
+
+/// Shared hand-local presentation for live and preview consumers. The target
+/// is the existing hand convention, not yet an anatomy-resolved grasp frame.
+/// Parent hand scale is unchanged; no additional item scaling is introduced.
+pub(crate) fn held_transform(kind: Kind) -> Transform {
+    let rotation = Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2)
+        * Quat::from_rotation_x(std::f32::consts::FRAC_PI_2);
+    if let Some(handle) = sword_handle_frame(kind) {
+        let grasp = Vec3::new(-0.03, -0.02, 0.0);
+        // Align the authored handle with the target, rather than estimating
+        // a model-dependent forward offset in each caller.
+        Transform::from_rotation(rotation).with_translation(grasp - rotation * handle.translation)
+    } else {
+        // Preserve existing non-sword presentation until its recipe declares
+        // a handle frame; do not invent anatomy or an item grip here.
+        Transform::from_rotation(rotation).with_translation(Vec3::new(0.0, -0.02, 0.29))
+    }
+}
+
 pub(crate) fn hash(text: &str) -> u64 {
     text.bytes().fold(1469598103934665603u64, |h, b| {
         (h ^ u64::from(b)).wrapping_mul(1099511628211)
@@ -524,9 +794,15 @@ fn build_item(kind: Kind, name: &str) -> Parts {
             Vec3::new(0.38, 0.6, 0.68),
         ),
         Kind::Mace => mace(&mut p),
-        Kind::Greatsword => sword(&mut p, 1.0),
-        Kind::ShortSword => sword(&mut p, 0.62),
-        Kind::RingMail => ring_mail(&mut p),
+        Kind::Greatsword | Kind::ShortSword => sword(&mut p, sword_scale(kind).unwrap()),
+        Kind::LeatherArmor
+        | Kind::StuddedLeather
+        | Kind::RingMail
+        | Kind::ScaleMail
+        | Kind::ChainMail
+        | Kind::SplintMail
+        | Kind::BandedMail
+        | Kind::PlateMail => body_armor(&mut p, kind),
         Kind::Bandage => bandage(&mut p),
         Kind::Ration => ration(&mut p),
         Kind::Corpse => corpse(&mut p, name),
@@ -628,8 +904,8 @@ fn sword(p: &mut Parts, scale: f32) {
         BRONZE,
     );
     p.matte.prism(
-        Vec3::new(-0.235, 0.03, 0.0),
-        Vec3::new(-0.4, 0.03, 0.0),
+        SWORD_HANDLE_START,
+        SWORD_HANDLE_END,
         0.022,
         0.022,
         6,
@@ -657,37 +933,120 @@ fn sword(p: &mut Parts, scale: f32) {
 }
 
 /// A ring-mail shirt laid flat, its rows of rings catching the light.
-fn ring_mail(p: &mut Parts) {
-    p.metal.extrude(
-        &[
-            Vec2::new(-0.17, -0.25),
-            Vec2::new(0.17, -0.25),
-            Vec2::new(0.18, 0.06),
-            Vec2::new(0.3, 0.1),
-            Vec2::new(0.28, 0.2),
-            Vec2::new(0.1, 0.25),
-            Vec2::new(0.0, 0.2),
-            Vec2::new(-0.1, 0.25),
-            Vec2::new(-0.28, 0.2),
-            Vec2::new(-0.3, 0.1),
-            Vec2::new(-0.18, 0.06),
-        ],
+/// Body armour laid flat, its style read from the surface: the same vest
+/// outline as worn armour, in leather, iron or steel with its own detailing.
+fn body_armor(p: &mut Parts, kind: Kind) {
+    const OUTLINE: [Vec2; 11] = [
+        Vec2::new(-0.17, -0.25),
+        Vec2::new(0.17, -0.25),
+        Vec2::new(0.18, 0.06),
+        Vec2::new(0.3, 0.1),
+        Vec2::new(0.28, 0.2),
+        Vec2::new(0.1, 0.25),
+        Vec2::new(0.0, 0.2),
+        Vec2::new(-0.1, 0.25),
+        Vec2::new(-0.28, 0.2),
+        Vec2::new(-0.3, 0.1),
+        Vec2::new(-0.18, 0.06),
+    ];
+    let leathern = matches!(
+        kind,
+        Kind::LeatherArmor | Kind::StuddedLeather | Kind::RingMail | Kind::SplintMail
+    );
+    let base = match kind {
+        Kind::LeatherArmor | Kind::StuddedLeather => LEATHER * 1.15,
+        Kind::RingMail | Kind::SplintMail => LEATHER * 0.85,
+        Kind::ChainMail => IRON * 0.95,
+        Kind::PlateMail => STEEL,
+        _ => IRON * 0.8,
+    };
+    let body = if leathern { &mut p.matte } else { &mut p.metal };
+    body.extrude(
+        &OUTLINE,
         Vec3::new(0.0, 0.025, 0.0),
         Vec3::X,
         Vec3::NEG_Z,
         0.05,
-        IRON * 0.8,
+        base,
     );
-    for row in 0..6 {
-        for col in 0..5 {
-            let x = -0.13 + col as f32 * 0.065 + if row % 2 == 1 { 0.032 } else { 0.0 };
-            if x > 0.15 {
-                continue;
+    let top = 0.052;
+    let grid = |rows: usize, cols: usize, dx: f32, dz: f32| {
+        (0..rows).flat_map(move |row| {
+            (0..cols).filter_map(move |col| {
+                let x = -0.13 + col as f32 * dx + if row % 2 == 1 { dx * 0.5 } else { 0.0 };
+                (x <= 0.15).then(|| Vec2::new(x, 0.18 - row as f32 * dz))
+            })
+        })
+    };
+    match kind {
+        Kind::RingMail => {
+            for at in grid(6, 5, 0.065, 0.062) {
+                p.metal.torus(
+                    Vec3::new(at.x, top, at.y),
+                    Vec3::Y,
+                    0.024,
+                    0.0045,
+                    10,
+                    4,
+                    STEEL,
+                );
             }
-            let z = 0.18 - row as f32 * 0.062;
-            p.metal
-                .torus(Vec3::new(x, 0.052, z), Vec3::Y, 0.024, 0.0045, 10, 4, STEEL);
         }
+        Kind::StuddedLeather => {
+            for at in grid(8, 6, 0.054, 0.048) {
+                let at = Vec3::new(at.x, top - 0.002, at.y);
+                p.metal
+                    .prism(at, at + Vec3::Y * 0.008, 0.008, 0.006, 8, BRONZE, 0.0);
+            }
+        }
+        Kind::ScaleMail => {
+            for at in grid(9, 6, 0.054, 0.045) {
+                p.metal.extrude(
+                    &[
+                        Vec2::new(-0.024, 0.02),
+                        Vec2::new(0.024, 0.02),
+                        Vec2::new(0.02, -0.012),
+                        Vec2::new(0.0, -0.03),
+                        Vec2::new(-0.02, -0.012),
+                    ],
+                    Vec3::new(at.x, top + 0.002, at.y),
+                    Vec3::X,
+                    Vec3::NEG_Z,
+                    0.004,
+                    STEEL * (0.9 + 0.1 * (at.y * 40.0).sin().abs()),
+                );
+            }
+        }
+        Kind::SplintMail => {
+            for k in 0..6 {
+                let x = -0.125 + k as f32 * 0.05;
+                p.metal.cuboid(
+                    Vec3::new(x, top + 0.003, -0.03),
+                    Vec3::new(0.018, 0.004, 0.17),
+                    Quat::IDENTITY,
+                    STEEL,
+                );
+            }
+        }
+        Kind::BandedMail => {
+            for k in 0..7 {
+                p.metal.cuboid(
+                    Vec3::new(0.0, top + 0.003 + 0.002 * k as f32, 0.15 - k as f32 * 0.058),
+                    Vec3::new(0.17, 0.004, 0.032),
+                    Quat::IDENTITY,
+                    STEEL * (1.0 - 0.03 * k as f32),
+                );
+            }
+        }
+        Kind::PlateMail => {
+            p.metal.cuboid(
+                Vec3::new(0.0, top + 0.003, -0.24),
+                Vec3::new(0.17, 0.005, 0.012),
+                Quat::IDENTITY,
+                GOLD,
+            );
+        }
+        _ => {}
     }
     p.matte.cuboid(
         Vec3::new(0.0, 0.054, 0.17),
@@ -710,6 +1069,88 @@ fn ring_mail(p: &mut Parts) {
         4,
         LEATHER,
     );
+}
+
+/// A pressure plate sunk in the floor. Unknown traps show only a warning
+/// rim; a known family adds the mechanism it springs.
+fn trap(family: Option<tor_protocol::TrapFamily>) -> Parts {
+    use tor_protocol::TrapFamily as F;
+    let accent = match family {
+        None | Some(F::Mysterious) => Accent::Amber,
+        Some(F::Teleport) => Accent::Violet,
+        Some(F::SleepingGas | F::PoisonDart) => Accent::Teal,
+        Some(F::TrapDoor) => Accent::Abyss,
+        Some(F::Rust | F::Arrow | F::BearTrap) => Accent::Ember,
+    };
+    let mut p = Parts {
+        accent: Some(accent),
+        ..default()
+    };
+    p.metal.cuboid(
+        Vec3::Y * 0.012,
+        Vec3::new(0.3, 0.012, 0.3),
+        Quat::IDENTITY,
+        IRON * 0.7,
+    );
+    // A thin glowing seam round the plate.
+    for (center, half) in [
+        (Vec3::new(0.0, 0.026, 0.31), Vec3::new(0.32, 0.004, 0.012)),
+        (Vec3::new(0.0, 0.026, -0.31), Vec3::new(0.32, 0.004, 0.012)),
+        (Vec3::new(0.31, 0.026, 0.0), Vec3::new(0.012, 0.004, 0.3)),
+        (Vec3::new(-0.31, 0.026, 0.0), Vec3::new(0.012, 0.004, 0.3)),
+    ] {
+        p.glow.cuboid(center, half, Quat::IDENTITY, Vec3::ONE);
+    }
+    match family {
+        Some(F::BearTrap) => {
+            for k in 0..8 {
+                let x = -0.21 + k as f32 * 0.06;
+                for z in [-0.08, 0.08] {
+                    p.metal.prism(
+                        Vec3::new(x, 0.024, z),
+                        Vec3::new(x, 0.07, z * 0.6),
+                        0.014,
+                        0.002,
+                        4,
+                        STEEL,
+                        0.0,
+                    );
+                }
+            }
+        }
+        Some(F::Arrow | F::PoisonDart) => {
+            for x in [-0.12, 0.0, 0.12] {
+                p.matte.cuboid(
+                    Vec3::new(x, 0.026, 0.0),
+                    Vec3::new(0.012, 0.003, 0.16),
+                    Quat::IDENTITY,
+                    STONE_DARK * 0.5,
+                );
+            }
+        }
+        Some(F::TrapDoor) => {
+            p.matte.cuboid(
+                Vec3::Y * 0.027,
+                Vec3::new(0.24, 0.004, 0.24),
+                Quat::IDENTITY,
+                WOOD_DARK,
+            );
+        }
+        Some(F::Rust) => {
+            p.matte.blob(
+                Vec3::Y * 0.03,
+                Vec3::new(0.16, 0.02, 0.12),
+                3,
+                0.3,
+                BRONZE * 0.6,
+            );
+        }
+        Some(F::SleepingGas | F::Teleport | F::Mysterious) | None => {
+            p.metal
+                .torus(Vec3::Y * 0.028, Vec3::Y, 0.11, 0.012, 16, 4, BRONZE);
+        }
+    }
+    p
 }
 
 /// A rolled bandage with its loose end trailing across the floor.
@@ -1480,6 +1921,63 @@ impl Default for Builder {
 }
 
 impl Builder {
+    /// Farthest forward ray intersection with existing triangles, expressed in
+    /// this builder's current recipe coordinates. Includes all surface layers.
+    pub(crate) fn outer_surface(&self, origin: Vec3, direction: Vec3) -> Option<Vec3> {
+        let start = self.xf.transform_point3(origin);
+        let ray = self.xf.transform_vector3(direction);
+        let mut farthest: Option<f32> = None;
+        for triangle in self.positions.as_chunks::<3>().0 {
+            let a = Vec3::from_array(triangle[0]);
+            let edge1 = Vec3::from_array(triangle[1]) - a;
+            let edge2 = Vec3::from_array(triangle[2]) - a;
+            let cross = ray.cross(edge2);
+            let determinant = edge1.dot(cross);
+            if determinant.abs() < 1e-10 {
+                continue;
+            }
+            let offset = start - a;
+            let u = offset.dot(cross) / determinant;
+            let q = offset.cross(edge1);
+            let v = ray.dot(q) / determinant;
+            if u < -1e-5 || v < -1e-5 || u + v > 1.00001 {
+                continue;
+            }
+            let distance = edge2.dot(q) / determinant;
+            if distance >= 0.0 {
+                farthest = Some(farthest.map_or(distance, |old| old.max(distance)));
+            }
+        }
+        farthest.map(|distance| origin + direction * distance)
+    }
+
+    /// Whether nothing has been built yet.
+    #[cfg(test)]
+    pub(crate) fn is_empty(&self) -> bool {
+        self.positions.is_empty()
+    }
+
+    /// The box enclosing everything built so far.
+    #[cfg(test)]
+    pub(crate) fn bounds(&self) -> (Vec3, Vec3) {
+        self.positions.iter().fold(
+            (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY)),
+            |(low, high), p| {
+                let p = Vec3::from_array(*p);
+                (low.min(p), high.max(p))
+            },
+        )
+    }
+
+    /// Take over another builder's finished triangles.
+    pub(crate) fn absorb(&mut self, other: Builder) {
+        self.positions.extend(other.positions);
+        self.normals.extend(other.normals);
+        self.colors.extend(other.colors);
+        self.shades.extend(other.shades);
+        self.smooth |= other.smooth;
+    }
+
     /// Average each vertex's normal with those of coincident vertices whose
     /// faces meet at a gentle angle, so curves shade softly and creases stay.
     fn soften(&mut self) {

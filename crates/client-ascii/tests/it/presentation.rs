@@ -90,6 +90,7 @@ fn ability_menu_selects_a_granted_technique_then_an_opaque_target_without_paying
         let target = super::actor_target(42);
         let actor = ActorView {
             appearance_seed: None,
+            worn: Vec::new(),
             asset: None,
             id: target,
             name: "goblin".into(),
@@ -148,6 +149,7 @@ fn ability_selection_cancels_cleanly_and_clears_when_grants_or_control_change() 
         .visible_actors
         .push(ActorView {
             appearance_seed: None,
+            worn: Vec::new(),
             asset: None,
             id: super::actor_target(42),
             name: "goblin".into(),
@@ -481,6 +483,7 @@ fn opaque_bytes_do_not_reorder_attack_choices_or_duplicate_body_cells() {
     let mut snapshot = state().snapshot();
     let first = ActorView {
         appearance_seed: None,
+        worn: Vec::new(),
         id: super::actor_target(250),
         name: "first figure".into(),
         description: String::new(),
@@ -965,6 +968,7 @@ fn rewind_clears_old_drafts() {
     assert!(app.note.is_some());
     app.attack_targets.push(ActorView {
         appearance_seed: None,
+        worn: Vec::new(),
         asset: None,
         id: super::actor_target(2),
         name: "guard".into(),
@@ -1572,6 +1576,7 @@ fn configurable_bump_attacks_use_disclosed_hostility_only() {
         let mut view = state().state().clone();
         view.observation.visible_actors.push(ActorView {
             appearance_seed: None,
+            worn: Vec::new(),
             asset: None,
             id: super::actor_target(2),
             name: "guard".into(),
@@ -2186,6 +2191,7 @@ fn phase5_supportive_menu_lists_self_and_allies_but_never_neutrals() {
     for (id, name) in [(ally, "companion"), (neutral, "stranger")] {
         view.visible_actors.push(ActorView {
             appearance_seed: None,
+            worn: Vec::new(),
             asset: None,
             id,
             name: name.into(),

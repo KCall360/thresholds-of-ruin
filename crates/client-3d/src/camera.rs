@@ -12,6 +12,10 @@ pub(super) fn input(
     mut game: ResMut<Game>,
     mut rig: ResMut<CameraRig>,
 ) {
+    // Typed advancement commands neither turn the camera nor move.
+    if game.screen.is_some() {
+        return;
+    }
     if keys.just_pressed(KeyCode::KeyQ) {
         rig.facing -= 1;
     }
@@ -26,7 +30,10 @@ pub(super) fn input(
         return;
     }
     let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
-    let pressed = |codes: &[KeyCode]| keys.any_pressed(codes.iter().copied());
+    // A key pressed and released within one slow frame is only just pressed,
+    // yet it is still the player's tap.
+    let down = |code: KeyCode| keys.pressed(code) || keys.just_pressed(code);
+    let pressed = |codes: &[KeyCode]| codes.iter().any(|&code| down(code));
     let fresh = |codes: &[KeyCode]| keys.any_just_pressed(codes.iter().copied());
 
     let command = if fresh(&[KeyCode::Tab]) {
@@ -47,10 +54,7 @@ pub(super) fn input(
             (KeyCode::Numpad4, (-1, 0)),
             (KeyCode::Numpad7, (-1, 1)),
         ];
-        let mut heading = numpad
-            .iter()
-            .find(|(k, _)| keys.pressed(*k))
-            .map(|(_, d)| *d);
+        let mut heading = numpad.iter().find(|(k, _)| down(*k)).map(|(_, d)| *d);
         if heading.is_none() {
             let x = i32::from(pressed(&[KeyCode::KeyD, KeyCode::ArrowRight]))
                 - i32::from(pressed(&[KeyCode::KeyA, KeyCode::ArrowLeft]));
@@ -106,6 +110,17 @@ pub(super) fn input(
             }
             _ => None,
         }
+    };
+    let aimed = match (&command, &game.aiming) {
+        (Some(Cmd::Move(direction)), Some(aim)) => aim.along(*direction),
+        _ => None,
+    };
+    let command = match aimed {
+        Some(aimed) => {
+            game.aiming = None;
+            Some(aimed)
+        }
+        None => command,
     };
     if let Some(command) = command {
         game.send(&net, command);

@@ -1054,6 +1054,7 @@ impl App {
                         0,
                         ActorView {
                             appearance_seed: None,
+                            worn: Vec::new(),
                             asset: None,
                             id: view.self_target,
                             name: "yourself".into(),
@@ -3492,67 +3493,9 @@ pub fn glyph_at(o: &Observation, palette: &tor_client_common::Palette, x: i32, y
         .map_or(' ', |t| t.glyph)
 }
 
+/// One history entry as a line, in the shared client wording.
 pub fn history_text(entry: &HistoryEntry) -> String {
-    match &entry.content {
-        HistoryContent::PlaceRenamed { name, .. } => format!("Place named {}.", name),
-        HistoryContent::Travel { .. } => "Travel requested.".into(),
-        HistoryContent::Wizard { summary, .. } => summary.clone(),
-        HistoryContent::Action { event, .. } => match event.as_ref() {
-            Event::Moved { direction } => format!("Moved {}.", direction_name(*direction)),
-            Event::Escaped { .. } => "Escaped with the objective item.".into(),
-            Event::Crumbled { quantity, .. } => {
-                if *quantity == 1 {
-                    "An item crumbled during pickup.".into()
-                } else {
-                    format!("{quantity} items crumbled during pickup.")
-                }
-            }
-            Event::Taken { quantity, .. } => {
-                format!(
-                    "Picked up {}.",
-                    if *quantity == 1 {
-                        "an item".to_owned()
-                    } else {
-                        format!("{quantity} items")
-                    }
-                )
-            }
-            Event::Dropped { quantity, .. } => {
-                format!(
-                    "Dropped {}.",
-                    if *quantity == 1 {
-                        "an item".to_owned()
-                    } else {
-                        format!("{quantity} items")
-                    }
-                )
-            }
-            Event::DoorChanged { open, .. } => {
-                format!("{} door.", if *open { "Opened" } else { "Closed" })
-            }
-            Event::Waited => "Waited.".into(),
-            Event::PreparationPaused => "Preparation paused.".into(),
-            Event::AbilityStarted { ability, .. } => format!("Prepared {}.", ability.name),
-            Event::EscapeStarted { .. } => "Began trying to escape a hold.".into(),
-            Event::ItemStarted { action } => match action {
-                tor_protocol::Action::Equip { .. } => "Began equipping an item.".into(),
-                tor_protocol::Action::Unequip { .. } => "Began removing an item.".into(),
-                tor_protocol::Action::Ignite { .. } => "Began igniting an item.".into(),
-                tor_protocol::Action::Extinguish { .. } => "Began extinguishing an item.".into(),
-                tor_protocol::Action::Drink { .. } => "Began drinking an item.".into(),
-                tor_protocol::Action::Eat { .. } => "Began eating an item.".into(),
-                _ => "Began preparation.".into(),
-            },
-        },
-        HistoryContent::Annotation { text, .. } => {
-            let audience = if entry.audience == Audience::Private {
-                "Private note"
-            } else {
-                "Note"
-            };
-            format!("{audience}: {text}")
-        }
-    }
+    tor_client_common::history::text(entry)
 }
 
 pub fn wrap(text: &str, width: usize) -> Vec<String> {
@@ -3795,6 +3738,17 @@ pub fn describe(
                 tor_client_common::narration::injury(combat.injury)
             ));
         }
+        let attire = tor_client_common::narration::Attire::of(&actor.worn);
+        let held: Vec<String> = attire
+            .holds
+            .iter()
+            .map(|name| item_phrase(name, 1))
+            .collect();
+        for (verb, names) in [("wearing", &attire.wears), ("holding", &held)] {
+            if !names.is_empty() {
+                text.push_str(&format!(", {verb} {}", names.join(" and ")));
+            }
+        }
         if !actor.description.trim().is_empty() {
             text.push_str(&format!(". {}", actor.description.trim()));
         }
@@ -3887,153 +3841,11 @@ pub fn describe(
 }
 
 /// The known place whose anchor in sight is nearest the player.
-fn place_name(o: &Observation) -> Option<&str> {
-    o.places
-        .iter()
-        .filter_map(|place| {
-            o.visible_cells
-                .iter()
-                .filter(|c| c.key == place.key)
-                .map(|c| {
-                    let d = c.position;
-                    (d.x - o.position.x).pow(2) + (d.y - o.position.y).pow(2)
-                })
-                .min()
-                .map(|distance| (distance, place.name.as_str()))
-        })
-        .min()
-        .map(|(_, name)| name)
-}
-
-fn sequence_label(combat: &CombatView) -> Option<String> {
-    let sequence = combat.sequence.as_ref()?;
-    Some(format!(
-        "{}:{}/{} Next:{} Cancel:{}",
-        if combat.preparation_active {
-            "Sequence"
-        } else {
-            "Sequence paused"
-        },
-        sequence.completed,
-        sequence.total,
-        sequence.next_strike_remaining,
-        sequence.cancel_recovery_remaining
-    ))
-}
-
 /// Compact disclosed attributes and location, then health, resource balances,
 /// reserved amounts, identified gold, time and conditions.
 pub fn status_lines(app: &App, state: &ClientState) -> [String; 2] {
-    let o = &state.state().observation;
-    let me = o
-        .visible_actors
-        .iter()
-        .find(|a| a.id == o.self_target && !a.name.trim().is_empty())
-        .map(|a| a.name.as_str());
-    let mut first = Vec::new();
-    if let Some(stats) = o
-        .combat
-        .as_ref()
-        .and_then(|combat| combat.own_stats.as_ref())
-    {
-        let a = &stats.attributes;
-        first.push(format!(
-            "Str:{} Spd:{} Int:{} Wil:{} Awr:{} Pre:{} HD:{}",
-            a.strength,
-            a.speed,
-            a.intellect,
-            a.willpower,
-            a.awareness,
-            a.presence,
-            stats.hit_dice.total,
-        ));
-    }
-    if let Some(place) = place_name(o).or(me) {
-        first.push(place.to_owned());
-    }
-    let mut first = first.join("  ");
-    if let Some(objective) = o.combat.as_ref().and_then(|c| c.objective) {
-        if !first.is_empty() {
-            first.push_str("   ");
-        }
-        first.push_str(tor_client_common::narration::objective(objective));
-    }
-    let mut second = Vec::new();
-    if let Some(combat) = &o.combat {
-        second.push(format!("HP:{}({})", combat.hp, combat.max_hp));
-        if let Some(stats) = &combat.own_stats {
-            for resource in &stats.resources {
-                let label = match resource.resource.id.as_str() {
-                    "stamina" => "Stm",
-                    "focus" => "Foc",
-                    "mana" => "Mana",
-                    _ => resource.resource.name.as_str(),
-                };
-                let mut pool = format!("{label}:{}/{}", resource.balance, resource.maximum);
-                if resource.reserved > 0 {
-                    pool.push_str(&format!("[-{}]", resource.reserved));
-                }
-                second.push(pool);
-            }
-        }
-    }
-    // Currency is a disclosed typed capability, never inferred from appearance.
-    // Sum in u128: the bounded inventory can contain several full u64 stacks.
-    let gold: u128 = o
-        .inventory
-        .iter()
-        .filter(|item| item.known_currency == Some(CurrencyKind::Gold))
-        .map(|item| u128::from(item.quantity))
-        .sum();
-    second.push(format!("Gold:{gold}"));
-    if let Some(NutritionView::Required { hunger, .. }) = o
-        .combat
-        .as_ref()
-        .and_then(|combat| combat.own_stats.as_ref())
-        .map(|stats| stats.nutrition)
-    {
-        second.push(tor_client_common::stats::hunger_label(hunger).into());
-    }
-    second.push(format!("T:{}", o.tick));
-    if !o.linked_holds.is_empty() {
-        second.push(format!("Held:{}", o.linked_holds.len()));
-    }
-    if let Some(combat) = &o.combat {
-        if combat.dead {
-            second.push("Dead".into());
-        } else if combat.victory {
-            second.push("Victorious".into());
-            if !combat.terminal {
-                second.extend(sequence_label(combat));
-            }
-        } else if let Some(sequence) = sequence_label(combat) {
-            second.push(sequence);
-        } else if combat.preparation_remaining.is_some() {
-            second.push(
-                if combat.preparation_active {
-                    "Attacking"
-                } else {
-                    "Attack paused"
-                }
-                .into(),
-            );
-        } else if combat.recovery_remaining > 0 {
-            second.push("Recovering".into());
-        }
-    }
-    if state
-        .travel()
-        .is_some_and(|t| t.phase == TravelPhase::Active)
-    {
-        second.push("Travelling".into());
-    }
-    if app.running.is_some() {
-        second.push("Running".into());
-    }
-    if state.state().wizard_game {
-        second.push("Wizard".into());
-    }
-    [first, second.join("  ")]
+    let running = app.running.is_some().then_some("Running");
+    tor_client_common::status::lines(state, running.as_slice())
 }
 
 /// Readable, bounded status rows. Whole fields wrap before optional details are

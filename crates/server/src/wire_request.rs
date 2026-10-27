@@ -398,6 +398,7 @@ mod tests {
             name: "Ordinary disclosed holder".into(),
             location: observation.location,
             asset: None,
+            worn: Vec::new(),
         });
         let visible = project(observation.clone());
         assert_eq!(

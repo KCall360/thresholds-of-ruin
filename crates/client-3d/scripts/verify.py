@@ -69,9 +69,32 @@ def steps(profile):
                            "--bin", "tor-client-headless", "--locked", *optimized]),
         ("scenario-check", [str(TARGET / profile / ("tor-scenario.exe" if os.name == "nt" else "tor-scenario")),
                             "check", str(CLIENT / "scenarios/menagerie")]),
-        ("client-binary", ["cargo", "build", *cargo, "--bin", "tor-client-3d", "--locked", *optimized]),
+        ("client-binary", ["cargo", "build", *cargo, "--bin", "tor-client-3d", "--example", "model_bench", "--locked", *optimized]),
         ("process-tests", [sys.executable, "-m", "unittest", "discover", "-s", str(CLIENT / "scripts"), "-p", "test_*process.py"]),
     ]
+
+
+# Native process tests render on CI's software rasterizers; the job's own
+# 120-minute limit still bounds the whole run.
+PROCESS_TIMEOUT = 3000
+
+
+def process_summary(path):
+    """The failures and slowest tests recorded so far. The runner flushes each
+    row as it happens, so this survives a timeout that kills the suite."""
+    try:
+        rows = [json.loads(line) for line in Path(path).read_text(encoding="utf-8").splitlines() if line.strip()]
+    except (OSError, ValueError):
+        return ["No per-test timing evidence was recorded."]
+    tests = [row for row in rows if row.get("kind") == "test"]
+    lines = [f"Per-test evidence: {len(tests)} finished"]
+    for row in sorted(tests, key=lambda row: -row.get("seconds", 0))[:8]:
+        lines.append(f"  {row.get('seconds', 0):7.1f}s {row.get('outcome')} {row.get('test_id')}")
+    for row in rows:
+        if row.get("kind") == "diagnostic":
+            lines.append(f"{row.get('exception_type')} in {row.get('subtest_id') or row.get('test_id')}:")
+            lines.extend("    " + line for line in row.get("traceback", "").splitlines()[-12:])
+    return lines
 
 
 def source_identity():
@@ -132,17 +155,18 @@ def main(argv=None):
         receipt["toolchain"] = {name: subprocess.check_output([name, "--version"], text=True).strip()
                                 for name in ("cargo", "rustc")}
         for name, command in steps(args.profile):
-            if name == "process-tests" and graphical is not None:
-                command = [sys.executable, str(ROOT / "scripts/test_runner.py"),
-                           "--waive-local-graphical", str(graphical_path),
-                           *command[3:]]
+            if name == "process-tests" and command[1:3] == ["-m", "unittest"]:
+                # The shared runner records each outcome and traceback as it
+                # happens, so a timeout keeps the evidence of what failed.
+                waiver = ["--waive-local-graphical", str(graphical_path)] if graphical is not None else []
+                command = [sys.executable, str(ROOT / "scripts/test_runner.py"), *waiver, *command[3:], "-v"]
                 environment["TOR_TEST_TIMINGS"] = str(logs / "process-tests-tests.jsonl")
             started = time.monotonic()
             log = logs / f"{name}.log"
             try:
                 with log.open("w", encoding="utf-8") as output:
                     result = subprocess.run(command, cwd=ROOT, env=environment, stdout=output, stderr=subprocess.STDOUT,
-                                            timeout=2400 if name != "process-tests" else 1200, check=False)
+                                            timeout=2400 if name != "process-tests" else PROCESS_TIMEOUT, check=False)
                 code = result.returncode
             except subprocess.TimeoutExpired:
                 code = 124
@@ -158,6 +182,8 @@ def main(argv=None):
             print(f"{name}: {'PASS' if code == 0 else 'FAIL'}", flush=True)
             if code:
                 print("\n".join(log.read_text(encoding="utf-8", errors="replace").splitlines()[-55:]))
+                if name == "process-tests" and "TOR_TEST_TIMINGS" in environment:
+                    print("\n".join(process_summary(environment["TOR_TEST_TIMINGS"])))
                 return 1
         receipt["final_source"] = source_identity()
         receipt["gate_passed"] = (receipt["source"] == receipt["final_source"]

@@ -1,0 +1,275 @@
+{
+  "version": 1,
+  "hz": 50,
+  "viewport": [
+    1000,
+    1000
+  ],
+  "actors": [
+    {
+      "id": "woman",
+      "model": "Human",
+      "seed": 7,
+      "body": {
+        "woman": true,
+        "bust": 3
+      },
+      "outfit": "adventurer",
+      "equipment": [],
+      "position": [
+        0,
+        -0.5,
+        0
+      ],
+      "yaw": 0
+    }
+  ],
+  "cameras": [
+    {
+      "id": "front",
+      "position": [
+        0,
+        0.55,
+        1.5
+      ],
+      "target": [
+        0,
+        0.4,
+        0
+      ],
+      "fov_degrees": 34
+    },
+    {
+      "id": "three-quarter",
+      "position": [
+        1.05,
+        0.6,
+        1.05
+      ],
+      "target": [
+        0,
+        0.4,
+        0
+      ],
+      "fov_degrees": 34
+    },
+    {
+      "id": "side",
+      "position": [
+        1.5,
+        0.55,
+        0
+      ],
+      "target": [
+        0,
+        0.4,
+        0
+      ],
+      "fov_degrees": 34
+    }
+  ],
+  "events": [
+    {
+      "tick": 1,
+      "actor": "woman",
+      "operation": {
+        "type": "equipment",
+        "items": [
+          "leather"
+        ]
+      }
+    },
+    {
+      "tick": 5,
+      "actor": "woman",
+      "operation": {
+        "type": "equipment",
+        "items": [
+          "studded-leather"
+        ]
+      }
+    },
+    {
+      "tick": 9,
+      "actor": "woman",
+      "operation": {
+        "type": "equipment",
+        "items": [
+          "ring-mail"
+        ]
+      }
+    },
+    {
+      "tick": 13,
+      "actor": "woman",
+      "operation": {
+        "type": "equipment",
+        "items": [
+          "scale-mail"
+        ]
+      }
+    },
+    {
+      "tick": 17,
+      "actor": "woman",
+      "operation": {
+        "type": "equipment",
+        "items": [
+          "chain-mail"
+        ]
+      }
+    },
+    {
+      "tick": 21,
+      "actor": "woman",
+      "operation": {
+        "type": "equipment",
+        "items": [
+          "splint-mail"
+        ]
+      }
+    },
+    {
+      "tick": 25,
+      "actor": "woman",
+      "operation": {
+        "type": "equipment",
+        "items": [
+          "banded-mail"
+        ]
+      }
+    },
+    {
+      "tick": 29,
+      "actor": "woman",
+      "operation": {
+        "type": "equipment",
+        "items": [
+          "plate-mail"
+        ]
+      }
+    }
+  ],
+  "captures": [
+    {
+      "tick": 3,
+      "name": "01-leather-front",
+      "camera": "front"
+    },
+    {
+      "tick": 3,
+      "name": "01-leather-three-quarter",
+      "camera": "three-quarter"
+    },
+    {
+      "tick": 3,
+      "name": "01-leather-side",
+      "camera": "side"
+    },
+    {
+      "tick": 7,
+      "name": "02-studded-leather-front",
+      "camera": "front"
+    },
+    {
+      "tick": 7,
+      "name": "02-studded-leather-three-quarter",
+      "camera": "three-quarter"
+    },
+    {
+      "tick": 7,
+      "name": "02-studded-leather-side",
+      "camera": "side"
+    },
+    {
+      "tick": 11,
+      "name": "03-ring-mail-front",
+      "camera": "front"
+    },
+    {
+      "tick": 11,
+      "name": "03-ring-mail-three-quarter",
+      "camera": "three-quarter"
+    },
+    {
+      "tick": 11,
+      "name": "03-ring-mail-side",
+      "camera": "side"
+    },
+    {
+      "tick": 15,
+      "name": "04-scale-mail-front",
+      "camera": "front"
+    },
+    {
+      "tick": 15,
+      "name": "04-scale-mail-three-quarter",
+      "camera": "three-quarter"
+    },
+    {
+      "tick": 15,
+      "name": "04-scale-mail-side",
+      "camera": "side"
+    },
+    {
+      "tick": 19,
+      "name": "05-chain-mail-front",
+      "camera": "front"
+    },
+    {
+      "tick": 19,
+      "name": "05-chain-mail-three-quarter",
+      "camera": "three-quarter"
+    },
+    {
+      "tick": 19,
+      "name": "05-chain-mail-side",
+      "camera": "side"
+    },
+    {
+      "tick": 23,
+      "name": "06-splint-mail-front",
+      "camera": "front"
+    },
+    {
+      "tick": 23,
+      "name": "06-splint-mail-three-quarter",
+      "camera": "three-quarter"
+    },
+    {
+      "tick": 23,
+      "name": "06-splint-mail-side",
+      "camera": "side"
+    },
+    {
+      "tick": 27,
+      "name": "07-banded-mail-front",
+      "camera": "front"
+    },
+    {
+      "tick": 27,
+      "name": "07-banded-mail-three-quarter",
+      "camera": "three-quarter"
+    },
+    {
+      "tick": 27,
+      "name": "07-banded-mail-side",
+      "camera": "side"
+    },
+    {
+      "tick": 31,
+      "name": "08-plate-mail-front",
+      "camera": "front"
+    },
+    {
+      "tick": 31,
+      "name": "08-plate-mail-three-quarter",
+      "camera": "three-quarter"
+    },
+    {
+      "tick": 31,
+      "name": "08-plate-mail-side",
+      "camera": "side"
+    }
+  ]
+}

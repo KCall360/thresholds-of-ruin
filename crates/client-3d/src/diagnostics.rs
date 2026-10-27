@@ -129,6 +129,14 @@ pub(super) fn capture(
         .map(|button| format!("{button:?}"))
         .collect();
     pressed_mouse.sort();
+    let screen_text = game
+        .as_ref()
+        .filter(|game| game.screen.is_some())
+        .map(|game| crate::screen::lines(game));
+    let typed = game
+        .as_ref()
+        .filter(|game| game.screen.is_some())
+        .map(|game| game.typed.clone());
     let report = serde_json::json!({
         "type": if view.is_some() { "3d_frame" } else { "3d_capture" },
         "gpu_readback": true, "png": path, "keys": pressed, "actors": actors,
@@ -140,7 +148,20 @@ pub(super) fn capture(
         "doors": view.map(|view| view.visible.iter().filter_map(|cell| cell.door.as_ref()).map(|door| serde_json::json!({
             "id": door.id, "open": door.open, "reachable": door.reachable,
         })).collect::<Vec<_>>()),
-        "panel_open": panel.is_some_and(|panel| panel.open),
+        "panel_open": panel.as_ref().is_some_and(|panel| panel.open),
+        // Pack actions in number-key order, as "row: action".
+        "panel_actions": panel.as_ref().map(|panel| panel.actions.iter().map(|(label, _)| label.clone()).collect::<Vec<_>>()),
+        "advancement": game.as_ref().filter(|game| game.screen == Some(crate::screen::Screen::Advancement)).map(|game| serde_json::json!({
+            "lines": game.advancement, "typed": game.typed,
+        })),
+        "screen": game.as_ref().and_then(|game| game.screen).map(|screen| format!("{screen:?}")),
+        // The open screen as drawn, and the line being typed on it.
+        "screen_text": screen_text,
+        "typed": typed,
+        "aiming": game.as_ref().and_then(|game| game.aiming.as_ref()).map(|aim| format!("{aim:?}")),
+        "projectile": game.as_ref().and_then(|game| game.projectile.as_ref()).map(|prompt| serde_json::json!({
+            "title": prompt.title, "rows": prompt.rows, "choosing": prompt.choosing, "aiming": prompt.aiming,
+        })),
         "hover": { "title": hover.as_ref().map(|hover| &hover.title),
             "cell": hover.as_ref().and_then(|hover| hover.cell).map(|cell| {
                 let local = cell - game.as_ref().map_or(IVec3::ZERO, |game| game.offset);

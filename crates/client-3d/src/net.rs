@@ -12,7 +12,9 @@ pub use tor_client_3d_model::{Cmd, Happening, Input, View};
 use tor_client_common::{Connection, PendingRequest, RequestCompletion};
 use tor_protocol::*;
 
+mod projectile;
 mod startup;
+pub use projectile::ProjectilePrompt;
 use startup::InitialPresentation;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
@@ -21,6 +23,12 @@ const EVENTS_PER_FRAME: usize = 16;
 
 pub enum Event {
     View(Box<View>),
+    /// A projectile choice in progress, or `None` once it ends.
+    Projectile(Option<ProjectilePrompt>),
+    /// The advancement pages as the player reads them.
+    Advancement(Vec<String>),
+    /// The detection charts: the catalog, or the chosen chart's rows.
+    Charts(Vec<String>),
     Status(String),
     Ready,
     Fatal(String),
@@ -203,7 +211,6 @@ async fn run(
     tx: &SyncSender<Event>,
 ) -> Result<(), Error> {
     let mut connection = Connection::connect(address, token, actor, "3d").await?;
-    connection.use_external_advancement_presentation();
     connection.set_pace(Duration::from_millis(90));
     let result = session(&mut connection, observe, rx, tx).await;
     // A broken presentation pipe is normal during window shutdown. Connection
@@ -223,9 +230,12 @@ async fn session(
 ) -> Result<(), Error> {
     let mut initial = InitialPresentation::default();
     if !observe && connection.role() != AccessRole::Spectator {
-        transact_with(connection, Request::AcquireControl, |event| {
-            initial.record(event)
-        })
+        transact_with(
+            connection,
+            Request::AcquireControl,
+            |event| initial.record(event),
+            |_, _, _| {},
+        )
         .await?;
     }
     // Shared state has applied every handshake message. Present its settled
@@ -233,11 +243,55 @@ async fn session(
     for event in initial.finish(Box::new(view(&connection.state, &connection.palette))) {
         publish(tx, event)?;
     }
+    let mut menu = None;
+    let mut advancement = Vec::new();
+    let mut charts = Vec::new();
     loop {
         tokio::select! {
             biased;
             command = rx.recv() => match command {
                 None => return Ok(()),
+                Some(Input { shown, command: Cmd::Projectile(step) }) => {
+                    if connection.state.validate_reply_context(&shown).is_err() {
+                        publish(tx, Event::Status("State changed; request was not sent. Review the new state.".into()))?;
+                    } else if connection.is_synchronized() {
+                        projectile::step(connection, &mut menu, step, tx).await?;
+                    } else {
+                        publish(tx, Event::Status("Resynchronizing; try again.".into()))?;
+                    }
+                    publish(tx, Event::Ready)?;
+                }
+                Some(Input { command: Cmd::Chart(input), .. }) => {
+                    // Read-only presentation: browsing never takes game time.
+                    if input == tor_client_common::charts::ChartInput::Cancel {
+                        connection.cancel_charts();
+                    } else {
+                        match connection.charts.request(input, &connection.state) {
+                            Ok(Some(request)) => {
+                                if let Err(error) = connection.request(request).await {
+                                    publish(tx, Event::Status(error.to_string()))?;
+                                }
+                            }
+                            Ok(None) => {}
+                            Err(reason) => publish(tx, Event::Status(reason))?,
+                        }
+                    }
+                    present_charts(connection, &mut charts, tx, true)?;
+                    publish(tx, Event::Ready)?;
+                }
+                Some(Input { command: Cmd::Advancement(text), .. }) => {
+                    // Browsing is free and stays allowed while work is under way.
+                    let request = tor_client_common::advancement::parse(&text)
+                        .and_then(|input| connection.advancement_pages.request(input, &connection.state));
+                    match request {
+                        Ok(Some(request)) if connection.is_synchronized() => transact(connection, request, tx).await?,
+                        Ok(Some(_)) => publish(tx, Event::Status("Resynchronizing; try again.".into()))?,
+                        Ok(None) => {}
+                        Err(reason) => publish(tx, Event::Status(reason))?,
+                    }
+                    present_advancement(connection, &mut advancement, tx, true)?;
+                    publish(tx, Event::Ready)?;
+                }
                 Some(command) => {
                     match request_from(&connection.state, &command.shown, command.command) {
                         Ok(request) if connection.is_synchronized() => transact(connection, request, tx).await?,
@@ -250,9 +304,58 @@ async fn session(
             message = connection.next() => {
                 let message = message?;
                 present(connection, &message, tx)?;
+                projectile::revalidate(connection, &mut menu, tx)?;
+                present_advancement(connection, &mut advancement, tx, false)?;
+                present_charts(connection, &mut charts, tx, false)?;
             }
         }
     }
+}
+
+/// Publish the advancement display when it changed, or always on request.
+fn present_advancement(
+    connection: &Connection,
+    shown: &mut Vec<String>,
+    tx: &SyncSender<Event>,
+    always: bool,
+) -> Result<(), Error> {
+    let lines = connection
+        .advancement_pages
+        .display(&connection.state.state().observation);
+    if always || lines != *shown {
+        shown.clone_from(&lines);
+        publish(tx, Event::Advancement(lines))?;
+    }
+    Ok(())
+}
+
+/// The chart catalog with its number keys, or the chosen chart's rows.
+fn present_charts(
+    connection: &Connection,
+    shown: &mut Vec<String>,
+    tx: &SyncSender<Event>,
+    always: bool,
+) -> Result<(), Error> {
+    let state = &connection.state;
+    let mut lines = Vec::new();
+    if connection.charts.selected().is_none() {
+        for (index, summary) in state.state().observation.charts.iter().enumerate().take(10) {
+            lines.push(format!(
+                "{} {}",
+                (index + 1) % 10,
+                tor_client_common::charts::kind_label(summary.kind)
+            ));
+        }
+        if lines.is_empty() {
+            lines.push("No detection charts have been disclosed.".into());
+        }
+    }
+    lines.extend(connection.charts.lines(state));
+    if always || lines != *shown {
+        shown.clone_from(&lines);
+        publish(tx, Event::Charts(lines))?;
+    }
+    Ok(())
 }
 
 async fn transact(
@@ -260,20 +363,30 @@ async fn transact(
     request: Request,
     tx: &SyncSender<Event>,
 ) -> Result<(), Error> {
-    transact_with(connection, request, |event| publish(tx, event)).await
+    transact_with(
+        connection,
+        request,
+        |event| publish(tx, event),
+        |_, _, _| {},
+    )
+    .await
 }
 
+/// Send one request and present every message until it completes. `inspect`
+/// sees each message with the request's id, after shared state applied it.
 async fn transact_with(
     connection: &mut Connection,
     request: Request,
     mut deliver: impl FnMut(Event) -> Result<(), Error>,
+    mut inspect: impl FnMut(&Connection, &str, &ServerMessage),
 ) -> Result<(), Error> {
     let id = connection.request(request).await?;
-    let mut pending = PendingRequest::new(id);
+    let mut pending = PendingRequest::new(id.clone());
     timeout(Duration::from_secs(10), async {
         loop {
             let message = connection.next().await?;
             let completion = pending.observe(connection, &message);
+            inspect(connection, &id, &message);
             let complete = completion.is_some();
             let unknown = matches!(completion, Some(RequestCompletion::Unknown));
             if let Some(event) = presentation_event(connection, &message) {
@@ -292,6 +405,20 @@ async fn transact_with(
     .await
     .map_err(|_| "Response timed out")??;
     Ok(())
+}
+
+/// A ready connection whose commands a test receives directly.
+#[cfg(test)]
+pub(crate) fn test_channel() -> (crate::Net, async_mpsc::Receiver<Input>) {
+    let (mut network, commands, events) = Network::channels();
+    events.send(Event::Ready).unwrap();
+    network.next_event().unwrap();
+    // The window's side of the event channel stays open for the test.
+    std::mem::forget(events);
+    (
+        crate::Net(std::sync::Arc::new(std::sync::Mutex::new(network))),
+        commands,
+    )
 }
 
 #[cfg(test)]
@@ -340,6 +467,8 @@ mod tests {
                 drinkable: false,
                 portable_light: None,
                 edible: false,
+                readable: false,
+                device: None,
             });
             let game = crate::Game {
                 view: Some(view),
@@ -365,6 +494,88 @@ mod tests {
                 "hidden inventory dispatched an action"
             );
         }
+    }
+
+    #[test]
+    fn each_aim_completes_only_with_what_it_is_aimed_at() {
+        use crate::Aim;
+        use tor_client_3d_model::AbilityTarget;
+        let wand = ItemTarget::from_digest([7; 32]);
+        let foe = ActorTarget::from_digest([8; 32]);
+        let ability = |target| Aim::Ability {
+            id: "spell".into(),
+            target,
+        };
+        assert!(matches!(
+            Aim::Device(wand).along(Direction::East),
+            Some(Cmd::Zap(item, Direction::East)) if item == wand
+        ));
+        assert!(Aim::Device(wand).at(foe).is_none());
+        for kind in [
+            AbilityTargetKind::DirectionalRay,
+            AbilityTargetKind::SelfStep,
+        ] {
+            assert!(matches!(
+                ability(kind).along(Direction::West),
+                Some(Cmd::Ability(id, AbilityTarget::Direction(Direction::West))) if id == "spell"
+            ));
+            assert!(
+                ability(kind).at(foe).is_none(),
+                "{kind:?} is not aimed at creatures"
+            );
+        }
+        for kind in [AbilityTargetKind::Actor, AbilityTargetKind::SelfOrAlly] {
+            assert!(matches!(
+                ability(kind).at(foe),
+                Some(Cmd::Ability(id, AbilityTarget::Actor(target))) if id == "spell" && target == foe
+            ));
+            assert!(
+                ability(kind).along(Direction::North).is_none(),
+                "{kind:?} does not step: movement keeps moving"
+            );
+        }
+    }
+
+    #[test]
+    fn an_aimed_device_takes_the_next_direction_instead_of_a_step() {
+        use bevy::prelude::{App, ButtonInput, KeyCode, Time, Update};
+        let (mut network, mut commands, events) = Network::channels();
+        events.send(Event::Ready).unwrap();
+        network.next_event().unwrap();
+        let net = crate::Net(std::sync::Arc::new(std::sync::Mutex::new(network)));
+        let wand = ItemTarget::from_digest([7; 32]);
+        let mut view = crate::test_support::view(0);
+        view.has_control = true;
+        view.can_act = true;
+        let game = crate::Game {
+            view: Some(view),
+            aiming: Some(crate::Aim::Device(wand)),
+            ..Default::default()
+        };
+        let mut app = App::new();
+        app.insert_resource(net)
+            .insert_resource(game)
+            .insert_resource(crate::CameraRig::default())
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<Time>()
+            .add_event::<bevy::input::mouse::MouseWheel>()
+            .add_systems(Update, crate::camera::input);
+        // A tap pressed and released within one slow frame still counts.
+        {
+            let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            keys.press(KeyCode::KeyW);
+            keys.release(KeyCode::KeyW);
+        }
+        app.update();
+        let sent = commands.try_recv().expect("the aim is sent");
+        assert!(
+            matches!(sent.command, Cmd::Zap(item, Direction::North) if item == wand),
+            "forward on an unturned camera aims north"
+        );
+        assert!(
+            app.world().resource::<crate::Game>().aiming.is_none(),
+            "one aim per selection"
+        );
     }
 
     #[test]

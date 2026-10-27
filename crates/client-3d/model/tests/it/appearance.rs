@@ -18,6 +18,7 @@ fn palette(assets: &[&str]) -> Palette {
 fn actor(asset: Option<&str>, name: &str) -> ActorView {
     ActorView {
         appearance_seed: None,
+        worn: Vec::new(),
         id: ActorTarget::from_digest([7; 32]),
         name: name.into(),
         description: String::new(),

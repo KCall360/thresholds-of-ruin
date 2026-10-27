@@ -4971,7 +4971,7 @@ mod tests {
 
     #[test]
     fn discovery_formats_preserve_physical_envelopes() {
-        assert_eq!(tor_protocol::PROTOCOL_VERSION, 63);
+        assert_eq!(tor_protocol::PROTOCOL_VERSION, 64);
         assert_eq!(super::RULES_INPUT_FORMAT, 26);
         assert_eq!(super::REGION_INPUT_FORMAT, 9);
         // Semantic rule, region and package payload versions advance independently

@@ -452,9 +452,33 @@ local `target` directory otherwise. Both directories are passed explicitly to
 Cargo, checked for overlap, and recorded in the comparison. Binary snapshots
 come from these same directories; the baseline cannot inherit the head's cache.
 
+Workload definitions may select a Cargo manifest relative to each compared tree;
+the default remains `Cargo.toml`. This supports isolated workspaces such as the 3D
+client without moving their dependencies into the core workspace. Build groups
+include both manifest and package, and comparison metadata records the manifest.
+Example executable names must have one build owner across the selected workloads,
+including `--no-build` runs, so snapshots cannot silently refer to an overwritten
+binary. The `models` workload uses `crates/client-3d/Cargo.toml` and the `model_bench`
+example, validated by `scripts/model_performance_report.py`. It measures cold and
+cached CPU construction for three fixed compositions (Human/Sylvan/plate,
+Nymph/Royal Princess/cloak, Mage/native/boots), three samples each. Counts cover
+entities and CPU mesh-buffer storage, including additional instance-owned meshes.
+The current workload additionally records a 30-frame jump at 50 Hz after two untimed
+initialization updates. Each timing runs the review renderer's shared pose,
+transform-propagation and soft-body schedule; hair/cloth fitting is included in
+pose advancement. The validator requires actual pose changes and a complete,
+finite timing sequence. These are CPU schedule durations, not total application
+frame time, total process memory, GPU work or displayed frames.
+The optional latest-frame profile separates pose/joints, robe fitting, drape
+updates and hair/contact fitting. These phases are contained within each update;
+scheduling, transform propagation and soft-body work remain outside those phase
+totals. Ordinary rendering does not enable these timers or retain profile history.
+Both compared revisions must contain the same versioned workload and validator;
+a missing baseline producer is not permission to compare different workloads.
+
 A case is either a `latency_bench` case name (`--cycles` sets its cycle count,
 default five) or `WORKLOAD[:GROUP]` for `combat`, `physics`, `items`, `client`,
-or `places`. The `latency_bench` region streaming cases, `stream-r16-memory`,
+`places`, or `models`. The `latency_bench` region streaming cases, `stream-r16-memory`,
 `stream-r16-durable`, `stream-r256-memory` and `stream-r256-durable` (workload
 `streaming-v1`), run only when selected by name; see
 [region streaming performance](../architecture/streaming.md#performance). Those workloads always run their complete matrix, because their

@@ -12,6 +12,7 @@ fn body(app: &mut App, at: Vec3) -> Entity {
                 appearance_seed: None,
                 appearance_key: "fixture".into(),
                 model: CreatureModel::Placeholder,
+                wearing: Default::default(),
                 hostile: false,
                 goal: at,
                 label,
@@ -45,6 +46,8 @@ fn scene(id: &str, name: &str, show_target: bool, disclose_target: bool) -> (App
         .map(|(id, x)| Actor {
             appearance_seed: None,
             model: CreatureModel::Placeholder,
+            wearing: Default::default(),
+            attire: Default::default(),
             id,
             name: String::new(),
             description: String::new(),

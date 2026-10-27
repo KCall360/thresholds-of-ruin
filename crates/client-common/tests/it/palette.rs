@@ -156,7 +156,52 @@ fn full(names: &[&str]) -> PaletteBody {
     }
 }
 
-fn update(sequence: u64, names: &[&str]) -> ServerMessage {
+#[derive(Clone, Copy, Debug)]
+enum Carrier {
+    Cells,
+    SelfBody,
+    GroundCorpse,
+    CarriedCorpse,
+}
+
+fn update(sequence: u64, names: &[&str], carrier: Carrier) -> ServerMessage {
+    let mut state = observation(sequence, names);
+    if !matches!(carrier, Carrier::Cells) {
+        state.observation.visible_cells.clear();
+        let body = CreatureAppearance {
+            seed: AppearanceSeed::from_digest([9; 32]),
+            worn: Vec::new(),
+            asset: Some(names[0].into()),
+        };
+        if matches!(carrier, Carrier::SelfBody) {
+            state.observation.self_appearance = Some(body);
+        } else {
+            let item = ItemView {
+                corpse: Some(body),
+                class: ItemClass::Corpse,
+                quantity: 1,
+                appearance: "remains".into(),
+                identified: true,
+                description: String::new(),
+                id: ItemTarget::from_digest([3; 32]),
+                name: "remains".into(),
+                asset: None,
+                known_supply: None,
+                known_currency: None,
+            };
+            if matches!(carrier, Carrier::CarriedCorpse) {
+                state.observation.inventory.push(item);
+            } else {
+                state.observation.ground_items.push(GroundItemView {
+                    presentation: None,
+                    reachable: true,
+                    supply_reachable: false,
+                    item,
+                    position: Position { x: 0, y: 0, z: 0 },
+                });
+            }
+        }
+    }
     ServerMessage::Update {
         update: Box::new(StreamUpdate {
             context: super::stream_context(0),
@@ -167,7 +212,7 @@ fn update(sequence: u64, names: &[&str]) -> ServerMessage {
                 tick: sequence,
             },
             body: UpdateBody::Observation {
-                state: (observation(sequence, names)).into(),
+                state: state.into(),
                 event: None,
             },
         }),
@@ -179,12 +224,28 @@ async fn a_connection_repairs_its_palette_after_a_gap_and_a_missing_asset() {
     // Production ordinary traffic intentionally has no universal deadline.
     // The entire scripted exchange still has a test liveness contract: a lost
     // palette request/reply must fail this test instead of hanging the suite.
-    timeout(Duration::from_secs(15), palette_repair_scenario())
-        .await
-        .expect("scripted palette exchange exceeded its 15-second watchdog");
+    timeout(
+        Duration::from_secs(15),
+        palette_repair_scenario(Carrier::Cells),
+    )
+    .await
+    .expect("scripted palette exchange exceeded its 15-second watchdog");
 }
 
-async fn palette_repair_scenario() {
+#[tokio::test]
+async fn nested_appearance_assets_trigger_one_palette_repair_per_missing_asset() {
+    for carrier in [
+        Carrier::SelfBody,
+        Carrier::GroundCorpse,
+        Carrier::CarriedCorpse,
+    ] {
+        timeout(Duration::from_secs(15), palette_repair_scenario(carrier))
+            .await
+            .unwrap_or_else(|_| panic!("nested palette repair timed out for {carrier:?}"));
+    }
+}
+
+async fn palette_repair_scenario(carrier: Carrier) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
@@ -283,14 +344,14 @@ async fn palette_repair_scenario() {
         .await;
         // An asset the palette lacks: one request, even when it's still
         // missing from the answer and seen again.
-        send(&mut server, update(1, &["creature.rat"])).await;
+        send(&mut server, update(1, &["creature.rat"], carrier)).await;
         let id = palette_request(&mut server).await;
         send(
             &mut server,
             palette(1, Some(id), 6, full(&["terrain.floor.cave"])),
         )
         .await;
-        send(&mut server, update(2, &["creature.rat"])).await;
+        send(&mut server, update(2, &["creature.rat"], carrier)).await;
         // Nothing more is asked before the client closes.
         assert!(receive(&mut server).await.is_none());
     });

@@ -60,3 +60,93 @@ fn art_contract_payload_budget_does_not_count_live_geometry_as_idle() {
     assert!(meshes.contains(visible.0[0].0.id()));
     assert!(!library.cache.contains_key("old"));
 }
+
+#[test]
+fn outer_surface_finds_outermost_layer_in_recipe_coordinates() {
+    for xf in [
+        Affine3A::IDENTITY,
+        Affine3A::from_scale_rotation_translation(
+            Vec3::new(2.0, 0.5, 1.3),
+            Quat::from_rotation_y(0.7),
+            Vec3::new(3.0, -2.0, 4.0),
+        ),
+    ] {
+        let mut builder = Builder {
+            xf,
+            ..Builder::default()
+        };
+        for z in [0.4, 0.2, -0.3] {
+            builder.tri(
+                [
+                    Vec3::new(-1.0, -1.0, z),
+                    Vec3::new(1.0, -1.0, z),
+                    Vec3::new(0.0, 1.0, z),
+                ],
+                Vec3::ONE,
+            );
+        }
+        let hit = builder.outer_surface(Vec3::ZERO, Vec3::Z).unwrap();
+        assert!(hit.distance(Vec3::Z * 0.4) < 1e-5, "{hit:?}");
+        assert!(builder.outer_surface(Vec3::X * 3.0, Vec3::Z).is_none());
+        assert!(builder.outer_surface(Vec3::Z, Vec3::Z).is_none());
+    }
+}
+
+#[test]
+fn sword_handle_mesh_centers_share_the_hand_grasp_and_keep_item_size() {
+    let mut spans = Vec::new();
+    for kind in [Kind::Greatsword, Kind::ShortSword] {
+        let parts = build_item(kind, "");
+        // The matte sword geometry is its handle and wrapping. Measure the
+        // actual emitted handle, independently of the attachment metadata.
+        let mut low = Vec3::splat(f32::INFINITY);
+        let mut high = Vec3::splat(f32::NEG_INFINITY);
+        for point in &parts.matte.positions {
+            low = low.min(Vec3::from_array(*point));
+            high = high.max(Vec3::from_array(*point));
+        }
+        let center = (low + high) * 0.5;
+        let held = held_transform(kind);
+        let grasp = Vec3::new(-0.03, -0.02, 0.0);
+        assert!(
+            held.transform_point(center).distance(grasp) < 0.0001,
+            "{kind:?}: emitted handle misses the shared hand grasp: {:?}",
+            held.transform_point(center)
+        );
+        assert!((held.rotation * Vec3::X).distance(Vec3::Z) < 0.0001);
+        assert_eq!(
+            held.scale,
+            Vec3::ONE,
+            "attachment must not rescale the item"
+        );
+        spans.push(
+            held.transform_point(high)
+                .distance(held.transform_point(low)),
+        );
+        // A wrist rotation/translation moves both frames together.
+        let wrist = Transform::from_xyz(0.3, 1.1, -0.2).with_rotation(Quat::from_euler(
+            EulerRot::XYZ,
+            0.4,
+            -0.7,
+            0.2,
+        ));
+        assert!(
+            wrist
+                .transform_point(held.transform_point(center))
+                .distance(wrist.transform_point(grasp))
+                < 0.0001
+        );
+    }
+    assert!((spans[1] / spans[0] - 0.62).abs() < 0.0001);
+}
+
+#[test]
+fn nonsword_items_do_not_claim_sword_handle_frames() {
+    for kind in [Kind::Mace, Kind::Wand, Kind::RingMail, Kind::Placeholder] {
+        assert!(sword_handle_frame(kind).is_none());
+        assert_eq!(
+            held_transform(kind).translation,
+            Vec3::new(0.0, -0.02, 0.29)
+        );
+    }
+}

@@ -116,7 +116,7 @@ classification rather than silent conversion.
 
 Necessary save/content changes are authorized as strict current-only versions,
 with no old-save importer or silent legacy ownership defaults. The protocol change
-was separately approved and applied as protocol **63** at checkpoint `3ad2ee66`:
+was separately approved and applied as its own protocol bump at checkpoint `3ad2ee66`:
 accurate changed-only diagnostics and `DirectionOrSelf` affordance plus
 common/Text/ASCII consumers. Old clients are rejected, not silently adapted. Binary framing and
 unrelated generator/report formats do not change. Owner-only advancement growth
@@ -128,8 +128,8 @@ Missing fields, invalid package bounds and overflowing counts are rejected.
 
 Current-format fixtures are produced by genuine application and save writers, not
 hand-edited compatibility conversions. All 44 authored packages and the protected
-source-only baseline comparator validate with the current compiler. Protocol 63
-records real client/server traffic; the six-case save 61 writer is rerun without
+source-only baseline comparator validate with the current compiler. The current
+protocol sample records real client/server traffic; the six-case save 61 writer is rerun without
 recording enabled to verify byte-for-byte current serialization.
 
 The ordinary controlled Wraith route covers paid purchase, personal-row drain and

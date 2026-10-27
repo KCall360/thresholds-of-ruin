@@ -15,7 +15,7 @@ fn views(count: usize, case: &str) -> (StateView, StateView) {
     let fixture: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/wire-v63.json"
+            "/tests/fixtures/wire-v64.json"
         ))
         .expect("regenerate current wire samples"),
     )
@@ -72,6 +72,7 @@ fn views(count: usize, case: &str) -> (StateView, StateView) {
         });
         o.visible_actors.push(ActorView {
             appearance_seed: None,
+            worn: Vec::new(),
             name: format!("actor {index}"),
             description: "disclosed actor".repeat(4),
             id: ActorTarget::from_digest(synthetic_digest(index as u64 + 10)),

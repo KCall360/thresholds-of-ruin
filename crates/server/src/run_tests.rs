@@ -506,6 +506,7 @@ fn repeated_views_of_self_are_not_potential_hazards() {
     observation.visible_actors = vec![
         ActorView {
             appearance_seed: None,
+            worn: Vec::new(),
             name: "figure".into(),
             description: "A figure.".into(),
             asset: None,
@@ -514,6 +515,7 @@ fn repeated_views_of_self_are_not_potential_hazards() {
         },
         ActorView {
             appearance_seed: None,
+            worn: Vec::new(),
             name: "figure".into(),
             description: "A figure.".into(),
             asset: None,
@@ -525,6 +527,7 @@ fn repeated_views_of_self_are_not_potential_hazards() {
         },
         ActorView {
             appearance_seed: None,
+            worn: Vec::new(),
             name: "figure".into(),
             description: "A figure.".into(),
             asset: None,

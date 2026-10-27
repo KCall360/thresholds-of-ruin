@@ -52,6 +52,7 @@ fn contact(observation: &mut s::Observation, disclosure: ActorDisclosure) {
             String::new()
         },
         asset: (disclosure == ActorDisclosure::Creature).then(|| "private_species_asset".into()),
+        worn: Vec::new(),
     });
 }
 
@@ -1484,4 +1485,53 @@ fn hallucination_map_acquisition_freezes_payload_without_granting_stair_facts() 
     assert!(!wire.stairs_up && !wire.stairs_down);
     assert_eq!(wire.ground_items[0].class, p::ItemClass::Coin);
     assert_eq!(wire.ground_items[0].quantity, 7);
+}
+
+#[test]
+fn disclosed_worn_equipment_reaches_actor_and_self_records_in_canonical_form() {
+    let (mut view, scene, scope) = fixture();
+    let mail = s::WornView {
+        slot: s::EquipmentSlot::new("body_armor").unwrap(),
+        occurrence: 0,
+        class: s::ItemClass::Armor,
+        appearance: "ring mail".into(),
+        asset: Some("item.armor.mail.ring".into()),
+    };
+    let offhand = s::WornView {
+        slot: s::EquipmentSlot::new("weapon").unwrap(),
+        occurrence: 1,
+        class: s::ItemClass::Weapon,
+        appearance: "dagger".into(),
+        asset: None,
+    };
+    contact(&mut view, ActorDisclosure::Creature);
+    view.visible_actors[0].worn = vec![mail.clone(), offhand];
+    view.worn = vec![mail];
+    let wire = projected(view, scene, &scope);
+    let subject = &wire["visible_actors"][0];
+    assert_eq!(
+        subject["worn"],
+        json!([
+            {"slot": "body_armor", "class": "armor", "appearance": "ring mail",
+             "asset": "item.armor.mail.ring"},
+            {"slot": "weapon", "occurrence": 1, "class": "weapon", "appearance": "dagger"}
+        ]),
+        "zero occurrences and absent assets are omitted"
+    );
+    assert_eq!(
+        wire["self_appearance"]["worn"],
+        json!([
+            {"slot": "body_armor", "class": "armor", "appearance": "ring mail",
+             "asset": "item.armor.mail.ring"}
+        ])
+    );
+}
+
+#[test]
+fn undisclosed_equipment_leaves_no_worn_field_on_the_wire() {
+    let (mut view, scene, scope) = fixture();
+    contact(&mut view, ActorDisclosure::AnonymousContact);
+    let wire = projected(view, scene, &scope);
+    assert!(wire["visible_actors"][0].get("worn").is_none(), "{wire}");
+    assert!(wire["self_appearance"].get("worn").is_none(), "{wire}");
 }

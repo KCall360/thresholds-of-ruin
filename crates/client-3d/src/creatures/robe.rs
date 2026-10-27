@@ -49,6 +49,191 @@ mod art_contract_tests {
     use super::*;
 
     #[test]
+    fn art_contract_posed_thigh_mesh_stays_inside_robe_contact_envelopes() {
+        let mut materials = Assets::<StandardMaterial>::default();
+        let materials = crate::props::PropMaterials::new(&mut materials);
+        let mut meshes = Assets::<Mesh>::default();
+        for build in 0..3 {
+            let look = Look::with_choice(
+                CreatureModel::Mage,
+                42,
+                Some(Variant {
+                    woman: true,
+                    build,
+                    ..default()
+                }),
+            );
+            let body = HumanoidBody::resolve(&look);
+            let mut parts = Parts::default();
+            let (low, high) = body.thigh.mesh_bounds(0.02);
+            geometry::limb_form(body.thigh)
+                .mesh(&mut parts.matte, low, high, 0.007, &|_, _| Vec3::ONE);
+            let model = parts.finish(&mut meshes, &materials);
+            assert_eq!(model.0.len(), 1, "build {build}: expected one thigh mesh");
+            let mesh = meshes.get(&model.0[0].0).unwrap();
+            let VertexAttributeValues::Float32x3(positions) =
+                mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap()
+            else {
+                panic!("thigh mesh must expose positions");
+            };
+            let indices: Vec<usize> = mesh.indices().unwrap().iter().collect();
+            assert!(indices.len() >= 300, "build {build}: missing thigh surface");
+            // Bound the contact queries while sampling across the emitted mesh,
+            // including the smooth joins rather than just authored mass poles.
+            let stride = (indices.len() / 3).div_ceil(512);
+            let mut rest = [Vec3::ZERO; JOINTS];
+            for (joint, offset) in [
+                (J::LegL, body.leg_root(1.0)),
+                (J::LegR, body.leg_root(-1.0)),
+                (J::ShinL, body.knee()),
+                (J::ShinR, body.knee()),
+                (J::FootL, body.ankle()),
+                (J::FootR, body.ankle()),
+            ] {
+                rest[joint as usize] = offset;
+            }
+            for posed in [false, true] {
+                let mut rotations = [Quat::IDENTITY; JOINTS];
+                let mut offsets = [Vec3::ZERO; JOINTS];
+                if posed {
+                    rotations[J::LegL as usize] = Quat::from_euler(EulerRot::YXZ, 0.27, 0.8, -0.19);
+                    rotations[J::LegR as usize] =
+                        Quat::from_euler(EulerRot::YXZ, -0.31, -0.45, 0.23);
+                    rotations[J::ShinL as usize] = Quat::from_rotation_x(-0.65);
+                    rotations[J::ShinR as usize] = Quat::from_rotation_x(0.35);
+                    offsets[J::LegL as usize] = Vec3::new(0.01, 0.025, -0.02);
+                    offsets[J::LegR as usize] = Vec3::new(-0.015, -0.01, 0.025);
+                }
+                let limbs = posed_limbs(
+                    [body.thigh, body.shin],
+                    BootShape::fitted(body.build, -0.24),
+                    &rest,
+                    &rotations,
+                    &offsets,
+                );
+                let feet = posed_feet(body.feet, &limbs, &rest, &rotations, &offsets);
+                let proxies = body_proxies(&limbs, &feet);
+                for limb_index in [0, 2] {
+                    let limb = limbs[limb_index];
+                    let start = 6 + limb_index * (CORE_PIECES + 1);
+                    // Other legs and footwear must not conceal a missed thigh.
+                    let own_proxies = &proxies[start..start + CORE_PIECES + 1];
+                    let mut coverage = [0_usize; 3];
+                    for (triangle_index, triangle) in indices
+                        .as_chunks::<3>()
+                        .0
+                        .iter()
+                        .enumerate()
+                        .step_by(stride)
+                    {
+                        let [a, b, c] = [triangle[0], triangle[1], triangle[2]]
+                            .map(|i| Vec3::from_array(positions[i]));
+                        for local in [
+                            a,
+                            b,
+                            c,
+                            (a + b) * 0.5,
+                            (b + c) * 0.5,
+                            (c + a) * 0.5,
+                            (a + b + c) / 3.0,
+                        ] {
+                            let third = ((-local.y / body.thigh.length * 3.0) as usize).min(2);
+                            coverage[third] += 1;
+                            let point = limb.origin + limb.inverse.inverse() * (local * LIMB_SCALE);
+                            assert!(
+                                own_proxies.iter().any(|proxy| {
+                                    proxy.overlaps(point, point)
+                                        && proxy.contact_normal([point; 3]).is_some()
+                                }),
+                                "build {build} posed {posed} limb {limb_index} triangle {triangle_index}: \
+                                 proxy misses emitted point {point:?}, local {local:?}"
+                            );
+                            // Horizontal robe-space rays exercise the actual
+                            // inverse pose and nonuniform Storybook scaling.
+                            for axis in [Vec3::X, Vec3::Z] {
+                                let far = limb_far(limb, point - axis, axis);
+                                assert!(
+                                    far.is_finite() && far >= 1.0 - 0.0002,
+                                    "build {build} posed {posed} limb {limb_index} triangle {triangle_index}: \
+                                     ray {axis:?} reaches {far:.6}, needs 1.0 at {point:?}, local {local:?}"
+                                );
+                            }
+                        }
+                    }
+                    assert!(
+                        coverage.iter().all(|count| *count >= 32),
+                        "build {build} posed {posed} limb {limb_index}: \
+                         insufficient proximal/middle/distal samples {coverage:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn copied_robe_recipe_retains_cloth_and_leg_driven_motion() {
+        let native = Look::with_choice(
+            CreatureModel::Mage,
+            42,
+            Some(Variant {
+                woman: true,
+                build: 1,
+                ..default()
+            }),
+        );
+        let recipe = outfit::Outfit::native(&native);
+        let (_, native_rig, _, native_meshes) = super::super::rogue_tests::spawn_one(&native);
+        let native_mesh = native_meshes
+            .get(&native_rig.robe.as_ref().unwrap().mesh)
+            .unwrap();
+        let positions = |mesh: &Mesh| match mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap() {
+            VertexAttributeValues::Float32x3(values) => values.clone(),
+            _ => panic!("robe positions"),
+        };
+        let colors = |mesh: &Mesh| match mesh.attribute(Mesh::ATTRIBUTE_COLOR).unwrap() {
+            VertexAttributeValues::Float32x4(values) => values.clone(),
+            _ => panic!("robe pigments"),
+        };
+        let mut copied = native.clone();
+        copied.outfit = Some(recipe);
+        let (_, copied_rig, _, copied_meshes) = super::super::rogue_tests::spawn_one(&copied);
+        let copied_robe = copied_rig
+            .robe
+            .as_ref()
+            .expect("explicit recipe lost animated robe");
+        let copied_mesh = copied_meshes.get(&copied_robe.mesh).unwrap();
+        assert_eq!(positions(copied_mesh), positions(native_mesh));
+        assert_eq!(colors(copied_mesh), colors(native_mesh));
+        let mut recipient = Look::with_choice(
+            CreatureModel::Orc,
+            91,
+            Some(Variant {
+                woman: true,
+                build: 2,
+                ..default()
+            }),
+        );
+        recipient.outfit = Some(recipe);
+        let (_, mut rig, _, mut meshes) = super::super::rogue_tests::spawn_one(&recipient);
+        let robe = rig.robe.as_mut().expect("recipient lost animated robe");
+        assert_eq!(
+            colors(meshes.get(&robe.mesh).unwrap()),
+            colors(native_mesh),
+            "robe pigments must not inherit the recipient's palette or fold seed"
+        );
+        let mut rotations = [Quat::IDENTITY; JOINTS];
+        let offsets = [Vec3::ZERO; JOINTS];
+        place(robe, &rig.rest, &rotations, &offsets, &mut meshes);
+        let neutral = positions(meshes.get(&robe.mesh).unwrap());
+        rotations[J::LegL as usize] = Quat::from_rotation_x(0.8);
+        place(robe, &rig.rest, &rotations, &offsets, &mut meshes);
+        let moved = positions(meshes.get(&robe.mesh).unwrap());
+        assert_ne!(moved, neutral, "recipient leg pose must deform its robe");
+        assert_eq!(moved.len(), neutral.len());
+        assert!(moved.iter().all(|p| Vec3::from_array(*p).is_finite()));
+    }
+
+    #[test]
     fn art_contract_motion_changes_only_the_wearers_owned_cloth_mesh() {
         let look = Look::with_choice(
             CreatureModel::Mage,
@@ -61,6 +246,11 @@ mod art_contract_tests {
         );
         let body = HumanoidBody::resolve(&look);
         let boot = BootShape::fitted(body.build, -0.24);
+        let feet = super::super::anatomy::BootLast {
+            build: body.build,
+            heeled: false,
+        }
+        .contacts();
         let mut materials = Assets::<StandardMaterial>::default();
         let mut library = PropLibrary::new(crate::props::PropMaterials::new(&mut materials));
         let mut meshes = Assets::<Mesh>::default();
@@ -74,9 +264,10 @@ mod art_contract_tests {
             &mut library,
             &mut meshes,
             hips,
-            &look,
+            outfit::Outfit::native(&look).robe.unwrap(),
             body,
             boot,
+            feet,
             &[],
         );
         let second = spawn(
@@ -84,9 +275,10 @@ mod art_contract_tests {
             &mut library,
             &mut meshes,
             other_hips,
-            &look,
+            outfit::Outfit::native(&look).robe.unwrap(),
             body,
             boot,
+            feet,
             &[],
         );
         queue.apply(&mut world);
@@ -164,6 +356,16 @@ mod art_contract_tests {
                 assert!(
                     hem > waist,
                     "free hem must not collapse into a body coating"
+                );
+                let heights: Vec<f32> = (0..COLUMNS)
+                    .map(|column| neutral(&look, body, ROWS, column).y)
+                    .collect();
+                let range = heights.iter().copied().fold(f32::NEG_INFINITY, f32::max)
+                    - heights.iter().copied().fold(f32::INFINITY, f32::min);
+                assert!(range > 0.01, "the robe's hem hangs free, not level");
+                assert!(
+                    range < MAX_HEM_RISE,
+                    "its unevenness stays within the hem band"
                 );
             }
         }
@@ -256,6 +458,12 @@ pub(super) struct RobeRig {
     dirty: bool,
 }
 
+impl RobeRig {
+    pub(super) fn invalidate(&mut self) {
+        self.dirty = true;
+    }
+}
+
 fn index(row: usize, column: usize) -> usize {
     row * COLUMNS + column % COLUMNS
 }
@@ -264,27 +472,66 @@ fn ease(t: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
-pub(super) fn belt_radii(build: f32, waist: f32) -> Vec2 {
-    Vec2::new(0.152 * waist + 0.018, 0.121) * build
+pub(super) fn belt_radii(body: HumanoidBody, height: f32) -> Vec2 {
+    let form = geometry::torso_shape(body, None, true);
+    belt_on(body, height, &form)
 }
 
+/// Fit to the same body or outer-shell field that the outfit emits.
+pub(super) fn belt_on(body: HumanoidBody, height: f32, form: &crate::sdf::Sculpt) -> Vec2 {
+    let y = height - body.torso.y;
+    let reach = |out: Vec3| geometry::pelvis_surface(form, y, out).dot(out);
+    let mut radii =
+        Vec2::new(reach(Vec3::X), reach(Vec3::Z).max(reach(Vec3::NEG_Z))) + Vec2::splat(0.006);
+    // The hip cross-section is not a perfect ellipse. Check its diagonals
+    // as well as its axes so the fitted band does not cut into the rear hips.
+    for _ in 0..6 {
+        let gap = (0..48)
+            .map(|k| {
+                let a = k as f32 * TAU / 48.0;
+                form.distance(Vec3::new(a.sin() * radii.x, y, a.cos() * radii.y))
+            })
+            .fold(f32::INFINITY, f32::min);
+        if gap >= 0.003 {
+            break;
+        }
+        radii += Vec2::splat(0.003 - gap);
+    }
+    radii
+}
+
+#[cfg(test)]
 fn neutral(look: &Look, body: HumanoidBody, row: usize, column: usize) -> Vec3 {
-    let (build, hips, waist) = (body.build, body.hips_width, body.waist);
+    neutral_fitted(look.v.shade, body, belt_radii(body, WAIST_TOP), row, column)
+}
+
+fn neutral_fitted(
+    fold_seed: u8,
+    body: HumanoidBody,
+    belt: Vec2,
+    row: usize,
+    column: usize,
+) -> Vec3 {
+    let (build, hips) = (body.build, body.hips_width);
     let t = row.saturating_sub(YOKE_ROWS) as f32 / LOWER_ROWS as f32;
     let angle = column as f32 / COLUMNS as f32 * TAU;
     let top = Vec2::new(0.18 * build * hips, 0.135 * build);
     let bottom = Vec2::new(0.2458 * build * hips, 0.2458 * 0.74 * build);
     let r = if row < YOKE_ROWS {
-        (belt_radii(build, waist) - Vec2::splat(0.003)).lerp(top, row as f32 / YOKE_ROWS as f32)
+        (belt - Vec2::splat(0.003)).lerp(top, row as f32 / YOKE_ROWS as f32)
     } else {
         top.lerp(bottom, ease(t))
     };
-    let phase = rand(u64::from(look.v.shade) + 73, 0) * 0.4;
-    let fold = (angle * 12.0 + phase).cos() * 0.007 * t.powf(1.2);
+    let phase = rand(u64::from(fold_seed) + 73, 0) * 0.4;
+    // A free hem: folds deepen toward the edge and the cloth hangs lower
+    // where each fold swings out, as on the draped skirts.
+    let wave = (angle * 12.0 + phase).cos();
+    let fold = wave * (0.007 * t.powf(1.2) + 0.01 * t.powi(3));
+    let drop = 0.013 * (0.5 + 0.5 * wave) * ease((t - 0.6) / 0.4);
     let y = if row < YOKE_ROWS {
         WAIST_TOP + (TOP - WAIST_TOP) * row as f32 / YOKE_ROWS as f32
     } else {
-        TOP + (HEM - TOP) * t
+        TOP + (HEM - TOP) * t - drop
     };
     let mut p = Vec3::new(angle.sin() * (r.x + fold), y, angle.cos() * (r.y + fold));
     if row > 0 && row <= YOKE_ROWS {
@@ -414,19 +661,30 @@ fn limb_far(limb: Limb, origin: Vec3, direction: Vec3) -> f32 {
     // The local smooth union can add at most .0075 at its capsule/belly join.
     // The clearance acts locally; it never expands an entire ring or garment.
     let margin = 0.0075;
-    let mut far = capsule_far(
-        o,
-        d,
-        s.length,
-        s.radius_top + margin,
-        s.radius_bottom + margin,
-    )
-    .max(ellipsoid_far(
-        o,
-        d,
-        s.belly_center,
-        s.belly + Vec3::splat(margin),
-    ));
+    let mut far = if let Some(contour) = s.contour {
+        contour.masses.iter().fold(f32::NEG_INFINITY, |far, mass| {
+            far.max(ellipsoid_far(
+                o,
+                d,
+                mass.center,
+                mass.level_radii(contour.margin()),
+            ))
+        })
+    } else {
+        capsule_far(
+            o,
+            d,
+            s.length,
+            s.radius_top + margin,
+            s.radius_bottom + margin,
+        )
+        .max(ellipsoid_far(
+            o,
+            d,
+            s.belly_center,
+            s.belly + Vec3::splat(margin),
+        ))
+    };
     if let Some(boot) = limb.boot {
         let half_cell = (limb.inverse * (Vec3::Y * ROW_HEIGHT * 0.5)) / scale;
         far = far.max(cuff_far(o, d, boot, half_cell));
@@ -551,6 +809,10 @@ fn body_proxies(limbs: &[Limb; 4], feet: &[Foot; 2]) -> [BodyProxy; CONTACT_PROX
             let limb = limbs[i / (CORE_PIECES + 1)];
             let piece = i % (CORE_PIECES + 1);
             let shape = limb.shape;
+            if let Some(contour) = shape.contour {
+                let mass = contour.masses[piece];
+                return BodyProxy::ellipsoid(limb, mass.center, mass.level_radii(contour.margin()));
+            }
             let margin = 0.0075;
             if piece == CORE_PIECES {
                 // This bounds the positive margin level of the approximate
@@ -1280,9 +1542,10 @@ pub(super) fn spawn(
     library: &mut PropLibrary,
     meshes: &mut Assets<Mesh>,
     hips: Entity,
-    look: &Look,
+    recipe: outfit::FittedRobe,
     body: HumanoidBody,
     boot: BootShape,
+    feet: [(Vec3, Vec3); 3],
     sashes: &[SashTail],
 ) -> RobeRig {
     // One tiny shared recipe supplies the existing matte material. Dynamic
@@ -1297,8 +1560,9 @@ pub(super) fn spawn(
         .1
         .clone();
     let shapes = [body.thigh, body.shin];
+    let belt = belt_radii(body, WAIST_TOP);
     let rest: Box<[Vec3; GRID]> = Box::new(std::array::from_fn(|i| {
-        neutral(look, body, i / COLUMNS, i % COLUMNS)
+        neutral_fitted(recipe.fold_seed, body, belt, i / COLUMNS, i % COLUMNS)
     }));
     let directions: Box<[Vec3; GRID]> = Box::new(std::array::from_fn(|i| {
         rest[i].with_y(0.0).normalize_or(Vec3::Z)
@@ -1313,13 +1577,13 @@ pub(super) fn spawn(
     let mut colors = vec![[0.0; 4]; vertices];
     for i in 0..GRID {
         let angle = (i % COLUMNS) as f32 / COLUMNS as f32 * TAU;
-        let phase = rand(u64::from(look.v.shade) + 73, 0) * 0.4;
+        let phase = rand(u64::from(recipe.fold_seed) + 73, 0) * 0.4;
         let shade = 0.97 + 0.03 * (angle * 12.0 + phase).cos();
-        colors[i] = (look.cloth * shade).extend(1.0).to_array();
-        colors[GRID + i] = (look.cloth * shade * 0.70).extend(1.0).to_array();
+        colors[i] = (recipe.color * shade).extend(1.0).to_array();
+        colors[GRID + i] = (recipe.color * shade * 0.70).extend(1.0).to_array();
     }
     for color in &mut colors[GRID * 2..BODY_VERTICES] {
-        *color = look.trim.extend(1.0).to_array();
+        *color = recipe.trim.extend(1.0).to_array();
     }
     for (tail, recipe) in sashes.iter().enumerate() {
         let start = BODY_VERTICES + tail * SASH_VERTICES;
@@ -1426,7 +1690,7 @@ pub(super) fn spawn(
         mesh,
         shapes,
         boot,
-        feet: body.feet,
+        feet,
         rest,
         directions,
         points,

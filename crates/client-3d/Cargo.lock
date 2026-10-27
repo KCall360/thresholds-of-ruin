@@ -4379,6 +4379,7 @@ name = "tor-client-3d"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "serde",
  "serde_json",
  "tokio",
  "tor-client-3d-model",

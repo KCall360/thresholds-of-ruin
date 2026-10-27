@@ -1,0 +1,318 @@
+{
+  "version": 1,
+  "hz": 50,
+  "viewport": [
+    640,
+    480
+  ],
+  "actors": [
+    {
+      "id": "duelist",
+      "model": "Human",
+      "seed": 7,
+      "body": {
+        "woman": true,
+        "hair": 0,
+        "bust_lean": 1
+      },
+      "outfit": "leotard",
+      "equipment": [
+        "breastplate"
+      ],
+      "position": [
+        -4.5,
+        -0.5,
+        0
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "princess",
+      "model": "Nymph",
+      "seed": 7,
+      "body": {
+        "woman": true,
+        "hair": 0,
+        "bust_lean": 1
+      },
+      "outfit": "royal-princess",
+      "equipment": [
+        "helm"
+      ],
+      "position": [
+        -1.5,
+        -0.5,
+        0
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "mage",
+      "model": "Mage",
+      "seed": 7,
+      "body": {
+        "woman": false,
+        "hair": 0,
+        "bust_lean": 1
+      },
+      "outfit": "native",
+      "equipment": [
+        "cloak",
+        "helm"
+      ],
+      "position": [
+        1.5,
+        -0.5,
+        0
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "red-mage",
+      "model": "RedMage",
+      "seed": 7,
+      "body": {
+        "woman": true,
+        "hair": 0,
+        "bust_lean": 1
+      },
+      "outfit": "native",
+      "equipment": [
+        "boots"
+      ],
+      "position": [
+        4.5,
+        -0.5,
+        0
+      ],
+      "yaw": 0
+    }
+  ],
+  "cameras": [
+    {
+      "id": "duelist",
+      "position": [
+        -4.5,
+        0.7,
+        2.8
+      ],
+      "target": [
+        -4.5,
+        0.25,
+        0
+      ],
+      "fov_degrees": 42
+    },
+    {
+      "id": "princess",
+      "position": [
+        -1.5,
+        0.7,
+        2.8
+      ],
+      "target": [
+        -1.5,
+        0.25,
+        0
+      ],
+      "fov_degrees": 42
+    },
+    {
+      "id": "mage",
+      "position": [
+        1.5,
+        0.7,
+        2.8
+      ],
+      "target": [
+        1.5,
+        0.25,
+        0
+      ],
+      "fov_degrees": 42
+    },
+    {
+      "id": "red-mage",
+      "position": [
+        4.5,
+        0.7,
+        2.8
+      ],
+      "target": [
+        4.5,
+        0.25,
+        0
+      ],
+      "fov_degrees": 42
+    }
+  ],
+  "events": [
+    {
+      "tick": 1,
+      "actor": "duelist",
+      "operation": {
+        "type": "action",
+        "name": "jump"
+      }
+    },
+    {
+      "tick": 1,
+      "actor": "princess",
+      "operation": {
+        "type": "action",
+        "name": "jump"
+      }
+    },
+    {
+      "tick": 1,
+      "actor": "mage",
+      "operation": {
+        "type": "action",
+        "name": "jump"
+      }
+    },
+    {
+      "tick": 1,
+      "actor": "red-mage",
+      "operation": {
+        "type": "action",
+        "name": "jump"
+      }
+    },
+    {
+      "tick": 8,
+      "actor": "duelist",
+      "operation": {
+        "type": "equipment",
+        "items": []
+      }
+    },
+    {
+      "tick": 8,
+      "actor": "princess",
+      "operation": {
+        "type": "equipment",
+        "items": []
+      }
+    },
+    {
+      "tick": 8,
+      "actor": "mage",
+      "operation": {
+        "type": "equipment",
+        "items": []
+      }
+    },
+    {
+      "tick": 8,
+      "actor": "red-mage",
+      "operation": {
+        "type": "equipment",
+        "items": []
+      }
+    },
+    {
+      "tick": 16,
+      "actor": "duelist",
+      "operation": {
+        "type": "equipment",
+        "items": [
+          "breastplate"
+        ]
+      }
+    },
+    {
+      "tick": 16,
+      "actor": "princess",
+      "operation": {
+        "type": "equipment",
+        "items": [
+          "helm"
+        ]
+      }
+    },
+    {
+      "tick": 16,
+      "actor": "mage",
+      "operation": {
+        "type": "equipment",
+        "items": [
+          "cloak",
+          "helm"
+        ]
+      }
+    },
+    {
+      "tick": 16,
+      "actor": "red-mage",
+      "operation": {
+        "type": "equipment",
+        "items": [
+          "boots"
+        ]
+      }
+    }
+  ],
+  "captures": [
+    {
+      "tick": 0,
+      "name": "00-duelist",
+      "camera": "duelist"
+    },
+    {
+      "tick": 0,
+      "name": "00-princess",
+      "camera": "princess"
+    },
+    {
+      "tick": 0,
+      "name": "00-mage",
+      "camera": "mage"
+    },
+    {
+      "tick": 0,
+      "name": "00-red-mage",
+      "camera": "red-mage"
+    },
+    {
+      "tick": 10,
+      "name": "10-duelist",
+      "camera": "duelist"
+    },
+    {
+      "tick": 10,
+      "name": "10-princess",
+      "camera": "princess"
+    },
+    {
+      "tick": 10,
+      "name": "10-mage",
+      "camera": "mage"
+    },
+    {
+      "tick": 10,
+      "name": "10-red-mage",
+      "camera": "red-mage"
+    },
+    {
+      "tick": 20,
+      "name": "20-duelist",
+      "camera": "duelist"
+    },
+    {
+      "tick": 20,
+      "name": "20-princess",
+      "camera": "princess"
+    },
+    {
+      "tick": 20,
+      "name": "20-mage",
+      "camera": "mage"
+    },
+    {
+      "tick": 20,
+      "name": "20-red-mage",
+      "camera": "red-mage"
+    }
+  ]
+}

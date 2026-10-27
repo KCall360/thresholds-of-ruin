@@ -35,6 +35,7 @@ enum Ground {
     Door,
     Up,
     Down,
+    Trap,
 }
 
 fn terrain_kind(cell: &tor_client_3d_model::Terrain<'_>, dz: i32) -> Option<Ground> {
@@ -47,6 +48,8 @@ fn terrain_kind(cell: &tor_client_3d_model::Terrain<'_>, dz: i32) -> Option<Grou
         }
     } else if cell.door.is_some() {
         Ground::Door
+    } else if cell.trap.is_some() && dz == 0 {
+        Ground::Trap
     } else if cell.wall && dz == 0 {
         Ground::Wall
     } else if !cell.wall && dz == 0 {
@@ -195,6 +198,8 @@ pub(crate) fn draw(
             Ground::Door => [0.86, 0.6, 0.24],
             Ground::Up => [0.36, 0.84, 0.86],
             Ground::Down => [0.4, 0.55, 0.95],
+            // Orange, as the ASCII map marks a discovered trap.
+            Ground::Trap => [0.98, 0.5, 0.16],
         };
         canvas.cell(dx, dy, color.map(|c| c * lit), 0.92);
     }
@@ -327,6 +332,25 @@ mod cosmetic_tests {
     use tor_protocol::{ItemClass, ObjectPresentation, ObjectPresentationKind, Position};
 
     #[test]
+    fn a_discovered_trap_is_marked_on_its_level_only() {
+        let trap = Terrain {
+            object_presentation: None,
+            object_model: None,
+            key: "trap",
+            position: Position { x: 1, y: 0, z: 0 },
+            wall: false,
+            stairs_up: false,
+            stairs_down: false,
+            door: None,
+            trap: Some(None),
+            seen: true,
+            lit: true,
+        };
+        assert_eq!(terrain_kind(&trap, 0), Some(Ground::Trap));
+        assert_eq!(terrain_kind(&trap, 1), None);
+    }
+
+    #[test]
     fn sampled_stair_colors_leave_factual_geometry_and_navigation_unchanged() {
         let mut cell = Terrain {
             object_presentation: None,
@@ -337,6 +361,7 @@ mod cosmetic_tests {
             stairs_up: true,
             stairs_down: false,
             door: None,
+            trap: None,
             seen: true,
             lit: true,
         };

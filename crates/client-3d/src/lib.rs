@@ -4,6 +4,8 @@
 //! The server describes cells in an observer frame that moves with the
 //! character. Matching cell keys between views recovers that motion, so the
 //! window keeps one steady world and the camera glides after the player.
+// The frame diagnostics report is one large `serde_json::json!` object.
+#![recursion_limit = "256"]
 mod autoplay;
 mod bestiary;
 mod cave;
@@ -16,11 +18,16 @@ mod interact;
 mod launch;
 mod lighting;
 mod minimap;
+#[doc(hidden)]
+pub mod model_benchmark;
 mod net;
+mod pack;
 mod picking;
 mod props;
 #[cfg(test)]
 mod render_contracts;
+mod review_clock;
+mod review_script;
 mod sdf;
 mod showcase;
 #[cfg(test)]
@@ -28,6 +35,7 @@ mod test_support;
 use diagnostics::capture;
 mod camera;
 mod scene;
+mod screen;
 use camera::{follow_actors, input, rig_camera, torch_flicker, update_cave_params};
 use scene::{animate_props, react, receive, stand, studio_lights, tend_the_dead};
 
@@ -61,6 +69,13 @@ const HELP: &str = "WASD/arrows: move   Q/E: turn   wheel: zoom   click: act   G
 X: door   I: pack   Space: wait   R/F: up/down   M: map   Tab: control   Esc: close/quit";
 
 pub fn run() -> Result<(), Error> {
+    let arguments: Vec<String> = std::env::args().skip(1).collect();
+    if arguments.iter().any(|arg| arg == "--live-playlist") {
+        return review_script::live::cli(&arguments);
+    }
+    if arguments.iter().any(|arg| arg == "--scene-script") {
+        return review_script::cli(&arguments);
+    }
     let mut connect: Option<SocketAddr> = None;
     let mut actor = ActorId(1);
     let mut observe = false;
@@ -101,6 +116,11 @@ pub fn run() -> Result<(), Error> {
             }
             "--demo" => diagnostics.demo = true,
             "--quit-after" => diagnostics.quit_after = Some(value()?.parse()?),
+            "--review-step-hz" => {
+                let hz = value()?.parse()?;
+                review_clock::ReviewStep::new(hz)?;
+                diagnostics.review_step_hz = Some(hz);
+            }
             "--capture-every" => diagnostics.capture_every = Some(value()?.parse()?),
             "--distance" => diagnostics.distance = Some(value()?.parse()?),
             "--azimuth" => {
@@ -109,6 +129,13 @@ pub fn run() -> Result<(), Error> {
                     return Err("--azimuth must be a finite number of degrees".into());
                 }
                 diagnostics.azimuth = Some(degrees.rem_euclid(360.0).to_radians());
+            }
+            "--turn" => {
+                let degrees: f32 = value()?.parse()?;
+                if !degrees.is_finite() {
+                    return Err("--turn must be a finite number of degrees".into());
+                }
+                diagnostics.turn = degrees.to_radians();
             }
             "--gallery" => gallery = true,
             "--bestiary" => bestiary = true,
@@ -138,6 +165,58 @@ pub fn run() -> Result<(), Error> {
                 bestiary = true;
                 diagnostics.lineups = true;
             }
+            "--outfit" => {
+                // Dress every humanoid in the bestiary from the wardrobe.
+                let name = value()?;
+                diagnostics.outfit = creatures::Wardrobe::parse(&name)
+                    .ok_or_else(|| format!("unknown outfit {name}"))?;
+            }
+            "--wear" => {
+                diagnostics.equipment.select(&value()?)?;
+            }
+            "--wardrobe-cycle" => {
+                // Redress the bestiary's humanoids every so many seconds.
+                diagnostics.wardrobe_cycle = Some(value()?.parse()?);
+            }
+            "--family" => {
+                diagnostics.families = value()?
+                    .split(',')
+                    .map(|name| name.trim().to_string())
+                    .filter(|name| !name.is_empty())
+                    .collect();
+            }
+            "--jump" => {
+                bestiary = true;
+                diagnostics.lineups = true;
+                diagnostics.jump = true;
+            }
+            "--bust-study" => {
+                bestiary = true;
+                diagnostics.lineups = true;
+                diagnostics.women = true;
+                diagnostics.bust_study = Some(match value()?.as_str() {
+                    "contours" => BustStudy::Contours,
+                    "volumes" => BustStudy::Volumes,
+                    other => return Err(format!("unknown bust study {other:?}").into()),
+                });
+            }
+            "--antic" => {
+                bestiary = true;
+                diagnostics.lineups = true;
+                diagnostics.lively = true;
+                diagnostics.bored = true;
+                diagnostics.antic = Some(value()?.parse()?);
+            }
+            "--lively" => {
+                bestiary = true;
+                diagnostics.lineups = true;
+                diagnostics.lively = true;
+            }
+            "--women" => {
+                bestiary = true;
+                diagnostics.lineups = true;
+                diagnostics.women = true;
+            }
             "--fallen-lineups" => {
                 bestiary = true;
                 diagnostics.lineups = true;
@@ -164,7 +243,8 @@ pub fn run() -> Result<(), Error> {
                     "tor-client-3d [--scenario DIR] [--save FILE | --save-root DIR] [--seed N] [--server-bin EXE]\n\
                      tor-client-3d --connect 127.0.0.1:PORT [--actor 1] [--observe]  (token from TOR_SERVER_TOKEN)\n\
                      Offline: --bestiary or --gallery [--azimuth DEGREES]\n\
-                     Model review: --lineups or --fallen-lineups [--capture DIR]\n\
+                     Model review: --lineups [--women] [--jump] [--lively] [--antic N] [--turn DEGREES] [--bust-study contours|volumes] or --fallen-lineups [--capture DIR]\n\
+                     Wardrobe: --outfit NAME [--wear helm] [--wear boots] [--wear cloak] [--wear breastplate] [--wardrobe-cycle SECS]\n\
                      Motion review: --travel-study [--capture DIR --capture-every SECS]\n\
                      Without --connect it starts a private server with a fresh save.\n{HELP}"
                 );
@@ -191,11 +271,22 @@ pub fn run() -> Result<(), Error> {
                 .into(),
         );
     }
+    if !diagnostics.equipment.is_empty() && (connect.is_some() || gallery || !bestiary) {
+        return Err(
+            "--wear is available only in the offline bestiary; live equipment is server-owned"
+                .into(),
+        );
+    }
     if creatures::PLAYER_LOOK.get().is_some() && (gallery || !bestiary) {
         return Err(
             "--appearance is available only with --bestiary; live appearance is server-owned"
                 .into(),
         );
+    }
+    if diagnostics.review_step_hz.is_some()
+        && (connect.is_some() || gallery || !diagnostics.lineups)
+    {
+        return Err("--review-step-hz requires offline --lineups".into());
     }
     if gallery {
         gallery::run(diagnostics);
@@ -260,7 +351,14 @@ pub fn run() -> Result<(), Error> {
     .insert_resource(autoplay::Autoplay::new(autoplay, hunt))
     .add_systems(
         Startup,
-        (setup, interact::setup, minimap::setup, cursor::setup).chain(),
+        (
+            setup,
+            interact::setup,
+            screen::setup,
+            minimap::setup,
+            cursor::setup,
+        )
+            .chain(),
     )
     .add_systems(
         Update,
@@ -268,6 +366,7 @@ pub fn run() -> Result<(), Error> {
             receive,
             react,
             interact::keys,
+            (screen::typing, screen::show),
             interact::panel,
             interact::panel_buttons,
             input,
@@ -279,6 +378,7 @@ pub fn run() -> Result<(), Error> {
             update_cave_params,
             follow_actors,
             creatures::animate,
+            creatures::soften,
             creatures::snuff,
             creatures::effects,
             tend_the_dead,
@@ -324,6 +424,15 @@ pub fn run() -> Result<(), Error> {
 
 const FOG: Color = Color::srgb(0.02, 0.022, 0.035);
 
+/// Which aspect of the chest a controlled line-up varies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum BustStudy {
+    /// Each contour family in turn, at her kind's typical volume.
+    Contours,
+    /// Each volume step in turn, in her kind's typical contour.
+    Volumes,
+}
+
 /// Process-test aids: periodic screenshots and a wandering character.
 #[derive(Resource, Default)]
 pub(crate) struct Diagnostics {
@@ -333,8 +442,12 @@ pub(crate) struct Diagnostics {
     distance: Option<f32>,
     /// Offline camera orbit, in radians relative to the standard showcase view.
     azimuth: Option<f32>,
+    /// Line-up individuals turned from their usual facing, in radians:
+    /// a quarter turn shows each in profile.
+    turn: f32,
     /// Seconds between screenshots with --capture.
     capture_every: Option<f32>,
+    review_step_hz: Option<u32>,
     /// In the bestiary, go straight to the close-ups.
     portraits: bool,
     /// Let offline bestiary shaders warm up before starting its capture clock.
@@ -349,6 +462,25 @@ pub(crate) struct Diagnostics {
     lineups: bool,
     /// Use the same generated lineup individuals in their settled death poses.
     fallen_lineups: bool,
+    /// Line up only women among people, for studying their figures.
+    women: bool,
+    /// Line-up individuals jump on the spot in turn, for studying motion.
+    jump: bool,
+    /// Line-up individuals keep their idle stances and fidgets.
+    lively: bool,
+    /// Line-up individuals all play this antic from the start, held long
+    /// enough to see it through.
+    antic: Option<u32>,
+    /// Line up women alike but for one aspect of their chest.
+    bust_study: Option<BustStudy>,
+    /// Limit line-ups to these creatures, by their bestiary names.
+    families: Vec<String>,
+    /// What the bestiary's humanoids wear at first.
+    outfit: creatures::Wardrobe,
+    /// Independent visual equipment for offline composition review.
+    equipment: creatures::Equipment,
+    /// Redress them in the next outfit every so many seconds.
+    wardrobe_cycle: Option<f32>,
     /// Offline travel, fast gait transitions, and interrupted contact recovery.
     travel_study: bool,
     shots: u32,
@@ -399,8 +531,8 @@ struct Game {
     cave: CaveWorld,
     chunks: HashMap<IVec3, Entity>,
     door_leaves: HashMap<IVec3, Entity>,
-    /// The equipped weapon shown on the player: recipe, hand, model.
-    held: Option<(ItemModel, Entity, Entity)>,
+    /// The weapon shown in each figure's hand: hand joint to recipe and model.
+    held: HashMap<Entity, (ItemModel, Entity)>,
     /// Counts views, so panels know when to refresh.
     view_serial: u64,
     /// The weapon hand of each figure, for showing what it holds.
@@ -418,6 +550,17 @@ struct Game {
     log: VecDeque<String>,
     last_narration: Vec<String>,
     status: String,
+    /// A device or ability waiting for what it is aimed at.
+    aiming: Option<Aim>,
+    /// A projectile choice in progress, as the session last presented it.
+    projectile: Option<net::ProjectilePrompt>,
+    /// The full screen holding the keyboard, if any; the advancement pages
+    /// it shows and the line being typed.
+    screen: Option<screen::Screen>,
+    /// The detection charts as the session last presented them.
+    charts: Vec<String>,
+    advancement: Vec<String>,
+    typed: String,
     busy: bool,
     fatal: bool,
     since_send: f32,
@@ -450,6 +593,56 @@ impl Game {
     }
 }
 
+/// What a chosen device or ability still needs before it is sent.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Aim {
+    /// A directional device: the next movement input is its direction.
+    Device(tor_protocol::ItemTarget),
+    /// An ability: a direction for steps and rays, a clicked creature otherwise.
+    Ability {
+        id: String,
+        target: tor_protocol::AbilityTargetKind,
+    },
+    /// A chosen projectile delivery: the next movement input fires it.
+    Projectile,
+}
+
+impl Aim {
+    /// The command a movement input completes, if this aim takes directions.
+    fn along(&self, direction: tor_protocol::Direction) -> Option<Cmd> {
+        use tor_protocol::AbilityTargetKind as Kind;
+        match self {
+            Aim::Device(item) => Some(Cmd::Zap(*item, direction)),
+            Aim::Projectile => Some(Cmd::Projectile(tor_client_3d_model::ProjectileStep::Fire(
+                direction,
+            ))),
+            Aim::Ability {
+                id,
+                target: Kind::SelfStep | Kind::DirectionalRay,
+            } => Some(Cmd::Ability(
+                id.clone(),
+                tor_client_3d_model::AbilityTarget::Direction(direction),
+            )),
+            Aim::Ability { .. } => None,
+        }
+    }
+
+    /// The command a clicked creature completes, if this aim takes one.
+    fn at(&self, actor: tor_protocol::ActorTarget) -> Option<Cmd> {
+        use tor_protocol::AbilityTargetKind as Kind;
+        match self {
+            Aim::Ability {
+                id,
+                target: Kind::Actor | Kind::SelfOrAlly | Kind::SelfOnly,
+            } => Some(Cmd::Ability(
+                id.clone(),
+                tor_client_3d_model::AbilityTarget::Actor(actor),
+            )),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Resource)]
 struct CameraRig {
     /// Compass eighths the camera faces; unbounded so turning stays smooth.
@@ -470,12 +663,14 @@ impl Default for CameraRig {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum CellLook {
     Object(ItemModel),
     Door,
     StairsUp,
     StairsDown,
+    /// A discovered trap, by family once known.
+    Trap(Option<tor_protocol::TrapFamily>),
 }
 
 #[derive(Resource)]
@@ -491,6 +686,8 @@ struct ActorBody {
     appearance_seed: Option<tor_protocol::AppearanceSeed>,
     appearance_key: String,
     model: CreatureModel,
+    /// Disclosed equipment it was built wearing; a change rebuilds it.
+    wearing: tor_client_3d_model::Wearing,
     hostile: bool,
     goal: Vec3,
     label: Entity,
@@ -746,14 +943,20 @@ fn hud(
         text.0 = lines.into_iter().rev().collect::<Vec<_>>().join("\n");
     }
     if let Ok(mut text) = status.single_mut() {
+        let mut rows = Vec::new();
         let mut parts = Vec::new();
         if let Some(view) = &game.view {
-            match view.hp {
-                Some((0, _)) => parts.push("You have fallen.".into()),
-                Some((hp, max)) => parts.push(format!("HP {hp}/{max}")),
-                None => {}
+            // The shared status rows, as the ASCII client shows them.
+            rows.extend(view.status.iter().filter(|row| !row.is_empty()).cloned());
+            if view.hp.is_some_and(|(hp, _)| hp == 0) {
+                parts.push("You have fallen.".into());
             }
-            parts.push(format!("tick {}", view.tick));
+            if view.can_resume {
+                parts.push("F8 resumes your work".into());
+            }
+            if view.can_cancel {
+                parts.push("F9 cancels it".into());
+            }
             parts.push(
                 if view.has_control {
                     "in control"
@@ -778,7 +981,11 @@ fn hud(
         if !game.status.is_empty() {
             parts.push(game.status.clone());
         }
-        text.0 = parts.join("   |   ");
+        rows.push(parts.join("   |   "));
+        text.0 = rows.join(
+            "
+",
+        );
     }
 }
 

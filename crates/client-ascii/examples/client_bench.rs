@@ -138,6 +138,7 @@ fn main() {
                         view.observation.visible_actors = if open {
                             vec![ActorView {
                                 appearance_seed: None,
+                                worn: Vec::new(),
                                 asset: None,
                                 id: ActorTarget::from_digest([2; 32]),
                                 name: "figure".into(),

@@ -1,0 +1,147 @@
+{
+  "version": 1,
+  "hz": 50,
+  "viewport": [
+    960,
+    720
+  ],
+  "actors": [
+    {
+      "id": "duelist",
+      "model": "Human",
+      "seed": 7,
+      "body": {
+        "woman": true,
+        "bust": 2,
+        "bust_lean": 1
+      },
+      "outfit": "sylvan-duelist",
+      "equipment": [],
+      "position": [
+        -0.6,
+        -0.5,
+        0
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "mage",
+      "model": "Mage",
+      "seed": 19,
+      "body": {
+        "woman": true
+      },
+      "outfit": "native",
+      "equipment": [],
+      "position": [
+        0.6,
+        -0.5,
+        0
+      ],
+      "yaw": 0
+    }
+  ],
+  "cameras": [
+    {
+      "id": "front",
+      "position": [
+        0,
+        1.0,
+        4
+      ],
+      "target": [
+        0,
+        0.2,
+        0
+      ],
+      "fov_degrees": 40
+    },
+    {
+      "id": "side",
+      "position": [
+        4,
+        1.0,
+        0
+      ],
+      "target": [
+        0,
+        0.2,
+        0
+      ],
+      "fov_degrees": 40
+    },
+    {
+      "id": "back",
+      "position": [
+        0,
+        1.0,
+        -4
+      ],
+      "target": [
+        0,
+        0.2,
+        0
+      ],
+      "fov_degrees": 40
+    }
+  ],
+  "events": [
+    {
+      "tick": 1,
+      "actor": "duelist",
+      "operation": {
+        "type": "action",
+        "name": "jump"
+      }
+    },
+    {
+      "tick": 1,
+      "actor": "mage",
+      "operation": {
+        "type": "velocity",
+        "value": [
+          0,
+          0,
+          0.5
+        ]
+      }
+    },
+    {
+      "tick": 20,
+      "actor": "duelist",
+      "operation": {
+        "type": "equipment",
+        "items": [
+          "breastplate"
+        ]
+      }
+    }
+  ],
+  "captures": [
+    {
+      "tick": 0,
+      "name": "rest-front",
+      "camera": "front"
+    },
+    {
+      "tick": 0,
+      "name": "rest-side",
+      "camera": "side"
+    },
+    {
+      "tick": 0,
+      "name": "rest-back",
+      "camera": "back"
+    },
+    {
+      "tick": 15,
+      "name": "moving",
+      "camera": "front"
+    },
+    {
+      "tick": 25,
+      "name": "armored",
+      "camera": "front"
+    }
+  ]
+}

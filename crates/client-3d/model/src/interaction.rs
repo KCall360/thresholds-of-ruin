@@ -1,6 +1,6 @@
 //! Interpret disclosed cells and interaction targets without a renderer.
 use crate::{Actor, Cmd, GroundItem, View};
-use tor_protocol::{ActorTarget, Direction, DoorTarget, ItemTarget, Position};
+use tor_protocol::{ActorTarget, Direction, DoorTarget, ItemTarget, Position, TrapTarget};
 
 /// What a click on the hovered cell would do.
 #[derive(Clone, Debug)]
@@ -14,6 +14,8 @@ pub enum Intent {
     Door(DoorTarget, bool),
     Climb(Direction),
     Travel(String),
+    /// Study a reachable trap whose family is not yet known.
+    ExamineTrap(TrapTarget),
 }
 
 impl Intent {
@@ -25,6 +27,7 @@ impl Intent {
             Intent::Take(item) => Cmd::Take(item),
             Intent::Door(door, open) => Cmd::Door(door, open),
             Intent::Travel(key) => Cmd::Travel(key),
+            Intent::ExamineTrap(trap) => Cmd::ExamineTrap(trap),
             Intent::Fetch(_) | Intent::Charge(_) => return None,
         })
     }
@@ -40,6 +43,7 @@ impl Intent {
             Intent::Climb(Direction::Up) => "Click to climb",
             Intent::Climb(_) => "Click to descend",
             Intent::Travel(_) => "Click to travel here",
+            Intent::ExamineTrap(_) => "Click to study the trap",
         }
     }
 }
@@ -121,6 +125,11 @@ pub fn describe(view: &View, at: Position) -> (String, String, Option<Intent>) {
                 })
         });
     let floor = known_cells(view).find(|c| c.position == at);
+    let trap = view
+        .visible
+        .iter()
+        .filter(|c| c.position == at)
+        .find_map(|c| c.trap.as_ref());
     if let Some(creature) = creature {
         return describe_actor(view, creature);
     }
@@ -135,6 +144,18 @@ pub fn describe(view: &View, at: Position) -> (String, String, Option<Intent>) {
             capitalise(name)
         };
         return (format!("{name} ({state})"), description.to_owned(), intent);
+    }
+    if let Some(trap) = trap {
+        // Never offer travel onto a known trap; an unknown one can be studied.
+        let name = trap.family.map_or("Trap", tor_protocol::TrapFamily::name);
+        let intent =
+            (trap.reachable && trap.family.is_none()).then_some(Intent::ExamineTrap(trap.id));
+        let note = if trap.family.is_none() {
+            "A trap you have found but not yet studied."
+        } else {
+            ""
+        };
+        return (capitalise(name), note.into(), intent);
     }
     match floor {
         Some(cell) if cell.stairs_up || cell.stairs_down => {
@@ -231,7 +252,21 @@ fn describe_actor(view: &View, creature: &Actor) -> (String, String, Option<Inte
     } else {
         capitalise(&creature.name)
     };
-    (name, creature.description.clone(), intent)
+    let mut description = creature.description.clone();
+    let mut clauses = Vec::new();
+    if !creature.attire.wears.is_empty() {
+        clauses.push(format!("wearing {}", creature.attire.wears.join(" and ")));
+    }
+    if !creature.attire.holds.is_empty() {
+        clauses.push(format!("holding {}", creature.attire.holds.join(" and ")));
+    }
+    if !clauses.is_empty() {
+        if !description.is_empty() {
+            description.push(' ');
+        }
+        description.push_str(&capitalise(&format!("{}.", clauses.join(", "))));
+    }
+    (name, description, intent)
 }
 
 fn describe_items(items: &[&GroundItem]) -> (String, String, Option<Intent>) {

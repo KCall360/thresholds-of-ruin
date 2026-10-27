@@ -30,6 +30,19 @@ pub(super) fn receive(
     for event in events {
         match event {
             NetEvent::Ready => game.busy = false,
+            NetEvent::Advancement(lines) => game.advancement = lines,
+            NetEvent::Charts(lines) => game.charts = lines,
+            NetEvent::Projectile(prompt) => {
+                // A chosen delivery waits for its direction like any aim.
+                let aiming = prompt.as_ref().is_some_and(|p| p.aiming);
+                if aiming {
+                    game.aiming = Some(crate::Aim::Projectile);
+                    game.status = "Choose a direction to fire. Esc cancels.".into();
+                } else if game.aiming == Some(crate::Aim::Projectile) {
+                    game.aiming = None;
+                }
+                game.projectile = prompt;
+            }
             NetEvent::Status(text) => {
                 if std::env::var_os("TOR_3D_DEBUG").is_some() {
                     eprintln!("status: {text}");
@@ -192,7 +205,7 @@ fn align(commands: &mut Commands, game: &mut Game, view: &View) {
     game.cave = CaveWorld::default();
     game.door_leaves.clear();
     game.hands.clear();
-    game.held = None;
+    game.held.clear();
     game.pending.clear();
     game.last_revision = None;
     game.snap_camera = true;
@@ -205,8 +218,10 @@ fn look(cell: &tor_client_3d_model::Terrain<'_>) -> CellLook {
         CellLook::Object(model)
     } else if cell.stairs_up {
         CellLook::StairsUp
-    } else {
+    } else if cell.stairs_down {
         CellLook::StairsDown
+    } else {
+        CellLook::Trap(cell.trap.flatten())
     }
 }
 
@@ -261,6 +276,11 @@ fn build_cells(
         open.insert(bevy_cell(at));
         if seen && cell.lit {
             lit_open.insert(bevy_cell(at));
+        }
+        if cell.trap.is_some() && !(cell.door.is_some() || cell.stairs_up || cell.stairs_down) {
+            // A trap lies on open floor; it does not block the way.
+            wanted.entry(at).or_insert((look(&cell), cell));
+            continue;
         }
         if !(cell.door.is_some() || cell.stairs_up || cell.stairs_down) {
             continue;
@@ -365,6 +385,13 @@ fn build_cells(
                         ));
                     })
                     .add_child(leaf)
+                    .id()
+            }
+            CellLook::Trap(family) => {
+                let model = library.trap(*family, meshes);
+                commands
+                    .spawn((Transform::from_translation(base), Visibility::default()))
+                    .with_children(|parent| model.attach(parent))
                     .id()
             }
             CellLook::StairsUp => {
@@ -555,7 +582,13 @@ fn build_actors(
                 crate::picking::Pick(tor_client_3d_model::Focus::Actor(actor.id)),
             ));
             if let Ok(mut body) = bodies.get_mut(entity) {
-                if body.model == actor.model && body.appearance_seed == actor.appearance_seed {
+                // Held weapons follow the hand; only worn pieces rebuild the body.
+                if body.model == actor.model
+                    && body.appearance_seed == actor.appearance_seed
+                    && creatures::Equipment::disclosed(&body.wearing)
+                        == creatures::Equipment::disclosed(&actor.wearing)
+                {
+                    body.wearing = actor.wearing;
                     body.goal = goal;
                     if body.name != actor.name || body.hostile != actor.hostile {
                         body.name.clone_from(&actor.name);
@@ -577,7 +610,8 @@ fn build_actors(
             game.hands.remove(&entity);
         }
         let individual = creatures::individual(actor.appearance_seed);
-        let look = Look::of(actor.model, individual);
+        let look = Look::of(actor.model, individual)
+            .equipped(creatures::Equipment::disclosed(&actor.wearing));
         let name = if actor.is_self {
             String::new()
         } else {
@@ -617,6 +651,7 @@ fn build_actors(
                     appearance_seed: actor.appearance_seed,
                     appearance_key: look.key.clone(),
                     model: actor.model,
+                    wearing: actor.wearing,
                     hostile: actor.hostile,
                     goal,
                     label,
@@ -981,7 +1016,9 @@ fn prune_corpses(
     });
 }
 
-/// Show the equipped weapon at the player's side.
+/// Show each figure's main-hand weapon in its hand: the player's from its own
+/// inventory, everyone else's from their disclosed worn equipment. A figure
+/// with nothing disclosed holds nothing, rather than a guessed weapon.
 fn update_held(
     commands: &mut Commands,
     game: &mut Game,
@@ -989,48 +1026,46 @@ fn update_held(
     meshes: &mut Assets<Mesh>,
     view: &View,
 ) {
-    let weapon = view
+    let own = view
         .inventory
         .iter()
-        .find(|c| c.equipped.is_some() && c.class == ItemClass::Weapon);
-    let body = view
-        .actors
-        .iter()
-        .find(|a| a.is_self)
-        .and_then(|a| game.actors.get(&a.id))
-        .and_then(|body| game.hands.get(body))
-        .copied();
-    let wanted = weapon.zip(body).map(|(w, b)| (w.model, b));
-    if wanted == game.held.as_ref().map(|(model, body, _)| (*model, *body)) {
-        return;
+        .find(|c| c.equipped.is_some() && c.class == ItemClass::Weapon)
+        .map(|c| c.model);
+    let mut wanted = HashMap::new();
+    for actor in &view.actors {
+        let weapon = if actor.is_self {
+            own
+        } else {
+            actor.wearing.weapons[0]
+        };
+        let hand = game
+            .actors
+            .get(&actor.id)
+            .and_then(|body| game.hands.get(body))
+            .copied();
+        if let (Some(kind), Some(hand)) = (weapon, hand) {
+            // The first view of a figure is its primary; aliases do not override it.
+            wanted.entry(hand).or_insert(kind);
+        }
     }
-    if let Some((_, _, model)) = game.held.take() {
-        commands.entity(model).try_despawn();
-    }
-    if let Some((kind, body)) = wanted {
+    game.held.retain(|hand, (kind, model)| {
+        let keep = wanted.get(hand) == Some(kind);
+        if !keep {
+            commands.entity(*model).try_despawn();
+        }
+        keep
+    });
+    for (hand, kind) in wanted {
+        if game.held.contains_key(&hand) {
+            continue;
+        }
         let model = library.item(kind, meshes);
         let held = commands
-            .spawn((
-                // Point forward from the fist, edge up, the grip in the hand.
-                Transform::from_rotation(
-                    Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2)
-                        * Quat::from_rotation_x(std::f32::consts::FRAC_PI_2),
-                )
-                .with_translation(Vec3::new(
-                    0.0,
-                    -0.02,
-                    if kind == ItemModel::ShortSword {
-                        0.17
-                    } else {
-                        0.29
-                    },
-                )),
-                Visibility::default(),
-            ))
+            .spawn((crate::props::held_transform(kind), Visibility::default()))
             .with_children(|parent| model.attach(parent))
             .id();
-        commands.entity(body).add_child(held);
-        game.held = Some((kind, body, held));
+        commands.entity(hand).add_child(held);
+        game.held.insert(hand, (kind, held));
     }
 }
 

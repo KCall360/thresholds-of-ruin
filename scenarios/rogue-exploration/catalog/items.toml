@@ -11,7 +11,7 @@ equipment_generation = { kind = "authored", hit_enchantment = 1, damage_enchantm
 equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact", sides = 4 }, components = [{ category = "impact", amount = { type = "rolled", count = 2, sides = 4, bonus = 0 } }] } }, modifiers = [] }
 
 [items."rogue.ring_mail"]
-asset = "item.armor.mail"
+asset = "item.armor.mail.ring"
 name = "ring mail"
 identity = "rogue.ring_mail"
 class = "armor"
@@ -337,7 +337,7 @@ equipment_generation = { kind = "weapon", curse_percent = 10, enchant_percent = 
 equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "keen", sides = 3 }, components = [{ category = "keen", amount = { type = "rolled", count = 2, sides = 3, bonus = 0 } }] } }, modifiers = [] }
 
 [items."rogue.leather_armor"]
-asset = "item.armor"
+asset = "item.armor.leather"
 name = "leather armor"
 identity = "rogue.leather_armor"
 class = "armor"
@@ -345,7 +345,7 @@ equipment_generation = { kind = "armor", curse_percent = 20, enchant_percent = 8
 equipment = { slot = "body_armor", armor = { physical_reduction = 1, material = "nonmetal", rustproof = false }, modifiers = [] }
 
 [items."rogue.generated_ring_mail"]
-asset = "item.armor.mail"
+asset = "item.armor.mail.ring"
 name = "ring mail"
 identity = "rogue.ring_mail"
 class = "armor"
@@ -353,7 +353,7 @@ equipment_generation = { kind = "armor", curse_percent = 20, enchant_percent = 8
 equipment = { slot = "body_armor", armor = { physical_reduction = 2, material = "metal", rustproof = false }, modifiers = [] }
 
 [items."rogue.studded_leather"]
-asset = "item.armor"
+asset = "item.armor.leather.studded"
 name = "studded leather armor"
 identity = "rogue.studded_leather"
 class = "armor"
@@ -361,7 +361,7 @@ equipment_generation = { kind = "armor", curse_percent = 20, enchant_percent = 8
 equipment = { slot = "body_armor", armor = { physical_reduction = 2, material = "metal", rustproof = false }, modifiers = [] }
 
 [items."rogue.scale_mail"]
-asset = "item.armor"
+asset = "item.armor.mail.scale"
 name = "scale mail"
 identity = "rogue.scale_mail"
 class = "armor"
@@ -369,7 +369,7 @@ equipment_generation = { kind = "armor", curse_percent = 20, enchant_percent = 8
 equipment = { slot = "body_armor", armor = { physical_reduction = 3, material = "metal", rustproof = false }, modifiers = [] }
 
 [items."rogue.chain_mail"]
-asset = "item.armor"
+asset = "item.armor.mail.chain"
 name = "chain mail"
 identity = "rogue.chain_mail"
 class = "armor"
@@ -377,7 +377,7 @@ equipment_generation = { kind = "armor", curse_percent = 20, enchant_percent = 8
 equipment = { slot = "body_armor", armor = { physical_reduction = 4, material = "metal", rustproof = false }, modifiers = [] }
 
 [items."rogue.splint_mail"]
-asset = "item.armor"
+asset = "item.armor.plate.splint"
 name = "splint mail"
 identity = "rogue.splint_mail"
 class = "armor"
@@ -385,7 +385,7 @@ equipment_generation = { kind = "armor", curse_percent = 20, enchant_percent = 8
 equipment = { slot = "body_armor", armor = { physical_reduction = 5, material = "metal", rustproof = false }, modifiers = [] }
 
 [items."rogue.banded_mail"]
-asset = "item.armor"
+asset = "item.armor.plate.banded"
 name = "banded mail"
 identity = "rogue.banded_mail"
 class = "armor"
@@ -393,7 +393,7 @@ equipment_generation = { kind = "armor", curse_percent = 20, enchant_percent = 8
 equipment = { slot = "body_armor", armor = { physical_reduction = 5, material = "metal", rustproof = false }, modifiers = [] }
 
 [items."rogue.plate_mail"]
-asset = "item.armor"
+asset = "item.armor.plate"
 name = "plate mail"
 identity = "rogue.plate_mail"
 class = "armor"

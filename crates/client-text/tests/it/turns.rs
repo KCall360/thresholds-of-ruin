@@ -406,6 +406,7 @@ fn east(mut s: StateView, steps: i32) -> StateView {
 fn figure(id: u64, name: &str, x: i32) -> ActorView {
     ActorView {
         appearance_seed: None,
+        worn: Vec::new(),
         name: name.into(),
         description: String::new(),
         id: super::actor_target(id),
@@ -655,6 +656,7 @@ async fn ability_goals_submit_once_from_the_current_position_and_tell_preparatio
         ]));
         initial.observation.visible_actors.push(ActorView {
             appearance_seed: None,
+            worn: Vec::new(),
             asset: None,
             id: target,
             name: "goblin".into(),

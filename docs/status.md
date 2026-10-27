@@ -6,7 +6,7 @@ record accepted work that is not yet complete. “Implemented” describes code 
 this tree, not a promise that every related product or performance goal is closed.
 Every change still requires the [testing policy](development/testing.md).
 
-**Current formats:** protocol **63**, save format **62**, scenario format **34**, ruleset
+**Current formats:** protocol **64**, save format **62**, scenario format **34**, ruleset
 **`interactions-v55`**, scenario validator **`tor-scenario-46`**. Unsupported
 protocol/save/rules identities are rejected rather than migrated. Current private
 creature records also require explicit Health roll policy, stable HD/purchase
@@ -147,7 +147,7 @@ destinations; live weighted stock and kits remain unchanged. Personal restoratio
 must distinguish empty-choice `ChooseAgain` from original-choice `Authored`, with
 stable purchase high-water marks and authored package restoration.
 
-Current application writers validate all 44 packages and produce protocol 63 and
+Current application writers validate all 44 packages and produce protocol 64 and
 save 61 fixtures without altering historical formats. Ordinary paid
 `ChooseAgain` purchase/drain/XP restoration now has corresponding first-red and
 green process evidence; retained Authored attribute receipts have a separate
@@ -668,10 +668,91 @@ checks do not replace the current
   ASCII map/look/inventory redraw on palette changes and recover safely.
   Shared creature seeds and captured corpse appearance support the optional,
   independently maintained [3D prototype](../crates/client-3d/README.md).
+  Protocol 64 adds each disclosed creature's visibly worn weapons and armour,
+  and the observer's own, as a bounded `worn` list. That list is projected after
+  observer disclosure and carries no more than the items show on the ground; see
+  the [first slice](plans/appearance-composition-contract.md#implemented-first-slice-protocol-64).
+  Text examination and the ASCII look line name the visible gear. The 3D client
+  dresses bodies from it: each of Rogue's eight body armours now has its own
+  asset and torso recipe, following the maintainer's style guide.
+  The 3D client now plays what the server offers through the shared client
+  logic: reading, zapping and identifying items, aimed abilities and projectile
+  choices, traps and holds, number-keyed pack actions, resuming and cancelling
+  work, and the advancement, places, chart, history and note screens. The
+  personal stats screen, end-of-game summary, message log, releasing control and
+  running remain ASCII-only; see the [3D guide](../crates/client-3d/README.md).
   The prototype adds shared body/fitting dimensions, correlated build silhouettes,
-  fitted garment surfaces and family-specific support motion. See the
+  fitted garment surfaces, an offline swappable wardrobe with garment-owned
+  feminine necklines and lower-panel construction, outfit-owned torso ornaments
+  and pouches, independent offline helm/boots/cloak/breastplate equipment overrides that
+  survive wardrobe changes, fitted torso armor and cloak back clearance during
+  swing, peplums fitted over tunics,
+  reusable closed baldrics
+  with open buckles and clearance over combined torso layers,
+  sewn bindings and straps with coherent surface fitting and
+  support retained across garment openings,
+  hollow faceted shoulder plates fitted to the resolved arms,
+  and family-specific support motion. Feathered fliers and beasts share tapered,
+  closed vanes with a central ridge and proportionate thickness. Reared beasts
+  distinguish supporting legs from grasping limbs; Jabberwock uses bent hind
+  support and free clawed hands. Xeroc combines a larger articulated maw with
+  overlapping physical shell plates. Small shared plate, fang and limb pieces
+  support further species recipes; a general external monster format remains
+  future work. Aquator has connected shoulder/haunch masses and a broad skull
+  with seated dark eyes. Aquator and Xeroc use short splayed supporting limbs
+  and broad soles, with lateral foot placement retained during walking and
+  local actions. Shared profiled segments end in rounded flesh; Xeroc keeps
+  skin-colored shanks and pads with separate pale nails. The rooted flytrap
+  has broad fleshy leaves, a substantial stalk, cupped snapping lobes and
+  staggered cilia, reusing small leaf and fang-row components.
+  The Emu has compact linked supports, substantial hocks and shanks, broad
+  three-toed feet, a breast-rooted throat and larger skull. Both snakes have
+  larger skulls, hinged lower jaws and folding fangs; shared dimensions also
+  place the tongue and support the head during a side fall. Rattlesnake rests
+  extended with its head and warning rattle raised.
+  Equine families share compact linked supports, distinct fore/hind landmarks,
+  fuller ribcage/haunch masses and broad closed hoof wedges with planar soles.
+  Their standing height and shortened travel stride follow those dimensions.
+  Centaur side-fall height and arm support also follow the shared barrel width.
+  Horse and Unicorn bridge, muzzle and lower jaw form a continuous sculpt.
+  Griffin has a larger anatomical skull, a broad sculpted feathered neck,
+  connected shoulder masses, shorter bent supports and broader grounded talons.
+  Griffin and Kestrel share closed ridged upper/lower hooked beaks. Feather/wing
+  joins and complete action/fall surface clearance remain unfinished.
+  Bat and Dragon wing skin and Aquator toe webs share closed tensioned membranes
+  with curved scallops, shallow camber and consistent outward facing on mirrored
+  parts. Bat wing supports are more substantial. Full wing/body contact through
+  every action and the remaining creature anatomy still need review.
+  Dragon has shorter bent supports, connected shoulder/haunch masses, broad
+  grounded claw feet and a larger anatomical skull above a sculpted neck.
+  Dragon/Jabberwock jaw meshes and hinges share the rendered skull dimensions;
+  both use the broader lower-jaw profile and shared substantial claw feet.
+  Full action/fall surface clearance and remaining shape finish stay open.
+  Worn boots share a constructed upper and layered welt/outsole. Heeled outfit
+  choices have a raised arch and tapered block heel; heel and forefoot use the
+  same sole plane. Replacement boots use the same shape rules, and robe contact
+  bounds follow the worn last. Bare, stone and furry feet retain their recipes.
+  Shaft/cuff finish and complete garment contact through motion remain open.
+  Ice Monster refinement is deferred pending a chosen direction.
+  Shared adult female brows use substantial tapered bands fitted to the
+  forehead, with controlled arches and species expressions. Their eyes share
+  almond openings, clipped iris/pupil surfaces, fitted lids and a visible upper
+  lash line; glow belongs to the iris, and Medusa retains slit pupils.
+  Lower-lid rims, species expression and adult cheek/jaw planes remain unfinished.
+  Shoulder cloaks now use connected lined sheets with thickness, fitted upper-back
+  attachment and clean or torn hems. Native and replacement cloaks share that
+  construction; moving vertices belong to each wearer and materials remain shared.
+  Lower cloth follows eased motion beneath pinned upper rows. General cloth
+  collision remains unfinished.
+  Zombie decay survives outfit swaps. Every Rogue
+  monster has its own recipe and motions, drawn from the maintainer's concept
+  sheets (see the [Rogue creature models plan](plans/rogue-creature-models.md)).
+  See the
   [art continuation plan](plans/3d-art-continuation.md) for visual-review limits
   and the unfinished garment/equipment authoring boundary.
+  The 2026-10-21 feature-branch sharing checkpoint uses the maintainer-authorized
+  focused local checks without the push gate; complete Windows/Linux
+  debug/release CI remains required before merge.
   Scenario overrides (including Rogue letters), general trait specifications
   and server-stored player choices remain deferred. See the
   [presentation plan](plans/presentation.md).
