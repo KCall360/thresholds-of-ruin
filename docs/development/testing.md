@@ -1397,6 +1397,14 @@ required on the final commit before merging.
 
 ### Formats and fixtures
 
+Polymorph's current wire book also requires a genuine known `direction_or_self`
+affordance and a paid `baleful_polymorph` diagnostic with only `target` and
+`changed`, not merely an older snapshot/diagnostic message kind. The recorder
+reuses the ordinary Text self-Zap/source-free-reopen case for its exact request
+and snapshot, plus one minimal authored self-ability diagnostic case. Selected
+form IDs and body/advancement ledgers are not wire sample material. Both process
+cases and their cleanup must succeed before either sample is published.
+
 When the protocol version changes, rerun `python scripts/record_wire_samples.py`
 to record `crates/protocol/tests/fixtures/wire-v<version>.json` and review its
 difference: every change in it is a change to the wire format. The required-kind

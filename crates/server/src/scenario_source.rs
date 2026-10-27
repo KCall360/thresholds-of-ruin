@@ -285,6 +285,9 @@ pub(super) fn catalog_context(
     let (field, label) = match kind {
         crate::creature_authoring::CatalogKind::Species => ("creatures.species", "species"),
         crate::creature_authoring::CatalogKind::Template => ("creatures.templates", "template"),
+        crate::creature_authoring::CatalogKind::BodyPackage => {
+            ("creatures.body_packages", "body package")
+        }
     };
     in_declaration(
         failure,
@@ -337,6 +340,10 @@ pub fn resolve_source(root: &Path) -> Result<ResolvedSource, Failure> {
         (
             "creatures.templates",
             manifest.creatures.templates.keys().collect(),
+        ),
+        (
+            "creatures.body_packages",
+            manifest.creatures.body_packages.keys().collect(),
         ),
         ("archetypes", manifest.archetypes.keys().collect()),
         (
@@ -405,6 +412,14 @@ pub fn resolve_source(root: &Path) -> Result<ResolvedSource, Failure> {
             &mut manifest.creatures.templates,
             module.creatures.templates,
             "creatures.templates",
+            scope,
+            file,
+            &mut provenance,
+        )?;
+        merge(
+            &mut manifest.creatures.body_packages,
+            module.creatures.body_packages,
+            "creatures.body_packages",
             scope,
             file,
             &mut provenance,

@@ -176,6 +176,26 @@ impl PreparedArchetype {
         manifest: &Manifest,
         catalog: &CompiledCatalog,
     ) -> Result<Self, RecipeError> {
+        // Item payloads are not part of the Ruleset ability graph. Resolve their
+        // roster references here, after catalog imports and eligibility sealing,
+        // rather than deferring an invalid authored form until item use.
+        for effect in author
+            .consumable
+            .iter()
+            .flat_map(|spec| &spec.effects)
+            .chain(author.readable.iter().flat_map(|spec| &spec.effects))
+        {
+            if let super::Effect::BalefulPolymorph { forms } = effect {
+                for form in forms {
+                    let id = tor_simulation::content_ids::BodyFormId::new(form)
+                        .map_err(|_| fail("Invalid polymorph body package ID"))?;
+                    require(
+                        catalog.content().polymorph_body_package(&id).is_some(),
+                        "Unknown or ineligible polymorph body package",
+                    )?;
+                }
+            }
+        }
         Ok(Self {
             recipe: prepare_recipe(
                 author.creature.as_ref(),
@@ -1001,6 +1021,64 @@ mod tests {
             "starting_skills": ["deception", "persuasion"], "restoration": "choose_again", "nutrition": {"kind":"exempt"}, "hit_dice": [{"source": "racial"}, {"source": "warrior"}]
         })).unwrap());
         manifest
+    }
+
+    #[test]
+    fn direct_item_polymorph_rosters_require_explicit_catalog_eligibility() {
+        let mut manifest = creature_manifest();
+        manifest.creatures.body_packages.insert(
+            "eligible_body".into(),
+            serde_json::from_value(serde_json::json!({
+                "species": "human",
+                "body": {"cells": [[0, 0, 0]], "eye": [0, 0, 0], "mass": 80},
+                "hit_dice": [{"source": "racial"}],
+                "polymorph_eligible": true
+            }))
+            .unwrap(),
+        );
+        for capability in ["consumable", "readable"] {
+            let item = serde_json::json!({
+                capability: {"effects": [{"kind": "baleful_polymorph", "forms": ["eligible_body"]}]}
+            });
+            manifest.archetypes.insert(
+                "polymorph_item".into(),
+                serde_json::from_value(item).unwrap(),
+            );
+            assert!(
+                PreparedDefinitions::new(&manifest, 1).is_ok(),
+                "{capability} positive fixture"
+            );
+            manifest
+                .creatures
+                .body_packages
+                .get_mut("eligible_body")
+                .unwrap()
+                .polymorph_eligible = false;
+            let error = PreparedDefinitions::new(&manifest, 1).unwrap_err();
+            assert!(
+                error
+                    .message
+                    .contains("Unknown or ineligible polymorph body package"),
+                "{}",
+                error.message
+            );
+            manifest
+                .creatures
+                .body_packages
+                .get_mut("eligible_body")
+                .unwrap()
+                .polymorph_eligible = true;
+            let mut missing = manifest.clone();
+            missing.creatures.body_packages.clear();
+            let error = PreparedDefinitions::new(&missing, 1).unwrap_err();
+            assert!(
+                error
+                    .message
+                    .contains("Unknown or ineligible polymorph body package"),
+                "{}",
+                error.message
+            );
+        }
     }
 
     #[test]

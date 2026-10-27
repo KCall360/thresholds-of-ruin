@@ -1843,3 +1843,46 @@ fn owner_overview_scales_current_action_timings_but_not_received_loss_clock() {
         assert_eq!(engine.game, before, "overview remains read-only");
     }
 }
+
+#[test]
+fn actionable_balance_rows_exclude_locked_package_pools() {
+    use s::content_ids::BodyFormId;
+    use s::creatures::{BodyPackage, PlannedAdvancement};
+    use std::sync::Arc;
+    let engine = Engine::memory(scenario()).unwrap();
+    let creature = engine.game.creature(s::ActorId(1)).unwrap();
+    let source = creature.build();
+    let ordinary = CreatureBuild::new(
+        source.content().clone(),
+        source.species_id().clone(),
+        source.ledger().clone(),
+        source.binding(),
+        *source.starting_skills(),
+    )
+    .unwrap();
+    let root = ordinary.ledger().health_root_seed().unwrap();
+    let base = Arc::new(BodyPackage {
+        id: BodyFormId::new("balance_body").unwrap(),
+        species: ordinary.species_id().clone(),
+        body: s::BodySpec::default(),
+        advancement: vec![PlannedAdvancement {
+            source: ordinary.ledger().entries()[0].source(),
+            choices: ordinary.choices()[0].clone(),
+        }],
+    });
+    assert_eq!(
+        balances(&ordinary).unwrap().len(),
+        2,
+        "ordinary ownership is unchanged"
+    );
+    let owned = ordinary.with_body_package(base, root).unwrap();
+    let rows = balances(&owned).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].0, s::HdIndex(1));
+    assert_eq!(rows[0].1.unspent(), 1);
+    assert_eq!(
+        owned.point_balances(s::HdIndex(0)).unwrap()[0].unspent(),
+        1,
+        "package grant is retained, not transferred or destroyed"
+    );
+}

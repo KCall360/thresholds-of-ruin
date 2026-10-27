@@ -1,4 +1,4 @@
-"""Authored-HD2 autonomous drain prefix on the retained nine-emu/W path.
+"""Authored personal-HD2 / effective-HD3 autonomous drain prefix on the retained nine-emu/W path.
 
 Only finite placement, geometry and one empty Warrior row differ from production.
 No runtime setup, source replacement, new kit, AI override or gameplay driver.
@@ -28,7 +28,7 @@ def recovery_sources():
             path.append((x + dx, y + dy))
     floor = set(path)
     width, height = max(x for x, _ in path) + 2, max(y for _, y in path) + 2
-    region.update(name="Authored HD2 W recovery bays", size=[width, height, 2],
+    region.update(name="Authored personal-HD2 W recovery bays", size=[width, height, 2],
         anchors={"start": [*path[0], 0]},
         walls=[[x, y, z] for x in range(width) for y in range(height)
                for z in range(2) if (x, y) not in floor],
@@ -83,10 +83,11 @@ def drain_interval(events, *, wraith, victim, prior_earned, earned, prior_hd, hd
     CombatEventView reports the primary outcome, not the Spiritual rider's
     check. Ring mail can absorb all primary damage (Unaffected) while the rider
     drains a row, as the canonical W Service contract also requires. Exact
-    actual2→1 paid-row loss separately proves the rider; the event alone cannot.
+    personal2→1 owned paid-row loss (effective3→2) separately proves the rider;
+    the event alone cannot. Callers derive personal counts from saved ownership.
     """
     if (prior_earned, prior_hd, hd) != (160, 2, 1):
-        raise AssertionError("A first survived drain needs prior160/HD2 and actual HD1")
+        raise AssertionError("A first survived drain needs prior160/personalHD2 and personalHD1")
     contacts = [index for index, event in enumerate(events) if event["type"] == "ability"
                 and event["ability"]["id"] == "rogue.energy_drain" and event["caster"] == wraith
                 and event["target"] == victim and event["outcome"] in ("applied", "unaffected")

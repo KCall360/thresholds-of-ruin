@@ -19,13 +19,23 @@ fn growth_source(root: &Path, peer: bool) -> crate::Scenario {
     manifest["creatures"]["species"]["fixture.growth"]["modifiers"] = json!([
         {"scope":"always","op":{"kind":"set","stat":{"kind":"attribute","attribute":"speed"},"value":0}}
     ]);
+    // Species variants retain the approved body/personal ownership partition.
+    let mut owner_package = manifest["creatures"]["body_packages"]["rogue.body.human"].clone();
+    owner_package["species"] = json!("fixture.growth");
+    let mut peer_package = owner_package.clone();
+    // The peer previously used the implicit one-cell body; do not enlarge it.
+    peer_package["body"] = json!({"cells":[[0,0,0]],"eye":[0,0,0],"mass":80});
+    manifest["creatures"]["body_packages"]["fixture.growth.body"] = owner_package;
+    manifest["creatures"]["body_packages"]["fixture.growth.peer_body"] = peer_package;
     let owner = &mut manifest["characters"][0];
     owner["turn_ticks"] = json!(100);
     owner["creature"]["species"] = json!("fixture.growth");
+    owner["creature"]["body_package"] = json!("fixture.growth.body");
     owner["creature"]["attributes"] =
         json!({"strength":3,"speed":2,"intellect":2,"willpower":2,"awareness":1,"presence":1});
     assert_eq!(owner["creature"]["future_growth"]["kind"], "disabled");
-    let creature = owner["creature"].clone();
+    let mut creature = owner["creature"].clone();
+    creature["body_package"] = json!("fixture.growth.peer_body");
     manifest["archetypes"]["fixture.strength_loss"] = json!({"name":"strength loss fixture","class":"potion","stackable":true,
         "consumable":{"discovery":"on_use","effects":[{"kind":"lose_attribute","attribute":"strength","amount":{"kind":"fixed","amount":1}}]}});
     manifest["archetypes"]["fixture.strength_ring"] = json!({"name":"strength ring fixture","class":"ring","stackable":false,
@@ -132,7 +142,18 @@ fn prerequisite(wire: &mut Wire) {
     let owner = creature(&saved);
     assert_eq!(owner["build"]["initial_attributes"]["strength"], 3);
     assert_eq!(owner["build"]["strength_acquired"], 0);
-    assert_eq!(owner["build"]["hd"].as_array().unwrap().len(), 1);
+    let rows = owner["build"]["hd"].as_array().unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0]["source"], json!({"kind":"racial"}));
+    assert_eq!(
+        rows[0]["owner"],
+        json!({"kind":"body","form":"fixture.growth.body","ordinal":0})
+    );
+    assert_eq!(rows[0]["health_policy"], "maximized");
+    assert_eq!(rows[1]["source"], json!({"kind":"class","id":"warrior"}));
+    assert_eq!(rows[1]["owner"], json!({"kind":"personal","id":1}));
+    assert_eq!(rows[1]["health_policy"], "seeded");
+    assert_eq!(owner["earned_progress"]["authored_baseline"], 1);
     assert_eq!(owner["earned_progress"]["held_xp"], 0);
     assert_eq!(owner["earned_progress"]["highest_applied_tier"], 1);
     assert_eq!(owner["dead"], false);
@@ -221,11 +242,19 @@ fn imported_strength_restores_exclusively_then_reaches_combined_cap_independent_
     acquired_overview(&mut wire, 4);
     let (context, page) = advancement(&mut wire, json!({"kind":"overview"}));
     let before_preview = wire.checkpoint();
+    assert_eq!(
+        creature(&before_preview)["build"]["hd"][0]["owner"]["kind"],
+        "body"
+    );
+    assert_eq!(
+        creature(&before_preview)["build"]["hd"][1]["owner"],
+        json!({"kind":"personal","id":1})
+    );
     let (_, preview) = advancement_from(
         &mut wire,
         context,
         json!({"kind":"preview", "basis":page.basis,
-        "proposal":{"kind":"purchase","purchase":{"owner":"0","pool":"advancement","selection":{"kind":"skill_rank","skill":"lore"}}},
+        "proposal":{"kind":"purchase","purchase":{"owner":"1","pool":"advancement","selection":{"kind":"skill_rank","skill":"lore"}}},
         "section":"summary","offset":0}),
     );
     let [tor_protocol::AdvancementEntry::Summary { value }] = preview.entries.as_slice() else {
@@ -317,13 +346,31 @@ fn imported_raise_repeated_blocked_doses_fund_successive_levels_and_reopen_witho
     ack(wire.send(OWNER, "choose-normal-growth", request.clone()));
     wire.finish(OWNER, "choose-normal-growth", &request);
     let grown = wire.checkpoint();
-    let hd = creature(&grown)["build"]["hd"].as_array().unwrap().len() as u64;
+    let rows = creature(&grown)["build"]["hd"].as_array().unwrap();
+    let personal: Vec<_> = rows
+        .iter()
+        .filter(|row| row["owner"]["kind"] == "personal")
+        .collect();
+    let personal_hd = personal.len() as u64;
     assert!(
-        (2..=3).contains(&hd),
-        "normal growth advances only funded ordinals"
+        (2..=3).contains(&personal_hd),
+        "normal growth advances only funded personal ordinals"
     );
+    assert_eq!(
+        rows.len(),
+        personal.len() + 1,
+        "one locked body row is not an XP tier"
+    );
+    assert_eq!(rows[0], creature(&initial)["build"]["hd"][0]);
+    for (index, row) in personal.iter().enumerate() {
+        assert_eq!(row["owner"], json!({"kind":"personal","id":index + 1}));
+        assert_eq!(row["source"], json!({"kind":"class","id":"warrior"}));
+    }
     let spent = curve
-        .threshold_sum(tor_simulation::HdCount(1), tor_simulation::HdCount(hd))
+        .threshold_sum(
+            tor_simulation::HdCount(1),
+            tor_simulation::HdCount(personal_hd),
+        )
         .unwrap();
     assert_eq!(creature(&grown)["earned_progress"]["earned_xp"], total);
     assert_eq!(creature(&grown)["earned_progress"]["spent_xp"], spent);
@@ -342,9 +389,9 @@ fn imported_strength_pending_interval_one_reopen_keeps_unexecuted_boon_and_exact
         checkpoint_interval: 1,
         ..Default::default()
     };
-    let mut wire = Wire::new(
-        Engine::open_with_policy(&path, growth_source(&root, true), policy.clone()).unwrap(),
-    );
+    let source = growth_source(&root, true);
+    let content = source.content().unwrap();
+    let mut wire = Wire::new(Engine::open_with_policy(&path, source, policy.clone()).unwrap());
     prerequisite(&mut wire);
     let potion = item(&mut wire, 30);
     assert_eq!(wire.service.engine.next_actor(), Some(OWNER));
@@ -378,7 +425,44 @@ fn imported_strength_pending_interval_one_reopen_keeps_unexecuted_boon_and_exact
         .unwrap();
     let index = pending["game"]["actors"].as_u64().unwrap();
     let path_to_boon = format!("/shared/actors/{index}/1/combat/creature/build/strength_acquired");
-    for value in [json!(5), json!(8), json!(-1), Value::Null, json!("1")] {
+    // Owned permanent receipts acquired in a weaker form survive a stronger
+    // current body. Raw5/7 are legal retained receipts even though natural
+    // Strength projects to7; fresh potion acquisition is still capped above.
+    for value in [json!(5), json!(7)] {
+        let mut retained = pending.clone();
+        *retained.pointer_mut(&path_to_boon).unwrap() = value.clone();
+        wire.service
+            .engine
+            .test_restore_checkpoint(&serde_json::to_vec(&retained).unwrap())
+            .unwrap();
+        // Decode/reopen the retained creature independently to assert the
+        // effective cap without normalizing away its permanent raw receipt.
+        let record: tor_simulation::creatures::record::CreatureRecord =
+            serde_json::from_value(creature(&retained).clone()).unwrap();
+
+        let restored = record.restore(content.clone(), vec![]).unwrap();
+        assert_eq!(
+            restored
+                .derived()
+                .attributes
+                .get(tor_simulation::attributes::Attribute::Strength),
+            7
+        );
+        assert_eq!(json!(restored.build().strength_acquired()), value);
+        let encoded = serde_json::to_vec(
+            &tor_simulation::creatures::record::CreatureRecord::capture(&restored),
+        )
+        .unwrap();
+        let reopened: tor_simulation::creatures::record::CreatureRecord =
+            serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(reopened.restore(content.clone(), vec![]).unwrap(), restored);
+    }
+    assert_eq!(
+        wire.checkpoint(),
+        pending,
+        "validation never installs a hypothetical receipt"
+    );
+    for value in [json!(8), json!(-1), Value::Null, json!("1")] {
         let mut malformed = pending.clone();
         *malformed.pointer_mut(&path_to_boon).unwrap() = value;
         assert!(wire

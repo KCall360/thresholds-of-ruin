@@ -608,6 +608,7 @@ fn growth_invariant_build(minimum: u16) -> CreatureBuild {
     .unwrap();
     let mut advancement = base.advancement().clone();
     advancement.choices[0].purchases.push(AdvancementPurchase {
+        id: None,
         pool: crate::content_ids::PointPoolId::new("advancement").unwrap(),
         selection: PurchaseSelection::Talent(id.clone()),
     });

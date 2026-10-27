@@ -211,7 +211,11 @@ pub(crate) fn definition_shape_valid(definition: &crate::rules::AbilityDef) -> b
             && strike.on_failure.is_empty()
             && strike.on_success == [Effect::CancelSpecials];
     }
-    if until
+    if (until
+        || strike
+            .on_failure
+            .iter()
+            .any(|effect| matches!(effect, Effect::BalefulPolymorph { .. })))
         && !matches!(
             &strike.check,
             Some(crate::rules::CheckDef {
@@ -250,7 +254,11 @@ pub(crate) fn definition_shape_valid(definition: &crate::rules::AbilityDef) -> b
             || strike
                 .on_failure
                 .iter()
-                .all(|effect| matches!(effect, Effect::Damage { .. })))
+                .all(|effect| matches!(effect, Effect::Damage { .. }))
+            || matches!(
+                strike.on_failure.as_slice(),
+                [Effect::BalefulPolymorph { .. }]
+            ))
         && strike.on_failure.iter().all(|effect| match effect {
             Effect::Damage {
                 damage: crate::rules::DamageExpr::Components { .. },
@@ -259,6 +267,26 @@ pub(crate) fn definition_shape_valid(definition: &crate::rules::AbilityDef) -> b
             | Effect::ApplyConditionForTurns { .. }
             | Effect::ApplyPersistentCondition { .. }
             | Effect::RemoveCondition { .. } => delivery == RayDelivery::FirstContact,
+            Effect::BalefulPolymorph { forms } => {
+                delivery == RayDelivery::FirstContact
+                    && strike.on_failure.len() == 1
+                    && strike.descriptors.is_empty()
+                    && crate::rules::valid_body_forms(forms)
+                    && matches!(
+                        &strike.check,
+                        Some(crate::rules::CheckDef {
+                            actor: CheckActor::Target,
+                            skill: SkillSelector::Named {
+                                skill: crate::attributes::Skill::Agility
+                            },
+                            against: Against::Opposed {
+                                skill: SkillSelector::Named {
+                                    skill: crate::attributes::Skill::Lore
+                                }
+                            },
+                        })
+                    )
+            }
             Effect::TeleportRandom | Effect::TeleportToRayOrigin => {
                 delivery == RayDelivery::FirstContact && strike.on_failure.len() == 1
             }
@@ -435,6 +463,7 @@ impl Game {
             .ability(&device.ability)
             .ok_or_else(invalid)?;
         let is_self = super::self_device_definition_valid(definition);
+        let polymorph_self = super::self_polymorph_device_definition_valid(definition);
         // Knowledge gates only the submitted convenience aim. Once captured,
         // neither later identification nor its absence can change delivery.
         if matches!(aim, crate::DeviceAim::SelfTarget {}) {
@@ -443,11 +472,11 @@ impl Game {
                     .actors
                     .get(&actor)
                     .is_some_and(|a| a.knowledge.contains(&source.spec.identity));
-            if !known || !is_self {
+            if !known || !(is_self || polymorph_self) {
                 return Err(GameError::ItemUnavailable);
             }
         }
-        if !is_self {
+        if !is_self && !matches!(aim, crate::DeviceAim::SelfTarget {}) {
             let crate::DeviceAim::Direction { direction } = aim else {
                 return Err(GameError::ItemUnavailable);
             };
@@ -467,7 +496,14 @@ impl Game {
                     ability: device.ability.clone(),
                     preparation,
                     descriptors: strikes[0].descriptors.clone(),
-                    effects: self.effect_plan(actor, &strikes[0].on_success)?,
+                    effects: self.effect_plan(
+                        actor,
+                        if polymorph_self {
+                            &strikes[0].on_failure
+                        } else {
+                            &strikes[0].on_success
+                        },
+                    )?,
                 }),
             },
         };
@@ -918,5 +954,64 @@ impl Game {
             }
         }
         Ok(())
+    }
+}
+
+impl Game {
+    /// Load-only probe for bounded first-contact body effects. This follows the
+    /// same visit/source-exclusion/frozen-region rules as bounded release, but
+    /// makes no checks, payments, form selections or state changes.
+    pub(crate) fn bounded_body_effect_regions(
+        &self,
+        ray: &RayPlan,
+    ) -> Result<BTreeSet<tor_world::RegionId>, GameError> {
+        let mut regions = BTreeSet::new();
+        let RayTraversal::Bounded { clear_visits } = ray.traversal else {
+            return Ok(regions);
+        };
+        if ray.delivery != RayDelivery::FirstContact
+            || !ray.effects.iter().any(|effect| {
+                matches!(
+                    effect,
+                    PlannedEffect::BalefulPolymorph { .. } | PlannedEffect::CancelSpecials
+                )
+            })
+        {
+            return Ok(regions);
+        }
+        let mut at = ray.origin.location;
+        let mut direction = Direction::from(ray.direction).rotated(ray.origin.orientation);
+        for _ in 0..clear_visits.min(MAX_RAY_PROBES) {
+            if self.region_frozen(at.region) {
+                break;
+            }
+            let (step, dependencies) = self.world.ray_step_dependencies(at, direction);
+            let missing = dependencies
+                .iter()
+                .any(|id| self.world.region(*id).is_none());
+            regions.extend(dependencies);
+            if missing {
+                break;
+            }
+            let RayStep::Clear { to, rotation } = step else {
+                break;
+            };
+            if self.region_frozen(to.region) {
+                break;
+            }
+            at = to;
+            direction = direction.rotated(rotation);
+            let target = self.actors.at(&self.world, at).keys().copied().find(|id| {
+                self.actors[id].alive()
+                    && !self.actor_frozen(*id)
+                    && self.creature(*id).is_some()
+                    && (*id != ray.actor || ray.launch_footprint.binary_search(&at).is_err())
+            });
+            if let Some(target) = target {
+                regions.extend(self.body_effect_required_regions(target, &ray.effects)?);
+                break;
+            }
+        }
+        Ok(regions)
     }
 }

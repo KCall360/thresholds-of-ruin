@@ -21,6 +21,10 @@ def fixture():
     owner.update(anchor="1/start", turn_ticks=100, loadout=[], known_identities=["rogue.gold"])
     owner["creature"].update(species="fixture.hallucination", nutrition={"kind": "exempt"},
                              future_growth={"kind": "disabled"})
+    body = copy.deepcopy(manifest["creatures"]["body_packages"][owner["creature"]["body_package"]])
+    body["species"] = "fixture.hallucination"
+    manifest["creatures"]["body_packages"]["fixture.body.hallucination"] = body
+    owner["creature"]["body_package"] = "fixture.body.hallucination"
     peer = copy.deepcopy(owner["creature"])
     peer["name"] = "actual visible peer"
     result["regions"] = [{"id": 1, "name": "Lit Hallucination laboratory", "size": [7, 5, 2],
@@ -51,8 +55,10 @@ def initial_items(test, frame):
 def assert_sample(test, observation, phase):
     # Frozen values independently evaluated from the documented selector recipe
     # and canonical production tuple roster: seed42, observer1, peer2/item40.
-    expected = {0: ("emu", "creature.bird.emu", "scroll titled SAH REN", "item.scroll", "scroll"),
-                1: ("bat", "creature.bat", "yew wand", "item.wand", "wand")}[phase]
+    # The opt-in Polymorph maple-wand label makes81 object tuples, not80;
+    # no combat RNG or actor-HD operand participates in this selector.
+    expected = {0: ("emu", "creature.bird.emu", "smoky potion", "item.potion", "potion"),
+                1: ("bat", "creature.bat", "ivory ring", "item.ring", "ring")}[phase]
     name, asset, object_name, object_asset, cosmetic_class = expected
     peers = [row for row in observation["visible_actors"] if row["id"] != observation["self_target"]]
     # One creature may have several genuinely disclosed body-cell occurrences.

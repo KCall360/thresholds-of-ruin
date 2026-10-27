@@ -222,6 +222,112 @@ fn natural_melee_source_captured_plan_survives_transform_pause_and_checkpoint() 
     assert_eq!(restored, game);
 }
 #[test]
+fn baleful_body_transition_preserves_paid_natural_prefix_and_frozen_tail_across_restore() {
+    use crate::content_ids::BodyFormId;
+    use crate::creatures::{BodyPackage, Content, HdChoices, PlannedAdvancement};
+    use crate::progression::HdSource;
+    use std::sync::Arc;
+    let (mut game, intention) = source_game();
+    let actor = ActorId(1);
+    let mut catalog = game.content().catalog().clone();
+    let original_species = game.creature(actor).unwrap().build().species_id().clone();
+    let mut other = catalog.species[&original_species].clone();
+    other.id = crate::content_ids::SpeciesId::new("baleful_natural_source").unwrap();
+    let mut rows = other.melee.strikes().to_vec();
+    rows[0].on_success = vec![damage(17)];
+    other.melee = crate::attacks::NaturalAttack::new(
+        other.melee.skill(),
+        other.melee.bonus(),
+        other.melee.wind_up(),
+        other.melee.recovery(),
+        rows,
+    )
+    .unwrap();
+    catalog.species.insert(other.id.clone(), other.clone());
+    let content = Content::new(game.content().rules().clone(), catalog).unwrap();
+    let package = |id, species| {
+        Arc::new(BodyPackage {
+            id: BodyFormId::new(id).unwrap(),
+            species,
+            body: (*game.actors[&actor].body).clone(),
+            advancement: vec![PlannedAdvancement {
+                source: HdSource::Racial,
+                choices: HdChoices::default(),
+            }],
+        })
+    };
+    let base = package("natural_prefix_base", original_species);
+    let changed = package("natural_prefix_changed", other.id);
+    let content = Content::with_body_packages(
+        &content,
+        [base.clone(), changed.clone()]
+            .into_iter()
+            .map(|package| (package.id.clone(), package))
+            .collect(),
+    )
+    .unwrap();
+    // Enroll the ordinary source fixture into the same sealed package catalog.
+    game.actors.get_mut(&ActorId(2)).unwrap().ready_at = game.tick;
+    let mut shared = crate::checkpoint::SharedState::default();
+    let saved = game.checkpoint(&mut shared);
+    let mut game = crate::Game::restore_checkpoint(saved, &shared, content.clone()).unwrap();
+    let owned = game
+        .creature(actor)
+        .unwrap()
+        .build()
+        .with_body_package(base, 42)
+        .unwrap();
+    game.rebuild_creature(actor, owned).unwrap();
+    game.actors.get_mut(&ActorId(2)).unwrap().ready_at = 1000;
+    game.tick = 10;
+    game.resolve_preparations().unwrap();
+    assert_eq!(game.health(ActorId(2)).unwrap().0, 91);
+    assert!(game.preparation(actor).unwrap().has_prefix());
+    let captured = game.preparation(actor).unwrap().plan.clone();
+    let progress = game.preparation(actor).unwrap().progress;
+    let tick = game.tick;
+    assert_eq!(
+        game.polymorph_creature(actor, changed).unwrap(),
+        crate::BodyTransitionResult::Changed
+    );
+    assert_eq!(game.tick, tick);
+    assert_eq!(game.preparation(actor).unwrap().plan, captured);
+    assert_eq!(game.preparation(actor).unwrap().progress, progress);
+    let fresh = game
+        .ability_plan(
+            actor,
+            &crate::content_ids::AbilityId::new("basic_melee").unwrap(),
+            ActorId(2),
+        )
+        .unwrap();
+    assert_ne!(
+        fresh.as_ability().unwrap().strikes[0].on_success,
+        captured.as_ability().unwrap().strikes[0].on_success
+    );
+    game.tick = 15;
+    game.pause_preparation(actor).unwrap();
+    game.actors.get_mut(&ActorId(2)).unwrap().ready_at = game.tick;
+    let mut shared = crate::checkpoint::SharedState::default();
+    let saved = game.checkpoint(&mut shared);
+    let mut restored = crate::Game::restore_checkpoint(saved, &shared, content).unwrap();
+    assert_eq!(restored, game);
+    for candidate in [&mut game, &mut restored] {
+        candidate.tick = 25;
+        let resumed = candidate.plan_work(actor, captured.work()).unwrap();
+        assert_eq!(resumed, captured);
+        candidate.start_work(resumed, Some(intention)).unwrap();
+        candidate.tick = 30;
+        candidate.resolve_preparations().unwrap();
+        assert_eq!(
+            candidate.health(ActorId(2)).unwrap().0,
+            82,
+            "paid first strike is not replayed and frozen old natural tail is not rebound"
+        );
+    }
+    assert_eq!(restored, game);
+}
+
+#[test]
 fn natural_melee_source_rejects_forged_species_and_rider_boundary() {
     let (game, _) = source_game();
     let captured = &game.preparation(ActorId(1)).unwrap().plan;

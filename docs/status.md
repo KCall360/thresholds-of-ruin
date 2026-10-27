@@ -6,13 +6,16 @@ record accepted work that is not yet complete. “Implemented” describes code 
 this tree, not a promise that every related product or performance goal is closed.
 Every change still requires the [testing policy](development/testing.md).
 
-**Current formats:** protocol **63**, save format **60**, scenario format **32**, ruleset
-**`interactions-v53`**, scenario validator **`tor-scenario-44`**. Unsupported
-protocol/save/rules identities are rejected rather than migrated. Other current
-guides refer here instead of copying these identities.
+**Current formats:** protocol **64**, save format **61**, scenario format **33**, ruleset
+**`interactions-v54`**, scenario validator **`tor-scenario-45`**. Unsupported
+protocol/save/rules identities are rejected rather than migrated. Current private
+creature records also require explicit Health roll policy, stable HD/purchase
+ownership, body snapshots and pending-return state; authored packages may
+explicitly register body forms and eligibility. Other current guides refer here
+instead of copying these identities.
 
-The independent compiled inputs use RulesInput **25**, ContentPackage **29** and
-RegionInput **8**. Physical TORB/TORJ/TORR framing stays at **6** and TORC at **1**;
+The independent compiled inputs use RulesInput **26**, ContentPackage **30** and
+RegionInput **9**. Physical TORB/TORJ/TORR framing stays at **6** and TORC at **1**;
 rooms **2**, grid-rooms **1** and world-family **1** are unchanged. The independent
 arena run report is **`tor-arena-run-v5`**; its enclosing batch/matrix/search
 formats remain unchanged. Current payloads require explicit nullable rider
@@ -121,7 +124,26 @@ beyond all levels already funded by XP, even while actual growth is blocked,
 without bypassing ordinary advancement admission.
 Their provenance, refund/history and actual-caller checks pass, including the
 corrected full core/server regressions and current protocol/common/ASCII consumers.
-Existing live item distributions remain unchanged and polymorph remains separate.
+Existing live item distributions remain unchanged. The separate
+[baleful Polymorph implementation](plans/baleful-polymorph.md) now has source-staged
+body/personal ownership, atomic transitions and opt-in wand content. All 26 NPC
+body types are now enrolled: the approved class-only trio adds one racial body HD
+while retaining personal classes; Dragon retains ten racial HD with separately
+funded personal attribute/Breath receipts. Only emu/snake/troll are opt-in form
+destinations; live weighted stock and kits remain unchanged. Personal restoration
+must distinguish empty-choice `ChooseAgain` from original-choice `Authored`, with
+stable purchase high-water marks and authored package restoration.
+
+Current application writers validate all 44 packages and produce protocol 64 and
+save 61 fixtures without altering historical formats. Ordinary paid
+`ChooseAgain` purchase/drain/XP restoration now has corresponding first-red and
+green process evidence; retained Authored attribute receipts have a separate
+explicitly privileged-builder witness. Aggregate qualification remains a release
+requirement, not something inferred from these selected checks. The approved
+100-method local native deferral remains **deferred, not passed**; final-head
+hosted graphical gates are mandatory. Consumables PR #195 merged at `feae51f`,
+and the separate Polymorph branch is based on it. No additional live tuning or
+next Rogue implementation milestone is implied.
 
 The opt-in Hallucination potion now uses one pure timed condition and saved
 base-turn presentation cadence. Extend preserves its generation/deadline; Extra
@@ -633,10 +655,10 @@ checks do not replace the current
   ASCII map/look/inventory redraw on palette changes and recover safely.
   Shared creature seeds and captured corpse appearance support the optional,
   independently maintained [3D prototype](../crates/client-3d/README.md).
-  Protocol 63 adds each disclosed creature's visibly worn weapons and armour,
+  Protocol 64 adds each disclosed creature's visibly worn weapons and armour,
   and the observer's own, as a bounded `worn` list. That list is projected after
   observer disclosure and carries no more than the items show on the ground; see
-  the [first slice](plans/appearance-composition-contract.md#implemented-first-slice-protocol-63).
+  the [first slice](plans/appearance-composition-contract.md#implemented-first-slice-protocol-64).
   Text examination and the ASCII look line name the visible gear. The 3D client
   dresses bodies from it: each of Rogue's eight body armours now has its own
   asset and torso recipe, following the maintainer's style guide.

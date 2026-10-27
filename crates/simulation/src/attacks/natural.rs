@@ -46,6 +46,7 @@ impl NaturalAttack {
                                     | Effect::DetectMagic
                                     | Effect::DrainLife
                                     | Effect::CancelSpecials
+                                    | Effect::BalefulPolymorph { .. }
                                     | Effect::HasteDose { .. }
                             )
                     })

@@ -484,3 +484,31 @@ fn portable_light_keys_choose_explicit_actions_cancel_and_show_fuel() {
         assert!(matches!(input, Input::Key { key } if key == expected));
     }
 }
+
+#[test]
+fn dual_device_direction_prompt_offers_explicit_self_without_defaulting_to_it() {
+    let mut snap = snapshot(false);
+    let view = &mut Arc::make_mut(&mut snap.state).observation;
+    view.inventory[1].identified = true;
+    view.interactions.as_mut().unwrap().inventory[1].device_activation =
+        Some(DeviceActivation::DirectionOrSelf);
+    let state = ClientState::from_snapshot(snap).expect("valid dual aim premise");
+    let mut app = App::new();
+    app.role = AccessRole::Player;
+    app.set_state(state);
+    app.ready();
+    app.messages.skip();
+    assert_eq!(key(&mut app, Key::Zap), Effect::None);
+    assert_eq!(app.input(Input::Text { text: "b".into() }), Effect::None);
+    assert!(app.status.contains("targets yourself"));
+    assert_eq!(app.zap_item(), Some(super::item_target(2)));
+    assert_eq!(key(&mut app, Key::Enter), Effect::None);
+    assert_eq!(
+        action(key(&mut app, Key::Wait)),
+        Action::Zap {
+            item: super::item_target(2),
+            aim: DeviceAim::SelfTarget {}
+        }
+    );
+    assert!(app.zap_item().is_none());
+}

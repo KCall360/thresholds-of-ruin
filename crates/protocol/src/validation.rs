@@ -234,8 +234,13 @@ impl StateView {
                                     && interaction.equipped_slot.is_none())
                         })
                         || (!item.identified
-                            && interaction.device_activation
-                                == Some(crate::DeviceActivation::SelfTarget))
+                            && matches!(
+                                interaction.device_activation,
+                                Some(
+                                    crate::DeviceActivation::SelfTarget
+                                        | crate::DeviceActivation::DirectionOrSelf
+                                )
+                            ))
                         || (!item.identified
                             && (interaction.known_equipment.is_some()
                                 || interaction.known_projectile_bonus.is_some()))

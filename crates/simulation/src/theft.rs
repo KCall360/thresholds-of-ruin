@@ -578,6 +578,30 @@ impl Game {
                 )
                 .map_err(|_| GameError::Rule(crate::abilities::RuleError::InvalidPlan))?;
             members.extend(trace.regions);
+            if let crate::abilities::ContactEnd::Body(target) = trace.end {
+                members.extend(self.body_effect_required_regions(target, &ray.effects)?);
+            }
+        }
+        if !matches!(plan, crate::abilities::Plan::Zap { charges: 0, .. }) {
+            if let Some(ray) = plan.as_ray() {
+                members.extend(self.bounded_body_effect_regions(ray)?);
+            }
+            members.extend(self.body_effect_required_regions(plan.target(), plan.on_success())?);
+            if let Some(ability) = plan.as_ability() {
+                for strike in &ability.strikes {
+                    members.extend(
+                        self.body_effect_required_regions(ability.target, &strike.on_success)?,
+                    );
+                    members.extend(
+                        self.body_effect_required_regions(ability.target, &strike.on_failure)?,
+                    );
+                    for rider in &strike.riders {
+                        members.extend(
+                            self.body_effect_required_regions(ability.target, &rider.effects)?,
+                        );
+                    }
+                }
+            }
         }
         if plan
             .on_success()
@@ -717,6 +741,7 @@ impl Game {
             .iter()
             .filter(|(_, actor)| active.contains(&actor.location.region))
         {
+            loaded.extend(self.pending_body_return_regions(*id));
             // Supplemental scope members remain load-only. Never add them to
             // live_regions, whose active owner would activate their residents.
             if self.monster_detection_active(*id) {

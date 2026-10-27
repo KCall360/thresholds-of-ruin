@@ -285,6 +285,9 @@ fn record(
                                 },
                             }
                         }
+                        s::abilities::ResolvedEffect::BalefulPolymorph { changed, .. } => {
+                            p::DiagnosticEffect::BalefulPolymorph { target, changed: *changed }
+                        }
                         s::abilities::ResolvedEffect::CancelSpecials { changed } => {
                             p::DiagnosticEffect::CancelSpecials {
                                 target,
@@ -809,6 +812,7 @@ mod restorable_loss_diagnostic_tests {
                     ordinal: s::HdIndex(ordinal),
                     source: s::progression::HdSource::Racial,
                     health_seed: 42,
+                    health_policy: s::progression::HealthRollPolicy::Seeded,
                     original_kind: s::content_ids::TypeId::new("humanoid").unwrap(),
                     original_die: 8,
                     previous: 0,

@@ -834,7 +834,7 @@ pub fn proposal_label(proposal: &AdvancementProposal) -> String {
 fn render_entry(entry: &AdvancementEntry, rows: &mut Vec<String>) {
     match entry {
         AdvancementEntry::Overview { value } => {
-            if value.strength_acquired > 0 { rows.push(format!("Permanent potion Strength: +{} (not refundable)", value.strength_acquired)); }
+            if value.strength_acquired > 0 { rows.push(format!("Permanent potion Strength owned: {} (not refundable; capped effect)", value.strength_acquired)); }
             rows.push(format!("Starting skills: {} ({}), {} ({})", value.starting_skills[0].name, value.starting_skills[0].id, value.starting_skills[1].name, value.starting_skills[1].id));
             rows.push(format!("Points: earned {}, spent {}, unspent {}", value.points.earned, value.points.spent, value.points.unspent));
             rows.push(format!("XP: held {} / next threshold {}; total earned {}, spent {}; highest earned HD {}; peak threat {}", value.growth.held_xp, value.growth.next_threshold, value.growth.earned_xp, value.growth.spent_xp, value.growth.highest_earned_tier, value.growth.peak_threat));
@@ -860,7 +860,7 @@ fn render_entry(entry: &AdvancementEntry, rows: &mut Vec<String>) {
             }
         },
         AdvancementEntry::Summary { value } => {
-            if value.strength_acquired > 0 { rows.push(format!("Permanent potion Strength: +{} (not refundable)", value.strength_acquired)); }
+            if value.strength_acquired > 0 { rows.push(format!("Permanent potion Strength owned: {} (not refundable; capped effect)", value.strength_acquired)); }
             rows.push(proposal_label(&value.proposal));
             rows.push(format!("Resulting build {}; removed purchases {}; gross refund rows {}; removed conditions {}", value.resulting_build_epoch, value.removed_count, value.refund_count, value.removed_condition_count));
             rows.push(format!("{}Health: {}/{}; injury {}", if value.health.dead { "DEATH. " } else { "" }, value.health.current, value.health.maximum, value.health.injury));

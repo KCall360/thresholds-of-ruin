@@ -775,3 +775,58 @@ fn recorded_scare_crumble_keeps_exact_opaque_unit_loss_without_transfer() {
         "record actual current-writer Scare crumble via its paid process witness"
     );
 }
+
+#[test]
+fn recorded_polymorph_has_dual_aim_and_changed_only_diagnostic() {
+    let book = samples();
+    let server = book["server"].as_array().unwrap();
+    let dual_items: BTreeSet<String> = server
+        .iter()
+        .filter(|message| message["type"] == "snapshot")
+        .flat_map(|message| {
+            message["snapshot"]["state"]["observation"]["interactions"]["inventory"]
+                .as_array()
+                .into_iter()
+                .flatten()
+        })
+        .filter(|row| row["device_activation"] == "direction_or_self")
+        .map(|row| row["item"].as_str().unwrap().to_owned())
+        .collect();
+    assert!(
+        !dual_items.is_empty(),
+        "record genuine known DirectionOrSelf affordance, not merely an old snapshot kind"
+    );
+    let effects: Vec<_> = server
+        .iter()
+        .filter(|message| message["type"] == "combat_diagnostics")
+        .flat_map(|message| message["report"]["records"].as_array().unwrap())
+        .flat_map(|record| record["outcome"]["effects"].as_array().unwrap())
+        .filter(|effect| effect["type"] == "baleful_polymorph")
+        .collect();
+    assert!(
+        !effects.is_empty(),
+        "record the real paid Polymorph diagnostic variant"
+    );
+    assert!(effects.iter().any(|effect| effect["changed"] == true));
+    for effect in effects {
+        assert_eq!(
+            effect
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from(["type", "target", "changed"])
+        );
+        assert!(effect["target"].is_string());
+        assert!(effect["changed"].is_boolean());
+    }
+    assert!(book["client"].as_array().unwrap().iter().any(|message| {
+        let action = &message["request"]["command"]["action"];
+        action["type"] == "zap"
+            && action["aim"]["kind"] == "self_target"
+            && action["item"]
+                .as_str()
+                .is_some_and(|item| dual_items.contains(item))
+    }));
+}

@@ -382,7 +382,8 @@ pub struct ItemInteractionView {
 }
 impl ConsumableSpec {
     pub fn valid(&self) -> bool {
-        crate::magic_items::valid_payload_descriptor_shape(&self.descriptors)
+        self.discovery != crate::ItemDiscovery::DiscernibleEffect
+            && crate::magic_items::valid_payload_descriptor_shape(&self.descriptors)
             && !self.effects.is_empty()
             && self.effects.len() <= crate::limits::CONSUMABLE_EFFECTS
             && self
@@ -681,11 +682,41 @@ impl Game {
         >,
     > {
         let owner = self.actors.get(&actor)?;
+        self.equipment_capacity_state_for(actor, owner, equipment)
+    }
+
+    /// Validate the candidate's anatomy and expertise, not its published predecessor.
+    fn equipment_capacity_state_for(
+        &self,
+        actor: ActorId,
+        owner: &crate::Actor,
+        equipment: &BTreeMap<EquipmentSlotId, ItemId>,
+    ) -> Option<
+        BTreeMap<
+            crate::content_ids::EquipmentCapacityId,
+            crate::equipment_capacity::EquipmentCapacityDeficit,
+        >,
+    > {
         let anatomy = &owner.anatomy;
         let no_expertise = crate::expertise::ExpertiseOwnership::default();
         let expertises = owner.combat.as_ref().map_or(&no_expertise, |combat| {
             &combat.creature().derived().expertises
         });
+        self.equipment_capacity_state_for_facts(actor, anatomy, expertises, equipment)
+    }
+
+    pub(crate) fn equipment_capacity_state_for_facts(
+        &self,
+        actor: ActorId,
+        anatomy: &AnatomySpec,
+        expertises: &crate::expertise::ExpertiseOwnership,
+        equipment: &BTreeMap<EquipmentSlotId, ItemId>,
+    ) -> Option<
+        BTreeMap<
+            crate::content_ids::EquipmentCapacityId,
+            crate::equipment_capacity::EquipmentCapacityDeficit,
+        >,
+    > {
         let mut demands = Vec::new();
         for (socket, item) in equipment {
             let slot = self
@@ -771,7 +802,7 @@ impl Game {
         equipment: BTreeMap<EquipmentSlotId, ItemId>,
     ) -> Result<(), GameError> {
         let actor = outcome.id;
-        self.equipment_capacity_state(actor, &equipment)
+        self.equipment_capacity_state_for(actor, &outcome.state, &equipment)
             .ok_or(GameError::ItemUnavailable)?;
         if let Some(combat) = outcome.state.combat.as_mut() {
             let sources = equipment

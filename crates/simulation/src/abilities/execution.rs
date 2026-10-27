@@ -552,9 +552,12 @@ impl Game {
             activity,
             origin,
         )?;
+        // Publication finalizes staged effects (including Polymorph) before
+        // receipt consumers compare the authoritative outcome.
+        let outcome = self.published_resolution(receipt)?.clone();
         self.seal_participant_events()?;
-        self.provoke_from_strike(&result.outcome, receipt, awareness)?;
-        Ok(result.outcome)
+        self.provoke_from_strike(&outcome, receipt, awareness)?;
+        Ok(outcome)
     }
     pub(crate) fn resolution_context(
         &self,

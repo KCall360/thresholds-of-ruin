@@ -78,7 +78,7 @@ The branch was rebased again onto main at `feae51f2` (#195), which had
 already taken its own protocol bump for hallucinated presentations. Conflicts
 were resolved as follows:
 
-- **Worn equipment:** the worn list now bumps the protocol to 63.
+- **Worn equipment:** the worn list now bumps the protocol past main's.
 - **Hallucination:** a hallucinated figure carries no worn list, so its true
   gear cannot betray it.
 - **Palette discovery:** a ground item with a presentation contributes only
@@ -162,6 +162,13 @@ The first CI runs of the independent 3D workflow failed on both platforms:
 - **Leotard test outfit:** tests and fixtures that used the sylvan duelist only
   as a stand-in now dress figures in the leotard. Tests about the duelist keep
   it. The 7 affected Rust tests and 4 affected process tests pass locally.
+
+Main then took baleful polymorph (#198) as its own protocol bump. Merging it
+renumbered the worn list to **protocol 64**: main's recorded wire sample
+stays as it is, and this branch records a new one for the worn list. An actor's view keeps main's
+current body asset, so a polymorphed creature shows its active form. Polymorph
+unequips gear its new form cannot wear and keeps it carried, so the worn list,
+built from equipped items, follows the form without extra rules.
 
 
 The consolidated Windows release contract check passes 387 renderer-library

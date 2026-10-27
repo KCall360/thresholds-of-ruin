@@ -330,16 +330,14 @@ fn rogue_mixed_tail_all_vampire_entry_at_274_publishes_exact_256_hd_and_replays(
     let mut scenario = rogue_tail_entry_fixture(274, "up");
     scenario.seed = 80;
     let engine = Engine::memory(scenario).unwrap();
+    let creature = engine.game.creature(SimActor(1)).unwrap();
+    let warrior = creature.build();
+    assert_eq!(warrior.ledger().total_hd(), tor_simulation::HdCount(2));
+    assert_eq!(warrior.personal_hd_count(), tor_simulation::HdCount(1));
     assert_eq!(
-        engine
-            .game
-            .creature(SimActor(1))
-            .unwrap()
-            .build()
-            .ledger()
-            .total_hd(),
-        tor_simulation::HdCount(1),
-        "the production Warrior is unchanged"
+        warrior.active_body_package().unwrap().id.as_str(),
+        "rogue.body.human",
+        "the approved racial body plus personal Warrior is not population growth"
     );
     for attempt in rogue_tail_attempts(&engine, 274) {
         assert_rogue_tail_actor(&engine, &attempt, "rogue.vampire", 256);

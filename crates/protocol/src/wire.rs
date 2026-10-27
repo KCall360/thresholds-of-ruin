@@ -5,7 +5,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-pub const PROTOCOL_VERSION: u32 = 63;
+pub const PROTOCOL_VERSION: u32 = 64;
 /// The maximum disclosed primary strike ordinal plus one.
 pub const MAX_SEQUENCE_STRIKES: u16 = 16;
 
@@ -231,6 +231,7 @@ pub enum Direction {
 pub enum DeviceActivation {
     Direction,
     SelfTarget,
+    DirectionOrSelf,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]

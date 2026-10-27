@@ -136,6 +136,8 @@ pub(crate) enum PanelButton {
     Use(ItemTarget, ItemOperation),
     /// Hold a directional device until a direction is chosen.
     Aim(ItemTarget),
+    /// Zap a device that offers yourself as its target.
+    ZapSelf(ItemTarget),
     Identify(Option<ItemTarget>),
     /// The view's granted ability at this index.
     Ability(usize),
@@ -847,6 +849,7 @@ pub(crate) fn activate(action: PanelButton, net: &Net, panel: &mut Panel, game: 
         PanelButton::Take(item) => Cmd::Take(item),
         PanelButton::Drop(item) => Cmd::Drop(item),
         PanelButton::Use(item, operation) => Cmd::Use(item, operation),
+        PanelButton::ZapSelf(item) => Cmd::ZapSelf(item),
         PanelButton::Identify(item) => Cmd::Identify(item),
         PanelButton::Escape(hold) => Cmd::Escape(hold),
         PanelButton::ProjectileChoose(index) => {

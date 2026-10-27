@@ -19,7 +19,7 @@ def prepare(test):
     manifest = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
     production = tomllib.loads((PRODUCTION / "scenario.toml").read_text(encoding="utf-8"))
     manifest["id"] = "imported-nothing"
-    manifest["modules"] = ["catalog/items.toml"]
+    manifest["modules"] = ["catalog/items.toml", "catalog/creatures.toml", "catalog/bodies.toml"]
     manifest.pop("archetypes")
     manifest.pop("appearance_pools")
     manifest["assets"] = production["assets"]
@@ -27,7 +27,10 @@ def prepare(test):
     manifest["characters"][0]["turn_ticks"] = 100
     test.assertEqual(manifest["creatures"]["species"]["figure"]["attributes"]["speed"], 0)
     (package / "catalog").mkdir()
-    shutil.copy2(PRODUCTION / "catalog/items.toml", package / "catalog/items.toml")
+    # Whole production rules/items now reference the opt-in body roster. Keep
+    # their canonical definition closure without enrolling the synthetic figure.
+    for module in manifest["modules"]:
+        shutil.copy2(PRODUCTION / module, package / module)
     shutil.copy2(PRODUCTION / "rules.toml", package / "rules.toml")
     manifest_path.write_text(toml_source(manifest), encoding="utf-8")
     region_path = package / "regions/1.toml"
@@ -38,7 +41,7 @@ def prepare(test):
         {"id": 31, "at": [1, 2, 0], "archetype": "rogue.wand_nothing"},
     ]
     region_path.write_text(toml_source(region), encoding="utf-8")
-    for relative in ("catalog/items.toml", "rules.toml"):
+    for relative in (*manifest["modules"], "rules.toml"):
         test.assertEqual((package / relative).read_bytes(), (PRODUCTION / relative).read_bytes())
     compiler = test.bin / ("tor-scenario" + test.suffix)
     checked = subprocess.run([compiler, "validate", package], capture_output=True, text=True, timeout=30)

@@ -24,6 +24,10 @@ def fixture():
         "kind": "add", "stat": {"kind": "attribute", "attribute": "intellect"}, "value": 100}})
     manifest["creatures"]["species"]["fixture.utility_caster"] = species
     caster["creature"]["species"] = "fixture.utility_caster"
+    body = copy.deepcopy(manifest["creatures"]["body_packages"][caster["creature"]["body_package"]])
+    body["species"] = "fixture.utility_caster"
+    manifest["creatures"]["body_packages"]["fixture.body.utility_caster"] = body
+    caster["creature"]["body_package"] = "fixture.body.utility_caster"
     caster["loadout"] = [{"archetype": "rogue.wand_" + kind, "quantity": 1}
                          for kind in ("haste", "slow", "invisibility")]
     caster["known_identities"] = ["rogue.wand_haste", "rogue.wand_slow"]

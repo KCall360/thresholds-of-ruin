@@ -56,6 +56,26 @@ impl Eq for ActorScenes {}
 pub(crate) const SIGHT_RANGE: u8 = 16;
 
 impl crate::Actor {
+    /// Personal artwork belongs to the birth body. A replacement body's visible
+    /// artwork comes only from its current authored species, never a guessed ID.
+    pub(crate) fn current_body_asset(&self) -> Option<String> {
+        if let Some(creature) = self.combat.as_ref().map(|combat| combat.creature()) {
+            if creature
+                .build()
+                .base_body_package()
+                .zip(creature.build().active_body_package())
+                .is_some_and(|(base, active)| base.id != active.id)
+            {
+                return creature
+                    .build()
+                    .content()
+                    .detection_appearance(creature.build().species_id())
+                    .and_then(|appearance| appearance.asset.as_deref())
+                    .map(str::to_owned);
+            }
+        }
+        self.asset.clone()
+    }
     /// Effective Awareness governs nonvisual disclosure, not genuine sight.
     /// The source table is in feet; the user's explicit adaptation caps every
     /// tier, including 9+, at the unchanged ordinary sight limit.
@@ -467,6 +487,12 @@ impl Game {
                                         .is_some_and(crate::abilities::self_device_definition_valid)
                                 {
                                     crate::DeviceActivation::SelfTarget
+                                } else if identified
+                                    && self.content.rules.ability(&device.ability).is_some_and(
+                                        crate::abilities::self_polymorph_device_definition_valid,
+                                    )
+                                {
+                                    crate::DeviceActivation::DirectionOrSelf
                                 } else {
                                     crate::DeviceActivation::Direction
                                 }
@@ -601,7 +627,7 @@ impl Game {
             actor: id,
             tick: self.tick,
             location: actor.location,
-            asset: actor.asset.clone(),
+            asset: actor.current_body_asset(),
             worn: self.worn_view(actor),
             region: self
                 .world
@@ -707,7 +733,7 @@ impl Game {
                             id: other_id,
                             location,
                             asset: (disclosure == crate::perception::ActorDisclosure::Creature)
-                                .then(|| other.asset.clone())
+                                .then(|| other.current_body_asset())
                                 .flatten(),
                             worn: worn.clone(),
                         })
@@ -1827,3 +1853,7 @@ mod tests {
 #[cfg(test)]
 #[path = "observation_awareness_tests.rs"]
 mod awareness_tests;
+
+#[cfg(test)]
+#[path = "observation_body_tests.rs"]
+mod body_tests;

@@ -9,9 +9,9 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = ROOT / "scenarios/rogue-exploration"
 ORDINARY = {"emu": (1, [(1, 2)]), "snake": (1, [(1, 3)]), "rattlesnake": (2, [(1, 6)]),
-            "hobgoblin": (1, [(1, 8)]), "orc": (1, [(1, 8)]), "zombie": (2, [(1, 8)]),
+            "hobgoblin": (2, [(1, 8)]), "orc": (2, [(1, 8)]), "zombie": (2, [(1, 8)]),
             "quagga": (3, [(1, 5), (1, 5)]),
-            "centaur": (4, [(1, 2), (1, 5), (1, 5)]),
+            "centaur": (5, [(1, 2), (1, 5), (1, 5)]),
             "yeti": (4, [(1, 6), (1, 6)]),
             "troll": (6, [(1, 8), (1, 8), (2, 6)]),
             "black_unicorn": (7, [(1, 9), (1, 9), (2, 9)]),
@@ -26,6 +26,27 @@ def source(name):
 
 
 class RogueRosterContent(unittest.TestCase):
+    def test_dragon_partitions_only_approved_personal_acquisitions(self):
+        actor = source("catalog/actors.toml")["actors"]["rogue.dragon"]
+        recipe = actor["creature"]
+        body = source("catalog/bodies.toml")["creatures"]["body_packages"]["rogue.body.dragon"]
+        breath = {"pool": "advancement", "selection": {"kind": "skill_rank", "skill": "breath"}}
+        self.assertEqual(recipe["body_package"], "rogue.body.dragon")
+        self.assertEqual(recipe["personal_body_grants"], [
+            {"ordinal": 3, "attribute": "willpower", "purchases": []},
+            {"ordinal": 7, "attribute": "willpower", "purchases": [breath]},
+        ])
+        self.assertEqual(len(recipe["hit_dice"]), 10)
+        expected = [{"source": "racial", "purchases": []} for _ in range(10)]
+        for ordinal, talent in [(1, "second_strike"), (3, "third_strike"), (5, "rogue.breath_weapon")]:
+            expected[ordinal]["purchases"] = [{"pool": "advancement", "selection": {"kind": "talent", "talent": talent}}]
+        self.assertEqual(body, {"species": "rogue.dragon", "body": actor["body"],
+                               "polymorph_eligible": False, "hit_dice": expected})
+        expected[3]["attribute"] = "willpower"
+        expected[7]["attribute"] = "willpower"
+        expected[7]["purchases"] = [breath]
+        self.assertEqual(recipe["hit_dice"], expected)
+
     def test_retained_ordinary_recipes_own_real_rolled_strikes_and_hd_records(self):
         actors = source("catalog/actors.toml")["actors"]
         species = source("catalog/creatures.toml")["creatures"]["species"]
@@ -89,7 +110,8 @@ class RogueRosterContent(unittest.TestCase):
             with self.subTest(species=name):
                 build = actors["rogue." + name]["creature"]
                 self.assertEqual(build["restoration"], "authored")
-                self.assertEqual(build["hit_dice"], [{"source": owner, "purchases": [
+                body_prefix = [{"source": "racial", "purchases": []}] if name == "centaur" else []
+                self.assertEqual(build["hit_dice"], body_prefix + [{"source": owner, "purchases": [
                     {"pool": "advancement", "selection": {"kind": "talent", "talent": unlocks[ordinal]}}
                 ] if ordinal in unlocks else []} for ordinal in range(1, 5)])
         self.assertEqual(species["rogue.yeti"]["subtypes"], ["cold"])
@@ -98,6 +120,26 @@ class RogueRosterContent(unittest.TestCase):
         self.assertFalse(cold["mechanics_deferred"])
         self.assertEqual(cold["modifiers"], [{"scope": "always", "op": {
             "kind": "immunity", "selector": {"kind": "descriptor", "descriptor": "cold"}}}])
+
+    def test_approved_class_trio_adds_only_one_body_hd_and_preserves_personal_training(self):
+        actors = source("catalog/actors.toml")["actors"]
+        packages = source("catalog/bodies.toml")["creatures"]["body_packages"]
+        for name, count, purchases in [("hobgoblin", 1, {1: "rattling_blow"}),
+                                       ("orc", 1, {1: "measured_cut"}),
+                                       ("centaur", 4, {2: "second_strike", 4: "third_strike"})]:
+            with self.subTest(species=name):
+                actor = actors["rogue." + name]
+                build = actor["creature"]
+                form = "rogue.body." + name
+                self.assertEqual(build["body_package"], form)
+                body_hd = {"source": "racial", "purchases": []}
+                self.assertEqual(packages[form], {"species": "rogue." + name,
+                    "body": actor["body"], "polymorph_eligible": False, "hit_dice": [body_hd]})
+                personal = [{"source": "warrior", "purchases": [
+                    {"pool": "advancement", "selection": {"kind": "talent", "talent": purchases[i]}}
+                ] if i in purchases else []} for i in range(1, count + 1)]
+                self.assertEqual(build["hit_dice"], [body_hd] + personal)
+                self.assertEqual(build["restoration"], "authored")
 
     def test_troll_owns_six_exact_racial_rows_and_only_rg1_na1_na2_purchases(self):
         actors = source("catalog/actors.toml")["actors"]
@@ -193,6 +235,7 @@ class RogueRosterContent(unittest.TestCase):
         self.assertIn(actor["asset"], {asset for theme in manifest["themes"]
                                      for asset in manifest["assets"][theme]})
         self.assertEqual(actor["creature"], {
+            "body_package": "rogue.body.wraith",
             "species": "rogue.wraith", "name": "wraith", "faction": "dungeon_foes",
             "binding": "awareness", "starting_skills": ["heavy_weaponry", "discipline"],
             "restoration": "authored", "nutrition": {"kind": "exempt"},
@@ -297,7 +340,11 @@ class RogueRosterContent(unittest.TestCase):
         # Neither E nor W owns equipment expertise; their threat stays unchanged.
         # E: 70 HD + 10 two ranks + 10 species + 10 type = tier 1.
         # W: 350 HD + 10 ranks + 10 species + 10 type + 10 DR2 = tier 4.
-        # Retained highest-earned HD2: E awards20, W awards35; regrowth costs200.
+        # Retained highest-earned PERSONAL HD2: the extra body HD changes neither
+        # E awards20 nor W awards35 nor the200 personal regrowth cost.
+        warrior = source("scenario.toml")["characters"][0]["creature"]
+        self.assertEqual(warrior["body_package"], "rogue.body.human")
+        self.assertEqual([row["source"] for row in warrior["hit_dice"]], ["racial", "warrior"])
         self.assertEqual((8 * 20, 8 * 20 + 35, 9 * 20 + 35 - 200), (160, 195, 15))
 
     def test_wraith_corridor_choices_use_only_disclosed_forward_and_remembered_edges(self):
@@ -439,7 +486,8 @@ class RogueRosterContent(unittest.TestCase):
                 identity = "rogue." + name
                 self.assertEqual(species[identity]["kind"], kind)
                 build = actors[identity]["creature"]
-                self.assertEqual(build["hit_dice"], [
+                self.assertEqual(build["hit_dice"],
+                    ([{"source": "racial", "purchases": []}] if name == "orc" else []) + [
                     {"source": owner, "purchases": [{"pool": "advancement",
                         "selection": {"kind": "talent", "talent": talent}}] if talent else []}
                     for talent in talents])

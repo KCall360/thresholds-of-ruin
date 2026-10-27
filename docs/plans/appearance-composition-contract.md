@@ -1,8 +1,8 @@
 # Observer-facing appearance composition proposal
 
 Status: the maintainer authorized protocol and server revisions for worn and
-equipped appearance, and protocol 63 implements the
-[first slice](#implemented-first-slice-protocol-63) under the recommended defaults
+equipped appearance, and protocol 64 implements the
+[first slice](#implemented-first-slice-protocol-64) under the recommended defaults
 below. Everything beyond that slice remains a proposal. Save and content formats are
 unchanged, and the current [format identities](../status.md) and strict rejection
 policy still apply.
@@ -254,7 +254,7 @@ field names. The next developer should not have to infer them from renderer code
 | Record and updates | One shared appearance value for body, disclosed coverage and visible components; replace complete actor entries atomically in the existing observation transaction | Independent component event streams, component revision numbers and incremental mesh instructions |
 | Catalog lifetime | Use immutable package/region catalog content under the existing palette lifecycle | Runtime recipe creation and independent catalog revisions |
 
-### Implemented first slice (protocol 63)
+### Implemented first slice (protocol 64)
 
 Under the maintainer's authorization, the four defaults above are adopted for this
 slice. Each disclosed creature carries a bounded, canonically ordered `worn` list on

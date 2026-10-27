@@ -274,7 +274,7 @@ fn recorded_care_request() -> serde_json::Value {
     let samples: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/wire-v63.json"
+            "/tests/fixtures/wire-v64.json"
         ))
         .expect("regenerate current wire samples"),
     )
@@ -323,7 +323,7 @@ fn recorded_ability_response(id: &str) -> (serde_json::Value, usize) {
     let samples: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/wire-v63.json"
+            "/tests/fixtures/wire-v64.json"
         ))
         .expect("regenerate current wire samples"),
     )

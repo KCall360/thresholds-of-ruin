@@ -124,6 +124,7 @@ pub fn lines(report: &CombatDiagnosticsView) -> Result<Vec<String>, InvalidComba
                 },
                 DiagnosticEffect::DrainLife { target, changed } => format!("  Actor {}: drain life {}", target.0, if *changed { "changed" } else { "unchanged" }),
                 DiagnosticEffect::DirectHealthLoss { target, amount } => format!("  Actor {}: {amount} direct health loss", target.0),
+                DiagnosticEffect::BalefulPolymorph { target, changed } => format!("  Actor {}: body {}", target.0, if *changed { "transformed" } else { "unchanged" }),
                 DiagnosticEffect::CancelSpecials { target, changed } => format!("  Actor {}: special capabilities {}", target.0, if *changed { "cancelled" } else { "unchanged" }),
                 DiagnosticEffect::RoomLight { target, changed } => format!("  Actor {}: room light {}", target.0, if *changed { "changed" } else { "unchanged" }),
                 DiagnosticEffect::ArrestDescent { target } => format!("  Actor {}: descent arrested", target.0),
@@ -349,6 +350,32 @@ pub(crate) mod tests {
             assert!(rows
                 .iter()
                 .any(|row| row.contains("preparation 5, started 5, remaining 5, recovery 2")));
+        }
+    }
+
+    #[test]
+    fn polymorph_diagnostic_is_changed_only_and_targets_recipient() {
+        for changed in [false, true] {
+            let effect = DiagnosticEffect::BalefulPolymorph {
+                target: ActorId(2),
+                changed,
+            };
+            let encoded = serde_json::to_value(&effect).unwrap();
+            assert_eq!(
+                encoded,
+                serde_json::json!({"type":"baleful_polymorph", "target":"2", "changed":changed})
+            );
+            let decoded: DiagnosticEffect = serde_json::from_value(encoded.clone()).unwrap();
+            assert_eq!(decoded, effect);
+            assert!(lines(&report_with_effects(vec![effect])).is_ok());
+            let forged = DiagnosticEffect::BalefulPolymorph {
+                target: ActorId(1),
+                changed,
+            };
+            assert!(lines(&report_with_effects(vec![forged])).is_err());
+            let mut leaked = encoded;
+            leaked["form"] = serde_json::json!("private_form");
+            assert!(serde_json::from_value::<DiagnosticEffect>(leaked).is_err());
         }
     }
 

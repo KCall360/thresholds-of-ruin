@@ -132,6 +132,10 @@ pub(crate) fn plan(view: &View, projectile: Option<&ProjectilePrompt>) -> Vec<Li
             Some(tor_protocol::DeviceActivation::Direction) => {
                 actions.push(("Zap", PanelButton::Aim(item.id)));
             }
+            Some(tor_protocol::DeviceActivation::DirectionOrSelf) => {
+                actions.push(("Zap", PanelButton::Aim(item.id)));
+                actions.push(("Zap self", PanelButton::ZapSelf(item.id)));
+            }
             None => {}
         }
         if item.equipped.is_none() || item.portable_light.is_some() {
@@ -235,6 +239,21 @@ mod tests {
         view.identify = Some(vec![wand.id]);
         let listed = actions(&plan(&view, None));
         assert_eq!(listed[0].0, "oak wand: Identify");
+        view.identify = None;
+        view.inventory = vec![Carried {
+            device: Some(DeviceActivation::DirectionOrSelf),
+            ..carried(3, "bone wand")
+        }];
+        let dual: Vec<_> = actions(&plan(&view, None))
+            .into_iter()
+            .map(|(_, button)| button)
+            .collect();
+        let bone = view.inventory[0].id;
+        assert_eq!(
+            dual[..2],
+            [PanelButton::Aim(bone), PanelButton::ZapSelf(bone)],
+            "a wand that may target either way offers both"
+        );
         assert_eq!(listed[1].0, "Leave it: Decline");
         assert_eq!(
             (hotkey(0), hotkey(8), hotkey(9), hotkey(10)),

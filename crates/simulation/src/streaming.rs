@@ -848,6 +848,16 @@ impl Game {
         self.actors.in_region(region).collect()
     }
 
+    /// Native continuation fixtures use the real freeze operation without
+    /// running the host horizon planner or advancing its scheduler.
+    #[cfg(test)]
+    pub(crate) fn freeze_region_for_body_return_test(
+        &mut self,
+        region: RegionId,
+    ) -> Result<(), GameError> {
+        self.freeze_region(region)
+    }
+
     fn freeze_region(&mut self, region: RegionId) -> Result<(), GameError> {
         for id in self.actors_in(region) {
             self.settle_actor_time(id)?;

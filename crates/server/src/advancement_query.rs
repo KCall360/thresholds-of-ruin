@@ -116,6 +116,14 @@ fn balances(
     // once per row. Descriptive names are cloned only for the requested page.
     let mut rows = Vec::new();
     for owner in 0..build.choices().len() {
+        // Package pools fund authored innate purchases only. The advancement
+        // balance surface is actionable, so it exposes personal pools alone.
+        if build.ledger().entries()[owner]
+            .owner()
+            .is_some_and(|owner| !owner.is_personal())
+        {
+            continue;
+        }
         let owner = s::HdIndex::from_usize(owner).map_err(|_| invalid())?;
         rows.extend(
             build
@@ -461,6 +469,10 @@ impl Engine {
             strength_acquired: build.strength_acquired(),
             starting_skills: build.starting_skills().map(skill),
             growth: p::AdvancementGrowth {
+                body_package_hit_dice: build
+                    .active_body_package()
+                    .map(|package| u64::try_from(package.advancement.len()).map_err(|_| invalid()))
+                    .transpose()?,
                 highest_applied_tier: creature.earned_progress().highest_applied_tier().get(),
                 restorable_hit_dice: creature.restorable_hit_dice().get(),
                 restoration_blocker: creature.hit_die_restoration_blocker().map(|blocker| {
@@ -767,3 +779,48 @@ impl Preview {
 #[cfg(test)]
 #[path = "advancement_engine_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod owned_growth_disclosure_tests {
+    use super::*;
+
+    #[test]
+    fn body_only_overview_keeps_authored_capacity_after_real_body_drain() {
+        let engine = Engine::memory(crate::advancement_test_support::scenario()).unwrap();
+        let original = engine.game.creature(s::ActorId(1)).unwrap();
+        let build = original.build();
+        let package = std::sync::Arc::new(s::creatures::BodyPackage {
+            id: s::content_ids::BodyFormId::new("overview_body").unwrap(),
+            species: build.species_id().clone(),
+            body: s::BodySpec::default(),
+            advancement: build
+                .ledger()
+                .entries()
+                .iter()
+                .zip(build.choices())
+                .map(|(die, choices)| s::creatures::PlannedAdvancement {
+                    source: die.source(),
+                    choices: choices.clone(),
+                })
+                .collect(),
+        });
+        let owned = build
+            .with_body_package(package, build.personal_health_root_seed().unwrap())
+            .unwrap();
+        let mut creature = s::creatures::CreatureState::new(owned).unwrap();
+        for loss in [0, 1] {
+            if loss != 0 {
+                assert_eq!(creature.drain_latest_hit_die().unwrap().applied, 1);
+            }
+            let overview = engine.advancement_overview(ActorId(1), &creature).unwrap();
+            assert_eq!(overview.growth.body_package_hit_dice, Some(2));
+            assert_eq!(overview.growth.highest_applied_tier, 0);
+            assert_eq!(overview.growth.highest_earned_tier, 0);
+            assert_eq!(overview.growth.restorable_hit_dice, loss);
+            assert_eq!(creature.build().ledger().total_hd().get(), 2 - loss);
+            let decoded: p::AdvancementGrowth =
+                serde_json::from_value(serde_json::to_value(&overview.growth).unwrap()).unwrap();
+            assert_eq!(decoded, overview.growth);
+        }
+    }
+}

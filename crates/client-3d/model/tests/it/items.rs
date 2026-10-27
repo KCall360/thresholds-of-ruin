@@ -6,6 +6,7 @@ use tor_protocol::*;
 const SCROLL: [u8; 32] = [61; 32];
 const WAND: [u8; 32] = [62; 32];
 const STAFF: [u8; 32] = [63; 32];
+const BONE: [u8; 32] = [64; 32];
 
 fn carried(id: [u8; 32], name: &str, class: ItemClass) -> ItemView {
     ItemView {
@@ -54,6 +55,10 @@ fn observation(identifying: bool) -> Observation {
             identified: true,
             ..carried(STAFF, "ash staff", ItemClass::Wand)
         },
+        ItemView {
+            identified: true,
+            ..carried(BONE, "bone wand", ItemClass::Wand)
+        },
     ];
     let mut scroll = affordance(SCROLL);
     scroll.readable = true;
@@ -63,6 +68,9 @@ fn observation(identifying: bool) -> Observation {
     let mut staff = affordance(STAFF);
     staff.zappable = true;
     staff.device_activation = Some(DeviceActivation::SelfTarget);
+    let mut bone = affordance(BONE);
+    bone.zappable = true;
+    bone.device_activation = Some(DeviceActivation::DirectionOrSelf);
     o.interactions = Some(InteractionView {
         slots: vec![],
         preparation: None,
@@ -81,7 +89,7 @@ fn observation(identifying: bool) -> Observation {
                 ItemTarget::from_digest(WAND),
             ],
         }),
-        inventory: vec![scroll, wand, staff],
+        inventory: vec![scroll, wand, staff, bone],
     });
     o
 }
@@ -158,6 +166,41 @@ fn reading_and_zapping_send_the_server_actions_for_those_items() {
         "a directional device needs its direction"
     );
     assert!(action(&state, Cmd::Zap(scroll, Direction::North)).is_err());
+}
+
+#[test]
+fn a_device_offering_either_aim_zaps_along_a_direction_or_at_yourself() {
+    let state = state(false);
+    let bone = ItemTarget::from_digest(BONE);
+    let wand = ItemTarget::from_digest(WAND);
+    assert_eq!(
+        view(&state, &Palette::default())
+            .inventory
+            .iter()
+            .find(|item| item.id == bone)
+            .and_then(|item| item.device),
+        Some(DeviceActivation::DirectionOrSelf)
+    );
+    assert_eq!(
+        action(&state, Cmd::ZapSelf(bone)),
+        Ok(Action::Zap {
+            item: bone,
+            aim: DeviceAim::SelfTarget {}
+        })
+    );
+    assert_eq!(
+        action(&state, Cmd::Zap(bone, Direction::West)),
+        Ok(Action::Zap {
+            item: bone,
+            aim: DeviceAim::Direction {
+                direction: Direction::West
+            }
+        })
+    );
+    assert!(
+        action(&state, Cmd::ZapSelf(wand)).is_err(),
+        "a directional-only device cannot target its user"
+    );
 }
 
 #[test]

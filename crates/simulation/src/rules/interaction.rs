@@ -149,7 +149,8 @@ impl Ruleset {
         bound(
             interaction != Interaction::NonHostile
                 || !effects.any(|effect| match effect {
-                    PlannedEffect::CorrodeArmor { .. }
+                    PlannedEffect::BalefulPolymorph { .. }
+                    | PlannedEffect::CorrodeArmor { .. }
                     | PlannedEffect::Theft { .. }
                     | PlannedEffect::ApplyLinkedHold { .. }
                     | PlannedEffect::HoldDamage { .. }
@@ -223,7 +224,8 @@ impl Ruleset {
     }
     fn effect_directly_harms(&self, effect: &Effect) -> bool {
         match effect {
-            Effect::CorrodeArmor { .. }
+            Effect::BalefulPolymorph { .. }
+            | Effect::CorrodeArmor { .. }
             | Effect::Theft { .. }
             | Effect::ApplyLinkedHold { .. }
             | Effect::HoldDamage { .. }

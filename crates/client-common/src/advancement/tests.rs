@@ -37,6 +37,7 @@ fn overview() -> AdvancementOverview {
     AdvancementOverview {
         strength_acquired: 0,
         growth: AdvancementGrowth {
+            body_package_hit_dice: None,
             highest_applied_tier: 2,
             restorable_hit_dice: 0,
             restoration_blocker: None,
@@ -1116,9 +1117,14 @@ fn permanent_potion_strength_has_distinct_overview_and_preview_label() {
     ] {
         let mut rows = Vec::new();
         render_entry(&entry, &mut rows);
-        assert!(rows
-            .iter()
-            .any(|row| row == "Permanent potion Strength: +3 (not refundable)"));
+        assert!(
+            rows.iter()
+                .any(|row| row
+                    == "Permanent potion Strength owned: 3 (not refundable; capped effect)")
+        );
+        // This is retained ownership, not a promise of +3 on the current
+        // sheet: natural5 + owned3 may contribute only2, before innate bonuses.
+        assert!(rows.iter().all(|row| !row.contains("Strength: +3")));
         if matches!(entry, AdvancementEntry::Summary { .. }) {
             assert!(rows
                 .iter()

@@ -45,6 +45,25 @@ pub struct HealthOrigin {
     pub kind: TypeId,
     pub die: u16,
 }
+/// Acquisition-owned Health interpretation. Composition never changes it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HealthRollPolicy {
+    Maximized,
+    Seeded,
+}
+impl HealthRollPolicy {
+    fn for_ordinal(ordinal: usize) -> Self {
+        if ordinal == 0 {
+            Self::Maximized
+        } else {
+            Self::Seeded
+        }
+    }
+    fn maximized(self) -> bool {
+        self == Self::Maximized
+    }
+}
 /// Exact one-point owned-record mutation selected from compiled active facts.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(deny_unknown_fields)]
@@ -52,6 +71,7 @@ pub struct HitDieHealthImprovement {
     pub ordinal: crate::HdIndex,
     pub source: HdSource,
     pub health_seed: u64,
+    pub health_policy: HealthRollPolicy,
     pub original_kind: TypeId,
     pub original_die: u16,
     pub previous: u16,
@@ -65,6 +85,7 @@ impl<'de> serde::Deserialize<'de> for HitDieHealthImprovement {
             #[serde(deserialize_with = "crate::bounded::named_map")]
             source: HdSource,
             health_seed: u64,
+            health_policy: HealthRollPolicy,
             original_kind: TypeId,
             original_die: u16,
             previous: u16,
@@ -74,6 +95,7 @@ impl<'de> serde::Deserialize<'de> for HitDieHealthImprovement {
             ordinal: f.ordinal,
             source: f.source,
             health_seed: f.health_seed,
+            health_policy: f.health_policy,
             original_kind: f.original_kind,
             original_die: f.original_die,
             previous: f.previous,
@@ -90,7 +112,11 @@ impl HitDieHealthImprovement {
             && (2..=crate::limits::DICE_SIDES).contains(&self.original_die)
             && self.previous
                 < self.original_die
-                    - original_roll(self.health_seed, self.original_die, self.ordinal.get() == 0)
+                    - original_roll(
+                        self.health_seed,
+                        self.original_die,
+                        self.health_policy.maximized(),
+                    )
     }
 }
 fn original_roll(seed: u64, sides: u16, first: bool) -> u16 {
@@ -113,7 +139,10 @@ fn source_die(source: &HdSource, kind: &TypeId, rules: &Ruleset) -> Result<u16, 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HitDie {
     source: HdSource,
+    owner: Option<crate::creatures::composition::HdOwner>,
     health_seed: u64,
+    // Only fresh unadmitted legacy rows can be unbound. All ledger rows are bound.
+    health_policy: Option<HealthRollPolicy>,
     health_origin: Option<HealthOrigin>,
     health_improvement: u16,
 }
@@ -122,10 +151,67 @@ impl HitDie {
     pub fn new(source: HdSource, health_seed: u64) -> Self {
         Self {
             source,
+            owner: None,
             health_seed,
+            health_policy: None,
             health_origin: None,
             health_improvement: 0,
         }
+    }
+
+    /// Construct a body/personal owned row with policy independent of its
+    /// eventual effective position. Only the first body HD is maximized.
+    pub fn with_health_policy(
+        source: HdSource,
+        health_seed: u64,
+        policy: HealthRollPolicy,
+    ) -> Self {
+        let mut row = Self::new(source, health_seed);
+        row.health_policy = Some(policy);
+        row
+    }
+    /// Bind an uncompiled acquisition to its owner. Bound origin/improvement
+    /// history cannot be reinterpreted as a newly maximized roll.
+    pub fn with_health_roll_policy(mut self, policy: HealthRollPolicy) -> Result<Self, HdError> {
+        if (self.health_origin.is_some() || self.owner.is_some())
+            && self.health_policy != Some(policy)
+        {
+            return Err(HdError::InvalidHealthImprovement);
+        }
+        self.health_policy = Some(policy);
+        Ok(self)
+    }
+    pub fn owner(&self) -> Option<&crate::creatures::composition::HdOwner> {
+        self.owner.as_ref()
+    }
+    /// Attach stable provenance once. A package/body owner cannot turn an
+    /// already acquired personal roll into a different funding or Health owner.
+    pub fn with_owner(
+        mut self,
+        owner: crate::creatures::composition::HdOwner,
+    ) -> Result<Self, HdError> {
+        if self
+            .owner
+            .as_ref()
+            .is_some_and(|existing| existing != &owner)
+        {
+            return Err(HdError::InvalidHealthImprovement);
+        }
+        let policy = if owner.maximizes_health() {
+            HealthRollPolicy::Maximized
+        } else {
+            HealthRollPolicy::Seeded
+        };
+        self = self.with_health_roll_policy(policy)?;
+        self.owner = Some(owner);
+        Ok(self)
+    }
+    pub fn health_policy(&self) -> Option<HealthRollPolicy> {
+        self.health_policy
+    }
+    fn bind_ordinal_policy(&mut self, ordinal: usize) {
+        self.health_policy
+            .get_or_insert(HealthRollPolicy::for_ordinal(ordinal));
     }
 
     pub fn source(&self) -> HdSource {
@@ -142,6 +228,7 @@ impl HitDie {
     pub fn health_improvement(&self) -> u16 {
         self.health_improvement
     }
+    #[cfg(test)]
     pub(crate) fn from_recorded(
         source: HdSource,
         health_seed: u64,
@@ -149,14 +236,31 @@ impl HitDie {
         improvement: u16,
         ordinal: usize,
     ) -> Result<Self, HdError> {
+        Self::from_recorded_with_policy(
+            source,
+            health_seed,
+            origin,
+            improvement,
+            HealthRollPolicy::for_ordinal(ordinal),
+        )
+    }
+    pub(crate) fn from_recorded_with_policy(
+        source: HdSource,
+        health_seed: u64,
+        origin: HealthOrigin,
+        improvement: u16,
+        policy: HealthRollPolicy,
+    ) -> Result<Self, HdError> {
         if !(2..=crate::limits::DICE_SIDES).contains(&origin.die)
-            || improvement > origin.die - original_roll(health_seed, origin.die, ordinal == 0)
+            || improvement > origin.die - original_roll(health_seed, origin.die, policy.maximized())
         {
             return Err(HdError::InvalidHealthImprovement);
         }
         Ok(Self {
             source,
+            owner: None,
             health_seed,
+            health_policy: Some(policy),
             health_origin: Some(origin),
             health_improvement: improvement,
         })
@@ -166,8 +270,10 @@ impl HitDie {
         kind: &TypeId,
         templates: &[crate::content_ids::TemplateId],
         rules: &Ruleset,
-        ordinal: usize,
     ) -> Result<(), HdError> {
+        let policy = self
+            .health_policy
+            .ok_or(HdError::InvalidHealthImprovement)?;
         let origin = self.health_origin.get_or_insert(HealthOrigin {
             templates: templates.to_vec(),
             kind: kind.clone(),
@@ -175,7 +281,7 @@ impl HitDie {
         });
         if source_die(&self.source, &origin.kind, rules)? != origin.die
             || self.health_improvement
-                > origin.die - original_roll(self.health_seed, origin.die, ordinal == 0)
+                > origin.die - original_roll(self.health_seed, origin.die, policy.maximized())
         {
             return Err(HdError::InvalidHealthImprovement);
         }
@@ -187,25 +293,25 @@ impl HitDie {
             ordinal: crate::HdIndex(ordinal as u64),
             source: self.source(),
             health_seed: self.health_seed,
+            health_policy: self.health_policy?,
             original_kind: origin.kind.clone(),
             original_die: origin.die,
             previous: self.health_improvement,
         };
         claim.valid().then_some(claim)
     }
-    fn health(
-        &self,
-        kind: &TypeId,
-        rules: &Ruleset,
-        first: bool,
-    ) -> Result<HealthContribution, HdError> {
+    fn health(&self, kind: &TypeId, rules: &Ruleset) -> Result<HealthContribution, HdError> {
         crate::diagnostics::raw_hit_die_visit();
         crate::diagnostics::health_derivation();
         let sides = source_die(&self.source, kind, rules)?;
         let mut state = self.health_seed;
         Ok(HealthContribution {
             die: sides,
-            health: if first {
+            health: if self
+                .health_policy
+                .ok_or(HdError::InvalidHealthImprovement)?
+                .maximized()
+            {
                 u32::from(sides)
             } else {
                 u32::from(die(&mut state, sides))
@@ -250,7 +356,14 @@ impl HdLedger {
         Ok(Self {
             entries: sources
                 .into_iter()
-                .map(|source| HitDie::new(source, random_word(&mut state)))
+                .enumerate()
+                .map(|(ordinal, source)| {
+                    HitDie::with_health_policy(
+                        source,
+                        random_word(&mut state),
+                        HealthRollPolicy::for_ordinal(ordinal),
+                    )
+                })
                 .collect(),
             health_root_seed: Some(seed),
             drained: Default::default(),
@@ -275,8 +388,10 @@ impl HdLedger {
             .drained
             .remove(&self.entries.len())
             .filter(|entry| entry.source == source && entry.health_seed == health_seed);
-        self.entries
-            .push(restored.unwrap_or_else(|| HitDie::new(source, health_seed)));
+        let ordinal = self.entries.len();
+        self.entries.push(restored.unwrap_or_else(|| {
+            HitDie::with_health_policy(source, health_seed, HealthRollPolicy::for_ordinal(ordinal))
+        }));
         Ok(())
     }
 
@@ -288,15 +403,20 @@ impl HdLedger {
     }
 
     pub(crate) fn from_recorded(
-        entries: Vec<HitDie>,
+        mut entries: Vec<HitDie>,
         health_root_seed: Option<u64>,
     ) -> Result<Self, HdError> {
         if entries.len() > crate::limits::HIT_DICE {
             return Err(HdError::TooManyHitDice);
         }
+        for (ordinal, entry) in entries.iter_mut().enumerate() {
+            entry.bind_ordinal_policy(ordinal);
+        }
         if let Some(mut stream) = health_root_seed {
-            for entry in &entries {
-                if entry.health_seed != random_word(&mut stream) {
+            for (ordinal, entry) in entries.iter().enumerate() {
+                if entry.health_seed != random_word(&mut stream)
+                    || entry.health_policy != Some(HealthRollPolicy::for_ordinal(ordinal))
+                {
                     return Err(HdError::InvalidHealthRoot);
                 }
             }
@@ -308,12 +428,22 @@ impl HdLedger {
         })
     }
 
+    /// Compose already-owned rows, preserving all acquisition provenance.
+    /// The effective projection has no single ordinal stream; personal growth
+    /// must append to its authoritative personal ledger, then recompose.
+    pub fn composed(entries: Vec<HitDie>) -> Result<Self, HdError> {
+        if entries.iter().any(|entry| entry.health_policy.is_none()) {
+            return Err(HdError::InvalidHealthImprovement);
+        }
+        Self::from_recorded(entries, None)
+    }
+
     pub(crate) fn restore_drained(&mut self, entries: Vec<(usize, HitDie)>) -> Result<(), HdError> {
         if entries.len() + self.entries.len() > crate::limits::HIT_DICE {
             return Err(HdError::TooManyHitDice);
         }
         let mut drained = std::collections::BTreeMap::new();
-        for (index, (ordinal, entry)) in entries.into_iter().enumerate() {
+        for (index, (ordinal, mut entry)) in entries.into_iter().enumerate() {
             if ordinal != self.entries.len() + index
                 || ordinal < self.entries.len()
                 || ordinal >= crate::limits::HIT_DICE
@@ -321,10 +451,11 @@ impl HdLedger {
             {
                 return Err(HdError::InvalidHealthImprovement);
             }
-            if self
-                .health_root_seed
-                .is_some_and(|root| entry.health_seed != random_word_at(root, ordinal as u64))
-            {
+            entry.bind_ordinal_policy(ordinal);
+            if self.health_root_seed.is_some_and(|root| {
+                entry.health_seed != random_word_at(root, ordinal as u64)
+                    || entry.health_policy != Some(HealthRollPolicy::for_ordinal(ordinal))
+            }) {
                 return Err(HdError::InvalidHealthRoot);
             }
             drained.insert(ordinal, entry);
@@ -341,11 +472,11 @@ impl HdLedger {
         templates: &[crate::content_ids::TemplateId],
         rules: &Ruleset,
     ) -> Result<(), HdError> {
-        for (ordinal, entry) in self.entries.iter_mut().enumerate() {
-            entry.bind_origin(kind, templates, rules, ordinal)?;
+        for entry in &mut self.entries {
+            entry.bind_origin(kind, templates, rules)?;
         }
-        for (ordinal, entry) in &mut self.drained {
-            entry.bind_origin(kind, templates, rules, *ordinal)?;
+        for entry in self.drained.values_mut() {
+            entry.bind_origin(kind, templates, rules)?;
         }
         Ok(())
     }
@@ -457,7 +588,7 @@ impl HdLedger {
                         }
                     }
                 }
-                entry.health(kind, rules, index == 0)
+                entry.health(kind, rules)
             })
             .collect::<Result<Vec<_>, _>>()?;
         Ok((health, next))
@@ -535,5 +666,130 @@ mod tests {
                 Ok(ledger)
             );
         }
+    }
+
+    #[test]
+    fn composition_keeps_personal_roll_when_package_size_or_position_changes() {
+        let rules = crate::test_support::test_ruleset();
+        let kind = TypeId::new("humanoid").unwrap();
+        let seed = (0..100)
+            .find(|seed| original_roll(*seed, 8, false) < 7)
+            .unwrap();
+        let person = HitDie::with_health_policy(HdSource::Racial, seed, HealthRollPolicy::Seeded);
+        let body = HitDie::with_health_policy(HdSource::Racial, 23, HealthRollPolicy::Maximized);
+        let mut before = HdLedger::composed(vec![body.clone(), person.clone()]).unwrap();
+        before.bind_health_origins(&kind, &[], &rules).unwrap();
+        let original = before.health_provenance(&kind, &rules).unwrap();
+        assert_eq!(original[0].health, 8);
+        assert!(original[1].health < 7);
+        let personal = before.entries()[1].clone();
+        let mut alone = HdLedger::composed(vec![personal.clone()]).unwrap();
+        alone.bind_health_origins(&kind, &[], &rules).unwrap();
+        assert_eq!(
+            alone.health_provenance(&kind, &rules).unwrap()[0],
+            original[1]
+        );
+        let extra = HitDie::with_health_policy(HdSource::Racial, 41, HealthRollPolicy::Seeded);
+        let mut expanded = HdLedger::composed(vec![body, extra, personal.clone()]).unwrap();
+        expanded.bind_health_origins(&kind, &[], &rules).unwrap();
+        assert_eq!(expanded.entries()[2], personal);
+        assert_eq!(
+            expanded.health_provenance(&kind, &rules).unwrap()[2],
+            original[1]
+        );
+        assert_eq!(expanded.health_root_seed(), None);
+    }
+
+    #[test]
+    fn composed_health_improvement_and_origin_survive_reordering() {
+        let rules = crate::test_support::test_ruleset();
+        let kind = TypeId::new("humanoid").unwrap();
+        let seed = (0..100)
+            .find(|seed| original_roll(*seed, 8, false) < 7)
+            .unwrap();
+        let mut ledger = HdLedger::composed(vec![
+            HitDie::with_health_policy(HdSource::Racial, 19, HealthRollPolicy::Maximized),
+            HitDie::with_health_policy(HdSource::Racial, seed, HealthRollPolicy::Seeded),
+        ])
+        .unwrap();
+        ledger.bind_health_origins(&kind, &[], &rules).unwrap();
+        let (_, claims) = ledger
+            .health_provenance_with_improvement(&kind, &rules)
+            .unwrap();
+        let old_claim = claims[0].clone();
+        ledger.improve_health(&old_claim).unwrap();
+        let personal = ledger.entries()[1].clone();
+        let before = ledger.health_provenance(&kind, &rules).unwrap()[1].clone();
+        let mut composed = HdLedger::composed(vec![personal.clone()]).unwrap();
+        assert_eq!(composed.entries()[0].health_improvement(), 1);
+        assert_eq!(
+            composed.entries()[0].health_origin(),
+            personal.health_origin()
+        );
+        assert_eq!(
+            composed.health_provenance(&kind, &rules).unwrap()[0],
+            before
+        );
+        assert_eq!(
+            composed.improve_health(&old_claim),
+            Err(HdError::InvalidHealthImprovement)
+        );
+        let (_, claims) = composed
+            .health_provenance_with_improvement(&kind, &rules)
+            .unwrap();
+        assert_eq!(claims[0].ordinal.get(), 0);
+        assert_eq!(claims[0].health_policy, HealthRollPolicy::Seeded);
+        assert_eq!(claims[0].previous, 1);
+        composed.improve_health(&claims[0]).unwrap();
+        assert_eq!(composed.entries()[0].health_improvement(), 2);
+        assert_eq!(
+            personal.with_health_roll_policy(HealthRollPolicy::Maximized),
+            Err(HdError::InvalidHealthImprovement)
+        );
+    }
+
+    #[test]
+    fn composition_rejects_unbound_rolls_and_root_provenance_rejects_policy_forgery() {
+        assert_eq!(
+            HdLedger::composed(vec![HitDie::new(HdSource::Racial, 7)]),
+            Err(HdError::InvalidHealthImprovement)
+        );
+        let ledger = HdLedger::seeded(vec![HdSource::Racial; 2], 42).unwrap();
+        let mut forged = ledger.entries().to_vec();
+        forged[1].health_policy = Some(HealthRollPolicy::Maximized);
+        assert_eq!(
+            HdLedger::from_recorded(forged, Some(42)),
+            Err(HdError::InvalidHealthRoot)
+        );
+        let mut ledger = ledger;
+        let removed = ledger.remove_latest().unwrap();
+        ledger.append_seeded(HdSource::Racial, 42).unwrap();
+        assert_eq!(ledger.entries()[1], removed);
+    }
+
+    #[test]
+    fn stable_owner_cannot_be_reassigned_or_have_its_roll_policy_changed() {
+        use crate::creatures::composition::{HdOwner, PersonalHdId};
+        let owner = HdOwner::Personal {
+            id: PersonalHdId(std::num::NonZeroU64::new(9).unwrap()),
+        };
+        let row = HitDie::new(HdSource::Racial, 31)
+            .with_owner(owner.clone())
+            .unwrap();
+        assert_eq!(row.owner(), Some(&owner));
+        assert_eq!(row.health_policy(), Some(HealthRollPolicy::Seeded));
+        assert_eq!(row.clone().with_owner(owner.clone()), Ok(row.clone()));
+        assert_eq!(
+            row.clone()
+                .with_health_roll_policy(HealthRollPolicy::Maximized),
+            Err(HdError::InvalidHealthImprovement)
+        );
+        let other = HdOwner::Personal {
+            id: PersonalHdId(std::num::NonZeroU64::new(10).unwrap()),
+        };
+        assert_eq!(
+            row.with_owner(other),
+            Err(HdError::InvalidHealthImprovement)
+        );
     }
 }

@@ -139,6 +139,10 @@ tagged!(GrowthSource { Racial {}, Class { class: String } });
 tagged!(FutureGrowth { Disabled {}, Selected { source: GrowthSource }, Authored {} });
 tagged!(HitDieRestorationBlocker { MissingSource {}, MissingHealthRoot {} });
 record!(AdvancementGrowth {
+    // Full authored active-package capacity, not surviving body rows. Required
+    // null identifies the ordinary unowned advancement domain.
+    #[serde(with = "crate::integers::optional_unsigned")]
+    body_package_hit_dice: Option<u64>,
     #[serde(with = "crate::integers::unsigned")]
     highest_applied_tier: u64,
     #[serde(with = "crate::integers::unsigned")]
@@ -410,9 +414,13 @@ impl Checked for HitDieRestorationBlocker {
 }
 impl Checked for AdvancementGrowth {
     fn checked(&self) -> bool {
-        self.highest_earned_tier > 0
-            && (1..=self.highest_earned_tier).contains(&self.highest_applied_tier)
-            && self.restorable_hit_dice <= self.highest_applied_tier
+        let loss_ceiling = match self.body_package_hit_dice {
+            None if self.highest_applied_tier > 0 => Some(self.highest_applied_tier),
+            Some(body) if (1..=256).contains(&body) => self.highest_applied_tier.checked_add(body),
+            _ => None,
+        };
+        self.highest_applied_tier <= self.highest_earned_tier
+            && loss_ceiling.is_some_and(|maximum| self.restorable_hit_dice <= maximum)
             && (self.restoration_blocker.is_none() || self.restorable_hit_dice > 0)
             && self.peak_threat > 0
             && self.next_threshold > 0

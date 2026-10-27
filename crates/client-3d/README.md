@@ -319,7 +319,8 @@ Objects:
   ASCII client.
 - A device zapped along a direction waits for one: the next movement key aims
   it, relative to the camera like a step, and Esc stops aiming. A device aimed
-  at yourself is zapped at once.
+  at yourself is zapped at once. A device that allows either offers Zap, which
+  then waits for a direction, and Zap self.
 - When the server asks which item to identify, the pack opens on that choice:
   pick one of the offered items, or decline.
 - Discovered traps lie on the floor as plates with a glowing seam: amber while

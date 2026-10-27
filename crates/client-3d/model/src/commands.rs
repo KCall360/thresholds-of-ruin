@@ -1,6 +1,6 @@
 //! Translate player input using the shared client's current admission authority.
 use tor_client_common::{
-    items::{identification_action, item_action, zap_action, ItemOperation},
+    items::{identification_action, item_action, zap_action, zap_self_action, ItemOperation},
     ClientState,
 };
 use tor_protocol::*;
@@ -16,6 +16,8 @@ pub enum Cmd {
     Use(ItemTarget, ItemOperation),
     /// Zap a device that is aimed along a direction.
     Zap(ItemTarget, Direction),
+    /// Zap a device at yourself, when it offers that.
+    ZapSelf(ItemTarget),
     /// Answer the pending identification choice; `None` declines it.
     Identify(Option<ItemTarget>),
     /// Use a granted ability, by its disclosed id, on what it targets.
@@ -189,6 +191,7 @@ pub fn request(state: &ClientState, command: Cmd) -> Result<Request, String> {
         },
         Cmd::Use(item, operation) => item_action(view, item, operation)?,
         Cmd::Zap(item, direction) => zap_action(view, item, direction)?,
+        Cmd::ZapSelf(item) => zap_self_action(view, item)?,
         Cmd::Identify(item) => identification_action(view, item)?,
         Cmd::Ability(id, target) => ability_action(view, &id, target)?,
         Cmd::ExamineTrap(trap) => {

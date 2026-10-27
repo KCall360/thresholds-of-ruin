@@ -602,18 +602,24 @@ fn added_hit_die_preserves_retained_seeds_and_owned_choices() {
         {
             "source": {"kind": "class", "id": "warrior"},
             "health_seed": 42,
+            "health_policy": "maximized",
+            "owner": null,
             "health_origin": {"templates": [], "kind": "humanoid", "die": 10},
             "health_improvement": 0,
         },
         {
             "source": {"kind": "class", "id": "mage"},
             "health_seed": 42,
+            "health_policy": "seeded",
+            "owner": null,
             "health_origin": {"templates": [], "kind": "humanoid", "die": 6},
             "health_improvement": 0,
         },
         {
             "source": {"kind": "racial"},
             "health_seed": seeded.entries()[2].health_seed(),
+            "health_policy": "seeded",
+            "owner": null,
             "health_origin": {"templates": [], "kind": "humanoid", "die": 8},
             "health_improvement": 0,
         },
@@ -651,6 +657,8 @@ fn added_hit_die_preserves_retained_seeds_and_owned_choices() {
         "hit_die": {
             "source": {"kind": "racial"},
             "health_seed": seeded.entries()[2].health_seed(),
+            "health_policy": "seeded",
+            "owner": null,
             "health_origin": {"templates": [], "kind": "humanoid", "die": 8},
             "health_improvement": 0,
         },

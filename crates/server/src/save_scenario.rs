@@ -1427,6 +1427,9 @@ enum Effect {
     MapTopology,
     DrainLife,
     CancelSpecials,
+    BalefulPolymorph {
+        forms: Vec<String>,
+    },
     StepSelfOneCell,
     TeleportRandom,
     TeleportToRayOrigin,
@@ -1654,6 +1657,7 @@ enum EquippedSelection {
 #[serde(remote = "source::ItemDiscovery", rename_all = "snake_case")]
 enum ItemDiscovery {
     SelfEffect,
+    DiscernibleEffect,
     OnUse,
     Never,
 }
@@ -1805,10 +1809,28 @@ struct DeviceSpec {
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "crate::creature_authoring::Catalog", deny_unknown_fields)]
 struct CreatureCatalog {
+    #[serde(
+        serialize_with = "mapped::serialize",
+        deserialize_with = "bounded_stored_map::<_, _, {tor_simulation::limits::CATALOG_ENTRIES}>"
+    )]
+    body_packages: BTreeMap<String, crate::creature_authoring::BodyPackage>,
     #[serde(with = "mapped")]
     species: BTreeMap<String, crate::creature_authoring::Species>,
     #[serde(with = "mapped")]
     templates: BTreeMap<String, crate::creature_authoring::Template>,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "crate::creature_authoring::BodyPackage", deny_unknown_fields)]
+struct CreatureBodyPackage {
+    species: String,
+    #[serde(with = "mapped")]
+    body: source::BodySpec,
+    #[serde(
+        serialize_with = "mapped::serialize",
+        deserialize_with = "bounded_stored::<_, _, {tor_simulation::limits::HIT_DICE}>"
+    )]
+    hit_dice: Vec<crate::creature_authoring::Advancement>,
+    polymorph_eligible: bool,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(
@@ -2402,8 +2424,24 @@ enum Restoration {
     Authored,
 }
 #[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "crate::creature_authoring::PersonalBodyGrant",
+    deny_unknown_fields
+)]
+struct PersonalBodyGrant {
+    ordinal: u16,
+    #[serde(with = "mapped")]
+    purchases: Vec<crate::creature_authoring::Purchase>,
+    #[serde(deserialize_with = "required_option")]
+    attribute: Option<String>,
+}
+#[derive(Serialize, Deserialize)]
 #[serde(remote = "crate::creature_authoring::BuildSpec", deny_unknown_fields)]
 struct BuildSpec {
+    #[serde(with = "mapped")]
+    personal_body_grants: Vec<crate::creature_authoring::PersonalBodyGrant>,
+    #[serde(deserialize_with = "required_option")]
+    body_package: Option<String>,
     #[serde(with = "mapped")]
     future_growth: crate::creature_authoring::FutureGrowth,
     starting_skills: [String; 2],
@@ -4121,6 +4159,7 @@ named_remote!(
     GrowthSource => crate::creature_authoring::GrowthSource,
     FutureGrowth => crate::creature_authoring::FutureGrowth,
     BuildSpec => crate::creature_authoring::BuildSpec,
+    PersonalBodyGrant => crate::creature_authoring::PersonalBodyGrant,
     ScenarioCapabilities => source::ScenarioCapabilities,
     FloorActivation => source::FloorActivation,
     PopulationProfile => source::PopulationProfile,
@@ -4236,6 +4275,7 @@ remote!(
     Effect => source::Effect,
     HoldPolicy => source::HoldPolicy,
     CreatureCatalog => crate::creature_authoring::Catalog,
+    CreatureBodyPackage => crate::creature_authoring::BodyPackage,
     DisplacementProfile => crate::creature_authoring::DisplacementProfile,
     Template => crate::creature_authoring::Template,
     Melee => crate::creature_authoring::Melee,
@@ -4316,7 +4356,7 @@ struct RulesInput {
     #[serde(with = "mapped")]
     document: tor_simulation::rules::RulesetDocument,
 }
-const RULES_INPUT_FORMAT: u32 = 25;
+const RULES_INPUT_FORMAT: u32 = 26;
 pub(crate) fn encode_rules_document(
     document: &tor_simulation::rules::RulesetDocument,
 ) -> Result<String, crate::Failure> {
@@ -4380,7 +4420,7 @@ struct RegionInput {
     #[serde(with = "mapped")]
     region: source::RegionDef,
 }
-const REGION_INPUT_FORMAT: u32 = 8;
+const REGION_INPUT_FORMAT: u32 = 9;
 pub(crate) fn encode_region_input(region: &source::RegionDef) -> Result<String, crate::Failure> {
     #[derive(Serialize)]
     struct Input<'a> {
@@ -4416,7 +4456,7 @@ struct ContentPackage {
     #[serde(with = "mapped")]
     index: source::RegionIndex,
 }
-const CONTENT_PACKAGE_FORMAT: u32 = 29;
+const CONTENT_PACKAGE_FORMAT: u32 = 30;
 pub(crate) fn check_metadata_capacity(package: &source::Package) -> Result<(), crate::Failure> {
     let bytes = serde_json::to_vec(&Borrowed(package)).map_err(|_| storage_failure())?;
     if bytes.len() > MAX_SAVE_METADATA_BYTES {
@@ -4888,15 +4928,15 @@ mod tests {
                 super::CONTENT_PACKAGE_FORMAT,
                 crate::arena_evaluation::FORMAT,
             ),
-            (60, 32, "interactions-v53", 25, 8, 29, "tor-arena-run-v5")
+            (61, 33, "interactions-v54", 26, 9, 30, "tor-arena-run-v5")
         );
     }
 
     #[test]
     fn discovery_formats_preserve_physical_envelopes() {
-        assert_eq!(tor_protocol::PROTOCOL_VERSION, 63);
-        assert_eq!(super::RULES_INPUT_FORMAT, 25);
-        assert_eq!(super::REGION_INPUT_FORMAT, 8);
+        assert_eq!(tor_protocol::PROTOCOL_VERSION, 64);
+        assert_eq!(super::RULES_INPUT_FORMAT, 26);
+        assert_eq!(super::REGION_INPUT_FORMAT, 9);
         // Semantic rule, region and package payload versions advance independently
         // of their physical framing, which remains unchanged.
         let base = crate::storage::codec::frame(0, 0, &serde_json::json!({})).unwrap();
@@ -5671,8 +5711,8 @@ mod tests {
             .unwrap()
             .remove("lighting");
         assert!(decode_region_input(&serde_json::to_string(&missing).unwrap()).is_err());
-        assert_eq!(value["format"], 8);
-        let header = "\"format\":8";
+        assert_eq!(value["format"], 9);
+        let header = "\"format\":9";
         for replacement in ["\"format\":0".to_owned(), format!("{header},{header}")] {
             let invalid = input.replacen(header, &replacement, 1);
             assert_ne!(
@@ -5825,7 +5865,7 @@ mod tests {
         }))
         .unwrap();
         let expected = concat!(
-            "{\"format\":8,\"region\":{\"trapdoor_destination\":null,\"lit\":true,\"lighting\":[],\"id\":1,",
+            "{\"format\":9,\"region\":{\"trapdoor_destination\":null,\"lit\":true,\"lighting\":[],\"id\":1,",
             "\"name\":\"Supply room\",\"size\":[4,4,1],\"chamber\":false,\"zone\":null,",
             "\"gravity\":null,\"gravity_overrides\":[],\"anchors\":{},\"walls\":[],",
             "\"openings\":[],\"places\":[],\"portals\":[],\"doors\":[],\"traps\":[],\"items\":[{",
@@ -5849,7 +5889,7 @@ mod tests {
         })).unwrap();
         let encoded = encode_region_input(&region).unwrap();
         let value: Value = serde_json::from_str(&encoded).unwrap();
-        assert_eq!(value["format"], 8);
+        assert_eq!(value["format"], 9);
         assert_eq!(
             value["region"]["actors"][0]["creature"]["future_growth"],
             serde_json::json!({"kind":"selected","source":{"kind":"racial"}})
@@ -6833,6 +6873,12 @@ impl Effect {
             MapTopology {},
             DrainLife {},
             CancelSpecials {},
+            BalefulPolymorph {
+                #[serde(
+                    deserialize_with = "bounded_plain::<_, _, {tor_simulation::limits::CATALOG_ENTRIES}>"
+                )]
+                forms: Vec<String>,
+            },
             StepSelfOneCell {},
             TeleportRandom {},
             TeleportToRayOrigin {},
@@ -6946,6 +6992,7 @@ impl Effect {
             Fields::MapTopology {} => source::Effect::MapTopology,
             Fields::DrainLife {} => source::Effect::DrainLife,
             Fields::CancelSpecials {} => source::Effect::CancelSpecials,
+            Fields::BalefulPolymorph { forms } => source::Effect::BalefulPolymorph { forms },
             Fields::StepSelfOneCell {} => source::Effect::StepSelfOneCell,
             Fields::TeleportRandom {} => source::Effect::TeleportRandom,
             Fields::TeleportToRayOrigin {} => source::Effect::TeleportToRayOrigin,
@@ -7241,6 +7288,17 @@ mod growth_boundary_tests {
         let spec: crate::creature_authoring::BuildSpec = serde_json::from_value(source).unwrap();
         let good = serde_json::to_value(Borrowed(&spec)).unwrap();
         assert_eq!(good["future_growth"], json!({"kind":"disabled"}));
+        assert_eq!(good["personal_body_grants"], json!([]));
+        let mut missing_grants = good.clone();
+        missing_grants
+            .as_object_mut()
+            .unwrap()
+            .remove("personal_body_grants");
+        assert!(
+            serde_json::from_value::<Owned<crate::creature_authoring::BuildSpec>>(missing_grants)
+                .is_err()
+        );
+
         let _: Owned<crate::creature_authoring::BuildSpec> =
             serde_json::from_value(good.clone()).unwrap();
         let mut bad = good.clone();
@@ -9731,6 +9789,17 @@ mod hazards_shape_tests {
     }
 
     #[test]
+    fn stored_discernible_discovery_roundtrips_exact_named_policy() {
+        let good = json!("discernible_effect");
+        let restored: Owned<source::ItemDiscovery> = serde_json::from_value(good.clone()).unwrap();
+        assert_eq!(restored.0, source::ItemDiscovery::DiscernibleEffect);
+        assert_eq!(serde_json::to_value(Borrowed(&restored.0)).unwrap(), good);
+        assert!(
+            serde_json::from_value::<Owned<source::ItemDiscovery>>(json!("discernible")).is_err()
+        );
+    }
+
+    #[test]
     fn current_consumable_descriptors_are_explicit_even_when_empty() {
         for descriptors in [json!([]), json!(["poison"])] {
             let good = json!({"descriptors":descriptors,"effects":[],"discovery":"self_effect"});
@@ -10114,6 +10183,83 @@ mod first_contact_schema_tests {
             assert!(serde_json::from_value::<crate::creature_authoring::Modifier>(bad).is_err());
         }
     }
+    #[test]
+    fn body_package_and_polymorph_effect_have_independent_strict_saved_shapes() {
+        let source: crate::creature_authoring::BodyPackage = serde_json::from_value(json!({
+            "species":"human", "body":{"cells":[[0,0,0]],"eye":[0,0,0],"mass":80},
+            "hit_dice":[{"source":"racial","purchases":[],"attribute":null}]
+        }))
+        .unwrap();
+        assert!(
+            !source.polymorph_eligible,
+            "author omission is not permission"
+        );
+        let encoded = serde_json::to_value(Owned(source.clone())).unwrap();
+        let decoded: Owned<crate::creature_authoring::BodyPackage> =
+            strict(&serde_json::to_vec(&encoded).unwrap()).unwrap();
+        assert_eq!(decoded.0, source);
+        for field in ["polymorph_eligible", "hit_dice", "body"] {
+            let mut missing = encoded.clone();
+            missing.as_object_mut().unwrap().remove(field);
+            assert!(strict::<Owned<crate::creature_authoring::BodyPackage>>(
+                &serde_json::to_vec(&missing).unwrap()
+            )
+            .is_err());
+        }
+        let grant: crate::creature_authoring::PersonalBodyGrant = serde_json::from_value(json!({
+            "ordinal": 3, "attribute": "willpower", "purchases": []
+        }))
+        .unwrap();
+        let grant_saved = serde_json::to_value(Owned(grant.clone())).unwrap();
+        assert_eq!(
+            serde_json::from_value::<Owned<crate::creature_authoring::PersonalBodyGrant>>(
+                grant_saved.clone(),
+            )
+            .unwrap()
+            .0,
+            grant,
+        );
+        assert!(
+            serde_json::from_value::<Owned<crate::creature_authoring::PersonalBodyGrant>>(json!([
+                3,
+                [],
+                "willpower"
+            ]),)
+            .is_err(),
+            "saved grant decoder itself rejects positional aliases"
+        );
+        assert_eq!(
+            strict::<Owned<crate::creature_authoring::PersonalBodyGrant>>(
+                &serde_json::to_vec(&grant_saved).unwrap()
+            )
+            .unwrap()
+            .0,
+            grant
+        );
+        for field in ["ordinal", "attribute", "purchases"] {
+            let mut missing = grant_saved.clone();
+            missing.as_object_mut().unwrap().remove(field);
+            assert!(
+                strict::<Owned<crate::creature_authoring::PersonalBodyGrant>>(
+                    &serde_json::to_vec(&missing).unwrap()
+                )
+                .is_err()
+            );
+        }
+        let effect: source::Effect =
+            serde_json::from_value(json!({"kind":"baleful_polymorph","forms":["human_body"]}))
+                .unwrap();
+        let saved = serde_json::to_vec(&Owned(effect.clone())).unwrap();
+        assert_eq!(strict::<Owned<source::Effect>>(&saved).unwrap().0, effect);
+        for bad in [
+            json!({"kind":"baleful_polymorph"}),
+            json!({"kind":"baleful_polymorph","forms":["human_body"],"changed":true}),
+            json!(["baleful_polymorph", ["human_body"]]),
+        ] {
+            assert!(strict::<Owned<source::Effect>>(&serde_json::to_vec(&bad).unwrap()).is_err());
+        }
+    }
+
     #[test]
     fn cancellation_and_until_obstruction_are_closed_empty_named_maps() {
         let raw = br#"{"kind":"cancel_specials"}"#;

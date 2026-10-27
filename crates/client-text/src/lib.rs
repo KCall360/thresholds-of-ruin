@@ -164,7 +164,18 @@ pub fn magic_input(line: &str, state: &StateView) -> Option<Result<Input, String
             .or_else(|| whole.strip_prefix("my "))
             .unwrap_or(&whole);
         let full_noun = view.inventory.iter().any(|item| item_matches(whole, item));
-        let (noun, direction) = if verb == "zap" && !full_noun {
+        let explicit_self = if verb == "zap" && !full_noun {
+            rest.rsplit_once(char::is_whitespace)
+                .filter(|(_, tail)| {
+                    tail.eq_ignore_ascii_case("self") || tail.eq_ignore_ascii_case("yourself")
+                })
+                .map(|(noun, _)| noun.trim_end_matches(" at").trim_end_matches(" to"))
+        } else {
+            None
+        };
+        let (noun, direction) = if let Some(noun) = explicit_self {
+            (noun, None)
+        } else if verb == "zap" && !full_noun {
             match rest
                 .rsplit_once(char::is_whitespace)
                 .and_then(|(noun, tail)| {
@@ -214,6 +225,9 @@ pub fn magic_input(line: &str, state: &StateView) -> Option<Result<Input, String
         };
         let action = match direction {
             Some(direction) => tor_client_common::items::zap_action(view, item, direction)?,
+            None if explicit_self.is_some() => {
+                tor_client_common::items::zap_self_action(view, item)?
+            }
             None if verb == "zap" => tor_client_common::items::item_action(
                 view,
                 item,

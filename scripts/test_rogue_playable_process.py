@@ -837,7 +837,9 @@ class RogueChecks:
         view = observation(frame)
         self.assertFalse(frame["state"]["wizard_game"])
         self.assertFalse(view["combat"]["terminal"])
-        self.assertEqual(hit_die_counts(view["combat"]["own_stats"]["hit_dice"]), {("class", source): 1})
+        self.assertEqual(hit_die_counts(view["combat"]["own_stats"]["hit_dice"]), {("racial", "racial"): 1, ("class", source): 1})
+        # Effective HD1 belongs to the body; every first personal purchase below
+        # intentionally names effective HD2, not the locked package row.
         self.assertEqual({row["name"]: int(row["quantity"]) for row in view["inventory"]},
                          {"mace": 1, "ring mail": 1, "clean bandage": 3, "food ration": 1})
         self.assertEqual(len(view["inventory"]), 4)
@@ -933,7 +935,7 @@ class RogueChecks:
         """Choose the first talent, then fight and collect through ordinary play."""
         growth = self.overview(player)
         self.assertEqual(growth["points"], {"earned": "1", "spent": "0", "unspent": "1"})
-        preview = self.advance(player, "purchase 1 advancement talent rattling_blow")
+        preview = self.advance(player, "purchase 2 advancement talent rattling_blow")
         self.assertNotIn("rattling_blow", abilities(preview))
         self.advance(player, "confirm")
         current = self.request(player, {"type": "snapshot"})
@@ -1242,10 +1244,10 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
         before = self.overview(player)
         for selection in ("talent evocation_initiate", "talent binding_initiate form spark_lance_cold"):
             rejected = self.command(player, {"type": "advancement", "command":
-                                             "purchase 1 advancement " + selection})
+                                             "purchase 2 advancement " + selection})
             self.assertIsNotNone(rejected["error"])
             self.assertEqual(self.overview(player)["points"], before["points"])
-        preview = self.advance(player, "purchase 1 advancement talent evocation_initiate form spark_lance_cold")
+        preview = self.advance(player, "purchase 2 advancement talent evocation_initiate form spark_lance_cold")
         # An owner snapshot resets the preview context. Inspect the preview's
         # current state without invalidating the confirmation under test.
         self.assertNotIn("spark_lance_cold", abilities(preview))
@@ -1264,7 +1266,7 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
             "kind": "selected", "source": {"kind": "class", "class": "warrior"}})
         self.assertEqual(selected["points"], {"earned": "1", "spent": "1", "unspent": "0"})
         current = self.request(player, {"type": "snapshot"})
-        self.assertEqual(hit_die_counts(observation(current)["combat"]["own_stats"]["hit_dice"]), {("class", "mage"): 1})
+        self.assertEqual(hit_die_counts(observation(current)["combat"]["own_stats"]["hit_dice"]), {("racial", "racial"): 1, ("class", "mage"): 1})
         # The owner snapshot cleared page context; reopen it before paging.
         self.overview(player)
         ledger = self.rows(player, "ledger")
@@ -1293,7 +1295,7 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
         self.server(scenario="rogue-exploration", seed=42)
         text, _ = self.text_client()
         self.assertIn("Starting skills", text.command("advancement"))
-        preview = text.command("advancement purchase 1 advancement talent rattling_blow")
+        preview = text.command("advancement purchase 2 advancement talent rattling_blow")
         self.assertIn("talent rattling_blow", preview)
         observer, before = self.client(observe=True)
         self.assertNotIn("rattling_blow", abilities(before))
@@ -1424,8 +1426,8 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
         self.assertEqual(u64(growth["growth"]["highest_earned_tier"]), 2)
         self.assertEqual(growth["points"], {"earned": "2", "spent": "1", "unspent": "1"})
         self.assertEqual(hit_die_counts(observation(current)["combat"]["own_stats"]["hit_dice"]),
-                         {("class", "warrior"): 2})
-        self.advance(player, "purchase 2 advancement skill heavy_weaponry")
+                         {("racial", "racial"): 1, ("class", "warrior"): 2})
+        self.advance(player, "purchase 3 advancement skill heavy_weaponry")
         self.advance(player, "confirm")
         self.assertEqual(self.overview(player)["points"], {"earned": "2", "spent": "2", "unspent": "0"})
         current = self.request(player, {"type": "snapshot"})
@@ -1622,7 +1624,7 @@ class RoguePlayableNativeProcesses(RogueChecks, ProcessTestCase):
             self.assertIn("Next available", " ".join(catalog["advancement_rows"]))
             catalog = command("next")
         self.assertIn("spark_lance_cold", " ".join(catalog["advancement_rows"]))
-        preview = command("purchase 1 advancement talent evocation_initiate form spark_lance_cold")
+        preview = command("purchase 2 advancement talent evocation_initiate form spark_lance_cold")
         self.assertIn("talent evocation_initiate form spark_lance_cold", " ".join(preview["advancement_rows"]))
         self.assertNotIn("spark_lance_cold", abilities(preview))
         command("confirm")

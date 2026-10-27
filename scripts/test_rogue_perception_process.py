@@ -60,6 +60,10 @@ def perception_package(test, species, arm, *, turn_ticks=25, cancellation=False)
           for defense in ("physical", "spiritual")]]
     manifest["creatures"] = {"species": {"fixture.perception_witness": victim}}
     character = copy.deepcopy(source["manifest"]["characters"][0])
+    body = copy.deepcopy(source["body_packages"][character["creature"]["body_package"]])
+    body["species"] = "fixture.perception_witness"
+    manifest["creatures"]["body_packages"] = {"fixture.perception_witness.body": body}
+    character["creature"]["body_package"] = "fixture.perception_witness.body"
     character.update(anchor="1/start", turn_ticks=turn_ticks, loadout=[], known_identities=[])
     character["creature"].update(species="fixture.perception_witness", name=WITNESS,
                                  nutrition={"kind": "exempt"}, future_growth={"kind": "disabled"})

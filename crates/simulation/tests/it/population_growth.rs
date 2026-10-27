@@ -182,6 +182,8 @@ fn population_racial_growth_keeps_authored_class_rows_and_every_ordinal_seed() {
                 json!({
                     "source": row.source(),
                     "health_seed": row.health_seed(),
+                    "health_policy": if ordinal == 0 { "maximized" } else { "seeded" },
+                    "owner": null,
                     "health_origin": {
                         "templates": [], "kind": "humanoid",
                         "die": if ordinal == 0 { 10 } else { 8 },
@@ -466,7 +468,9 @@ fn ordinal_skill(ordinal: u64) -> tor_simulation::prepared_spawn::OrdinalAdvance
     OrdinalAdvancement {
         ordinal: HdCount(ordinal),
         choices: HdChoices {
+            purchase_highwater: 0,
             purchases: vec![AdvancementPurchase {
+                id: None,
                 pool: PointPoolId::new("advancement").unwrap(),
                 selection: PurchaseSelection::SkillRank(Skill::Athletics),
             }],
