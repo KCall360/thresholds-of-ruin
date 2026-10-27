@@ -1,0 +1,36 @@
+import = "interactions-v55"
+
+# Provisional TOR mapping of the pinned Rogue food reserve, not calibrated balance.
+[[overrides]]
+op = "set"
+path = ["nutrition"]
+value = { kind = "enabled", initial = 1300, maximum = 2000, hungry_below = 300, weak_below = 150, starve_at = -852, unit_ticks = 100, hungry_recovery = { kind = "normal" }, weak_recovery = { kind = "normal" }, empty_recovery = { kind = "normal" }, regeneration_cost = { denominator = 1, health = 1, stamina = 1, focus = 1, mana = 1 } }
+
+[[overrides]]
+op = "set"
+path = ["nutrition_condition_trigger"]
+value = { kind = "on_empty_depletion", condition = "rogue.faint", chance = { one_in = 5 }, duration = { kind = "rolled", dice = { count = 1, sides = 8, bonus = 3 } }, ticks_per_unit = 100 }
+
+[[overrides]]
+op = "add"
+path = ["conditions", "rogue.faint"]
+value = { id = "rogue.faint", family = "rogue.faint", lifecycle = "timed", name = "Fainted", modifiers = [], stacking = { kind = "keep" }, source_scoped = false, descriptors = [], capacity = "reject", timing = { kind = "actor_active", on_expiry = { kind = "remove" } }, restrictions = ["voluntary_actions"], preparation = "pause" }
+
+# CH1 uses the accepted 200/400 actor-active policy. Its 100/100 action timing
+# and AI priority are provisional TOR tuning. No production floor pool selects it.
+# Reconstructed reconciliation: inherit the actual species contact; add only CH1
+# riders here, so a future species sequence still uses its one source of truth.
+[[overrides]]
+op = "add"
+path = ["conditions", "rogue.frozen"]
+value = { id = "rogue.frozen", family = "rogue.frozen", lifecycle = "timed", name = "Frozen", modifiers = [], stacking = { kind = "keep" }, source_scoped = false, descriptors = ["cold"], capacity = "reject", timing = { kind = "actor_active", on_expiry = { kind = "protect", duration = 400 } }, restrictions = ["voluntary_actions"], preparation = "pause" }
+
+[[overrides]]
+op = "add"
+path = ["abilities", "rogue.freezing_touch"]
+value = { id = "rogue.freezing_touch", name = "Freezing Touch", interaction = "hostile_to_target", tags = ["attack"], basic_attack = false, invocation = "actor_target", timing = { source = { kind = "fixed", prepare = 100, recover = 100 }, scaled_by = "speed" }, reach = { kind = "melee" }, strikes = { kind = "natural_melee", additional_riders = [{ trigger = "success", check = { skill = { kind = "natural_attack" }, defense = "physical" }, effects = [{ kind = "apply_condition", condition = "rogue.frozen", duration = 200 }], descriptors = ["cold"] }] }, ai = { priority = 20, hostile = true, minimum_resource_percent = 0, range_preference = "any" } }
+
+[[overrides]]
+op = "add"
+path = ["talents", "rogue.freezing_touch"]
+value = { id = "rogue.freezing_touch", name = "Freezing Touch", prerequisites = [], requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 1 }, { kind = "subtype_in", subtypes = ["cold"] }] }, form_choices = [], modifiers = [{ scope = "always", op = { kind = "grant_ability", ability = "rogue.freezing_touch" } }] }

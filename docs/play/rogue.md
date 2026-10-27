@@ -203,6 +203,24 @@ the old rate and leaves the target at normal speed until a later application.
 These effects do not change the Speed attribute. Utility use does not identify
 the wand. Status screens show these persistent effects as “until removed”.
 
+## Opt-in fruit, throwing weapons and treasure rooms
+
+Scenario authors can select fruit, darts and shuriken from the existing catalog.
+They do not appear in unchanged live floor pools or starting kits. Fruit is named
+ordinary food: take it and `eat fruit` with the same one-unit nutrition rules as
+a ration. Darts and shuriken are real weapons; acquire Knife expertise ordinarily
+and select a carried stack in Throw to spend exactly one free unit. Wielding
+requires a singleton, but throwing does not require wielding. Hits consume the
+unit; misses may leave recoverable stock under ordinary landing rules. Dagger
+recovery and arrow behavior are unchanged.
+
+The inert [treasure stage example](../../scenarios/rogue-exploration/examples/treasure-stage.toml)
+opts one selected room into coordinated loot and hostile births using next-depth
+actor context. It is not enabled automatically. Its independent bounded counts
+and illustrative bands are authored TOR policy, not a new production balance pass.
+See [items](../reference/items.md) and the
+[population schema](../reference/scenario-packages.md#first-entry-population).
+
 ## Opt-in Nothing, Light and Drain Life wands
 
 The catalog also contains `rogue.wand_nothing`, `rogue.wand_light` and

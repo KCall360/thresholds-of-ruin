@@ -3,10 +3,7 @@
 use crate::{regions::Regions, Failure};
 use std::collections::{BTreeMap, BTreeSet};
 use tor_protocol::{CreatureCatalogEntry, CreatureCatalogPage, ErrorCode};
-use tor_simulation::{
-    floor_activation::{PopulationContent, PreparedActorChoice},
-    Game,
-};
+use tor_simulation::{floor_activation::PreparedActorChoice, Game};
 
 pub(crate) fn valid_selector(value: &str) -> bool {
     !value.is_empty()
@@ -114,7 +111,7 @@ pub(crate) fn resolve(
     if let Some(plan) = game.population_spawn_plan() {
         for (profile_id, profile) in &plan.profiles {
             for stage in &profile.stages {
-                let PopulationContent::Actors { bands, .. } = &stage.population else {
+                let Some(bands) = stage.population.actor_bands() else {
                     continue;
                 };
                 if !bands
@@ -235,7 +232,7 @@ pub(crate) fn catalog(
     if let Some(plan) = game.population_spawn_plan() {
         for (profile_id, profile) in &plan.profiles {
             for stage in &profile.stages {
-                let PopulationContent::Actors { bands, .. } = &stage.population else {
+                let Some(bands) = stage.population.actor_bands() else {
                     continue;
                 };
                 let names: BTreeSet<_> = bands

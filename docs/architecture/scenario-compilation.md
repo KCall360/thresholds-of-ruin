@@ -81,8 +81,14 @@ can sample them; generated floor depth is an explicit argument, not a simulation
 dependency on a server generator. Source integer quantity shorthand lowers to one
 canonical form and does not permit older compiled or saved records.
 
-The independent region-input shape, ordinary disclosed protocol and physical
-storage framing are unchanged by this batch. Runtime item definitions, concrete
+The independent region-input and rules-document shapes, ordinary disclosed
+protocol and physical storage framing are unchanged by the treasure/throwing
+content extension. Mixed-room source declarations and thrown weapon profiles
+change the portable content package; runtime room receipts and frozen thrown
+payloads change the logical save/rules epoch. Region items still reference
+archetypes rather than embedding weapon profiles, and RulesetDocument does not
+contain those catalog declarations. Their independent envelopes do not advance
+merely because the package/save epoch does. Runtime item definitions, concrete
 AI policies and frozen theft plans still require the new strict logical save
 shape. Explicit nullable gates and currency capabilities cannot be filled in by a
 compatibility default. Rule-document serialization is a versioned compiled/save

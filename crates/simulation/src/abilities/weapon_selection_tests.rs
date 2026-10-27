@@ -122,6 +122,7 @@ fn equip_configured(
         weapon_profile: Some(WeaponProfileSpec {
             expertise: expertise(),
             launcher: None,
+            thrown_payload: None,
             base_traits: if expert_reduces_grip {
                 vec![WeaponTrait::TwoHanded]
             } else {
@@ -3995,4 +3996,608 @@ fn projectile_attack_bonus_augments_only_rolled_pool_once() {
         }
     }
     assert_eq!((rolled_count, fixed_count), (1, 1));
+}
+
+fn standalone_throw_fixture(
+    quantity: u64,
+    recovery: crate::projectile_profiles::HitRecovery,
+) -> (Game, AbilityId, ItemId) {
+    let (mut game, original, item) = paid_throw_fixture(false);
+    stow_fixture_weapon(&mut game, item);
+    let mut spec = (*game.items[&item].spec).clone();
+    spec.stackable = true;
+    let component =
+        crate::damage::DamageComponent::fixed(crate::combat::DamageType::Keen, None, 11);
+    let primary = component.key();
+    spec.equipment
+        .as_mut()
+        .unwrap()
+        .weapon_profile
+        .as_mut()
+        .unwrap()
+        .thrown_payload = Some(Box::new(crate::projectile_profiles::ThrownPayload {
+        damage: crate::damage::DamageSpec::new(vec![component], Some(primary)).unwrap(),
+        recovery,
+    }));
+    assert!(spec.valid());
+    spec.validate_rules(game.content.rules()).unwrap();
+    game.items
+        .edit(item, |item| {
+            item.spec = tor_world::Shared::new(spec);
+            item.quantity = quantity;
+            item.condition.damage_enchantment = 2;
+        })
+        .unwrap();
+    assert!(game.item_state_valid(item, &game.items[&item]));
+    (game, original.ability_id().unwrap().clone(), item)
+}
+fn standalone_carried_plan(
+    game: &Game,
+    ability: &AbilityId,
+    item: ItemId,
+    direction: StepDirection,
+) -> Plan {
+    game.ability_plan_with_supplies(
+        ActorId(1),
+        ability,
+        AbilityInvocation::directional_projectile(
+            direction,
+            ProjectileDeliverySelection::Throw {
+                source: ThrownSourceSelection::Carried {
+                    item,
+                    socket: EquipmentSlotId(0),
+                },
+            },
+        ),
+        Default::default(),
+    )
+    .unwrap()
+}
+
+#[test]
+fn standalone_thrown_payload_replaces_only_base_damage_and_preserves_melee() {
+    let (mut game, ability, item) =
+        standalone_throw_fixture(1, crate::projectile_profiles::HitRecovery::ConsumedOnHit);
+    game.equip_authored(ActorId(1), item, EquipmentSlotId(0))
+        .unwrap();
+    let melee = game
+        .creature(ActorId(1))
+        .unwrap()
+        .derived()
+        .selected_attack
+        .clone();
+    let plan = game
+        .capture_projectile_plan(
+            ActorId(1),
+            &ability,
+            StepDirection::East,
+            ProjectileDeliverySelection::Throw {
+                source: ThrownSourceSelection::Equipped {
+                    item,
+                    socket: EquipmentSlotId(0),
+                },
+            },
+        )
+        .unwrap();
+    assert_eq!(plan.bonus, melee.check_bonus, "hit enchantment enters once");
+    let [PlannedEffect::Damage { damage }] = plan.effects.as_slice() else {
+        panic!("one payload")
+    };
+    assert_eq!(
+        damage.components()[0].amount(),
+        crate::damage::DamageAmount::Fixed(13)
+    );
+    assert_eq!(
+        melee
+            .attack
+            .damage_with_modifiers(0, 0, 0)
+            .unwrap()
+            .components()[0]
+            .amount(),
+        crate::damage::DamageAmount::Fixed(7)
+    );
+    assert_eq!((plan.preparation, plan.recovery), (10, 20));
+    assert_eq!(
+        plan.range,
+        crate::weapon_profiles::RangeBands {
+            short_feet: 20,
+            long_feet: 60
+        }
+    );
+    let plan = Plan::Projectile(tor_world::Shared::new(plan));
+    start_plan(&mut game, &plan);
+    finish_fixture_preparation(&mut game);
+    assert!(
+        !game.items.contains_key(&item),
+        "hit consumes the equipped singleton"
+    );
+    assert!(game.equipment(ActorId(1)).unwrap().is_empty());
+}
+
+#[test]
+fn standalone_stack_is_not_equippable_but_paid_throw_holds_one_and_reopens() {
+    let (mut game, ability, item) =
+        standalone_throw_fixture(3, crate::projectile_profiles::HitRecovery::ConsumedOnHit);
+    let before = game.clone();
+    assert!(game
+        .equip_authored(ActorId(1), item, EquipmentSlotId(0))
+        .is_err());
+    assert!(game
+        .plan_work(
+            ActorId(1),
+            crate::Work::Equip {
+                item,
+                slot: EquipmentSlotId(0)
+            }
+        )
+        .is_err());
+    assert_eq!(game, before);
+    assert_eq!(
+        game.projectile_choice_for_item(
+            ActorId(1),
+            &ability,
+            ProjectileChoiceQuery::ThrowSources,
+            item
+        ),
+        Some(ProjectileChoice::Throw {
+            source: ThrownSourceSelection::Carried {
+                item,
+                socket: EquipmentSlotId(0)
+            }
+        })
+    );
+    let plan = standalone_carried_plan(&game, &ability, item, StepDirection::East);
+    start_plan(&mut game, &plan);
+    assert_eq!(game.items[&item].holds.len(), 1);
+    assert_eq!(game.items[&item].holds[0].quantity, 1);
+    assert!(game.equipment(ActorId(1)).unwrap().is_empty());
+    let mut shared = crate::checkpoint::SharedState::default();
+    let checkpoint = game.checkpoint(&mut shared);
+    let mut restored =
+        Game::restore_checkpoint(checkpoint, &shared, game.content().clone()).unwrap();
+    assert_eq!(restored.preparation(ActorId(1)).unwrap().plan, plan);
+    assert!(restored
+        .prepare_owned_transfer(item, ActorId(1), ActorId(2), 3)
+        .is_err());
+    let transfer = restored
+        .prepare_owned_transfer(item, ActorId(1), ActorId(2), 2)
+        .unwrap();
+    let stolen = transfer.result();
+    restored.apply_owned_transfer(transfer).unwrap();
+    assert_eq!(restored.items[&item].quantity, 1);
+    assert_eq!(restored.items[&stolen].quantity, 2);
+    finish_fixture_preparation(&mut restored);
+    assert!(!restored.items.contains_key(&item));
+    assert_eq!(
+        restored.items[&stolen].quantity, 2,
+        "theft never consumes the reserved unit"
+    );
+    let checkpoint = restored.checkpoint(&mut shared);
+    assert_eq!(
+        Game::restore_checkpoint(checkpoint, &shared, restored.content().clone()).unwrap(),
+        restored
+    );
+}
+
+#[test]
+fn standalone_miss_recovers_one_unit_and_preserves_stack_condition() {
+    let (mut game, ability, item) =
+        standalone_throw_fixture(3, crate::projectile_profiles::HitRecovery::ConsumedOnHit);
+    let condition = game.items[&item].condition;
+    let plan = standalone_carried_plan(&game, &ability, item, StepDirection::West);
+    start_plan(&mut game, &plan);
+    finish_fixture_preparation(&mut game);
+    assert_eq!(game.items[&item].quantity, 2);
+    assert!(game.items[&item].holds.is_empty());
+    let recovered: Vec<_> = game
+        .items
+        .iter()
+        .filter(|(id, value)| **id != item && value.spec == game.items[&item].spec)
+        .collect();
+    assert_eq!(recovered.len(), 1);
+    assert_eq!(recovered[0].1.quantity, 1);
+    assert_eq!(recovered[0].1.condition, condition);
+    assert!(matches!(
+        recovered[0].1.location,
+        crate::ItemLocation::Ground(_)
+    ));
+}
+
+#[test]
+fn standalone_recoverable_hit_merges_fresh_identity_and_retains_exact_condition() {
+    let (mut game, ability, item) =
+        standalone_throw_fixture(3, crate::projectile_profiles::HitRecovery::Recoverable);
+    let target = game.actors[&ActorId(2)].location;
+    let condition = game.items[&item].condition;
+    let other = game
+        .spawn_item_stack(target, None, 2, (*game.items[&item].spec).clone())
+        .unwrap();
+    game.items
+        .edit(other, |other| other.condition = condition)
+        .unwrap();
+    game.actors
+        .get_mut(&ActorId(1))
+        .unwrap()
+        .known_equipment
+        .learn_numbers(item, condition)
+        .unwrap();
+    game.actors
+        .get_mut(&ActorId(1))
+        .unwrap()
+        .known_equipment
+        .learn_numbers(other, condition)
+        .unwrap();
+    let plan = standalone_carried_plan(&game, &ability, item, StepDirection::East);
+    start_plan(&mut game, &plan);
+    finish_fixture_preparation(&mut game);
+    assert_eq!(game.items[&item].quantity, 2);
+    assert!(!game.items.contains_key(&other));
+    let landed: Vec<_> = game.items.at(crate::ItemLocation::Ground(target)).collect();
+    assert_eq!(landed.len(), 1);
+    assert_ne!(landed[0], item);
+    assert_ne!(landed[0], other);
+    assert_eq!(game.items[&landed[0]].quantity, 3);
+    assert_eq!(game.items[&landed[0]].condition, condition);
+    assert_eq!(
+        game.actors[&ActorId(1)]
+            .known_equipment
+            .remembered_condition(landed[0]),
+        game.actors[&ActorId(1)]
+            .known_equipment
+            .remembered_condition(item)
+    );
+    assert!(game.actors[&ActorId(2)]
+        .known_equipment
+        .remembered_condition(landed[0])
+        .is_none());
+}
+
+#[test]
+fn standalone_stack_split_merge_never_combines_mismatched_or_equipped_units() {
+    let (mut game, _, item) =
+        standalone_throw_fixture(3, crate::projectile_profiles::HitRecovery::ConsumedOnHit);
+    let target = game.actors[&ActorId(2)].location;
+    let condition = game.items[&item].condition;
+    let destination = game
+        .spawn_item_stack(
+            target,
+            Some(ActorId(2)),
+            2,
+            (*game.items[&item].spec).clone(),
+        )
+        .unwrap();
+    for mismatch in [
+        crate::armor::ItemCondition {
+            cursed: true,
+            ..condition
+        },
+        crate::armor::ItemCondition {
+            damage_enchantment: 1,
+            ..condition
+        },
+    ] {
+        game.items
+            .edit(destination, |other| other.condition = mismatch)
+            .unwrap();
+        let transfer = game
+            .prepare_owned_transfer(item, ActorId(1), ActorId(2), 1)
+            .unwrap();
+        assert_ne!(transfer.result(), destination);
+    }
+    game.items
+        .edit(destination, |other| other.condition = condition)
+        .unwrap();
+    let transfer = game
+        .prepare_owned_transfer(item, ActorId(1), ActorId(2), 1)
+        .unwrap();
+    let merged = transfer.result();
+    assert_ne!(merged, destination);
+    assert_ne!(merged, item);
+    game.apply_owned_transfer(transfer).unwrap();
+    assert_eq!(game.items[&item].quantity, 2);
+    assert_eq!(game.items[&merged].quantity, 3);
+    game.actors
+        .get_mut(&ActorId(1))
+        .unwrap()
+        .known_equipment
+        .learn_curse(item, true)
+        .unwrap();
+    // The real user-facing split sequence avoids immediately rejoining a
+    // carried homogeneous stack: drop all, pick one, equip, then pick the rest.
+    let drop = game
+        .prepare_transfer(ActorId(1), item, None, false)
+        .unwrap();
+    game.apply_prepared_transfer(&drop).unwrap();
+    let split = game
+        .prepare_transfer(ActorId(1), item, Some(1), true)
+        .unwrap();
+    let single = split.result();
+    game.apply_prepared_transfer(&split).unwrap();
+    assert_eq!(
+        game.actors[&ActorId(1)].known_equipment.curse(single),
+        Some(true),
+        "split inherits only its owner's remembered fact, not current truth"
+    );
+    assert_eq!(game.actors[&ActorId(2)].known_equipment.curse(single), None);
+    game.equip_authored(ActorId(1), single, EquipmentSlotId(0))
+        .unwrap();
+    assert!(!game.merge_destination_available(single));
+    let remainder = game.prepare_transfer(ActorId(1), item, None, true).unwrap();
+    assert_eq!(
+        remainder.result(),
+        item,
+        "equipped singleton cannot absorb the remaining stack"
+    );
+    game.apply_prepared_transfer(&remainder).unwrap();
+    assert_eq!(game.items[&single].quantity, 1);
+    assert_eq!(game.items[&item].quantity, 1);
+    game.items.edit(single, |item| item.quantity = 2).unwrap();
+    let mut shared = crate::checkpoint::SharedState::default();
+    assert!(Game::restore_checkpoint(
+        game.checkpoint(&mut shared),
+        &shared,
+        game.content().clone()
+    )
+    .is_err());
+}
+
+#[test]
+fn standalone_stack_contract_rejects_unrelated_equipment_capabilities() {
+    let (game, _, item) =
+        standalone_throw_fixture(2, crate::projectile_profiles::HitRecovery::ConsumedOnHit);
+    let good = (*game.items[&item].spec).clone();
+    for variant in 0..5 {
+        let mut spec = good.clone();
+        match variant {
+            0 => spec.class = crate::ItemClass::Armor,
+            1 => {
+                spec.equipment
+                    .as_mut()
+                    .unwrap()
+                    .weapon_profile
+                    .as_mut()
+                    .unwrap()
+                    .thrown_payload = None
+            }
+            2 => {
+                spec.equipment.as_mut().unwrap().armor = Some(crate::ArmorSpec {
+                    physical_reduction: 1,
+                    material: crate::armor::ArmorMaterial::Metal,
+                    rustproof: false,
+                })
+            }
+            3 => {
+                spec.equipment.as_mut().unwrap().periodic_relocation =
+                    Some(crate::PeriodicRelocation {
+                        interval: 10,
+                        chance_denominator: 2,
+                    })
+            }
+            4 => spec.equipment.as_mut().unwrap().modifiers.push(Modifier {
+                cancellable: false,
+                scope: Scope::Always,
+                op: ModifierOp::Set {
+                    stat: Stat::ResourceMax {
+                        resource: Resource::Mana,
+                    },
+                    value: 20,
+                },
+            }),
+            _ => unreachable!(),
+        }
+        assert!(!spec.valid(), "variant {variant}");
+    }
+}
+
+#[test]
+fn standalone_equipped_curse_refusal_preserves_last_unit_after_paid_attempt() {
+    let (mut game, ability, item) =
+        standalone_throw_fixture(1, crate::projectile_profiles::HitRecovery::ConsumedOnHit);
+    game.items
+        .edit(item, |item| item.condition.cursed = true)
+        .unwrap();
+    game.equip_authored(ActorId(1), item, EquipmentSlotId(0))
+        .unwrap();
+    let plan = game
+        .ability_plan_with_supplies(
+            ActorId(1),
+            &ability,
+            AbilityInvocation::directional_projectile(
+                StepDirection::East,
+                ProjectileDeliverySelection::Throw {
+                    source: ThrownSourceSelection::Equipped {
+                        item,
+                        socket: EquipmentSlotId(0),
+                    },
+                },
+            ),
+            Default::default(),
+        )
+        .unwrap();
+    let health = game.creature(ActorId(2)).unwrap().health();
+    start_plan(&mut game, &plan);
+    finish_fixture_preparation(&mut game);
+    assert_eq!(game.items[&item].quantity, 1);
+    assert!(game.items[&item].holds.is_empty());
+    assert_eq!(
+        game.equipment(ActorId(1)).unwrap().get(&EquipmentSlotId(0)),
+        Some(&item)
+    );
+    assert_eq!(
+        game.actors[&ActorId(1)].known_equipment.curse(item),
+        Some(true)
+    );
+    assert_eq!(game.creature(ActorId(2)).unwrap().health(), health);
+}
+
+#[test]
+fn standalone_landing_overflow_rolls_back_damage_payment_stack_and_rng() {
+    let (mut game, ability, item) =
+        standalone_throw_fixture(3, crate::projectile_profiles::HitRecovery::Recoverable);
+    let target = game.actors[&ActorId(2)].location;
+    let condition = game.items[&item].condition;
+    let destination = game
+        .spawn_item_stack(target, None, u64::MAX, (*game.items[&item].spec).clone())
+        .unwrap();
+    game.items
+        .edit(destination, |item| item.condition = condition)
+        .unwrap();
+    let plan = standalone_carried_plan(&game, &ability, item, StepDirection::East);
+    start_plan(&mut game, &plan);
+    game.tick += game
+        .preparation(ActorId(1))
+        .unwrap()
+        .remaining_at(game.actor_clock(ActorId(1)));
+    for id in game.actors.keys().copied().collect::<Vec<_>>() {
+        game.actors.get_mut(&id).unwrap().ready_at = game.tick;
+    }
+    let before = game.clone();
+    assert_eq!(
+        game.with_effect_publication(|game| game.resolve_preparations()),
+        Err(crate::GameError::InvalidQuantity)
+    );
+    assert_eq!(game, before);
+}
+
+#[test]
+fn standalone_frozen_payload_must_match_surviving_item_on_restore() {
+    let (mut game, ability, item) =
+        standalone_throw_fixture(3, crate::projectile_profiles::HitRecovery::ConsumedOnHit);
+    let plan = standalone_carried_plan(&game, &ability, item, StepDirection::East);
+    start_plan(&mut game, &plan);
+    let mut forged = serde_json::to_value(&plan).unwrap();
+    forged["source"]["allocation"]["target"]["spec"]["thrown_payload"]["recovery"] =
+        json!("recoverable");
+    let forged: Plan = serde_json::from_value(forged).unwrap();
+    assert!(forged.valid(game.content.rules()), "shape remains legal");
+    assert!(
+        !game.plan_source_valid(&forged),
+        "a frozen payload cannot contradict its exact surviving source"
+    );
+}
+
+#[test]
+fn standalone_no_legal_landing_discards_only_reserved_unit_without_random_draw() {
+    let (mut game, ability, item) =
+        standalone_throw_fixture(3, crate::projectile_profiles::HitRecovery::ConsumedOnHit);
+    let origin = game.actors[&ActorId(1)].location;
+    game.actors
+        .get_mut(&ActorId(2))
+        .unwrap()
+        .location
+        .position
+        .x = 4;
+    for y in -1..=1 {
+        for x in -1..=1 {
+            if x == 0 && y == 0 {
+                continue;
+            }
+            let at = tor_world::Location {
+                region: origin.region,
+                position: tor_world::Position {
+                    x: origin.position.x + x,
+                    y: origin.position.y + y,
+                    z: origin.position.z,
+                },
+            };
+            game.world.set_wall(at, true).unwrap();
+        }
+    }
+    let plan = standalone_carried_plan(&game, &ability, item, StepDirection::West);
+    let rng = game.rules_rng;
+    game.begin_survival_diagnostics(true);
+    start_plan(&mut game, &plan);
+    finish_fixture_preparation(&mut game);
+    assert_eq!(game.rules_rng, rng);
+    assert_eq!(game.items[&item].quantity, 2);
+    assert_eq!(
+        game.items
+            .values()
+            .filter(|value| value.spec == game.items[&item].spec)
+            .map(|value| value.quantity)
+            .sum::<u64>(),
+        2
+    );
+    assert_eq!(
+        game.take_survival_diagnostics().unwrap().actors[&ActorId(1)].items_consumed,
+        1
+    );
+}
+
+#[test]
+fn standalone_thrown_damage_bounds_are_validated_independently_of_melee() {
+    let (mut game, _, item) =
+        standalone_throw_fixture(3, crate::projectile_profiles::HitRecovery::ConsumedOnHit);
+    let maximum = crate::damage::DamageComponent::fixed(
+        crate::combat::DamageType::Keen,
+        None,
+        crate::limits::NUMERIC as u32,
+    );
+    let primary = maximum.key();
+    game.items
+        .edit(item, |item| {
+            item.spec
+                .equipment
+                .as_mut()
+                .unwrap()
+                .weapon_profile
+                .as_mut()
+                .unwrap()
+                .thrown_payload
+                .as_mut()
+                .unwrap()
+                .damage = crate::damage::DamageSpec::new(vec![maximum], Some(primary)).unwrap();
+        })
+        .unwrap();
+    assert!(
+        !game.items[&item].condition_valid(),
+        "melee's valid enchantment must also fit thrown damage"
+    );
+    assert!(!game.item_state_valid(item, &game.items[&item]));
+}
+
+#[test]
+fn standalone_rolled_payload_combines_instance_and_other_equipment_bonuses_once() {
+    let (mut game, ability, item) =
+        standalone_throw_fixture(3, crate::projectile_profiles::HitRecovery::ConsumedOnHit);
+    let component = crate::damage::DamageComponent::rolled(
+        crate::combat::DamageType::Keen,
+        None,
+        crate::dice::DicePool::new(1, 3, 0).unwrap(),
+    );
+    let primary = component.key();
+    game.items
+        .edit(item, |item| {
+            item.spec
+                .equipment
+                .as_mut()
+                .unwrap()
+                .weapon_profile
+                .as_mut()
+                .unwrap()
+                .thrown_payload
+                .as_mut()
+                .unwrap()
+                .damage = crate::damage::DamageSpec::new(vec![component], Some(primary)).unwrap();
+        })
+        .unwrap();
+    equip_configured(&mut game, 10, false, |spec| {
+        spec.equipment.as_mut().unwrap().modifiers.push(Modifier {
+            cancellable: false,
+            scope: Scope::Always,
+            op: ModifierOp::Add {
+                stat: Stat::AttackDamageRollBonus,
+                value: 2,
+            },
+        });
+    });
+    let plan = standalone_carried_plan(&game, &ability, item, StepDirection::East);
+    let [PlannedEffect::Damage { damage }] = plan.as_projectile().unwrap().effects.as_slice()
+    else {
+        panic!("one payload")
+    };
+    assert_eq!(
+        damage.components()[0].amount(),
+        crate::damage::DamageAmount::Rolled(crate::dice::DicePool::new(1, 3, 4).unwrap())
+    );
 }

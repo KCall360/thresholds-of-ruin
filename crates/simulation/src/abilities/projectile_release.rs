@@ -152,8 +152,11 @@ impl Game {
             false
         };
         let consumed = successful_hit
-            && matches!(&plan.source,
-            ProjectileSource::Launch { payload, .. } if payload.recovery == HitRecovery::ConsumedOnHit);
+            && plan
+                .source
+                .hit_recovery(self.content.rules())
+                .ok_or(GameError::Rule(RuleError::InvalidPlan))?
+                == HitRecovery::ConsumedOnHit;
         let mut discarded = consumed;
         if !consumed {
             let landing = if successful_hit {

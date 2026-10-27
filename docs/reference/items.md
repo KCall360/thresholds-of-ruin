@@ -33,8 +33,15 @@ and unauthorized requests do not partially mutate state or spend simulation time
 
 Only explicitly stackable items merge. The complete immutable definition, exact
 per-unit condition and charge state must match. Corpse provenance is never
-interchangeable stack state. Equipment and devices remain nonstackable; independent
-ammunition payloads can be stackable without acquiring equipment sockets.
+interchangeable stack state. Devices, armor, rings and other equipment remain
+nonstackable. Plain weapon equipment with an explicit standalone thrown payload may be a homogeneous stack;
+independent ammunition remains stackable without acquiring equipment sockets.
+A weapon stack must be split to exactly one unit before wielding: drop the
+whole stack, take one, equip that singleton, then take the remainder. Taking a
+unit back before equipping would merge it with an identical carried stack.
+Carried Throw
+uses one free unit directly, without equipping the stack, multiplying modifiers
+or reserving extra sockets. Equipped units never merge with a carried stack.
 
 Ordinary fungible stacks retain the lowest matching destination ID. Instance-sensitive
 stacks, such as ammunition with hit/damage enchantments, instead retire the matching
@@ -73,10 +80,25 @@ both capabilities and remains subject to equipment nonstackability.
 
 Ammunition supports homogeneous birth, curse and signed hit/damage enchantments;
 plain ammunition cannot acquire armor penalties, armor enchantment, corrosion or
-protection. This foundation does not yet expose ordinary launch/throw actions or
-production ammunition content. The planned Rogue arrow policy consumes ammunition
-on successful hits and permits miss recovery; durable thrown weapons remain
-recoverable after hits. No percentage breakage rule is implied.
+protection. Ordinary Launch and Throw use the shared physical-projectile kernel. The Rogue
+arrow consumes one unit on a successful hit and permits miss recovery. A weapon
+profile may separately author `thrown_payload = { damage = ..., recovery = ... }`
+without becoming ammunition or requiring a launcher. Throw replaces only the
+weapon base damage; instance enchantments and general attack bonuses apply once.
+The captured profile retains the payload through paid preparation and reopening.
+Profiles without that payload retain their melee damage and recoverable-hit
+behavior. No percentage breakage rule is implied.
+
+### Ordinary fruit
+
+The opt-in `rogue.fruit` is ordinary named Food with a generic food appearance,
+not a ration reskin or a special consumable effect. It is stackable, has exactly
+the ration's 1d400+1099 nutrition, and uses the same paid one-unit Eat, reserve cap,
+debt settlement and food detection. Its `ration` supply tag deliberately means
+interchangeable food supply, not literal identity: fruit never merges with a
+ration stack. The authored `name` supplies its label through ordinary validation.
+There is no mutable global fruit preference, extra effect, taste XP, food-pool
+weight change or starter addition.
 
 ## Timed equipment and effects
 
@@ -217,6 +239,19 @@ attack-speed claims. The dagger's typed profile adds Thrown 20/60 feet and
 Offhand only while Knife expertise is active; its existing LightWeaponry 1d6 Keen
 melee math and 60/40 timing are unchanged. A thrown dagger remains recoverable
 on a successful hit.
+
+The opt-in `rogue.dart` and `rogue.shuriken` are standalone stackable weapons,
+not ammunition. Dart melee is fixed 1 Keen (not an invalid one-sided die) and its
+throw is 1d3 Keen; shuriken melee is 1d2 Keen and its throw is 2d4 Keen. Both use
+ordinary Knife expertise to enable Throw, 20/60-foot ranges and 60/40 timing.
+These handling choices and damage categories are TOR adaptations; expertise is
+not free. A successful hit consumes the thrown unit. Misses use ordinary bounded
+floor recovery, including loss when no legal landing exists. Birth conditions,
+exact-unit holds, condition-aware splitting/merging and conservative owner
+knowledge use the same inventory mechanisms as other instance-sensitive stacks.
+Neither weapon changes live stock, starter kits, existing weapons or generation
+frequencies. The authored quantity remains explicit; no source birth-stack range
+is silently adopted.
 
 The shortbow uses LightWeaponry, a base TwoHanded requirement and expert-only
 Quickdraw. Its launcher range is 80/320 feet; incidental melee deals fixed

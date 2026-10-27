@@ -20,6 +20,9 @@ mod checkpoints;
 #[path = "floor_population_depth_tests.rs"]
 mod depth;
 
+#[path = "room_cluster_tests.rs"]
+mod room_cluster;
+
 #[path = "spawn_carried_stock_tests.rs"]
 mod carried_stock;
 #[path = "floor_population_growth_tests.rs"]
@@ -1038,7 +1041,9 @@ fn reject_expired_population_actor_receipt_using_reserved_identity(reserved: u64
                     _ => None,
                 })
             }
-            StageResult::Skipped { .. } | StageResult::RoomsEvaluated { .. } => None,
+            StageResult::Skipped { .. }
+            | StageResult::RoomsEvaluated { .. }
+            | StageResult::RoomCluster { .. } => None,
         })
         .expect("fixture must retain the abandoned actor origin");
     assert!(
@@ -1157,7 +1162,9 @@ fn reject_expired_population_receipt_using_retained_wizard_origin(
                     _ => None,
                 })
             }
-            StageResult::Skipped { .. } | StageResult::RoomsEvaluated { .. } => None,
+            StageResult::Skipped { .. }
+            | StageResult::RoomsEvaluated { .. }
+            | StageResult::RoomCluster { .. } => None,
         })
         .expect("fixture must retain an abandoned origin of the requested kind");
     assert_ne!(*identity, origin);

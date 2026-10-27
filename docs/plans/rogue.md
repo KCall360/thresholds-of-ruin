@@ -461,8 +461,12 @@ consumer yet and is explicitly unsupported rather than an inert displayed trait.
 
 Acceptance: capacity/anatomy constraints, unknown-property disclosure, naming
 without identification, allowed observed-use learning, resource consumption,
-obstruction/bounces, starvation/healing, AI use and full recovery. Balance food
-safeguards and treasure-room population only when prerequisites exist.
+obstruction/bounces, starvation/healing, AI use and full recovery. The bounded opt-in treasure-room mechanism, ordinary fruit and standalone
+stackable darts/shuriken now use those shared foundations; their exact contracts
+are in the [population schema](../reference/scenario-packages.md#first-entry-population)
+and [item reference](../reference/items.md). Existing live distributions remain
+unchanged. Food safeguards, live treasure frequency and overall balance remain
+separate future decisions, not implied by this content-completion batch.
 
 ### Species, traps and pressure
 

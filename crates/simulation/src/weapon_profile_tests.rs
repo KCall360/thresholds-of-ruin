@@ -72,6 +72,7 @@ fn spec() -> WeaponProfileSpec {
     WeaponProfileSpec {
         expertise: id(),
         launcher: None,
+        thrown_payload: None,
         base_traits: vec![],
         expert_traits: WeaponTraitChanges {
             add: vec![],
@@ -249,8 +250,14 @@ fn named_records_required_nullable_and_bounded_supported_traits_are_strict() {
         serde_json::from_value::<WeaponProfileSpec>(canonical.clone()).unwrap(),
         spec()
     );
-    let mut invalid = vec![json!(["fixture.weapon", null, [], {"add":[],"remove":[]}])];
-    for key in ["expertise", "launcher", "base_traits", "expert_traits"] {
+    let mut invalid = vec![json!(["fixture.weapon", null, null, [], {"add":[],"remove":[]}])];
+    for key in [
+        "expertise",
+        "launcher",
+        "thrown_payload",
+        "base_traits",
+        "expert_traits",
+    ] {
         let mut value = canonical.clone();
         value.as_object_mut().unwrap().remove(key);
         invalid.push(value);
@@ -596,4 +603,83 @@ fn launcher_is_strict_named_and_old_ranged_field_is_rejected() {
     old["ranged"] = serde_json::Value::Null;
     assert!(serde_json::from_value::<WeaponProfileSpec>(old).is_err());
     assert!(serde_json::from_str::<LauncherProfile>(r#"{"family":"fixture.bow","family":"fixture.crossbow","range":{"short_feet":20,"long_feet":60}}"#).is_err());
+}
+
+#[test]
+fn thrown_payload_is_explicit_strict_and_requires_a_thrown_state() {
+    let mut value = serde_json::to_value(spec()).unwrap();
+    value["base_traits"] = json!([{"kind":"thrown", "range":{"short_feet":20,"long_feet":60}}]);
+    value["thrown_payload"] = json!({
+        "damage":{"components":[{"category":"keen","descriptor":null,
+            "amount":{"type":"rolled","count":1,"sides":3,"bonus":0}}],
+            "primary":{"category":"keen","descriptor":null,"sides":3}},
+        "recovery":"consumed_on_hit"});
+    let profile: WeaponProfileSpec = serde_json::from_value(value.clone()).expect(
+        "standalone thrown weapons accept a distinct explicit payload without a launcher family",
+    );
+    assert!(profile.validate(&rules()).is_ok());
+    assert_eq!(serde_json::to_value(&profile).unwrap(), value);
+    for pointer in [
+        "/thrown_payload/damage",
+        "/thrown_payload/recovery",
+        "/thrown_payload/damage/primary",
+    ] {
+        let mut bad = value.clone();
+        let (parent, field) = pointer.rsplit_once('/').unwrap();
+        bad.pointer_mut(parent)
+            .unwrap()
+            .as_object_mut()
+            .unwrap()
+            .remove(field);
+        assert!(
+            serde_json::from_value::<WeaponProfileSpec>(bad).is_err(),
+            "{pointer}"
+        );
+    }
+    let mut bad = value.clone();
+    bad["thrown_payload"]["family"] = json!("fake.ammunition");
+    assert!(serde_json::from_value::<WeaponProfileSpec>(bad).is_err());
+    let mut unknown = value.clone();
+    unknown["thrown_payload"]["damage"]["components"][0]["descriptor"] = json!("fixture.unknown");
+    unknown["thrown_payload"]["damage"]["primary"]["descriptor"] = json!("fixture.unknown");
+    let unknown: WeaponProfileSpec = serde_json::from_value(unknown).unwrap();
+    assert!(
+        unknown.validate(&rules()).is_err(),
+        "payload descriptors belong to current rules"
+    );
+    let encoded = serde_json::to_string(&profile).unwrap();
+    let duplicate = encoded.replacen(
+        "\"recovery\":",
+        "\"recovery\":\"recoverable\",\"recovery\":",
+        1,
+    );
+    assert!(serde_json::from_str::<WeaponProfileSpec>(&duplicate).is_err());
+    let mut bad = value;
+    bad["base_traits"] = json!([]);
+    assert!(serde_json::from_value::<WeaponProfileSpec>(bad).is_err());
+}
+
+#[test]
+fn thrown_payload_never_grants_unowned_or_dormant_expertise() {
+    let mut source = spec();
+    source.expert_traits.add = vec![WeaponTrait::Thrown { range: range() }];
+    let component = crate::damage::DamageComponent::fixed(crate::combat::DamageType::Keen, None, 1);
+    let primary = component.key();
+    source.thrown_payload = Some(Box::new(crate::projectile_profiles::ThrownPayload {
+        damage: crate::damage::DamageSpec::new(vec![component], Some(primary)).unwrap(),
+        recovery: crate::projectile_profiles::HitRecovery::ConsumedOnHit,
+    }));
+    let compiled = source.validate(&rules()).unwrap();
+    assert!(compiled
+        .resolve(&ExpertiseOwnership::default())
+        .thrown_payload()
+        .is_none());
+    assert!(compiled
+        .resolve(&ownership(false))
+        .thrown_payload()
+        .is_none());
+    assert_eq!(
+        compiled.resolve(&ownership(true)).thrown_payload(),
+        source.thrown_payload.as_deref()
+    );
 }

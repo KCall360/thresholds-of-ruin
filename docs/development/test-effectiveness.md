@@ -137,6 +137,124 @@ receipt. No lifetime failure rate, complete CI-attempt total, or measured speedu
 is established. Remaining unreviewed historical failures are **unclassified /
 pending**, not zero.
 
+## Dependency integration: SQLAlchemy 2.1.5
+
+Reviewed 27 October 2026 for [PR #194](https://github.com/KCall360/thresholds-of-ruin/pull/194),
+from its dependency-update head `aa70a74a46f819384009313894832c93aaa745fe`
+and the bounded local correction receipts. **One production integration defect
+root**, not a stale test: the hash-pinned requirements selected SQLAlchemy 2.1.5
+while the sampler's runtime `PINNED` allowlist still required 2.1.4. A correctly
+installed locked environment was therefore rejected before sampling. This was
+caught in development; the evidence does not establish a broken main release.
+
+The existing `test_arena_search_sampling.SearchSamplingTests.test_dependency_allowlist_matches_hash_pinned_requirements`
+failed at its independent lock-versus-runtime assertion, then passed after
+synchronizing the runtime allowlist without changing or weakening the dependency
+hashes. This local window contributes **1 naturally failing method / 1 observed
+failed execution / 0 stale-test roots or methods**. Broader hosted errors from
+the same mismatch are not independently added to these bounded counts.
+
+Two explicit regressions,
+`test_environment_rejects_old_sqlalchemy_before_loading_the_sampler` and
+`test_history_rejects_old_sqlalchemy_even_with_valid_integrity_hash` in the same
+class, each failed before the correction and passed after it. Those are
+**2 deliberate diagnostic red executions**, not additional discovered defects or
+stale tests. The retained-history case repairs the integrity hash before testing
+semantic environment rejection and also proves the rejected state is unchanged.
+All seven selected dependency/history tests passed locally; mocked package
+metadata acceptance, exact sampler-source digest, missing-dependency rejection,
+syntax and unchanged-lock checks passed separately. Installed Optuna/process and
+platform qualification belongs to the exact-head hosted run, not these local
+mocked checks.
+
+The follow-through is to update lock pins and their strict runtime allowlist in
+one dependency checkpoint, with this cheap independent contract selected before
+expensive sampling/process owners. Do not loosen history/environment validation
+to make a dependency update pass.
+
+## Rogue content batch: bounded iteration findings
+
+The local catalog checkpoint on 27 October 2026 exposed **1 stale-test root,
+2 distinct methods and 2 failed method executions**: after the approved dart and
+shuriken identities were installed, two closed catalog-inventory expectations
+still omitted them. The intended update script had stopped on a source-anchor
+assertion after adding the definitions, before updating those inventories.
+`test_rogue_equipment_content.RogueEquipmentContent.test_generated_gear_keeps_source_distributions_and_nonlauncher_damage`
+and
+`test_rogue_playable_content.RoguePlayableContent.test_selected_character_loadout_declares_equipment_and_finite_known_stock`
+therefore failed for the two extra identities. Adding those identities to the
+independent expected sets retained all unchanged weapon/armor values, starter
+kits and live-pool assertions. Both passed in the subsequent 23-method focused
+catalog/fixture checkpoint. This is test-maintenance cost, not a gameplay defect.
+
+The same incomplete-edit run had one setup error in the new treasure example
+owner because its deliberately new file was not installed yet; classify that as
+incomplete new-feature/harness setup, not another stale root or production bug.
+Intentional missing-payload, missing-room-cluster and missing-content first-red
+checks are separately retained and excluded from discovered-defect counts.
+
+### Compiler boundary and new acceptance drivers
+
+The real current compiler then exposed **1 production integration defect root**
+before publication: the server's authoring validation still rejected every
+stackable equipment archetype, even though the runtime's narrow standalone-weapon
+contract supported darts and shuriken. One natural compiler invocation rejected
+`rogue.dart` in the production catalog. An intentional confirmation using
+`test_rogue_throwing_process.RogueThrowingProcesses.test_text_carried_dart_and_shuriken_preserve_exact_pending_payload_after_source_deletion`
+failed **1 method once** at that same compiler boundary. That confirmation is not
+a second root or an additional naturally discovered test failure.
+
+The repair shares the closed equipment-stack allowlist between authoring and
+runtime, retains the outer item-capability exclusions, and adds a full authored
+singleton/stack positive with invalid-capability contrasts. It does not change
+weapon values or permit stacked armor, launchers or passive modifiers. All **44
+current packages**, including the external 3D package, subsequently passed the
+real compiler; the complete throwing Text process also passed with source-deleted
+reopening and exact hit/miss unit accounting. These are local boundary results,
+not an exhaustive or hosted qualification claim.
+
+The first completed pair of new process drivers exposed **2 new-harness roots,
+2 distinct methods and 2 failed executions**, not stale existing oracles or
+runtime defects:
+
+- The throwing method above attempted a third Focus-cost-2 throw after spending
+  its finite pool of 4. The retained response was `Action: Failed.` and no unit
+  was released. Ordinary bounded player waits now recover the previewed cost;
+  assertions still require the actual admission, one-unit consumption and damage.
+- `test_rogue_treasure_process.RogueTreasureProcesses.test_generated_cluster_shares_one_room_uses_next_depth_and_reopens_without_authoring_sources`
+  attempted to control a newly born NPC not in the account's initial actor
+  allowlist. The fixture now uses an explicit neutral, idle-AI control policy;
+  production authorization, catalogs and the selected character remain intact.
+
+Both methods passed after those driver repairs. The throwing method overlaps the
+compiler-confirmation method above, so summing category method counts would
+inflate a distinct-method total. The genuine native throwing witness remains
+**not run locally / required in hosted CI**. Compile/lint preflights and
+pre-execution review fixes are not included in these test-failure counts.
+
+### Expired-history fixture premise
+
+The focused server checkpoint reported **373 passed / 1 failed / 0 ignored**.
+The failure was
+`engine::floor_activation_tests::room_cluster::expired_abandoned_cluster_still_binds_selected_room_area_and_full_footprint`:
+its initial assertion assumed floor 2 was absent from the live activation scopes.
+Streaming legitimately prepares linked neighbors even with zero configured
+radii; the reach frontier can activate floor 2 and prepare floor 3. This is
+**1 additional new-harness root / 1 distinct method / 1 failed execution**, not a
+production defect or stale existing test. Together with the two process-driver
+causes above, this bounded new-harness window has **3 roots / 3 methods / 3
+failed executions**; the earlier incomplete-file setup remains separate.
+
+The fixture now targets floor 4, traversing three ordinary descents through
+unpopulated earlier floors before rewinding. Distinct start/up/down anchors and
+the three-step reach bound keep that target outside the initial frontier. Both
+initial and expired-history absent-scope assertions, plus every room-area and
+full-footprint corruption rejection, are retained. This is a fixture-only
+correction; **its runtime rerun remains pending required exact-head hosted CI**.
+A no-link preflight is not a replacement for that witness. The other selected
+server owners, including the genuine current save writer/reader and encoded
+standalone-stack storage-rejection/retry contract, passed in the same local run.
+
 ## Add the next useful finding
 
 One compact row or paragraph per diagnosed cause is enough:

@@ -1,21 +1,21 @@
 {
-  "validator": "tor-scenario-45",
-  "ruleset": "interactions-v54",
-  "ruleset_hash": "371fb62b2717b0fdd6d3e85879fee331bcfbd0706ca839509ec787b007fea88d",
+  "validator": "tor-scenario-46",
+  "ruleset": "interactions-v55",
+  "ruleset_hash": "8ced73597db509b3db9c8d9991b58d9ebee9e82134d4eec0f525624941d5579d",
   "ruleset_dependencies": {
-    "interactions-v54": "f9dbd45087a583b1dcad03bd84ae08bb3c7d97cd5d2b8be0bf1c6169c2c6ad60"
+    "interactions-v55": "79f1b304407f248d6aba5e85992689c66b9702136e108a64f44fc67f1cab2807"
   },
-  "content_hash": "d0380d3518d1f3a62dedf892e2f2c0da021568fa420e05f609137ff53d5a5682",
+  "content_hash": "7662b967dcc627d749706c5479b655af7521c2dbd0bad44c4acd0162dafd5f21",
   "files": {
     "catalog/actors.toml": "25cdbb1b0810e8252644051cafe9d275eba0b2e27ad4f30c89097e4fcbc35c61",
     "catalog/bodies.toml": "bbe18281cf810fcc7bf158de7ca07f153114c980c166cada9a4c83e108f8a16f",
     "catalog/creatures.toml": "9f5bd274a631b2982d05ab80c24279fb560798a0e678084d722b99e051b9b46e",
-    "catalog/items.toml": "27cad4c36627240d735939a954c33534cbaaf01c4210985604d54d4a054bf6b2",
+    "catalog/items.toml": "72d0a27d6de4807e5668f663acfee7b16e32cfbd513914cd01b1fc508b322cae",
     "index.json": "9bcdcd8e7340350480abf05c4edbe9b8a8ef04e77258d462167b598589354902",
-    "rules.toml": "d98d8e04517b402018a0cdc438ff0b39181218df5dd66b04254882537e7fb77e",
-    "scenario.toml": "5cd952e111c55a56affb71d548fb113d918f8af653656db55a8ebc32ccb436d6"
+    "rules.toml": "b2a2b536869b096c3c0c98a21774b39716138ceebd4a7a91db9e8115393d980c",
+    "scenario.toml": "da0913e64805dbf76bab5f1cf863efcb14ce01239539064d68a20c70268c07c8"
   },
   "regions": 0,
-  "model_hash": "9408740f640fdf69baaceef54c5b389b1ead80171aaba77f72c53bb113c78cb1",
+  "model_hash": "aa59ce8277ffcb31d955c8ac29631218c49b05031443cafb0e202f5a46a21100",
   "coverage": "all authored regions and character starts; descriptor structural bounds; deterministic sampled groups at seeds 0, 1, 42 under explicit work budget; no all-seed or winnability proof"
 }

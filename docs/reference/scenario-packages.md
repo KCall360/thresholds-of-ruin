@@ -407,8 +407,9 @@ omitting `ai` leaves population actors externally controlled. Supplying a profil
 enrolls them in AI with that species' defaults plus the profile's partial
 overrides. Item stages reference ordinary item archetypes and a
 [quantity expression](items.md#quantity-expressions), with an integer accepted as
-fixed-quantity source shorthand. The tagged forms are strict: `quantity` belongs
-only to item stages, while `ai`, `avoid_protagonist_sight` and `depth_growth` belong only to actor stages. Archetypes
+fixed-quantity source shorthand. The tagged forms are strict: ordinary item stages carry `quantity`, ordinary
+actor stages carry `ai`, `avoid_protagonist_sight` and `depth_growth`, and the
+explicit mixed-room form below owns both roles without accepting unrelated fields. Archetypes
 referenced by these stages do not create entities merely by existing in a catalog.
 
 A `kind = "room_items"` stage instead makes one finite chance decision per
@@ -422,6 +423,34 @@ independent stable streams and records chance misses and placement decisions in
 the same once-only entry ledger. No legal placement cell produces a saved skip;
 it does not trigger a later retry or refill. It neither reorders earlier stages nor replaces geometry preparation,
 room topology or the unique retrieval objective.
+
+A `kind = "room_cluster"` stage makes one explicit rational chance decision and,
+on success, selects one canonical present room shared by its item and actor
+attempts. It declares `item_count` and `actor_count` inclusive positive ranges,
+`item_bands`, `actor_bands`, item `quantity`, and `actor_depth_offset` (0 or 1).
+Ordinary `ai`, `depth_growth` and `avoid_protagonist_sight` apply to its actors.
+Counts are independent and capped to the selected room's area; their combined
+maximum must fit the existing 256-attempt budget. This is a bounded TOR policy,
+not the source game's correlated item-count-plus-two rule. Item selection and
+quantity use real floor depth; actor selection, construction and carried stock
+use checked effective birth depth. Overflow or a missing band records
+`no_eligible_content`, without changing actual floor identity or objectives.
+
+The ledger distinguishes chance miss, no present room and a selected stable room,
+retaining requested counts, room area, effective actor depth and ordinary nested
+item/actor/stock outcomes. Every body's complete horizontal footprint must fit
+inside that room's floor columns; ordinary 3D world body-fit still constrains its
+height. Protected cells and living bodies remain excluded, while actors may stand
+on loot. Mixed retained-decision capacity is preflighted before birth. Preparation,
+queries and NPC entry do not activate it; first protagonist entry, rollback,
+source-free recovery and revisits keep the ordinary once-only policy.
+
+The [inert treasure stage example](../../scenarios/rogue-exploration/examples/treasure-stage.toml)
+is not imported by the bundled Rogue package. Append it explicitly to opt in.
+Its 1/20 chance, independent 2–9 item / 4–11 actor requests and illustrative
+Hobgoblin/Orc bands are example policy, not new live balance or exact Rogue parity.
+The actual-process fixture composes this authored fragment with a copied
+production catalog; it forces chance/counts only for deterministic acceptance.
 
 The selected Rogue magic-item catalog appends finite potion, scroll and device
 stages after the existing actor, bandage, ration, restore-Strength and room-Gold
@@ -754,7 +783,7 @@ The manifest’s `ruleset = "rules.toml"` names a relative TOML file inside the
 package. Ordinary scenarios import the general rules rather than copy them:
 
 ```toml
-import = "interactions-v54"
+import = "interactions-v55"
 
 [[overrides]]
 op = "set"

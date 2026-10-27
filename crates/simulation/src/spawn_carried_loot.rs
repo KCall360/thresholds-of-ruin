@@ -323,6 +323,16 @@ impl StageDecision {
     pub fn decision_count(&self) -> usize {
         1 + match &self.result {
             StageResult::Skipped { .. } => 0,
+            StageResult::RoomCluster { selection } => {
+                1 + match selection {
+                    ClusterSelection::ChanceMiss {} | ClusterSelection::NoEligibleRoom {} => 0,
+                    ClusterSelection::Selected { items, actors, .. } => items
+                        .iter()
+                        .chain(actors)
+                        .map(PlacementDecision::decision_count)
+                        .sum::<usize>(),
+                }
+            }
             StageResult::RoomsEvaluated { rooms } => rooms
                 .iter()
                 .map(|room| {
@@ -340,6 +350,23 @@ impl StageDecision {
 }
 impl PopulationStage {
     pub(super) fn maximum_decisions(&self, rooms: usize) -> Option<usize> {
+        if let PopulationContent::RoomCluster {
+            item_count,
+            actor_count,
+            actor_bands,
+            ..
+        } = &self.population
+        {
+            let with_policy = actor_bands.iter().any(|band| {
+                band.choices
+                    .iter()
+                    .any(|choice| choice.carried_loot.is_some())
+            });
+            return usize::from(actor_count[1])
+                .checked_mul(1 + usize::from(with_policy))?
+                .checked_add(usize::from(item_count[1]))?
+                .checked_add(2);
+        }
         if matches!(self.population, PopulationContent::RoomItems { .. }) {
             return rooms.checked_mul(2)?.checked_add(1);
         }
@@ -349,7 +376,9 @@ impl PopulationStage {
                     .iter()
                     .any(|choice| choice.carried_loot.is_some())
             }),
-            PopulationContent::Items { .. } | PopulationContent::RoomItems { .. } => false,
+            PopulationContent::Items { .. }
+            | PopulationContent::RoomItems { .. }
+            | PopulationContent::RoomCluster { .. } => false,
         };
         usize::from(self.count[1])
             .checked_mul(1 + usize::from(with_policy))?
