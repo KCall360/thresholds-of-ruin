@@ -427,8 +427,8 @@ without a duplicate run on unchanged inputs:
 | Tier | Required | What it runs | Why it matters |
 | --- | --- | --- | --- |
 | Focused checks | During edits and at completed behavior checkpoints | Failing behavior/regression and affected unit tests during edits; affected integration, Service contracts and actual-process scenarios when the behavior is complete, repeated after changes affecting it | Establish a failing reproduction first and give fast feedback while retaining complete coverage before merge |
-| `quick` | At a stable, cohesive checkpoint, unless a required higher tier covers it | Formatting, clippy and debug tests for the affected packages, the dependency check, an explicit scenario-compiler build, the Python tool tests, and the process tests the change touches, plus the smoke set when the change can reach every process test | Catch broader regressions after focused checks and architectural review, before moving to another checkpoint |
-| `push` (default) | **Before every push**, unless a successful full run covers the same unchanged inputs and configuration | Everything in `quick`, plus workspace-wide clippy and warning-free API docs | Catches regressions in what the change can reach, and the lint and doc failures CI would reject, in minutes rather than an hour. CI independently selects its required assurance gate |
+| `quick` | At a stable, cohesive checkpoint, unless a required higher tier covers it | Formatting and clippy for the affected packages, debug tests for the directly changed packages, the dependency check, an explicit scenario-compiler build, the Python tool tests, and the process tests the change touches, plus the smoke set when the change can reach every process test, minus [extended-cost process tests](#extended-cost-process-tests) | Catch broader regressions after focused checks and architectural review, before moving to another checkpoint |
+| `push` (default) | **Before every push**, unless a successful full run covers the same unchanged inputs and configuration | Everything in `quick`, plus workspace-wide clippy, warning-free API docs, the isolated simulation fixture gate and debug tests for every affected package; extended-cost process tests stay deferred | Catches regressions in what the change can reach, and the lint and doc failures CI would reject, in minutes rather than an hour. CI independently selects its required assurance gate |
 | `full` | Required when CI cannot run or on request; otherwise optional | Complete platform suite in debug and release; separate tooling/dependency jobs are not included | A local full run covers the local push gate and can investigate either profile; the canonical CI gate is still required before merging |
 | CI | **Required before every merge** | Canonical selected-contract or exhaustive plan, tooling/dependency checks and both platform aggregates; verified prose-only changes use the documentation path below | Report the actual assurance mode; only an exhaustive result proves the complete matrix |
 
@@ -945,7 +945,8 @@ reason to remove cases. The verifier also records machine-readable stage results
 `gate_passed` includes only explicitly authorized gate waivers, while
 `clean_passed` requires every planned stage to pass without a waiver. Waived and
 not-run stages are listed separately, along with the tier, profile and scope.
-An interrupted method is recorded as `interrupted`, never `passed`; an interrupted
+Deferred extended-cost process tests are listed in `deferred_process_tests`; a
+`quick` or `push` pass never stands for them. An interrupted method is recorded as `interrupted`, never `passed`; an interrupted
 suite has no successful suite result and cannot be reused as a completed gate.
 Report measured Cargo compile/link elapsed time separately from test execution.
 When only the aggregate Cargo interval is measured, label it compile/link; do not
@@ -1207,15 +1208,41 @@ dependents even though ordinary prose changes are inert for Rust selection.
 The affected packages are the changed crates plus every workspace crate that
 depends on them. Shared inputs (`Cargo.lock`, toolchain, scenarios) and any
 path the script doesn't recognize select everything, so a tier can run more
-than it needs but never less. In `quick`, a change to a client, or to a
-process-test module or helper script, runs the process tests that can reach it.
-A change that can reach every process test (a runtime crate, scenarios, shared
-script data or the test infrastructure) runs those plus the smoke set,
-`SMOKE_PROCESS_TESTS` in `verify.py`: fast suites that start every client and
-cover movement, items, doors, intentions, checkpoints and package loading.
-`push` selects process tests the same way; `full` and full CI always run every
-process test. Local tiers are feedback filters, not the canonical CI assurance
-plan. Both required platform aggregates must validate that final plan before merge.
+than it needs but never less. `push` runs debug Rust tests for every affected
+package. `quick` runs them only for the directly changed packages; their reverse
+dependents get all-target Clippy in `quick` and their tests in `push`, and the
+summary names them. Shared inputs still select every package in both tiers.
+
+In `quick` and `push`, a change to a client, or to a process-test module or
+helper script, runs the process tests that can reach it. A client counts only
+when the change edits it directly: one reached through reverse dependencies (a
+protocol change reaches every client) is the broad case below. A change that can
+reach every process test (a runtime crate, scenarios, shared script data or the
+test infrastructure) runs those plus the smoke set, `SMOKE_PROCESS_TESTS` in
+`verify.py`: fast suites that start every client and cover movement, items,
+doors, intentions, checkpoints and package loading. `full` and full CI always
+run every process test. Local tiers are feedback filters, not the canonical CI
+assurance plan. Both required platform aggregates must validate that final plan
+before merge.
+
+#### Extended-cost process tests
+
+`quick` and `push` defer extended-cost process tests to `full` and CI. The set is
+the reviewed `EXTENDED` routes in `ci_test_contracts.py` plus `LOCAL_EXTENDED` in
+`verify.py`: tests measured at two minutes or more in a local debug run, such as
+the performance tests that build release benchmark examples. Deferral changes
+when a test runs, never whether it exists or what it asserts. CI selection is
+unchanged: `LOCAL_EXTENDED` tests remain ordinary CI owners, and CI selects the
+reviewed `EXTENDED` routes by domain as before.
+
+Deferred tests leave the runner's selection before it is recorded (`--exclude`
+in `test_runner.py`), so they are neither run nor reported as skipped. Every
+deferred ID is printed, written to `summary.txt`, and recorded in the selection
+receipt and as `deferred_process_tests` in `summary.json`. A name that no longer
+matches a loaded test fails the step, and CI rejects the option. A change that
+edits a test module runs all of that module's tests. Pass `--with-extended` to
+run the deferred tests locally, for example when a change targets one of their
+routes. Add a test to `LOCAL_EXTENDED` only with a measured duration.
 
 ### Parallel test execution
 
