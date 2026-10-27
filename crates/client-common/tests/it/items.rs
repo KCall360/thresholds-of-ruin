@@ -18,13 +18,14 @@ fn paired_equipment(slot: EquipmentSlot) -> Observation {
     let mut view: Observation = serde_json::from_value(serde_json::json!({
         "actor":"1", "self_target":ActorTarget::from_digest([1; 32]), "tick":"0",
         "position":{"x":0,"y":0,"z":0},"ready":true,
-        "places":[],"visible_cells":[],"ground_items":[],"linked_holds":[],"visible_actors":[],
+        "places":[],"visible_cells":[],"ground_items":[],"charts":[],"linked_holds":[],"visible_actors":[],
         "inventory": [
             {"known_currency":null,"known_supply":null,"quantity":"1","class":"ring","appearance":"silver ring","identified":false,"id":target(1),"name":"silver ring"},
             {"known_currency":null,"known_supply":null,"quantity":"1","class":"ring","appearance":"silver ring","identified":false,"id":target(2),"name":"silver ring"}
         ]
     })).unwrap();
     view.interactions = Some(InteractionView {
+        refused: vec![],
         curse_blocked: vec![],
         identification: None,
         completed: Vec::new(),
@@ -43,6 +44,8 @@ fn paired_equipment(slot: EquipmentSlot) -> Observation {
                 edible: false,
                 readable: false,
                 zappable: false,
+                portable_light: None,
+                device_activation: None,
                 charges: None,
             },
             ItemInteractionView {
@@ -57,6 +60,8 @@ fn paired_equipment(slot: EquipmentSlot) -> Observation {
                 edible: false,
                 readable: false,
                 zappable: false,
+                portable_light: None,
+                device_activation: None,
                 charges: None,
             },
         ],
@@ -177,7 +182,9 @@ fn magic_items_use_only_disclosed_affordances_and_never_test_unknown_charges() {
             zap_action(&view, target(2), Direction::North).unwrap(),
             Action::Zap {
                 item: target(2),
-                direction: Direction::North
+                aim: DeviceAim::Direction {
+                    direction: Direction::North
+                }
             }
         );
         assert_eq!(
@@ -246,4 +253,236 @@ fn projectile_details_label_remembered_bonuses_without_inventing_attack() {
     );
     view.interactions.as_mut().unwrap().inventory[0].known_projectile_bonus = None;
     assert!(tor_client_common::items::equipment_details(&view, target(1)).is_none());
+}
+
+#[test]
+fn identified_self_device_uses_disclosed_mode_without_direction_prompt() {
+    let source = paired_equipment(equipment_slot("ring", "on a finger", false));
+    let mut view = tor_client_common::test_support::observation();
+    view.inventory = source.inventory;
+    view.interactions = source.interactions;
+    view.interactions.as_mut().unwrap().slots.clear();
+    for row in &mut view.interactions.as_mut().unwrap().inventory {
+        row.slot = None;
+        row.equipped_slot = None;
+    }
+    view.inventory[1].class = ItemClass::Wand;
+    view.inventory[1].identified = true;
+    let device = &mut view.interactions.as_mut().unwrap().inventory[1];
+    device.zappable = true;
+    device.device_activation = Some(DeviceActivation::SelfTarget);
+    let valid = StateView {
+        revision: 0,
+        wizard_game: false,
+        observation: view.clone(),
+    };
+    assert!(
+        valid.validate().is_ok(),
+        "valid disclosed self device premise"
+    );
+    let mut unknown = valid.clone();
+    unknown.observation.inventory[1].identified = false;
+    assert!(
+        unknown.validate().is_err(),
+        "unknown family must not expose self aim"
+    );
+    unknown.observation.interactions.as_mut().unwrap().inventory[1].device_activation =
+        Some(DeviceActivation::Direction);
+    assert!(
+        unknown.validate().is_ok(),
+        "unknown directional input mode positive control"
+    );
+    assert_eq!(
+        item_action(&view, target(2), ItemOperation::Zap).unwrap(),
+        Action::Zap {
+            item: target(2),
+            aim: DeviceAim::SelfTarget {}
+        }
+    );
+}
+
+#[test]
+fn portable_light_actions_use_authoritative_affordances_without_auto_equipping() {
+    let mut view = paired_equipment(equipment_slot("held_light", "held", false));
+    view.inventory[0].class = ItemClass::Tool;
+    view.inventory[0].name = "torch".into();
+    view.interactions.as_mut().unwrap().inventory[0].portable_light = Some(PortableLightView {
+        remaining: 100_000,
+        lit: false,
+        ignitable: true,
+        extinguishable: false,
+    });
+    assert!(StateView {
+        revision: 0,
+        wizard_game: false,
+        observation: view.clone()
+    }
+    .validate()
+    .is_ok());
+    for invalid in 0..3 {
+        let mut forged = view.clone();
+        match invalid {
+            0 => forged.inventory[0].class = ItemClass::Ring,
+            1 => forged.inventory[0].quantity = 2,
+            _ => {
+                forged.interactions.as_mut().unwrap().inventory[0]
+                    .slot
+                    .as_mut()
+                    .unwrap()
+                    .id = "ring".into()
+            }
+        }
+        assert!(StateView {
+            revision: 0,
+            wizard_game: false,
+            observation: forged.clone()
+        }
+        .validate()
+        .is_err());
+    }
+    assert_eq!(
+        item_action(&view, target(1), ItemOperation::Ignite).unwrap(),
+        Action::Ignite { item: target(1) }
+    );
+    assert!(item_action(&view, target(1), ItemOperation::Extinguish).is_err());
+    assert!(item_action(&view, target(2), ItemOperation::Ignite).is_err());
+    assert_eq!(
+        item_choices(&view, ItemOperation::Ignite)
+            .map(|row| row.id)
+            .collect::<Vec<_>>(),
+        vec![target(1)]
+    );
+    assert_eq!(
+        tor_client_common::items::portable_light_details(&view, target(1)).unwrap(),
+        "unlit; fuel: 100000 ticks"
+    );
+    let offer = &mut view.interactions.as_mut().unwrap().inventory[0];
+    offer.portable_light = Some(PortableLightView {
+        remaining: 99_900,
+        lit: true,
+        ignitable: false,
+        extinguishable: true,
+    });
+    assert_eq!(
+        item_action(&view, target(1), ItemOperation::Extinguish).unwrap(),
+        Action::Extinguish { item: target(1) }
+    );
+    assert!(item_action(&view, target(1), ItemOperation::Ignite).is_err());
+    let offer = &mut view.interactions.as_mut().unwrap().inventory[0];
+    offer.equipped_slot = None;
+    offer.portable_light = Some(PortableLightView {
+        remaining: 99_900,
+        lit: false,
+        ignitable: false,
+        extinguishable: false,
+    });
+    assert!(StateView {
+        revision: 0,
+        wizard_game: false,
+        observation: view.clone()
+    }
+    .validate()
+    .is_ok());
+    assert!(item_action(&view, target(1), ItemOperation::Ignite).is_err());
+    assert_eq!(
+        item_action(&view, target(1), ItemOperation::Equip).unwrap(),
+        Action::Equip {
+            item: target(1),
+            slot: 0
+        }
+    );
+    view.interactions.as_mut().unwrap().inventory[0]
+        .portable_light
+        .as_mut()
+        .unwrap()
+        .ignitable = true;
+    assert!(
+        StateView {
+            revision: 0,
+            wizard_game: false,
+            observation: view.clone()
+        }
+        .validate()
+        .is_err(),
+        "stowed action eligibility cannot contradict the enclosing observation"
+    );
+}
+
+#[test]
+fn portable_light_completion_narration_is_explicit_and_not_repeated_on_fuel_updates() {
+    let before = tor_client_common::test_support::portable_light_observation(false);
+    let item = before.inventory[0].id;
+    let mut after = tor_client_common::test_support::portable_light_observation(true);
+    after.interactions.as_mut().unwrap().completed = vec![Action::Ignite { item }];
+    assert_eq!(
+        tor_client_common::narration::completed_items(&before, &after),
+        ["You finish igniting the torch."]
+    );
+    let mut elapsed = after.clone();
+    elapsed.interactions.as_mut().unwrap().inventory[0]
+        .portable_light
+        .as_mut()
+        .unwrap()
+        .remaining -= 100;
+    assert!(tor_client_common::narration::completed_items(&after, &elapsed).is_empty());
+    elapsed.interactions.as_mut().unwrap().completed = vec![Action::Extinguish { item }];
+    elapsed.interactions.as_mut().unwrap().inventory[0].portable_light = Some(PortableLightView {
+        remaining: 99_900,
+        lit: false,
+        ignitable: true,
+        extinguishable: false,
+    });
+    assert!(StateView {
+        revision: 0,
+        wizard_game: false,
+        observation: elapsed.clone()
+    }
+    .validate()
+    .is_ok());
+    assert_eq!(
+        tor_client_common::narration::completed_items(&after, &elapsed),
+        ["You finish extinguishing the torch."]
+    );
+}
+
+#[test]
+fn dual_device_discloses_both_aims_only_when_identified() {
+    let source = paired_equipment(equipment_slot("ring", "on a finger", false));
+    let mut view = tor_client_common::test_support::observation();
+    view.inventory = source.inventory;
+    view.interactions = source.interactions;
+    view.interactions.as_mut().unwrap().slots.clear();
+    for row in &mut view.interactions.as_mut().unwrap().inventory {
+        row.slot = None;
+        row.equipped_slot = None;
+    }
+    view.inventory[1].class = ItemClass::Wand;
+    view.inventory[1].identified = true;
+    let row = &mut view.interactions.as_mut().unwrap().inventory[1];
+    row.zappable = true;
+    row.device_activation = Some(DeviceActivation::DirectionOrSelf);
+    let valid = StateView {
+        revision: 0,
+        wizard_game: false,
+        observation: view.clone(),
+    };
+    assert!(valid.validate().is_ok());
+    assert!(item_action(&view, target(2), ItemOperation::Zap)
+        .unwrap_err()
+        .contains("yourself"));
+    assert_eq!(
+        tor_client_common::items::zap_self_action(&view, target(2)).unwrap(),
+        Action::Zap {
+            item: target(2),
+            aim: DeviceAim::SelfTarget {}
+        }
+    );
+    assert!(tor_client_common::items::zap_action(&view, target(2), Direction::East).is_ok());
+    let mut unknown = valid.clone();
+    unknown.observation.inventory[1].identified = false;
+    assert!(unknown.validate().is_err());
+    unknown.observation.interactions.as_mut().unwrap().inventory[1].device_activation =
+        Some(DeviceActivation::Direction);
+    assert!(unknown.validate().is_ok());
+    assert!(tor_client_common::items::zap_self_action(&unknown.observation, target(2)).is_err());
 }

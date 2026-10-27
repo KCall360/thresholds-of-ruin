@@ -117,6 +117,8 @@ pub enum Opening {
 /// A way out of the place.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Way {
+    /// Cosmetic label only; the actual opening and destination remain factual.
+    pub presentation: Option<ObjectPresentation>,
     /// The side of the place it's in, or its bearing when it has no one side.
     pub direction: Direction,
     /// Its bearing from the character, when that's another direction: the
@@ -131,6 +133,14 @@ pub struct Way {
 impl Way {
     /// "an archway", "a closed wooden door".
     pub fn label(&self) -> String {
+        if let Some(presentation) = &self.presentation {
+            let name = tor_client_common::items::object_name(presentation);
+            return if presentation.kind == ObjectPresentationKind::Stairs {
+                name.into()
+            } else {
+                super::prose::indefinite(name)
+            };
+        }
         match &self.kind {
             Opening::Stairs => "stairs".into(),
             _ => super::prose::indefinite(&self.kind_name()),
@@ -139,6 +149,9 @@ impl Way {
 
     /// What it is, without an article: "archway", "open wooden door".
     pub fn kind_name(&self) -> String {
+        if let Some(presentation) = &self.presentation {
+            return crate::safe(tor_client_common::items::object_name(presentation));
+        }
         match &self.kind {
             Opening::Door { name, open, .. } | Opening::RememberedDoor { name, open } => {
                 format!("{} {name}", if *open { "open" } else { "closed" })
@@ -388,6 +401,7 @@ pub fn survey(state: &dyn ScenicView) -> Place {
                         .min_by_key(|c| c.position.z.abs())
                 };
                 ways.push(Way {
+                    presentation: here.object_presentation.clone(),
                     direction: if up { Direction::Up } else { Direction::Down },
                     towards: None,
                     kind: if terminal {
@@ -550,6 +564,7 @@ fn way(cols: &Columns, place: &BTreeSet<Column>, group: &[Column], in_gap: bool)
         None => Opening::Archway,
     };
     Way {
+        presentation: None,
         direction,
         towards: towards.filter(|t| *t != direction),
         kind,
@@ -584,7 +599,7 @@ mod tests {
                         "wall": ch == '#',
                         "material": "stone",
                         "lit":true,"place_hint": false,
-                        "trap":null,"stairs_up": false,
+                        "trap":null,"object_presentation":null,"stairs_up": false,
                         "stairs_down": false,
                         "door": door.then(|| serde_json::json!({
                             "id":tor_protocol::DoorTarget::from_digest([9; 32]), "name": "oak door", "description": "",
@@ -598,7 +613,7 @@ mod tests {
             "wizard_game": false, "revision": "0", "observation": {
                 "actor": "1", "self_target":tor_protocol::ActorTarget::from_digest([1; 32]),"tick": "0", "position": {"x": 0, "y": 0, "z": 0},
                 "ready": true, "places": [], "visible_cells": cells,
-                "ground_items": [], "inventory": [], "linked_holds":[],"visible_actors": []
+                "ground_items": [], "inventory": [], "charts":[],"linked_holds":[],"visible_actors": []
             }
         }))
         .unwrap()

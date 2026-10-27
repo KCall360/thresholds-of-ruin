@@ -252,7 +252,12 @@ fn ordered_strike_content_validates_unlocks_without_reordering_authored_rows() {
     let value = document_with(vec![strike(0), second.clone(), strike(3)]);
     let rules = decode(value).unwrap();
     let serialized = serde_json::to_value(rules.document()).unwrap();
-    assert_eq!(serialized["abilities"][0]["strikes"]["strikes"][1], second);
+    let mut expected = second.clone();
+    expected["cancellable"] = json!(false);
+    assert_eq!(
+        serialized["abilities"][0]["strikes"]["strikes"][1],
+        expected
+    );
     let mut unknown = second;
     unknown["unlock"] = json!("missing_talent");
     assert!(decode(document_with(vec![strike(0), unknown])).is_err());
@@ -434,6 +439,7 @@ fn natural_melee_source_strike_and_rider_records_require_names() {
 fn natural_melee_source_repeated_riders_share_the_full_sequence_budget() {
     let row: StrikeDef = serde_json::from_value(strike(0)).unwrap();
     let extra = RiderDef {
+        cancellable: false,
         condition: None,
         trigger: RiderTrigger::Success,
         check: None,

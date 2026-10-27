@@ -3,6 +3,7 @@ use crate::rules::{Modifier, ModifierOp, Scope};
 
 pub(super) fn modifier(value: LocomotionValue) -> Modifier {
     Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Locomotion { value },
     }
@@ -96,6 +97,7 @@ pub(super) fn fixture_with_perception(
     species
         .modifiers
         .extend(perception.iter().cloned().map(|value| Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Perception { value },
         }));

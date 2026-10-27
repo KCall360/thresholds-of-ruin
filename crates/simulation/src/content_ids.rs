@@ -45,7 +45,7 @@ macro_rules! interned_ids {
         })+
     };
 }
-ids!(LauncherFamilyId);
+ids!(LauncherFamilyId, BodyFormId);
 interned_ids!(
     RulesetId,
     AbilityId,

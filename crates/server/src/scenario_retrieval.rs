@@ -81,6 +81,7 @@ impl Package {
                 && artifact.consumable.is_none()
                 && artifact.readable.is_none()
                 && artifact.device.is_none()
+                && artifact.held_light.is_none()
                 && artifact.edible.is_none()
                 && artifact.supply.is_none()
                 && artifact.appearance_pool.is_none(),

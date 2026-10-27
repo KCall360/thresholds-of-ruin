@@ -92,6 +92,8 @@ pub(crate) fn expertise(value: &str, rules: &s::rules::Ruleset) -> Result<Expert
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Modifier {
+    #[serde(default)]
+    pub cancellable: bool,
     pub scope: Scope,
     pub op: Op,
 }
@@ -568,9 +570,36 @@ impl BehaviorPolicy {
     }
 }
 
+/// Optional explicit detection label. Omission never falls back to personal names.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DetectionAppearance {
+    pub name: String,
+    pub asset: Option<String>,
+}
+impl<'de> Deserialize<'de> for DetectionAppearance {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            name: String,
+            #[serde(default)]
+            asset: Option<String>,
+        }
+        let fields: Fields = named_map(d)?;
+        let value = Self {
+            name: fields.name,
+            asset: fields.asset,
+        };
+        // The shared immutable Content constructor owns the exact grammar.
+        Ok(value)
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Species {
+    #[serde(default)]
+    pub detection_appearance: Option<DetectionAppearance>,
     pub behavior: BehaviorPolicy,
     #[serde(default)]
     pub displacement: Option<DisplacementProfile>,
@@ -589,6 +618,8 @@ impl<'de> Deserialize<'de> for Species {
         #[serde(deny_unknown_fields)]
         struct Fields {
             #[serde(default)]
+            detection_appearance: Option<DetectionAppearance>,
+            #[serde(default)]
             behavior: BehaviorPolicy,
             #[serde(default)]
             displacement: Option<DisplacementProfile>,
@@ -603,6 +634,7 @@ impl<'de> Deserialize<'de> for Species {
         }
         let fields: Fields = named_map(d)?;
         Ok(Self {
+            detection_appearance: fields.detection_appearance,
             behavior: fields.behavior,
             displacement: fields.displacement,
             kind: fields.kind,
@@ -700,10 +732,12 @@ pub(crate) fn compile_choices(
     rules: &s::rules::Ruleset,
 ) -> Result<s::creatures::HdChoices, Failure> {
     Ok(s::creatures::HdChoices {
+        purchase_highwater: 0,
         purchases: purchases
             .iter()
             .map(|purchase| {
                 Ok(s::creatures::AdvancementPurchase {
+                    id: None,
                     pool: PointPoolId::new(&purchase.pool)
                         .map_err(|_| invalid("Invalid point pool ID"))?,
                     selection: match &purchase.selection {
@@ -742,7 +776,19 @@ pub enum Restoration {
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct PersonalBodyGrant {
+    pub ordinal: u16,
+    #[serde(default)]
+    pub purchases: Vec<Purchase>,
+    pub attribute: Option<Attribute>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BuildSpec {
+    #[serde(default)]
+    pub personal_body_grants: Vec<PersonalBodyGrant>,
+    #[serde(default)]
+    pub body_package: Option<String>,
     #[serde(default)]
     pub future_growth: FutureGrowth,
     pub starting_skills: [Skill; 2],
@@ -796,9 +842,22 @@ impl FutureGrowth {
 #[serde(deny_unknown_fields)]
 pub struct Catalog {
     #[serde(default)]
+    pub body_packages: BTreeMap<String, BodyPackage>,
+    #[serde(default)]
     pub species: BTreeMap<String, Species>,
     #[serde(default)]
     pub templates: BTreeMap<String, Template>,
+}
+/// Explicit support metadata; `true` declares an ordinary supported living,
+/// corporeal, nonunique body. It does not add the form to any live item pool.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BodyPackage {
+    pub species: String,
+    pub body: crate::scenario_package::BodySpec,
+    pub hit_dice: Vec<Advancement>,
+    #[serde(default)]
+    pub polymorph_eligible: bool,
 }
 fn subtypes(values: &[String]) -> Result<BTreeSet<SubtypeId>, Failure> {
     let compiled = values
@@ -818,11 +877,12 @@ pub struct CompiledCatalog {
 pub(crate) enum CatalogKind {
     Species,
     Template,
+    BodyPackage,
 }
 
 impl Catalog {
     pub fn is_empty(&self) -> bool {
-        self.species.is_empty() && self.templates.is_empty()
+        self.species.is_empty() && self.templates.is_empty() && self.body_packages.is_empty()
     }
     pub fn compile(&self, rules: Arc<s::rules::Ruleset>) -> Result<CompiledCatalog, Failure> {
         self.compile_with_context(rules, |_, _, failure| failure)
@@ -835,6 +895,7 @@ impl Catalog {
     ) -> Result<CompiledCatalog, Failure> {
         if self.species.len() > s::limits::CATALOG_ENTRIES
             || self.templates.len() > s::limits::CATALOG_ENTRIES
+            || self.body_packages.len() > s::limits::CATALOG_ENTRIES
         {
             return Err(invalid("Creature catalog exceeds definition limits"));
         }
@@ -930,6 +991,61 @@ impl Catalog {
         }
         let content = s::creatures::Content::new(rules, catalog)
             .map_err(|error| invalid(format!("Invalid creature catalog: {error:?}")))?;
+        let mut appearances = BTreeMap::new();
+        for (id, species) in &self.species {
+            if let Some(label) = &species.detection_appearance {
+                let id = SpeciesId::new(id).map_err(|_| invalid("Invalid detection species"))?;
+                appearances.insert(
+                    id,
+                    s::appearance_catalog::CreatureAppearance {
+                        name: Arc::from(label.name.as_str()),
+                        asset: label.asset.as_deref().map(Arc::from),
+                    },
+                );
+            }
+        }
+        let content = s::creatures::Content::with_detection_appearances(&content, appearances)
+            .map_err(|error| invalid(format!("Invalid species detection appearance: {error:?}")))?;
+        let mut packages = BTreeMap::new();
+        let mut eligible = BTreeSet::new();
+        for (id, author) in &self.body_packages {
+            let (id, package) = (|| -> Result<_, Failure> {
+                let id = BodyFormId::new(id).map_err(|_| invalid("Invalid body-package ID"))?;
+                let package = s::creatures::BodyPackage {
+                    id: id.clone(),
+                    species: SpeciesId::new(&author.species)
+                        .map_err(|_| invalid("Invalid body species"))?,
+                    body: author.body.clone().into(),
+                    advancement: author
+                        .hit_dice
+                        .iter()
+                        .map(|entry| {
+                            Ok(s::creatures::PlannedAdvancement {
+                                source: hit_die_source(&entry.source, content.rules())?,
+                                choices: compile_choices(
+                                    &entry.purchases,
+                                    entry.attribute.as_ref(),
+                                    content.rules(),
+                                )?,
+                            })
+                        })
+                        .collect::<Result<Vec<_>, Failure>>()?,
+                };
+                package
+                    .validate(&content)
+                    .map_err(|error| invalid(format!("Invalid body package: {error:?}")))?;
+                Ok((id, Arc::new(package)))
+            })()
+            .map_err(|failure| context(CatalogKind::BodyPackage, id, failure))?;
+            if author.polymorph_eligible {
+                eligible.insert(id.clone());
+            }
+            packages.insert(id, package);
+        }
+        let content = s::creatures::Content::with_body_packages(&content, packages)
+            .map_err(|error| invalid(format!("Invalid body packages: {error:?}")))?;
+        let content = s::creatures::Content::with_polymorph_forms(&content, eligible)
+            .map_err(|error| invalid(format!("Invalid supported body forms: {error:?}")))?;
         Ok(CompiledCatalog { content })
     }
 }
@@ -940,6 +1056,13 @@ pub struct Recipe {
     nutrition: s::nutrition::NutritionRequirement,
 }
 impl CompiledCatalog {
+    pub(crate) fn with_presentation_catalog(
+        mut self,
+        catalog: Arc<s::appearance_catalog::PresentationCatalog>,
+    ) -> Self {
+        self.content = s::creatures::Content::with_presentation_catalog(&self.content, catalog);
+        self
+    }
     pub(crate) fn with_trap_ammunition(
         mut self,
         ammunition: BTreeMap<String, s::ItemSpec>,
@@ -1024,37 +1147,91 @@ impl CompiledCatalog {
                 )
             })
             .collect::<Result<Vec<_>, Failure>>()?;
-        let mut prototype = s::creatures::CreatureBuild::from_recorded(
-            self.content.clone(),
-            id,
-            attributes,
-            ledger,
-            primitive(&author.binding, "mana binding")?,
-            s::creatures::BuildAdvancement {
-                starting_skills: [
-                    skill(&author.starting_skills[0])?,
-                    skill(&author.starting_skills[1])?,
-                ],
-                restoration: match author.restoration {
-                    Restoration::ChooseAgain => s::creatures::RestorationPolicy::ChooseAgain,
-                    Restoration::Authored => s::creatures::RestorationPolicy::Authored(
-                        author
-                            .hit_dice
-                            .iter()
-                            .zip(&choices)
-                            .map(|(entry, choices)| {
-                                Ok(s::creatures::PlannedAdvancement {
-                                    source: hit_die_source(&entry.source, self.content.rules())?,
-                                    choices: choices.clone(),
-                                })
+        let advancement = s::creatures::BuildAdvancement {
+            starting_skills: [
+                skill(&author.starting_skills[0])?,
+                skill(&author.starting_skills[1])?,
+            ],
+            restoration: match author.restoration {
+                Restoration::ChooseAgain => s::creatures::RestorationPolicy::ChooseAgain,
+                Restoration::Authored => s::creatures::RestorationPolicy::Authored(
+                    author
+                        .hit_dice
+                        .iter()
+                        .zip(&choices)
+                        .map(|(entry, choices)| {
+                            Ok(s::creatures::PlannedAdvancement {
+                                source: hit_die_source(&entry.source, self.content.rules())?,
+                                choices: choices.clone(),
                             })
-                            .collect::<Result<_, Failure>>()?,
-                    ),
-                },
-                choices,
+                        })
+                        .collect::<Result<_, Failure>>()?,
+                ),
             },
-            templates,
-        )
+            choices,
+        };
+        let binding = primitive(&author.binding, "mana binding")?;
+        if author.personal_body_grants.len() > s::limits::HIT_DICE
+            || (author.body_package.is_none() && !author.personal_body_grants.is_empty())
+        {
+            return Err(invalid(
+                "Personal body grants require a bounded explicit body package",
+            ));
+        }
+        let mut personal_body_grants = BTreeMap::new();
+        let mut previous = None;
+        for grant in &author.personal_body_grants {
+            if previous.is_some_and(|ordinal| ordinal >= grant.ordinal) {
+                return Err(invalid(
+                    "Personal body grants require ordered unique donor ordinals",
+                ));
+            }
+            previous = Some(grant.ordinal);
+            personal_body_grants.insert(
+                grant.ordinal,
+                compile_choices(
+                    &grant.purchases,
+                    grant.attribute.as_ref(),
+                    self.content.rules(),
+                )?,
+            );
+        }
+        let mut prototype = if let Some(package_id) = &author.body_package {
+            if !templates.is_empty() {
+                return Err(invalid("Body packages do not support mixed templates"));
+            }
+            let package_id = BodyFormId::new(package_id)
+                .map_err(|_| invalid("Invalid birth body-package ID"))?;
+            let package = self
+                .content
+                .body_package(&package_id)
+                .ok_or_else(|| invalid("Unknown birth body package"))?;
+            if package.species != id {
+                return Err(invalid(
+                    "Body package species differs from authored creature",
+                ));
+            }
+            s::creatures::CreatureBuild::from_recorded_body_package_personal_grants(
+                self.content.clone(),
+                package.clone(),
+                attributes,
+                ledger,
+                binding,
+                advancement,
+                0,
+                personal_body_grants,
+            )
+        } else {
+            s::creatures::CreatureBuild::from_recorded(
+                self.content.clone(),
+                id,
+                attributes,
+                ledger,
+                binding,
+                advancement,
+                templates,
+            )
+        }
         .map_err(|error| invalid(format!("Invalid authored creature build: {error:?}")))?;
         prototype
             .set_future_growth(author.future_growth.compile()?)
@@ -1155,6 +1332,7 @@ mod strict_stat_tests {
                 json
             );
             Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: Op::Add { stat, value: 1 },
             }
@@ -1196,14 +1374,14 @@ mod strict_stat_tests {
 mod ordered_strike_authoring_tests {
     use super::*;
     use serde_json::{json, Value};
-    fn source() -> Value {
+    pub(super) fn source() -> Value {
         json!({"species": {"sequence_test": {"kind": "humanoid", "behavior": {"disposition":"mean","idle":"explore","memory_ticks":1000},
             "attributes": {"strength": 1, "speed": 1, "intellect": 1, "willpower": 1, "awareness": 1, "presence": 1},
             "melee": {"skill": "heavy_weaponry", "bonus": 0, "wind_up": 10, "recovery": 20,
                 "strikes": [{"offset": 0, "unlock": null, "check": null, "on_success": [], "on_failure": [], "descriptors": [], "riders": []}]}
         }}, "templates": {}})
     }
-    fn rules() -> Arc<s::rules::Ruleset> {
+    pub(super) fn rules() -> Arc<s::rules::Ruleset> {
         s::rules::Ruleset::validate(toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap())
             .unwrap()
     }
@@ -1290,12 +1468,15 @@ mod ordered_strike_authoring_tests {
     }
     #[test]
     fn ordered_strike_content_authoring_accepts_checkless_natural_source_and_retains_identity() {
-        let value = source();
+        let mut value = source();
         let catalog: Catalog =
             serde_json::from_value(value.clone()).expect("natural strike syntax must decode");
         catalog
             .compile(rules())
             .expect("a no-damage natural source is valid");
+        assert!(!catalog.species["sequence_test"].melee.strikes[0].cancellable);
+        value["species"]["sequence_test"]["melee"]["strikes"][0]["cancellable"] =
+            serde_json::json!(false);
         let decoded = serde_json::to_value(&catalog).unwrap();
         assert_eq!(
             decoded["species"]["sequence_test"]["melee"],
@@ -1456,11 +1637,16 @@ mod action_duration_authoring_tests {
             let value = json!(rate);
             let decoded: ActionDuration = serde_json::from_value(value.clone()).unwrap();
             assert_eq!(serde_json::to_value(decoded).unwrap(), value);
-            let modifier = json!({
+            let mut modifier = json!({
                 "scope":"always", "op":{"kind":"action_duration","value":rate}
             });
             let decoded: Modifier = serde_json::from_value(modifier.clone()).unwrap();
             assert!(decoded.compile().is_ok());
+            assert!(
+                !decoded.cancellable,
+                "omitted source metadata defaults false"
+            );
+            modifier["cancellable"] = json!(false);
             assert_eq!(serde_json::to_value(decoded).unwrap(), modifier);
             let authored: Modifier = toml::from_str(&format!(
                 "scope = 'always'\nop = {{ kind = 'action_duration', value = '{rate}' }}"
@@ -1578,6 +1764,7 @@ mod wearable_modifier_tests {
         ];
         for op in ops {
             let modifier = Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op,
             };
@@ -1603,8 +1790,13 @@ mod awareness_authoring_tests {
             json!({"kind":"continual_stealth","edge":1}),
             json!({"kind":"aggravation","interval":500,"chance_denominator":3,"stealth_disadvantage":1}),
         ] {
-            let modifier = json!({"scope":"always","op":{"kind":"perception","value":good}});
+            let mut modifier = json!({"scope":"always","op":{"kind":"perception","value":good}});
             let authored: Modifier = serde_json::from_value(modifier.clone()).unwrap();
+            assert!(
+                !authored.cancellable,
+                "omitted source metadata defaults false"
+            );
+            modifier["cancellable"] = json!(false);
             assert_eq!(serde_json::to_value(&authored).unwrap(), modifier);
             assert!(authored.compile().is_ok());
             for field in good.as_object().unwrap().keys() {
@@ -1631,3 +1823,6 @@ mod awareness_authoring_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod detection_tests;

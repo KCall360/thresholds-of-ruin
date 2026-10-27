@@ -105,6 +105,26 @@ pub enum PlannedEffect {
     RestoreHitDie,
     TeleportRandom,
     TeleportToRayOrigin,
+    RoomLight,
+    DetectMonsters {
+        id: ConditionId,
+        turn_ticks: u64,
+    },
+    DetectFood,
+    MapTopology,
+    DetectMagic,
+    DrainLife,
+    GainStrength,
+    RaiseLevel,
+    CancelSpecials,
+    BalefulPolymorph {
+        forms: Vec<crate::content_ids::BodyFormId>,
+    },
+    HasteDose {
+        id: ConditionId,
+        rest: ConditionId,
+        turn_ticks: u64,
+    },
     ArrestDescent,
     StepSelfOneCell,
     PushTargetOneCell {
@@ -172,7 +192,13 @@ pub enum PlannedEffect {
 impl PlannedEffect {
     pub(crate) fn recipient(&self) -> crate::rules::EffectRecipient {
         match self {
-            Self::AlterEquipment { .. }
+            Self::RoomLight
+            | Self::DetectMonsters { .. }
+            | Self::DetectFood
+            | Self::MapTopology
+            | Self::DetectMagic
+            | Self::DrainLife
+            | Self::AlterEquipment { .. }
             | Self::SearchAdjacentGuises { .. }
             | Self::ObservePublicPlan
             | Self::ApplyQualifiedConditionToSource { .. } => crate::rules::EffectRecipient::Source,
@@ -236,6 +262,110 @@ impl PlannedAmount {
         }
     }
 }
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum DeviceDeliveryPlan {
+    Ray {
+        plan: tor_world::Shared<super::RayPlan>,
+    },
+    SelfEffect {
+        plan: tor_world::Shared<SelfDevicePlan>,
+    },
+}
+impl<'de> Deserialize<'de> for DeviceDeliveryPlan {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            Ray {
+                plan: tor_world::Shared<super::RayPlan>,
+            },
+            SelfEffect {
+                plan: tor_world::Shared<SelfDevicePlan>,
+            },
+        }
+        Ok(match crate::bounded::named_map(d)? {
+            Fields::Ray { plan } => Self::Ray { plan },
+            Fields::SelfEffect { plan } => Self::SelfEffect { plan },
+        })
+    }
+}
+impl DeviceDeliveryPlan {
+    pub fn ability(&self) -> &AbilityId {
+        match self {
+            Self::Ray { plan } => &plan.ability,
+            Self::SelfEffect { plan } => &plan.ability,
+        }
+    }
+    fn actor(&self) -> ActorId {
+        match self {
+            Self::Ray { plan } => plan.actor,
+            Self::SelfEffect { plan } => plan.actor,
+        }
+    }
+    fn preparation(&self) -> u64 {
+        match self {
+            Self::Ray { plan } => plan.preparation,
+            Self::SelfEffect { plan } => plan.preparation,
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SelfDevicePlan {
+    pub actor: ActorId,
+    pub ability: AbilityId,
+    pub preparation: u64,
+    pub descriptors: Vec<crate::content_ids::DescriptorId>,
+    pub effects: Vec<PlannedEffect>,
+}
+impl<'de> Deserialize<'de> for SelfDevicePlan {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            actor: ActorId,
+            ability: AbilityId,
+            preparation: u64,
+            #[serde(deserialize_with = "crate::magic_items::read_payload_descriptors")]
+            descriptors: Vec<crate::content_ids::DescriptorId>,
+            #[serde(deserialize_with = "read_item_effects")]
+            effects: Vec<PlannedEffect>,
+        }
+        let f: Fields = crate::bounded::named_map(d)?;
+        Ok(Self {
+            actor: f.actor,
+            ability: f.ability,
+            preparation: f.preparation,
+            descriptors: f.descriptors,
+            effects: f.effects,
+        })
+    }
+}
+impl SelfDevicePlan {
+    fn valid(&self, rules: &crate::rules::Ruleset) -> bool {
+        rules.ability(&self.ability).is_some_and(|d| {
+            let polymorph = super::self_polymorph_device_definition_valid(d);
+            if !(super::self_device_definition_valid(d) || polymorph) {
+                return false;
+            }
+            let crate::rules::StrikeSource::Authored { strikes } = &d.strikes else {
+                return false;
+            };
+            self.descriptors == strikes[0].descriptors
+                && item_effects_match_definition(
+                    if polymorph {
+                        &strikes[0].on_failure
+                    } else {
+                        &strikes[0].on_success
+                    },
+                    &self.effects,
+                )
+                && effects_valid(&self.effects, rules)
+        })
+    }
+}
 /// A prepared action carries only the data its action kind can use.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -248,7 +378,8 @@ pub enum Plan {
         item: ItemId,
         charges: u16,
         discovery: crate::ItemDiscovery,
-        ray: tor_world::Shared<super::RayPlan>,
+        aim: crate::DeviceAim,
+        delivery: DeviceDeliveryPlan,
     },
     Respec(tor_world::Shared<crate::player_respec::RespecPlan>),
     Equip {
@@ -259,6 +390,16 @@ pub enum Plan {
         preparation: u64,
     },
     Unequip {
+        actor: ActorId,
+        item: ItemId,
+        preparation: u64,
+    },
+    Ignite {
+        actor: ActorId,
+        item: ItemId,
+        preparation: u64,
+    },
+    Extinguish {
         actor: ActorId,
         item: ItemId,
         preparation: u64,
@@ -387,7 +528,11 @@ impl Plan {
     ) -> impl ExactSizeIterator<Item = &crate::conditions::TokenReservation> + Clone {
         match self {
             Self::Ability(plan) => plan.tokens.as_slice(),
-            Self::Ray(plan) | Self::Zap { ray: plan, .. } => plan.tokens.as_slice(),
+            Self::Ray(plan)
+            | Self::Zap {
+                delivery: DeviceDeliveryPlan::Ray { plan },
+                ..
+            } => plan.tokens(),
             Self::Projectile(plan) => plan.tokens.as_slice(),
             Self::Escape(plan) => plan.tokens.as_slice(),
             _ => &[],
@@ -399,11 +544,14 @@ impl Plan {
         match self {
             Self::Escape(plan) => plan.actor,
             Self::Ability(plan) => plan.actor,
-            Self::Ray(plan) | Self::Zap { ray: plan, .. } => plan.actor,
+            Self::Ray(plan) => plan.actor,
+            Self::Zap { delivery, .. } => delivery.actor(),
             Self::Projectile(plan) => plan.actor,
             Self::Respec(plan) => plan.basis.actor,
             Self::Equip { actor, .. }
             | Self::Unequip { actor, .. }
+            | Self::Ignite { actor, .. }
+            | Self::Extinguish { actor, .. }
             | Self::Read { actor, .. }
             | Self::Drink { actor, .. }
             | Self::Eat { actor, .. } => *actor,
@@ -414,11 +562,14 @@ impl Plan {
             Self::Escape(plan) => plan.holder,
             Self::Ability(plan) => plan.target,
             // Legacy actor-local bookkeeping only; a ray has no persisted target.
-            Self::Ray(plan) | Self::Zap { ray: plan, .. } => plan.actor,
+            Self::Ray(plan) => plan.actor,
+            Self::Zap { delivery, .. } => delivery.actor(),
             Self::Projectile(plan) => plan.actor,
             Self::Respec(plan) => plan.basis.actor,
             Self::Equip { actor, .. }
             | Self::Unequip { actor, .. }
+            | Self::Ignite { actor, .. }
+            | Self::Extinguish { actor, .. }
             | Self::Read { actor, .. }
             | Self::Drink { actor, .. }
             | Self::Eat { actor, .. } => *actor,
@@ -432,9 +583,9 @@ impl Plan {
                 replacement: plan.replacement.clone(),
                 supplies: plan.supplies.clone(),
             },
-            Self::Zap { item, ray, .. } => Work::Zap {
+            Self::Zap { item, aim, .. } => Work::Zap {
                 item: *item,
-                direction: ray.direction,
+                aim: *aim,
             },
             Self::Projectile(plan) => Work::UseAbility {
                 id: plan.ability.clone(),
@@ -459,6 +610,8 @@ impl Plan {
                 slot: *slot,
             },
             Self::Unequip { item, .. } => Work::Unequip { item: *item },
+            Self::Ignite { item, .. } => Work::Ignite { item: *item },
+            Self::Extinguish { item, .. } => Work::Extinguish { item: *item },
             Self::Drink { item, .. } => Work::Drink { item: *item },
             Self::Read { item, .. } => Work::Read { item: *item },
             Self::Eat { item, .. } => Work::Eat { item: *item },
@@ -468,11 +621,14 @@ impl Plan {
         match self {
             Self::Escape(plan) => plan.preparation,
             Self::Ability(plan) => plan.preparation,
-            Self::Ray(plan) | Self::Zap { ray: plan, .. } => plan.preparation,
+            Self::Ray(plan) => plan.preparation,
+            Self::Zap { delivery, .. } => delivery.preparation(),
             Self::Projectile(plan) => plan.preparation,
             Self::Respec(plan) => plan.preparation,
             Self::Equip { preparation, .. }
             | Self::Unequip { preparation, .. }
+            | Self::Ignite { preparation, .. }
+            | Self::Extinguish { preparation, .. }
             | Self::Read { preparation, .. }
             | Self::Drink { preparation, .. }
             | Self::Eat { preparation, .. } => *preparation,
@@ -482,11 +638,14 @@ impl Plan {
         match self {
             Self::Escape(plan) => plan.recovery,
             Self::Ability(plan) => plan.recovery + plan.step.map_or(0, |step| step.duration),
-            Self::Ray(plan) | Self::Zap { ray: plan, .. } => plan.recovery,
+            Self::Ray(plan) => plan.recovery,
+            Self::Zap { .. } => 0,
             Self::Projectile(plan) => plan.recovery,
             Self::Respec(plan) => plan.recovery,
             Self::Equip { .. }
             | Self::Unequip { .. }
+            | Self::Ignite { .. }
+            | Self::Extinguish { .. }
             | Self::Read { .. }
             | Self::Drink { .. }
             | Self::Eat { .. } => 0,
@@ -495,11 +654,14 @@ impl Plan {
     pub fn cost(&self) -> Option<CostBundle> {
         match self {
             Self::Ability(plan) => plan.cost,
-            Self::Ray(plan) | Self::Zap { ray: plan, .. } => plan.cost,
+            Self::Ray(plan) => plan.cost,
+            Self::Zap { .. } => None,
             Self::Projectile(plan) => plan.cost,
             Self::Escape(_) | Self::Respec(_) => None,
             Self::Equip { .. }
             | Self::Unequip { .. }
+            | Self::Ignite { .. }
+            | Self::Extinguish { .. }
             | Self::Read { .. }
             | Self::Drink { .. }
             | Self::Eat { .. } => None,
@@ -514,13 +676,19 @@ impl Plan {
             Self::Read { effects, .. }
             | Self::Drink { effects, .. }
             | Self::Eat { effects, .. } => effects,
+            Self::Zap {
+                delivery: DeviceDeliveryPlan::SelfEffect { plan },
+                ..
+            } => &plan.effects,
             Self::Projectile(_)
             | Self::Ray(_)
             | Self::Zap { .. }
             | Self::Escape(_)
             | Self::Respec(_)
             | Self::Equip { .. }
-            | Self::Unequip { .. } => &[],
+            | Self::Unequip { .. }
+            | Self::Ignite { .. }
+            | Self::Extinguish { .. } => &[],
         }
     }
     pub fn as_ability(&self) -> Option<&AbilityPlan> {
@@ -533,6 +701,8 @@ impl Plan {
             | Self::Respec(_) => None,
             Self::Equip { .. }
             | Self::Unequip { .. }
+            | Self::Ignite { .. }
+            | Self::Extinguish { .. }
             | Self::Read { .. }
             | Self::Drink { .. }
             | Self::Eat { .. } => None,
@@ -546,7 +716,11 @@ impl Plan {
     }
     pub fn as_ray(&self) -> Option<&super::RayPlan> {
         match self {
-            Self::Ray(plan) | Self::Zap { ray: plan, .. } => Some(plan),
+            Self::Ray(plan)
+            | Self::Zap {
+                delivery: DeviceDeliveryPlan::Ray { plan },
+                ..
+            } => Some(plan),
             _ => None,
         }
     }
@@ -570,6 +744,15 @@ impl Plan {
     pub fn resolution(&self) -> Option<ResolutionPlan<'_>> {
         match self {
             Self::Ability(plan) => Some(ResolutionPlan::Ability(plan)),
+            Self::Zap {
+                delivery: DeviceDeliveryPlan::SelfEffect { plan },
+                ..
+            } => Some(ResolutionPlan::Exposure {
+                actor: plan.actor,
+                target: plan.actor,
+                effects: &plan.effects,
+                descriptors: &plan.descriptors,
+            }),
             Self::Read {
                 actor,
                 effects,
@@ -598,7 +781,9 @@ impl Plan {
             | Self::Escape(_)
             | Self::Respec(_)
             | Self::Equip { .. }
-            | Self::Unequip { .. } => None,
+            | Self::Unequip { .. }
+            | Self::Ignite { .. }
+            | Self::Extinguish { .. } => None,
         }
     }
     pub fn valid(&self, rules: &crate::rules::Ruleset) -> bool {
@@ -613,19 +798,38 @@ impl Plan {
                 Self::Projectile(plan) => plan.valid(rules),
                 Self::Zap {
                     item,
-                    ray,
+                    delivery,
+                    aim,
                     discovery,
                     ..
                 } => {
                     valid_item(*item)
                         && matches!(
                             discovery,
-                            crate::ItemDiscovery::OnUse | crate::ItemDiscovery::Never
+                            crate::ItemDiscovery::OnUse
+                                | crate::ItemDiscovery::DiscernibleEffect
+                                | crate::ItemDiscovery::Never
                         )
-                        && ray.valid(rules)
-                        && ray.cost.is_none()
-                        && ray.cooldown.is_none()
-                        && ray.supply_costs.is_empty()
+                        && (*discovery != crate::ItemDiscovery::DiscernibleEffect
+                            || rules
+                                .ability(delivery.ability())
+                                .is_some_and(super::discernible_device_definition_valid))
+                        && match delivery {
+                            DeviceDeliveryPlan::Ray { plan } => {
+                                matches!(aim, crate::DeviceAim::Direction {direction} if *direction == plan.direction)
+                                    && plan.valid(rules)
+                                    && plan.cost.is_none()
+                                    && plan.cooldown.is_none()
+                                    && plan.supply_costs.is_empty()
+                            }
+                            DeviceDeliveryPlan::SelfEffect { plan } => {
+                                plan.valid(rules)
+                                    && (matches!(aim, crate::DeviceAim::SelfTarget {})
+                                        || rules
+                                            .ability(&plan.ability)
+                                            .is_some_and(super::self_device_definition_valid))
+                            }
+                        }
                 }
                 Self::Respec(plan) => plan.valid(rules),
                 Self::Equip {
@@ -639,7 +843,9 @@ impl Plan {
                         && allocation.valid_shape(rules, *item, *slot)
                         && allocation.quickdraw(rules) == (self.preparation() == 0)
                 }
-                Self::Unequip { item, .. } => valid_item(*item),
+                Self::Unequip { item, .. }
+                | Self::Ignite { item, .. }
+                | Self::Extinguish { item, .. } => valid_item(*item),
                 Self::Read {
                     control,
                     item,
@@ -650,6 +856,7 @@ impl Plan {
                     ..
                 } => {
                     valid_item(*item)
+                        && *discovery != crate::ItemDiscovery::DiscernibleEffect
                         && rules
                             .validate_payload_recipients(
                                 descriptors,
@@ -676,9 +883,11 @@ impl Plan {
                     item,
                     effects,
                     descriptors,
+                    discovery,
                     ..
                 } => {
                     valid_item(*item)
+                        && *discovery != crate::ItemDiscovery::DiscernibleEffect
                         && effects_valid(effects, rules)
                         && rules
                             .validate_payload_recipients(
@@ -763,6 +972,10 @@ fn read_hit_die_pools<'de, D: serde::Deserializer<'de>>(
 pub(crate) fn effects_valid(effects: &[PlannedEffect], rules: &crate::rules::Ruleset) -> bool {
     effects.len() <= crate::limits::EFFECTS_PER_BRANCH
         && (effects.len() == 1
+            || !effects
+                .iter()
+                .any(|effect| crate::detection_lifecycle::planned_kind(effect).is_some()))
+        && (effects.len() == 1
             || !effects.iter().any(|effect| {
                 matches!(
                     effect,
@@ -780,6 +993,7 @@ pub(crate) fn effects_valid(effects: &[PlannedEffect], rules: &crate::rules::Rul
                 .all(|effect| effect.recipient() == first.recipient())
         })
         && effects.iter().all(|effect| match effect {
+            PlannedEffect::BalefulPolymorph { forms } => crate::rules::valid_body_forms(forms),
             PlannedEffect::Theft { theft } => theft.valid(),
             PlannedEffect::AlterEquipment { alteration } => alteration.valid(rules),
             PlannedEffect::CorrodeArmor { slot, amount } => {
@@ -792,7 +1006,31 @@ pub(crate) fn effects_valid(effects: &[PlannedEffect], rules: &crate::rules::Rul
             | PlannedEffect::RestoreHitDie
             | PlannedEffect::TeleportRandom
             | PlannedEffect::TeleportToRayOrigin
+            | PlannedEffect::RoomLight
+            | PlannedEffect::DetectFood
+            | PlannedEffect::MapTopology
+            | PlannedEffect::DetectMagic
+            | PlannedEffect::DrainLife
+            | PlannedEffect::GainStrength
+            | PlannedEffect::RaiseLevel
+            | PlannedEffect::CancelSpecials
             | PlannedEffect::ArrestDescent => true,
+            PlannedEffect::DetectMonsters { id, turn_ticks } => {
+                crate::detection_lifecycle::duration(*turn_ticks).is_some()
+                    && rules
+                        .condition(id)
+                        .is_some_and(|condition| condition.detecting_monsters)
+            }
+            PlannedEffect::HasteDose {
+                id,
+                rest,
+                turn_ticks,
+            } => {
+                super::valid_haste_turn_ticks(*turn_ticks)
+                    && rules.condition(id).zip(rules.condition(rest)).is_some_and(
+                        |(haste, rest)| super::haste_dose_conditions_valid(haste, rest),
+                    )
+            }
             PlannedEffect::ApplyLinkedHold { policy } => {
                 policy.valid() && rules.flag(&policy.sustaining).is_some()
             }
@@ -806,15 +1044,16 @@ pub(crate) fn effects_valid(effects: &[PlannedEffect], rules: &crate::rules::Rul
                 duration,
                 turn_ticks,
             } => {
-                rules.condition(id).is_some_and(|definition| {
-                    definition.timing != crate::rules::ConditionTiming::UntilRemoved
-                }) && duration.valid_turn_duration(*turn_ticks)
+                rules
+                    .condition(id)
+                    .is_some_and(|definition| definition.timing.permits_finite())
+                    && duration.valid_turn_duration(*turn_ticks)
             }
             PlannedEffect::ApplyPersistentCondition { id, cancels } => {
                 let persistent = |condition: &ConditionId| {
-                    rules.condition(condition).is_some_and(|definition| {
-                        definition.timing == crate::rules::ConditionTiming::UntilRemoved
-                    })
+                    rules
+                        .condition(condition)
+                        .is_some_and(|definition| definition.timing.permits_persistent())
                 };
                 persistent(id)
                     && cancels
@@ -833,9 +1072,10 @@ pub(crate) fn effects_valid(effects: &[PlannedEffect], rules: &crate::rules::Rul
                 PlannedAmount::Rolled { .. } => true,
             },
             PlannedEffect::ApplyCondition { id, duration } => {
-                rules.condition(id).is_some_and(|definition| {
-                    definition.timing != crate::rules::ConditionTiming::UntilRemoved
-                }) && (1..=crate::limits::NUMERIC as u64).contains(duration)
+                rules
+                    .condition(id)
+                    .is_some_and(|definition| definition.timing.permits_finite())
+                    && (1..=crate::limits::NUMERIC as u64).contains(duration)
             }
             PlannedEffect::SearchAdjacentGuises { check } => check.valid(),
             PlannedEffect::ObservePublicPlan => true,
@@ -918,8 +1158,36 @@ pub(super) fn effects_match_definition_scoped(
             .zip(actual)
             .enumerate()
             .all(|(index, (expected, actual))| match (expected, actual) {
+                (
+                    Effect::HasteDose { condition, rest },
+                    PlannedEffect::HasteDose {
+                        id,
+                        rest: actual_rest,
+                        turn_ticks,
+                    },
+                ) => {
+                    condition == id
+                        && rest == actual_rest
+                        && super::valid_haste_turn_ticks(*turn_ticks)
+                }
+                (
+                    Effect::DetectMonsters { condition },
+                    PlannedEffect::DetectMonsters { id, turn_ticks },
+                ) => condition == id && crate::detection_lifecycle::duration(*turn_ticks).is_some(),
+                (Effect::MapTopology, PlannedEffect::MapTopology)
+                | (Effect::DetectFood, PlannedEffect::DetectFood)
+                | (Effect::DetectMagic, PlannedEffect::DetectMagic) => true,
+                (
+                    Effect::BalefulPolymorph { forms },
+                    PlannedEffect::BalefulPolymorph { forms: captured },
+                ) => forms == captured,
                 (Effect::TeleportRandom, PlannedEffect::TeleportRandom)
                 | (Effect::TeleportToRayOrigin, PlannedEffect::TeleportToRayOrigin)
+                | (Effect::RoomLight, PlannedEffect::RoomLight)
+                | (Effect::DrainLife, PlannedEffect::DrainLife)
+                | (Effect::GainStrength, PlannedEffect::GainStrength)
+                | (Effect::RaiseLevel, PlannedEffect::RaiseLevel)
+                | (Effect::CancelSpecials, PlannedEffect::CancelSpecials)
                 | (Effect::ArrestDescent, PlannedEffect::ArrestDescent) => true,
                 (
                     Effect::Theft {
@@ -1187,7 +1455,7 @@ impl Game {
         }
         match reach {
             // Physical projectile reach is resolved along its released flight.
-            Reach::Projectile => false,
+            Reach::Projectile | Reach::UntilObstruction => false,
             Reach::SelfOnly => actor == target,
             Reach::SelfOrAlly { range } => {
                 actor == target
@@ -1379,6 +1647,60 @@ impl Game {
                 Effect::RestoreHitDie => Ok(PlannedEffect::RestoreHitDie),
                 Effect::TeleportRandom => Ok(PlannedEffect::TeleportRandom),
                 Effect::TeleportToRayOrigin => Ok(PlannedEffect::TeleportToRayOrigin),
+                Effect::RoomLight => Ok(PlannedEffect::RoomLight),
+                Effect::DetectMonsters { condition } => {
+                    let turn_ticks = self
+                        .actors
+                        .get(&actor)
+                        .ok_or_else(invalid)?
+                        .turn_ticks
+                        .get();
+                    crate::detection_lifecycle::duration(turn_ticks).ok_or_else(invalid)?;
+                    Ok(PlannedEffect::DetectMonsters {
+                        id: condition.clone(),
+                        turn_ticks,
+                    })
+                }
+                Effect::DetectFood => Ok(PlannedEffect::DetectFood),
+                Effect::MapTopology => {
+                    if !self.mapping_supported(actor) {
+                        return Err(invalid());
+                    }
+                    Ok(PlannedEffect::MapTopology)
+                }
+                Effect::DetectMagic => Ok(PlannedEffect::DetectMagic),
+                Effect::DrainLife => Ok(PlannedEffect::DrainLife),
+                Effect::GainStrength => Ok(PlannedEffect::GainStrength),
+                Effect::RaiseLevel => Ok(PlannedEffect::RaiseLevel),
+                Effect::CancelSpecials => Ok(PlannedEffect::CancelSpecials),
+                Effect::BalefulPolymorph { forms } => {
+                    if !crate::rules::valid_body_forms(forms)
+                        || forms
+                            .iter()
+                            .any(|id| self.content.polymorph_body_package(id).is_none())
+                    {
+                        return Err(invalid());
+                    }
+                    Ok(PlannedEffect::BalefulPolymorph {
+                        forms: forms.clone(),
+                    })
+                }
+                Effect::HasteDose { condition, rest } => {
+                    let turn_ticks = self
+                        .actors
+                        .get(&actor)
+                        .ok_or_else(invalid)?
+                        .turn_ticks
+                        .get();
+                    if !super::valid_haste_turn_ticks(turn_ticks) {
+                        return Err(invalid());
+                    }
+                    Ok(PlannedEffect::HasteDose {
+                        id: condition.clone(),
+                        rest: rest.clone(),
+                        turn_ticks,
+                    })
+                }
                 Effect::ArrestDescent => Ok(PlannedEffect::ArrestDescent),
                 Effect::StepSelfOneCell => Ok(PlannedEffect::StepSelfOneCell),
                 Effect::PushTargetOneCell { direction } => Ok(PlannedEffect::PushTargetOneCell {
@@ -1592,6 +1914,27 @@ impl<'de> Deserialize<'de> for PlannedEffect {
             RestoreHitDie {},
             TeleportRandom {},
             TeleportToRayOrigin {},
+            RoomLight {},
+            DetectMonsters {
+                id: ConditionId,
+                turn_ticks: u64,
+            },
+            DetectFood {},
+            MapTopology {},
+            DetectMagic {},
+            DrainLife {},
+            GainStrength {},
+            RaiseLevel {},
+            CancelSpecials {},
+            BalefulPolymorph {
+                #[serde(deserialize_with = "crate::rules::read_body_forms")]
+                forms: Vec<crate::content_ids::BodyFormId>,
+            },
+            HasteDose {
+                id: ConditionId,
+                rest: ConditionId,
+                turn_ticks: u64,
+            },
             ArrestDescent {},
             StepSelfOneCell {},
             PushTargetOneCell {
@@ -1673,6 +2016,25 @@ impl<'de> Deserialize<'de> for PlannedEffect {
             Fields::RestoreHitDie {} => Self::RestoreHitDie,
             Fields::TeleportRandom {} => Self::TeleportRandom,
             Fields::TeleportToRayOrigin {} => Self::TeleportToRayOrigin,
+            Fields::RoomLight {} => Self::RoomLight,
+            Fields::DetectMonsters { id, turn_ticks } => Self::DetectMonsters { id, turn_ticks },
+            Fields::DetectFood {} => Self::DetectFood,
+            Fields::MapTopology {} => Self::MapTopology,
+            Fields::DetectMagic {} => Self::DetectMagic,
+            Fields::DrainLife {} => Self::DrainLife,
+            Fields::GainStrength {} => Self::GainStrength,
+            Fields::RaiseLevel {} => Self::RaiseLevel,
+            Fields::CancelSpecials {} => Self::CancelSpecials,
+            Fields::BalefulPolymorph { forms } => Self::BalefulPolymorph { forms },
+            Fields::HasteDose {
+                id,
+                rest,
+                turn_ticks,
+            } => Self::HasteDose {
+                id,
+                rest,
+                turn_ticks,
+            },
             Fields::ArrestDescent {} => Self::ArrestDescent,
             Fields::StepSelfOneCell {} => Self::StepSelfOneCell,
             Fields::PushTargetOneCell { direction } => Self::PushTargetOneCell { direction },
@@ -1724,6 +2086,14 @@ impl<'de> Deserialize<'de> for PlannedEffect {
             },
         };
         let valid = match &effect {
+            Self::DetectMonsters { turn_ticks, .. } => {
+                crate::detection_lifecycle::duration(*turn_ticks).is_some()
+            }
+            Self::HasteDose {
+                id,
+                rest,
+                turn_ticks,
+            } => id != rest && super::valid_haste_turn_ticks(*turn_ticks),
             Self::ApplyPersistentCondition { id, cancels } => cancels.as_ref() != Some(id),
             Self::ApplyConditionForTurns {
                 duration,

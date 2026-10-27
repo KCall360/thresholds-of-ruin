@@ -19,8 +19,18 @@ mod diagnostics;
 mod instantiation;
 #[path = "scenario_population.rs"]
 mod population;
+#[path = "scenario_presentation.rs"]
+mod presentation;
 #[path = "scenario_retrieval.rs"]
 mod retrieval;
+#[path = "scenario_spatial.rs"]
+pub(crate) mod spatial;
+#[path = "scenario_spatial_authoring.rs"]
+pub mod spatial_authoring;
+#[path = "scenario_spatial_runtime.rs"]
+mod spatial_runtime;
+#[path = "scenario_spatial_sources.rs"]
+mod spatial_sources;
 pub use population::{
     ActorPopulationBand, ActorPopulationChoice, CarriedItemChoice, CarriedItemPool, CarriedLoot,
     CarryChance, CharacterLoadout, FloorActivation, PopulationAdvancement, PopulationBand,
@@ -28,6 +38,9 @@ pub use population::{
     PopulationQuantityExpr, PopulationStage, Protagonist, QuantityExpression, ScenarioCapabilities,
 };
 pub use retrieval::UniqueRetrieval;
+#[cfg(test)]
+pub(crate) use spatial_runtime::tests::package as spatial_audit_test_package;
+pub(crate) use spatial_runtime::{HistoricalSourceAudit, SpatialAudit};
 #[path = "scenario_rules.rs"]
 mod rules_source;
 pub use artifact::export;
@@ -38,10 +51,10 @@ pub use authoring::{
     AiProfile, AmountExpr, AnatomySpec, ArmorMaterial, ArmorSpec, BodySpec, ChargeRange,
     ConsumableSpec, CurrencyKind, DamageComponentExpr, DamageExpr, DamageType, DeviceSpec,
     DiceExpr, Effect, EquipmentAlteration, EquipmentGeneration, EquipmentSlot, EquipmentSpec,
-    EquippedSelection, HealingOverflow, HitRecovery, HoldPolicy, ItemClass, ItemDiscovery,
-    LauncherProfile, PeriodicRelocation, PrimaryAttackSocket, ProjectileSpec, PushDirection,
-    ReadableSpec, RelocationGate, RelocationPolicy, TheftSelection, WeaponProfileSpec,
-    WeaponRangeBands, WeaponTrait, WeaponTraitChanges, WeaponTraitKind,
+    EquippedSelection, HealingOverflow, HeldLightSpec, HitRecovery, HoldPolicy, ItemClass,
+    ItemDiscovery, LauncherProfile, PeriodicRelocation, PrimaryAttackSocket, ProjectileSpec,
+    PushDirection, ReadableSpec, RelocationGate, RelocationPolicy, TheftSelection,
+    WeaponProfileSpec, WeaponRangeBands, WeaponTrait, WeaponTraitChanges, WeaponTraitKind,
 };
 use compiler::PreparedDefinitions;
 use diagnostics::{Origin, PathSegment, ReferenceValue};
@@ -52,13 +65,13 @@ pub use tor_simulation::EdibleSpec;
 use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
-pub const RULESET: &str = "interactions-v52";
-const VALIDATOR: &str = "tor-scenario-43";
+pub const RULESET: &str = "interactions-v54";
+const VALIDATOR: &str = "tor-scenario-45";
 /// The manifest and the validator's files are bounded to this.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 /// The package layout this version reads: `scenario.toml`, one file per
 /// region in `regions/`, and the validator's `index.json`.
-pub const FORMAT: u32 = 31;
+pub const FORMAT: u32 = 33;
 const REGION_DIR: &str = "regions";
 /// Regions a package may have.
 pub const MAX_REGIONS: usize = 65_536;
@@ -66,6 +79,7 @@ pub const MAX_REGIONS: usize = 65_536;
 pub(crate) const MAX_REGION_BYTES: u64 = 1024 * 1024;
 /// The index is bounded to this, which holds the largest package.
 pub(crate) const MAX_INDEX_BYTES: u64 = 64 * 1024 * 1024;
+pub(crate) const MAX_VALIDATION_CELL_WORK: u64 = 67_108_864;
 
 fn fail(message: impl AsRef<str>) -> Failure {
     Failure::new(tor_protocol::ErrorCode::InvalidAction, message.as_ref())
@@ -114,6 +128,12 @@ fn label(s: &str) -> bool {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Manifest {
+    #[serde(
+        default,
+        skip_serializing_if = "BTreeMap::is_empty",
+        deserialize_with = "spatial_authoring::unique_map"
+    )]
+    pub spatial_scopes: BTreeMap<String, spatial_authoring::AuthoredSpatialScope>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unique_retrieval: Option<UniqueRetrieval>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -238,6 +258,7 @@ pub struct Archetype {
     pub readable: Option<ReadableSpec>,
     pub ground_scare: Option<tor_simulation::control_scrolls::ScareSpec>,
     pub device: Option<DeviceSpec>,
+    pub held_light: Option<HeldLightSpec>,
     pub edible: Option<EdibleSpec>,
     pub supply: Option<String>,
     #[serde(default)]
@@ -272,6 +293,7 @@ impl<'de> serde::Deserialize<'de> for Archetype {
             readable: Option<ReadableSpec>,
             ground_scare: Option<tor_simulation::control_scrolls::ScareSpec>,
             device: Option<DeviceSpec>,
+            held_light: Option<HeldLightSpec>,
             edible: Option<EdibleSpec>,
             supply: Option<String>,
             #[serde(default)]
@@ -311,6 +333,7 @@ impl<'de> serde::Deserialize<'de> for Archetype {
             readable: fields.readable,
             ground_scare: fields.ground_scare,
             device: fields.device,
+            held_light: fields.held_light,
             edible: fields.edible,
             supply: fields.supply,
             magical: fields.magical,
@@ -346,6 +369,7 @@ impl Clone for Archetype {
             readable: self.readable.clone(),
             ground_scare: self.ground_scare.clone(),
             device: self.device.clone(),
+            held_light: self.held_light,
             edible: self.edible.clone(),
             supply: self.supply.clone(),
             magical: self.magical,
@@ -1410,7 +1434,7 @@ impl Package {
     }
 
     pub(crate) fn content(&self) -> Result<Arc<tor_simulation::creatures::Content>, Failure> {
-        Ok(compiler::compile_trap_ammunition(
+        Ok(compiler::compile_content_decorations(
             &self.manifest,
             self.manifest
                 .creatures
@@ -1748,6 +1772,7 @@ impl Package {
             .ok_or_else(|| fail("Missing generation group owner"))?;
         let group = self.generation_group(&identity, seed)?;
         let generated = self.generated_group(&identity, seed)?;
+        let spatial = self.canonical_generated_spatial(&identity, seed, &generated)?;
         let rooms = generated.rooms;
         let definitions = generated.regions;
         let shell: BTreeMap<u64, Arc<RegionDef>> = definitions
@@ -1825,6 +1850,7 @@ impl Package {
             records,
             files,
             activation,
+            spatial,
         })
     }
 
@@ -2135,7 +2161,6 @@ pub fn write_package(
 pub(crate) fn checked_package(root: &Path) -> Result<Package, Failure> {
     let mut package = read_package(root)?;
     package.check()?;
-    const MAX_VALIDATION_CELL_WORK: u64 = 67_108_864;
     let volume = |size: [i32; 3], chamber: bool| -> Result<u64, Failure> {
         size.into_iter().try_fold(1u64, |product, side| {
             let side = u64::try_from(side).map_err(|_| fail("Invalid validation volume"))?;
@@ -3112,6 +3137,7 @@ impl Package {
                 )?;
             }
         }
+        self.validate_spatial_sources()?;
         Ok(())
     }
     /// Acquire diagnostic text only after a reference check fails. Unavailable
@@ -3345,6 +3371,7 @@ impl Package {
                 &item.consumable,
                 &item.readable,
                 &item.device,
+                &item.held_light,
                 &item.edible,
                 &item.supply,
             );
@@ -3397,6 +3424,23 @@ impl Package {
                             projectile.as_ref(),
                         ),
                         "Invalid equipment generation definition",
+                    )?;
+                }
+                if let Some(policy) = a.held_light {
+                    policy.compile()?;
+                    require(
+                        a.class == ItemClass::Tool
+                            && !a.stackable
+                            && a.equipment.as_ref().is_some_and(|equipment| {
+                                equipment.slot == "held_light" && equipment.attack.is_none()
+                            })
+                            && a.device.is_none()
+                            && a.consumable.is_none()
+                            && a.readable.is_none()
+                            && a.edible.is_none()
+                            && a.projectile.is_none()
+                            && a.supply.is_none(),
+                        "Invalid held light capability combination",
                     )?;
                 }
                 if let Some(equipment) = &a.equipment {
@@ -3572,12 +3616,18 @@ impl Package {
         // temporary batch into definitions; it is never a terrain baseline.
         let mut generated = BTreeMap::new();
         let mut generated_rooms = BTreeMap::new();
+        let mut generated_spatial = tor_simulation::spatial_scope::registry::Registry::default();
         let mut defs = Vec::new();
         for entry in &self.index.regions {
             if let Some(owner) = index.group_owners.get(&entry.id) {
                 if !generated.contains_key(&entry.id) {
                     let identity = &index.groups[owner];
                     let group = self.generated_group(identity, seed)?;
+                    generated_spatial
+                        .register_archive_checked(
+                            self.canonical_generated_spatial(identity, seed, &group)?,
+                        )
+                        .map_err(|e| fail(format!("Generated spatial capacity: {e:?}")))?;
                     generated_rooms.insert(identity.clone(), group.rooms);
                     generated.extend(group.regions);
                 }
@@ -3592,6 +3642,11 @@ impl Package {
         // without a spawned root retain one representative validation group.
         for identity in self.initial_procedural_groups(index.homes.values().map(|at| at.region.0)) {
             let group = self.generated_group(&identity, seed)?;
+            generated_spatial
+                .register_archive_checked(
+                    self.canonical_generated_spatial(&identity, seed, &group)?,
+                )
+                .map_err(|e| fail(format!("Generated spatial capacity: {e:?}")))?;
             generated_rooms.insert(identity, group.rooms);
             defs.extend(group.regions.into_values().map(Arc::new));
         }
@@ -3628,6 +3683,10 @@ impl Package {
                 self.boundary_anchor(name) || game.authored_cell_valid(*position),
                 format!("Anchor {name}: outside traversable geometry"),
             )?;
+        }
+        self.install_authored_spatial(&mut game)?;
+        for scope in generated_spatial.scopes() {
+            self.install_spatial_scope(&mut game, scope.clone())?;
         }
         self.add_entities(&mut game, seed, &index, &all)?;
         self.configure_population(&mut game, &index)?;
@@ -4324,17 +4383,12 @@ impl Package {
         Ok(())
     }
 
-    /// A region's gravity, outgoing links, place hints and gravity overrides.
-    fn add_structure(
+    fn spatial_joins(
         &self,
-        game: &mut Game,
         r: &RegionDef,
         anchors: &BTreeMap<String, Location>,
-    ) -> Result<(), Failure> {
-        if let Some(gravity) = r.gravity {
-            game.set_gravity(RegionId(r.id), gravity)
-                .map_err(|_| fail("Invalid region gravity"))?;
-        }
+    ) -> Result<Vec<spatial_runtime::SourceJoin>, Failure> {
+        let mut joins = Vec::new();
         for (index, p) in r.portals.iter().enumerate() {
             let direction = match p.direction.as_str() {
                 "north" => Direction::North,
@@ -4373,24 +4427,41 @@ impl Package {
                     || matches!(direction, Direction::Up | Direction::Down),
                 "Stairs require an up/down direction",
             )?;
-            let connect = match p.kind.as_deref() {
-                Some("boundary") => Game::connect_boundary_area,
-                Some("portal") => Game::connect_portal_area,
-                None | Some("stairs") => Game::connect_area,
+            let kind = match p.kind.as_deref() {
+                Some("boundary") => spatial_runtime::JoinKind::Boundary,
+                Some("portal") => spatial_runtime::JoinKind::Portal,
+                None | Some("stairs") => spatial_runtime::JoinKind::Transport,
                 _ => return Err(fail("Invalid connection kind")),
             };
-            connect(
-                game,
-                Passage {
+            joins.push(spatial_runtime::SourceJoin {
+                passage: Passage {
                     from: loc(r.id, p.at),
                     direction,
                     to,
                 },
                 rotation,
-                p.width,
-                p.height,
-            )
-            .map_err(|e| fail(format!("Region {} portal to {}: {e:?}", r.id, p.to)))?;
+                width: p.width,
+                height: p.height,
+                kind,
+            });
+        }
+        Ok(joins)
+    }
+
+    /// A region's gravity, outgoing links, place hints and gravity overrides.
+    fn add_structure(
+        &self,
+        game: &mut Game,
+        r: &RegionDef,
+        anchors: &BTreeMap<String, Location>,
+    ) -> Result<(), Failure> {
+        if let Some(gravity) = r.gravity {
+            game.set_gravity(RegionId(r.id), gravity)
+                .map_err(|_| fail("Invalid region gravity"))?;
+        }
+        for join in self.spatial_joins(r, anchors)? {
+            join.apply_game(game)
+                .map_err(|e| fail(format!("Region {} portal: {e:?}", r.id)))?;
         }
         for p in &r.places {
             match p {
@@ -4713,6 +4784,7 @@ pub(crate) struct PackageIndex {
 
 #[derive(Clone, Debug)]
 pub(crate) struct PreparedGroup {
+    pub(crate) spatial: tor_simulation::spatial_scope::registry::Scope,
     /// Immutable geometry-only input; preparing it never chooses population.
     pub(crate) activation: Option<tor_simulation::floor_activation::PreparedScope>,
     pub(crate) records: Vec<(tor_simulation::UnbuiltRegion, tor_simulation::RegionRecord)>,
@@ -5011,6 +5083,7 @@ mod tests {
             "readable",
             "ground_scare",
             "device",
+            "held_light",
             "edible",
             "supply",
             "magical",
@@ -5100,8 +5173,8 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let original = read_package(&root).unwrap();
         original.check_identity().unwrap();
-        assert_eq!(original.certificate.validator, "tor-scenario-43");
-        assert_eq!(original.certificate.ruleset, "interactions-v52");
+        assert_eq!(original.certificate.validator, "tor-scenario-45");
+        assert_eq!(original.certificate.ruleset, "interactions-v54");
         let current_artifact = artifact::relative_root(&original);
         for (boundary, identity) in [
             ("validator", "tor-scenario-27"),
@@ -5392,7 +5465,7 @@ mod tests {
         let mut package = read_package(&root).unwrap();
         // Device capability is class-independent, but every concealed alternative
         // in one appearance group must retain the same physical class.
-        for id in [
+        let ids = [
             "rogue.wand_fire",
             "rogue.wand_cold",
             "rogue.wand_lightning",
@@ -5401,7 +5474,31 @@ mod tests {
             "rogue.wand_slow",
             "rogue.wand_teleport_away",
             "rogue.wand_teleport_to",
-        ] {
+            "rogue.wand_nothing",
+            "rogue.wand_light",
+            "rogue.wand_drain_life",
+            "rogue.wand_cancellation",
+            "rogue.wand_magic_missile",
+            "rogue.wand_polymorph",
+        ];
+        assert_eq!(ids.len(), 14);
+        let pool = package.manifest.archetypes["rogue.wand_fire"]
+            .appearance_pool
+            .clone();
+        assert!(pool.is_some());
+        let actual: BTreeSet<_> = package
+            .manifest
+            .archetypes
+            .iter()
+            .filter(|(_, item)| item.appearance_pool == pool)
+            .map(|(id, _)| id.as_str())
+            .collect();
+        assert_eq!(
+            actual,
+            ids.iter().copied().collect(),
+            "class conversion must cover the exact complete appearance group"
+        );
+        for id in ids {
             package.manifest.archetypes.get_mut(id).unwrap().class = ItemClass::Tool;
         }
         package.appearance_mapping(42).unwrap();
@@ -6750,7 +6847,7 @@ mod tests {
 
     #[test]
     fn shared_rules_import_accepts_validated_scenario_override() {
-        let source = r#"import = "interactions-v52"
+        let source = r#"import = "interactions-v54"
 [[overrides]]
 op = "set"
 path = ["constants", "base_defense"]
@@ -6933,6 +7030,7 @@ value = 13
             .get_mut("figure")
             .unwrap()
             .modifiers = vec![crate::creature_authoring::Modifier {
+            cancellable: false,
             scope: crate::creature_authoring::Scope::Always,
             op: crate::creature_authoring::Op::Add {
                 stat: crate::creature_authoring::Stat::Health,
@@ -6997,6 +7095,7 @@ value = 13
                 .unwrap()
                 .modifiers
                 .push(crate::creature_authoring::Modifier {
+                    cancellable: false,
                     scope: crate::creature_authoring::Scope::Always,
                     op: crate::creature_authoring::Op::Perception { value },
                 });
@@ -7127,6 +7226,7 @@ value = 13
         ])).unwrap();
         let mut override_species = definitions.creatures.species["figure"].clone();
         override_species.modifiers = vec![crate::creature_authoring::Modifier {
+            cancellable: false,
             scope: crate::creature_authoring::Scope::Always,
             op: crate::creature_authoring::Op::Add {
                 stat: crate::creature_authoring::Stat::Health,
@@ -7248,6 +7348,11 @@ value = 13
             .unwrap();
         let package = Package::from_parts(manifest, regions, &template.rules_source).unwrap();
         let game = package.build(42, true).unwrap();
+        // Expected explicit recipes share the actual immutable package palette.
+        // Keep the full build comparison, including Content; a native neutral
+        // catalog is not this authored package's presentation catalog.
+        let catalog =
+            catalog.with_presentation_catalog(game.content().presentation_catalog().clone());
         let mut shared = tor_simulation::checkpoint::SharedState::default();
         let snapshot = serde_json::to_value(game.checkpoint(&mut shared)).unwrap();
         let shared = serde_json::to_value(shared).unwrap();
@@ -7414,6 +7519,7 @@ value = 13
             "creature": {
                 "species": "guard", "name": "guard", "faction": "guards", "binding": "intellect",
                 "attributes": null, "templates": [], "future_growth": {"kind": "disabled"},
+                "body_package": null, "personal_body_grants": [],
                 "starting_skills": ["deception", "persuasion"], "restoration": "choose_again", "nutrition": {"kind":"exempt"}, "hit_dice": [{"source": "racial", "purchases": [], "attribute": null}]
             }
         });
@@ -7830,7 +7936,9 @@ mod region_lifecycle_tests {
                     let mut loaded = BTreeSet::new();
                     for region in order.iter() {
                         loaded.insert(*region);
-                        if package.manifest.procedural_worlds.is_empty() {
+                        if package.manifest.procedural_worlds.is_empty()
+                            && package.manifest.generation_groups.is_empty()
+                        {
                             game.transition_regions(
                                 &RegionTransition {
                                     active: loaded.clone(),
@@ -7839,6 +7947,7 @@ mod region_lifecycle_tests {
                                 &mut individual,
                             )
                             .unwrap_or_else(|error| panic!("{context}: {error:?}"));
+                            package.install_authored_spatial(&mut game).unwrap();
                         } else {
                             publish_selection(&mut game, &mut groups, &loaded);
                         }
@@ -7850,7 +7959,9 @@ mod region_lifecycle_tests {
                     package.initialize_selected_character(&mut game).unwrap();
                     package.configure_loaded_arena(&mut game).unwrap();
                     game.initialize_discovery().unwrap();
-                    if package.manifest.procedural_worlds.is_empty() {
+                    if package.manifest.procedural_worlds.is_empty()
+                        && package.manifest.generation_groups.is_empty()
+                    {
                         assert_same_game(&game, &whole, &context);
                     } else {
                         assert_same_procedural_game(

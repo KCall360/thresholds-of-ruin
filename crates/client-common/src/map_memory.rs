@@ -40,6 +40,7 @@ pub(crate) struct MapMemory {
 
 pub(crate) fn appearance(cell: &CellView, items: &[&GroundItemView]) -> RememberedMapCell {
     RememberedMapCell {
+        object_presentation: cell.object_presentation.clone(),
         key: cell.key.clone(),
         position: cell.position,
         wall: cell.wall,
@@ -60,6 +61,7 @@ pub(crate) fn appearance(cell: &CellView, items: &[&GroundItemView]) -> Remember
         ground_items: items
             .iter()
             .map(|g| MapItemAppearance {
+                presentation: g.presentation.clone(),
                 class: g.item.class,
                 description: g.item.description.clone(),
                 name: g.item.name.clone(),

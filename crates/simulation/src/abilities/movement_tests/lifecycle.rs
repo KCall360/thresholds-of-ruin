@@ -145,6 +145,7 @@ fn whole_primary_immunity_skips_push_but_zero_actual_damage_still_pushes() {
             condition["id"] = json!("push_immunity");
             condition["family"] = json!("push_immunity");
             condition["modifiers"] = serde_json::to_value(vec![Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Immunity {
                     selector: if whole {

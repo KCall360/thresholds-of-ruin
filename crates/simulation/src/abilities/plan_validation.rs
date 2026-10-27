@@ -121,6 +121,27 @@ fn effect_descriptors(effects: &[PlannedEffect]) -> usize {
 }
 impl AbilityPlan {
     pub fn valid(&self, rules: &crate::rules::Ruleset) -> bool {
+        let detects = self
+            .strikes
+            .iter()
+            .flat_map(|strike| {
+                strike
+                    .on_success
+                    .iter()
+                    .chain(&strike.on_failure)
+                    .chain(strike.riders.iter().flat_map(|rider| &rider.effects))
+            })
+            .any(|effect| crate::detection_lifecycle::planned_kind(effect).is_some());
+        if detects
+            && (self.actor != self.target
+                || self.reach != Reach::SelfOnly
+                || !matches!(self.strikes.as_slice(), [super::FrozenStrike { offset: 0, check: None,
+                on_success, on_failure, riders, .. }] if on_success.len() == 1
+                    && on_success.iter().all(|effect| crate::detection_lifecycle::planned_kind(effect).is_some())
+                    && on_failure.is_empty() && riders.is_empty()))
+        {
+            return false;
+        }
         let Some(definition) = rules.ability(&self.ability) else {
             return false;
         };

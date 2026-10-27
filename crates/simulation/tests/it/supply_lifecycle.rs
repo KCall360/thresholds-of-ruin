@@ -1469,6 +1469,7 @@ fn phase5_container_checkpoint_rejects_positional_held_item() {
             "condition",
             "charges",
             "relocation_elapsed",
+            "fuel",
             "motion",
             "orientation",
             "spec",
@@ -1551,6 +1552,7 @@ fn phase5_container_checkpoint_rejects_positional_item_spec() {
         spec,
         &[
             "magical",
+            "held_light",
             "currency",
             "equipment",
             "projectile",
@@ -1585,6 +1587,7 @@ fn phase5_container_checkpoint_rejects_positional_creature_record() {
     let mut value = named_checkpoint_value(&game);
     let actors = value[0]["actors"].as_u64().unwrap() as usize;
     let creature = &mut value[1]["actors"][actors][actor.0.to_string()]["combat"]["creature"];
+    assert_eq!(creature["polymorph_return_pending"], false);
     assert_eq!(creature["cooldowns"].as_array().unwrap().len(), 1);
     assert!(creature["cooldowns"][0]["remaining"].as_u64().unwrap() > 0);
     *creature = json!(declared_field_values(
@@ -1594,6 +1597,8 @@ fn phase5_container_checkpoint_rejects_positional_creature_record() {
             "build_epoch",
             "earned_progress",
             "restorable_losses",
+            "cancelled",
+            "polymorph_return_pending",
             "injury",
             "dead",
             "health_recovery",

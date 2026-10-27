@@ -610,6 +610,7 @@ impl GuiseState {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ApparentObjectView {
+    pub presentation: Option<crate::appearance_catalog::ObjectPresentation>,
     /// Private resolved identity; adapters emit only the apparent-object domain.
     pub subject: ActorId,
     pub location: Location,

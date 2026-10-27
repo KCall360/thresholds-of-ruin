@@ -156,6 +156,7 @@ fn explicit_same_root_form_replacement_preserves_one_purchase_and_runtime_state(
     let before_recovery = creature.health_recovery();
     let before_resources = creature.costs().resources().clone();
     let replacement = AdvancementPurchase {
+        id: None,
         pool: tor_simulation::content_ids::PointPoolId::new("advancement").unwrap(),
         selection: PurchaseSelection::TalentForm {
             talent: talent(),
@@ -358,6 +359,7 @@ fn lifecycle_explicit_form_replacement_keeps_existing_cooldowns_and_replay_fract
         .unwrap();
     let before = creature.clone();
     let replacement = AdvancementPurchase {
+        id: None,
         pool: tor_simulation::content_ids::PointPoolId::new("advancement").unwrap(),
         selection: PurchaseSelection::TalentForm {
             talent: talent(),
@@ -423,6 +425,7 @@ fn lifecycle_changing_a_form_preserves_root_dependents_but_refunding_the_root_re
         .select_talent(tor_simulation::HdIndex(1), child.clone())
         .unwrap();
     let replacement = AdvancementPurchase {
+        id: None,
         pool: tor_simulation::content_ids::PointPoolId::new("advancement").unwrap(),
         selection: PurchaseSelection::TalentForm {
             talent: talent(),

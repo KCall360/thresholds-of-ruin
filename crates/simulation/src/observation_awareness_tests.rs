@@ -22,6 +22,7 @@ fn fixture(awareness: u16, subject: &[PerceptionValue]) -> Game {
         owner.default_attributes = Attributes::new(values).unwrap();
         if awareness > base {
             owner.modifiers.push(crate::rules::Modifier {
+                cancellable: false,
                 scope: crate::rules::Scope::Always,
                 op: crate::rules::ModifierOp::Add {
                     stat: crate::rules::Stat::Attribute {
@@ -593,6 +594,7 @@ fn worn_attribute_source_and_restorable_loss_drive_current_nonvisual_range() {
         attack: None,
         weapon_profile: None,
         modifiers: vec![crate::rules::Modifier {
+            cancellable: false,
             scope: crate::rules::Scope::Always,
             op: crate::rules::ModifierOp::Add {
                 stat: crate::rules::Stat::Attribute {

@@ -22,7 +22,7 @@ use crate::journal::{
     WizardResult,
 };
 
-pub(crate) const ARCHIVE_VERSION: u32 = 58;
+pub(crate) const ARCHIVE_VERSION: u32 = 61;
 #[path = "action_resolution.rs"]
 mod action_resolution;
 #[path = "advancement_query.rs"]
@@ -1581,15 +1581,23 @@ impl Candidate {
         &mut self,
         before: &Game,
         terrain: adapt::Terrain<'_>,
+        profile: Option<&mut CommandProfile>,
+    ) -> Result<(), Failure> {
+        let changed = self.game.map_disclosure_changed_actors_since(
+            before,
+            self.actors().into_iter().map(|actor| SimActor(actor.0)),
+        );
+        self.record_explored_for_actors(changed, terrain, profile)
+    }
+
+    fn record_explored_for_actors(
+        &mut self,
+        actors: Vec<SimActor>,
+        terrain: adapt::Terrain<'_>,
         mut profile: Option<&mut CommandProfile>,
     ) -> Result<(), Failure> {
-        for actor in self.actors() {
-            if !self
-                .game
-                .map_disclosure_changed_since(before, SimActor(actor.0))
-            {
-                continue;
-            }
+        for actor in actors {
+            let actor = ActorId(actor.0);
             let view = match self.observations.get(&actor) {
                 Some(view) => view.clone(),
                 None => {
@@ -1846,6 +1854,7 @@ impl Candidate {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct RevisionView {
     observation: tor_simulation::Observation,
+    charts: Arc<crate::chart_view::PreparedCharts>,
     event_proof: tor_simulation::EventObservation,
     scene: Vec<tor_world::SightCell>,
     ready: bool,
@@ -1890,6 +1899,9 @@ fn revision_view(game: &Game, actor: ActorId) -> Result<RevisionView, Failure> {
         .observe_event_scene(SimActor(actor.0))
         .map_err(|_| invalid_archive())?;
     Ok(RevisionView {
+        charts: Arc::new(crate::chart_view::PreparedCharts::for_game(
+            game, actor, false,
+        )?),
         observation: view,
         event_proof,
         scene,
@@ -1920,6 +1932,15 @@ pub struct Engine {
     regions: Option<crate::regions::Regions>,
 }
 
+#[cfg(test)]
+pub(crate) struct DetachedChartTestFixture {
+    pub(crate) game: Game,
+    pub(crate) records: Vec<(
+        tor_simulation::RecordId,
+        tor_world::Shared<tor_simulation::RegionRecord>,
+    )>,
+    pub(crate) package: Arc<crate::scenario_package::Package>,
+}
 impl Engine {
     pub fn scenario_validation(&self) -> Option<bool> {
         self.archive
@@ -2382,10 +2403,74 @@ impl Engine {
                 return Err(invalid_archive());
             }
         }
+        // Detached blobs remain lazy. Their historical chart source authority
+        // is checked by Regions at actual materialization, before core attach.
         engine.wizard_enabled = false;
         Ok(engine)
     }
 
+    #[cfg(test)]
+    pub(crate) fn test_detach_chart_records(&self) -> DetachedChartTestFixture {
+        use tor_simulation::RecordStore;
+        let mut game = self.game.clone();
+        let mut records = tor_simulation::MemoryRecords::default();
+        let detached = tor_simulation::RegionTransition {
+            active: BTreeSet::new(),
+            loaded: BTreeSet::new(),
+        };
+        // The paid actor still has its ordinary observing point. Prove its
+        // active-region pin before deliberately removing the test clone's
+        // observers through the public lifecycle API (not by bypassing pins).
+        let before = game.clone();
+        assert!(matches!(
+            game.apply_region_transition(&detached, &mut records),
+            Err(tor_simulation::TransitionError::MustBeActive(_))
+        ));
+        assert_eq!(game, before);
+        assert_eq!(records.ids().count(), 0);
+        let paid_history = game
+            .chart_history(tor_simulation::ActorId(1))
+            .expect("paid fixture chart history")
+            .clone();
+        let points: Vec<_> = game.reference_points().map(|(id, _)| id).collect();
+        assert!(!points.is_empty());
+        for point in points {
+            assert!(game.remove_reference_point(point));
+        }
+        // An outstanding controller input boundary is an independent active
+        // pin. Leave it through ordinary Wait actions, not private state edits.
+        // This fixture's external actors need at most one scheduler cycle.
+        let mut waited = BTreeSet::new();
+        while !game
+            .region_requirements(&detached.active, &detached.loaded)
+            .active
+            .is_empty()
+        {
+            let actor = game.next_actor().expect("ready fixture actor");
+            assert!(
+                waited.insert(actor),
+                "fixture input pin failed to discharge"
+            );
+            game.act(actor, tor_simulation::Action::Wait).unwrap();
+        }
+        assert_eq!(
+            game.chart_history(tor_simulation::ActorId(1)),
+            Some(&paid_history),
+            "observer removal and ordinary Wait preserve the exact paid history"
+        );
+        game.apply_region_transition(&detached, &mut records)
+            .unwrap();
+        let ids: Vec<_> = records.ids().collect();
+        let records = ids
+            .into_iter()
+            .map(|id| (id, records.get(id).unwrap()))
+            .collect();
+        DetachedChartTestFixture {
+            game,
+            records,
+            package: self.archive.scenario.package.as_ref().unwrap().clone(),
+        }
+    }
     pub fn branch(&self) -> &BranchId {
         &self.current_branch
     }
@@ -2579,6 +2664,12 @@ impl Engine {
             &terrain,
             &self.target_scope(actor),
         );
+        observation.charts = view.charts.summaries(
+            &self.archive.view_salt,
+            actor,
+            self.branch(),
+            self.revision(actor)?,
+        );
         observation.places = self
             .game
             .remembered_places(SimActor(actor.0))
@@ -2593,6 +2684,12 @@ impl Engine {
             })
             .collect();
         Ok(observation)
+    }
+    pub(crate) fn prepared_detection_charts(
+        &self,
+        actor: ActorId,
+    ) -> Result<Arc<crate::chart_view::PreparedCharts>, Failure> {
+        Ok(self.revision_view(actor)?.charts.clone())
     }
     pub fn explored_map(
         &self,
@@ -3201,6 +3298,8 @@ impl Engine {
             | Action::UseAbility { .. }
             | Action::Equip { .. }
             | Action::Unequip { .. }
+            | Action::Ignite { .. }
+            | Action::Extinguish { .. }
             | Action::Drink { .. }
             | Action::Eat { .. }
             | Action::Read { .. }
@@ -3212,6 +3311,14 @@ impl Engine {
             | Action::TouchApparentObject { .. }
             | Action::Drop { .. } => true,
         };
+        // A live whole-scope chart can change outside ordinary sight, even on
+        // a same-tick wait or condition expiry. The predicate reads only the
+        // active marker; the canonical census runs once in revision_view below.
+        let perception_changed = perception_changed
+            || self
+                .actors()
+                .into_iter()
+                .any(|observer| self.game.monster_detection_active(SimActor(observer.0)));
         let before: BTreeMap<_, _> = self
             .actors()
             .into_iter()
@@ -3959,7 +4066,8 @@ impl Engine {
                 None => Vec::new(),
             };
             copied = sources.iter().map(|(region, _)| *region).collect();
-            store.enqueue_regions(record, sources, &candidate.made, || {
+            let history_admission = candidate.game.chart_history_changed(&self.game);
+            store.enqueue_regions(record, sources, &candidate.made, history_admission, || {
                 let capture_started = Instant::now();
                 let mut checkpoint = Checkpoint::capture_candidate(
                     candidate,
@@ -4211,12 +4319,14 @@ impl Candidate {
                         let replacement = match replacement {
                             R::Refund {} => None,
                             R::SkillRank { pool, skill } => Some(AdvancementPurchase {
+                                id: None,
                                 pool: point_pool(pool)?,
                                 selection: PurchaseSelection::SkillRank(
                                     crate::creature_authoring::skill(skill)?,
                                 ),
                             }),
                             R::Expertise { pool, expertise } => Some(AdvancementPurchase {
+                                id: None,
                                 pool: point_pool(pool)?,
                                 selection: PurchaseSelection::Expertise(
                                     crate::creature_authoring::expertise(
@@ -4226,6 +4336,7 @@ impl Candidate {
                                 ),
                             }),
                             R::Talent { pool, talent } => Some(AdvancementPurchase {
+                                id: None,
                                 pool: point_pool(pool)?,
                                 selection: PurchaseSelection::Talent(
                                     crate::creature_authoring::talent(
@@ -4999,7 +5110,7 @@ mod earned_growth_identity_tests {
         let engine = Engine::memory(Scenario::two_room(42)).unwrap();
         Engine::replay(engine.archive.clone(), None, None).unwrap();
         assert_eq!(engine.archive.version, ARCHIVE_VERSION);
-        assert_eq!(engine.archive.ruleset, "interactions-v52");
+        assert_eq!(engine.archive.ruleset, "interactions-v54");
         for previous_archive in [true, false] {
             let mut previous = engine.archive.clone();
             if previous_archive {

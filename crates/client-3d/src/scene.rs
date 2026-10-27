@@ -201,6 +201,8 @@ fn align(commands: &mut Commands, game: &mut Game, view: &View) {
 fn look(cell: &tor_client_3d_model::Terrain<'_>) -> CellLook {
     if cell.door.is_some() {
         CellLook::Door
+    } else if let Some(model) = cell.object_model {
+        CellLook::Object(model)
     } else if cell.stairs_up {
         CellLook::StairsUp
     } else {
@@ -303,6 +305,21 @@ fn build_cells(
         }
         let base = stand(at);
         let entity = match look {
+            CellLook::Object(kind) => {
+                let model = library.item(*kind, meshes);
+                let scale = if *kind == ItemModel::Stairs {
+                    1.0
+                } else {
+                    ITEM_SCALE
+                };
+                commands
+                    .spawn((
+                        Transform::from_translation(base).with_scale(Vec3::splat(scale)),
+                        Visibility::default(),
+                    ))
+                    .with_children(|parent| model.attach(parent))
+                    .id()
+            }
             CellLook::Door => {
                 // A door two cells high is drawn once, from its lower cell.
                 if doors.contains(&(at - IVec3::Z)) {
@@ -815,7 +832,7 @@ fn build_items(
             let a = index as f32 * 2.4;
             Vec3::new(a.cos(), 0.0, a.sin()) * 0.27
         };
-        if item.class == ItemClass::Corpse {
+        if item.model == ItemModel::Corpse {
             if let Some(body) = game.dying.iter_mut().find(|d| {
                 !d.holds
                     && d.cell == at

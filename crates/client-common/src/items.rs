@@ -9,6 +9,8 @@ pub enum ItemOperation {
     Eat,
     Read,
     Zap,
+    Ignite,
+    Extinguish,
 }
 
 /// Potential choices in disclosed inventory order. A choice may still be blocked
@@ -33,6 +35,14 @@ pub fn item_choices(
             ItemOperation::Eat => affordance.edible,
             ItemOperation::Read => affordance.readable,
             ItemOperation::Zap => affordance.zappable,
+            ItemOperation::Ignite => affordance
+                .portable_light
+                .as_ref()
+                .is_some_and(|light| light.ignitable),
+            ItemOperation::Extinguish => affordance
+                .portable_light
+                .as_ref()
+                .is_some_and(|light| light.extinguishable),
         }
     })
 }
@@ -45,6 +55,8 @@ impl ItemOperation {
             Self::Eat => "eat",
             Self::Read => "read",
             Self::Zap => "zap",
+            Self::Ignite => "ignite",
+            Self::Extinguish => "extinguish",
         }
     }
 }
@@ -69,6 +81,24 @@ pub fn item_action(
         .find(|candidate| candidate.item == item)
         .ok_or("That item has no usable interaction.")?;
     match operation {
+        ItemOperation::Ignite
+            if affordance
+                .portable_light
+                .as_ref()
+                .is_some_and(|light| light.ignitable) =>
+        {
+            Ok(Action::Ignite { item })
+        }
+        ItemOperation::Ignite => Err("You can't ignite that item now.".into()),
+        ItemOperation::Extinguish
+            if affordance
+                .portable_light
+                .as_ref()
+                .is_some_and(|light| light.extinguishable) =>
+        {
+            Ok(Action::Extinguish { item })
+        }
+        ItemOperation::Extinguish => Err("You can't extinguish that item now.".into()),
         ItemOperation::Drink if affordance.drinkable && view.combat.is_some() => {
             Ok(Action::Drink { item })
         }
@@ -82,7 +112,19 @@ pub fn item_action(
         }
         ItemOperation::Read => Err("You can't read that item.".into()),
         ItemOperation::Zap if affordance.zappable && view.combat.is_some() => {
-            Err("Choose a direction to zap.".into())
+            match affordance.device_activation {
+                Some(tor_protocol::DeviceActivation::SelfTarget) => Ok(Action::Zap {
+                    item,
+                    aim: tor_protocol::DeviceAim::SelfTarget {},
+                }),
+                Some(tor_protocol::DeviceActivation::DirectionOrSelf) => {
+                    Err("Choose a direction or yourself to zap.".into())
+                }
+                Some(tor_protocol::DeviceActivation::Direction) => {
+                    Err("Choose a direction to zap.".into())
+                }
+                None => Err("You can't zap that item.".into()),
+            }
         }
         ItemOperation::Zap => Err("You can't zap that item.".into()),
         ItemOperation::Unequip if affordance.equipped_slot.is_some() => {
@@ -128,7 +170,37 @@ pub fn zap_action(
     {
         return Err("You can't zap that item.".into());
     }
-    Ok(Action::Zap { item, direction })
+    Ok(Action::Zap {
+        item,
+        aim: tor_protocol::DeviceAim::Direction { direction },
+    })
+}
+
+/// Explicit self aim is offered only by the current disclosed capability.
+pub fn zap_self_action(view: &Observation, item: ItemTarget) -> Result<Action, String> {
+    if view.combat.is_none()
+        || !item_choices(view, ItemOperation::Zap).any(|candidate| candidate.id == item)
+    {
+        return Err("You can't zap that item.".into());
+    }
+    let mode = view
+        .interactions
+        .as_ref()
+        .and_then(|interactions| interactions.inventory.iter().find(|row| row.item == item))
+        .and_then(|row| row.device_activation);
+    if !matches!(
+        mode,
+        Some(
+            tor_protocol::DeviceActivation::SelfTarget
+                | tor_protocol::DeviceActivation::DirectionOrSelf
+        )
+    ) {
+        return Err("That device does not offer self targeting.".into());
+    }
+    Ok(Action::Zap {
+        item,
+        aim: tor_protocol::DeviceAim::SelfTarget {},
+    })
 }
 
 /// Resolve or abandon the current paid owner choice using its exact opaque token.
@@ -187,6 +259,23 @@ pub fn charges(view: &Observation, item: ItemTarget) -> Option<u16> {
         .charges
 }
 
+/// Physical fuel facts come only from the controlled carried-item disclosure.
+pub fn portable_light_details(view: &Observation, item: ItemTarget) -> Option<String> {
+    let light = view
+        .interactions
+        .as_ref()?
+        .inventory
+        .iter()
+        .find(|offer| offer.item == item)?
+        .portable_light
+        .as_ref()?;
+    Some(format!(
+        "{}; fuel: {} ticks",
+        if light.lit { "lit" } else { "unlit" },
+        light.remaining
+    ))
+}
+
 /// Display only the owner's remembered instance facts, never inferred bonuses.
 pub fn equipment_details(view: &Observation, item: ItemTarget) -> Option<String> {
     let offer = view
@@ -196,6 +285,9 @@ pub fn equipment_details(view: &Observation, item: ItemTarget) -> Option<String>
         .iter()
         .find(|offer| offer.item == item)?;
     let mut parts = Vec::new();
+    if let Some(light) = portable_light_details(view, item) {
+        parts.push(light);
+    }
     if let Some(known) = &offer.known_equipment {
         if let Some(attack) = &known.attack {
             parts.push(format!(
@@ -227,4 +319,27 @@ pub fn equipment_details(view: &Observation, item: ItemTarget) -> Option<String>
         );
     }
     (!parts.is_empty()).then(|| parts.join(", "))
+}
+
+/// A cosmetic name never falls back to the real object's hidden identity.
+pub fn object_name(presentation: &tor_protocol::ObjectPresentation) -> &str {
+    if !presentation.name.trim().is_empty() {
+        &presentation.name
+    } else {
+        match presentation.kind {
+            tor_protocol::ObjectPresentationKind::Item { .. } => "object",
+            tor_protocol::ObjectPresentationKind::Stairs => "stairs",
+        }
+    }
+}
+
+pub fn ground_name(ground: &tor_protocol::GroundItemView) -> &str {
+    ground
+        .presentation
+        .as_ref()
+        .map_or(&ground.item.name, object_name)
+}
+
+pub fn map_item_name(item: &tor_protocol::MapItemAppearance) -> &str {
+    item.presentation.as_ref().map_or(&item.name, object_name)
 }

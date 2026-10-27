@@ -123,7 +123,13 @@ fn record(
                 .filter_map(|effect| {
                     Some(match effect {
                         s::abilities::ResolvedEffect::Theft { .. }
-                        | s::abilities::ResolvedEffect::AlterEquipment { .. } => return None,
+                        | s::abilities::ResolvedEffect::AlterEquipment { .. }
+                        // Charts have their own owner-scoped publication. Generic combat
+                        // diagnostics must not create a second detection disclosure path.
+                        | s::abilities::ResolvedEffect::DetectMonsters { .. }
+                        | s::abilities::ResolvedEffect::DetectFood { .. }
+                        | s::abilities::ResolvedEffect::DetectMagic { .. }
+                        | s::abilities::ResolvedEffect::MapTopology { .. } => return None,
                         s::abilities::ResolvedEffect::CorrodeArmor { amount, .. } => {
                             p::DiagnosticEffect::CorrodeArmor {
                                 target,
@@ -238,6 +244,72 @@ fn record(
                             p::DiagnosticEffect::DrainLatestHitDie {
                                 target,
                                 amount: *amount,
+                            }
+                        }
+                        s::abilities::ResolvedEffect::GainStrength { change } => {
+                            p::DiagnosticEffect::GainStrength {
+                                target,
+                                change: match change {
+                                    s::abilities::StrengthGain::Unchanged => {
+                                        p::StrengthGain::Unchanged
+                                    }
+                                    s::abilities::StrengthGain::Restored => {
+                                        p::StrengthGain::Restored
+                                    }
+                                    s::abilities::StrengthGain::Acquired => {
+                                        p::StrengthGain::Acquired
+                                    }
+                                },
+                            }
+                        }
+                        s::abilities::ResolvedEffect::RaiseLevel { amount } => {
+                            p::DiagnosticEffect::RaiseLevel {
+                                target,
+                                amount: *amount,
+                            }
+                        }
+                        s::abilities::ResolvedEffect::HasteDose { id, rest, outcome } => {
+                            p::DiagnosticEffect::HasteDose {
+                                target,
+                                condition: condition(id, rules),
+                                rest: condition(rest, rules),
+                                outcome: match outcome {
+                                    s::abilities::HasteDoseOutcome::Hasted { duration } => {
+                                        p::HasteDoseOutcome::Hasted {
+                                            duration: *duration,
+                                        }
+                                    }
+                                    s::abilities::HasteDoseOutcome::Overdose { rest } => {
+                                        p::HasteDoseOutcome::Overdose { rest: *rest }
+                                    }
+                                },
+                            }
+                        }
+                        s::abilities::ResolvedEffect::BalefulPolymorph { changed, .. } => {
+                            p::DiagnosticEffect::BalefulPolymorph { target, changed: *changed }
+                        }
+                        s::abilities::ResolvedEffect::CancelSpecials { changed } => {
+                            p::DiagnosticEffect::CancelSpecials {
+                                target,
+                                changed: *changed,
+                            }
+                        }
+                        s::abilities::ResolvedEffect::DrainLife { changed } => {
+                            p::DiagnosticEffect::DrainLife {
+                                target: p::ActorId(value.outcome.actor.0),
+                                changed: *changed,
+                            }
+                        }
+                        s::abilities::ResolvedEffect::DirectHealthLoss { amount } => {
+                            p::DiagnosticEffect::DirectHealthLoss {
+                                target,
+                                amount: *amount,
+                            }
+                        }
+                        s::abilities::ResolvedEffect::RoomLight { changed } => {
+                            p::DiagnosticEffect::RoomLight {
+                                target: p::ActorId(value.outcome.actor.0),
+                                changed: *changed,
                             }
                         }
                         s::abilities::ResolvedEffect::RestoreHitDie { amount } => {
@@ -519,6 +591,70 @@ mod restorable_loss_diagnostic_tests {
     }
 
     #[test]
+    fn drain_life_diagnostic_preserves_full_width_loss_without_target_count() {
+        let rules =
+            Ruleset::validate(toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap()).unwrap();
+        for amount in [0, u64::MAX] {
+            let source = diagnostic(vec![
+                s::abilities::ResolvedEffect::DrainLife {
+                    changed: amount != 0,
+                },
+                s::abilities::ResolvedEffect::DirectHealthLoss { amount },
+            ]);
+            let view = record(&source, 1, &rules).unwrap();
+            let value = serde_json::to_value(&view.outcome).unwrap();
+            assert_eq!(
+                value["effects"],
+                serde_json::json!([
+                    {"type":"drain_life","target":"1","changed":amount != 0},
+                    {"type":"direct_health_loss","target":"2","amount":amount.to_string()}
+                ])
+            );
+        }
+    }
+
+    #[test]
+    fn detection_results_do_not_add_a_second_combat_diagnostic_disclosure_path() {
+        let rules =
+            Ruleset::validate(toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap()).unwrap();
+        for changed in [false, true] {
+            let source = diagnostic(vec![
+                s::abilities::ResolvedEffect::DetectMonsters {
+                    id: s::content_ids::ConditionId::new("fixture.detecting").unwrap(),
+                    duration: 2000,
+                    changed,
+                },
+                s::abilities::ResolvedEffect::DetectFood { changed },
+                s::abilities::ResolvedEffect::DetectMagic { changed },
+                s::abilities::ResolvedEffect::MapTopology { changed },
+                s::abilities::ResolvedEffect::Damage { amount: 3 },
+            ]);
+            let view = record(&source, 1, &rules).unwrap();
+            assert_eq!(
+                serde_json::to_value(&view.outcome).unwrap()["effects"],
+                serde_json::json!([{"type":"damage","target":"2","amount":3}])
+            );
+        }
+    }
+
+    #[test]
+    fn room_light_diagnostic_projects_only_actual_change_and_source_recipient() {
+        let rules =
+            Ruleset::validate(toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap()).unwrap();
+        for changed in [false, true] {
+            let source = diagnostic(vec![s::abilities::ResolvedEffect::RoomLight { changed }]);
+            let view = record(&source, 1, &rules).unwrap();
+            let value = serde_json::to_value(&view.outcome).unwrap();
+            assert_eq!(
+                value["effects"],
+                serde_json::json!([
+                    {"type":"room_light", "target":"1", "changed":changed}
+                ])
+            );
+        }
+    }
+
+    #[test]
     fn authoritative_loss_results_project_and_render_actual_applied_amounts() {
         let rules =
             Ruleset::validate(toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap()).unwrap();
@@ -676,6 +812,7 @@ mod restorable_loss_diagnostic_tests {
                     ordinal: s::HdIndex(ordinal),
                     source: s::progression::HdSource::Racial,
                     health_seed: 42,
+                    health_policy: s::progression::HealthRollPolicy::Seeded,
                     original_kind: s::content_ids::TypeId::new("humanoid").unwrap(),
                     original_die: 8,
                     previous: 0,

@@ -435,12 +435,24 @@ impl Preparation {
             (&self.plan, self.progress),
             (Plan::Escape(_), PreparationProgress::Escape {})
                 | (Plan::Projectile(_), PreparationProgress::Projectile {})
-                | (Plan::Ray(_) | Plan::Zap { .. }, PreparationProgress::Ray {})
+                | (
+                    Plan::Ray(_)
+                        | Plan::Zap {
+                            delivery: crate::abilities::DeviceDeliveryPlan::Ray { .. },
+                            ..
+                        },
+                    PreparationProgress::Ray {}
+                )
                 | (Plan::Respec(_), PreparationProgress::Respec {})
                 | (Plan::Ability(_), PreparationProgress::Ability { .. })
                 | (
-                    Plan::Equip { .. }
+                    Plan::Zap {
+                        delivery: crate::abilities::DeviceDeliveryPlan::SelfEffect { .. },
+                        ..
+                    } | Plan::Equip { .. }
                         | Plan::Unequip { .. }
+                        | Plan::Ignite { .. }
+                        | Plan::Extinguish { .. }
                         | Plan::Read { .. }
                         | Plan::Drink { .. }
                         | Plan::Eat { .. },

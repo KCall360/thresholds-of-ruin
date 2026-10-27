@@ -272,7 +272,9 @@ can temporarily mask the benefit. See [item contracts](../reference/items.md#rea
 Poison uses the shared restorable Strength deficit and on-use recognition.
 See-invisible uses finite extending actor-active sight plus the blindness cure,
 without automatic recognition. Sustain-strength now uses the shared worn
-attribute-loss protection described below; hallucination cures remain a gap. Extra-healing overflow uses the source one/two
+attribute-loss protection described below. The opt-in Hallucination potion and
+exact Extra Healing cure now have scoped runtime/consumer coverage; detection
+and mapping remain unfinished. Extra-healing overflow uses the source one/two
 threshold on bounded owned HD records. Utility wands use persistent first-contact
 rays and nonstacking haste/slow that cancel to neutral; the Lore dodge and bounded
 reach are TOR adaptations. See [the bounded item mapping](../reference/items.md#reading-identification-and-charged-devices).

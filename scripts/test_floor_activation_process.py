@@ -5,6 +5,7 @@ A marker-only fixture isolates population receipts from combat tuning.
 import shutil
 import sqlite3
 import subprocess
+import tomllib
 import unittest
 from contextlib import closing
 
@@ -21,10 +22,13 @@ class FloorActivationProcess(ProcessTestCase):
         # the product receiving the playable starter and population.
         with (package / "scenario.toml").open("w", encoding="utf-8") as output:
             output.write('''
-format = 31
+format = 33
 id = "floor-activation"
 version = "1.0"
 ruleset = "rules.toml"
+# Imported production rules reference these canonical eligible body packages.
+# This closure does not enroll the geometry-only observer or spawn any creature.
+modules = ["catalog/creatures.toml", "catalog/bodies.toml"]
 default_character = 1
 [[characters]]
 id = 1
@@ -70,6 +74,14 @@ kind = "items"
 count = [1, 1]
 bands = [{ depth = { kind = "open", minimum = 3 }, choices = [{ archetype = "marker", weight = 1 }] }]
 ''')
+        # Keep exact catalog/rules inputs, rather than removing Polymorph from
+        # imported rules or inventing creature HD for this marker-only fixture.
+        for relative in ("rules.toml", "catalog/creatures.toml", "catalog/bodies.toml"):
+            self.assertEqual((package / relative).read_bytes(),
+                             (ROOT / "scenarios/rogue-exploration" / relative).read_bytes())
+        authored = tomllib.loads((package / "scenario.toml").read_text(encoding="utf-8"))
+        self.assertEqual(authored["characters"], [{"id": 1, "anchor": "dungeon/1/start", "turn_ticks": 100}])
+        self.assertEqual(set(authored["archetypes"]), {"marker", "alternate"})
         result = subprocess.run([self.bin / ("tor-scenario" + SUFFIX), "validate", package],
                                 text=True, capture_output=True, encoding="utf-8", timeout=30)
         self.assertEqual(result.returncode, 0, result.stderr)

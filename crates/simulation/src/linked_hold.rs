@@ -725,6 +725,7 @@ mod tests {
     fn build() -> crate::creatures::CreatureBuild {
         let mut species = crate::test_creatures::species();
         species.modifiers.push(crate::rules::Modifier {
+            cancellable: false,
             scope: crate::rules::Scope::Always,
             op: crate::rules::ModifierOp::Flag {
                 flag: policy().sustaining,

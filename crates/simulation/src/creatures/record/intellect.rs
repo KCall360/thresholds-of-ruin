@@ -20,12 +20,15 @@ macro_rules! record {
     };
 }
 record!(Sources {
+    strength_acquired: u8,
     attribute_increases: ByAttribute<u16>,
     classes: Bounded<ClassId, { limits::HIT_DICE }>,
     talents: Bounded<TalentId, { limits::OWNED_TALENTS }>,
 });
 record!(HistoryRow {
     owner: crate::HdIndex,
+    #[serde(deserialize_with = "required_option")]
+    ownership: Option<crate::creatures::composition::HdOwner>,
     #[serde(deserialize_with = "named_map")]
     source: SourceRecord,
     health_seed: u64,
@@ -58,6 +61,7 @@ record!(Learning {
 impl Sources {
     fn capture(value: &IntellectSources) -> Self {
         Self {
+            strength_acquired: value.strength_acquired,
             attribute_increases: value.attribute_increases,
             classes: Bounded(value.classes.iter().cloned().collect()),
             talents: Bounded(value.talents.iter().cloned().collect()),
@@ -80,6 +84,7 @@ impl Sources {
             return Err(BuildError::InvalidOwnership);
         }
         Ok(IntellectSources {
+            strength_acquired: self.strength_acquired,
             attribute_increases: self.attribute_increases,
             classes,
             talents,
@@ -101,6 +106,7 @@ impl Learning {
                     .iter()
                     .map(|row| HistoryRow {
                         owner: row.owner,
+                        ownership: row.ownership.clone(),
                         source: SourceRecord::capture(row.source.clone()),
                         health_seed: row.health_seed,
                         choices: ChoiceRecord::capture(&row.choices),
@@ -149,6 +155,7 @@ impl Learning {
                 .iter()
                 .map(|row| domain::IntellectChoiceWitness {
                     owner: row.owner,
+                    ownership: row.ownership.clone(),
                     source: row.source.restore(),
                     health_seed: row.health_seed,
                     choices: row.choices.restore(),

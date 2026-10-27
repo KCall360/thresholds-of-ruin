@@ -8,6 +8,7 @@ use tor_simulation::{ActorId, EquipmentSlotId, ItemId};
 
 fn strength_set(value: i64) -> Modifier {
     Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Set {
             stat: Stat::Attribute {

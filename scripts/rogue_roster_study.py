@@ -40,7 +40,7 @@ AI_SOURCES = (AUTHORING_AI_SOURCE, RUNTIME_AI_SOURCE)
 INPUTS = (
     PRODUCTION + "scenario.toml", PRODUCTION + "rules.toml",
     PRODUCTION + "catalog/creatures.toml", PRODUCTION + "catalog/actors.toml",
-    PRODUCTION + "catalog/items.toml", DEFAULT_RULES,
+    PRODUCTION + "catalog/items.toml", PRODUCTION + "catalog/bodies.toml", DEFAULT_RULES,
     "scripts/rogue_roster_study.py", "scripts/rogue_roster_package.py",
     "scripts/arena_matrix.py", "scripts/arena_recipes.json",
     "scripts/arena_evaluation.py", "scripts/ruleset_sources.py",
@@ -81,12 +81,18 @@ def playable_character(source, arm, reference):
                                    if row["id"] == selected))
     build = character["creature"]
     class_id = "warrior" if arm == "baseline" else "mage"
-    if build["hit_dice"] != [{"source": class_id, "purchases": []}]:
-        raise ValueError("Playable reference requires the actual unspent one-HD start")
+    personal_row = {"source": class_id, "purchases": []}
+    if build.get("body_package") is None and build["hit_dice"] == [personal_row]:
+        personal_index = 0  # Historical unowned class-only diagnostic source.
+    elif (build.get("body_package") == "rogue.body.human"
+            and build["hit_dice"] == [{"source": "racial", "purchases": []}, personal_row]):
+        personal_index = 1  # Current body's locked first HD is not training.
+    else:
+        raise ValueError("Playable reference requires the actual unspent one-HD personal-class start")
     if reference == "playable-first-purchase":
         choice = ({"kind": "talent", "talent": "rattling_blow"} if arm == "baseline" else
                   {"kind": "talent_form", "talent": "evocation_initiate", "form": "spark_lance_cold"})
-        build["hit_dice"][0]["purchases"] = [{"pool": "advancement", "selection": choice}]
+        build["hit_dice"][personal_index]["purchases"] = [{"pool": "advancement", "selection": choice}]
     return character
 
 
@@ -187,7 +193,7 @@ def study_encounter(case, arm, orientation, source, *, reference="arena-diagnost
         region["actors"][0].update(id=3, archetype=case["species"], ai="rogue_hostile")
     else:
         manifest["id"] = "rogue-roster-arena-diagnostic-" + case["id"]
-        manifest["modules"] = ["catalog/creatures.toml", "catalog/actors.toml"]
+        manifest["modules"] = ["catalog/creatures.toml", "catalog/actors.toml", "catalog/bodies.toml"]
         manifest["creatures"]["species"].pop("opponent")
         del manifest["archetypes"]
         foe_faction = source["actors"][case["species"]]["creature"]["faction"]

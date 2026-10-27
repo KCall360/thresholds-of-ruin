@@ -5,7 +5,7 @@ fn observation() -> serde_json::Value {
     json!({"actor":"1", "self_target": ActorTarget::from_digest([1; 32]),
         "tick":"0", "position":{"x":0,"y":0,"z":0}, "places":[],
         "visible_cells":[], "ground_items":[], "inventory":[],
-        "visible_actors":[], "ready":true, "linked_holds":[]})
+        "visible_actors":[], "ready":true, "charts":[],"linked_holds":[]})
 }
 
 #[test]

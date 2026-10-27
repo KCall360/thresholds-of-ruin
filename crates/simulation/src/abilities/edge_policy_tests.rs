@@ -14,6 +14,7 @@ fn policy(ability: &mut AbilityDef, kind: &str) {
 
 fn add(stat: Stat, value: i64) -> Modifier {
     Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Add { stat, value },
     }
@@ -60,6 +61,7 @@ fn outgoing_edge_policy_filters_before_independent_check_and_shared_budgets() {
                 };
                 for strike in strikes {
                     strike.riders.push(RiderDef {
+                        cancellable: false,
                         condition: None,
                         trigger: RiderTrigger::Success,
                         check: Some(RiderCheckDef {
@@ -254,6 +256,7 @@ fn outgoing_edge_policy_filters_negative_sets_but_keeps_zero_and_positive_overri
                 species.modifiers.extend([
                     add(Stat::Edge, 5),
                     Modifier {
+                        cancellable: false,
                         scope: Scope::Always,
                         op: ModifierOp::Set {
                             stat: Stat::Edge,
@@ -316,6 +319,7 @@ fn outgoing_edge_policy_selects_implied_ability_and_tag_sources_before_folding()
                     ],
                 });
                 species.modifiers.push(Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Flag { flag },
                 });
@@ -553,6 +557,7 @@ fn outgoing_edge_policy_distinguishes_self_target_roll_roles_and_claims() {
                         add(Stat::CheckEdge, -4),
                         add(Stat::IncomingEdge { defense: None }, -2),
                         Modifier {
+                            cancellable: false,
                             scope: Scope::Always,
                             op: ModifierOp::GrantAbility {
                                 ability: ability_id.clone(),
@@ -637,6 +642,7 @@ fn self_shared_case(kind: &str, opposed: bool) {
                 add(Stat::Edge, 5),
                 add(Stat::CheckEdge, -6),
                 Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::GrantAbility {
                         ability: ability_id.clone(),

@@ -43,6 +43,7 @@ fn fixture() -> Game {
     gaze.cost = None;
     gaze.strikes = StrikeSource::Authored {
         strikes: vec![StrikeDef {
+            cancellable: false,
             offset: 0,
             unlock: None,
             check: Some(CheckDef {
@@ -67,10 +68,12 @@ fn fixture() -> Game {
     let mut species = crate::test_creatures::species();
     species.modifiers.extend([
         Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::GrantAbility { ability: gaze.id },
         },
         Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Set {
                 stat: Stat::Health,

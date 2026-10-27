@@ -16,6 +16,7 @@ fn damage(amount: u32) -> Effect {
 }
 fn rider(amount: u32) -> RiderDef {
     RiderDef {
+        cancellable: false,
         condition: None,
         trigger: RiderTrigger::Success,
         check: None,
@@ -37,6 +38,7 @@ fn source_game() -> (crate::Game, crate::IntentionId) {
                 .into_iter()
                 .enumerate()
                 .map(|(ordinal, offset)| StrikeDef {
+                    cancellable: false,
                     offset,
                     unlock: (ordinal == 2)
                         .then(|| crate::content_ids::TalentId::new("rattling_blow").unwrap()),
@@ -85,6 +87,7 @@ fn natural_melee_source_ignores_equipped_weapon_operands_and_timing() {
         |ability| {
             ability.strikes = StrikeSource::NaturalMelee {
                 additional_riders: vec![RiderDef {
+                    cancellable: false,
                     condition: None,
                     trigger: RiderTrigger::Success,
                     check: Some(RiderCheckDef {
@@ -219,6 +222,112 @@ fn natural_melee_source_captured_plan_survives_transform_pause_and_checkpoint() 
     assert_eq!(restored, game);
 }
 #[test]
+fn baleful_body_transition_preserves_paid_natural_prefix_and_frozen_tail_across_restore() {
+    use crate::content_ids::BodyFormId;
+    use crate::creatures::{BodyPackage, Content, HdChoices, PlannedAdvancement};
+    use crate::progression::HdSource;
+    use std::sync::Arc;
+    let (mut game, intention) = source_game();
+    let actor = ActorId(1);
+    let mut catalog = game.content().catalog().clone();
+    let original_species = game.creature(actor).unwrap().build().species_id().clone();
+    let mut other = catalog.species[&original_species].clone();
+    other.id = crate::content_ids::SpeciesId::new("baleful_natural_source").unwrap();
+    let mut rows = other.melee.strikes().to_vec();
+    rows[0].on_success = vec![damage(17)];
+    other.melee = crate::attacks::NaturalAttack::new(
+        other.melee.skill(),
+        other.melee.bonus(),
+        other.melee.wind_up(),
+        other.melee.recovery(),
+        rows,
+    )
+    .unwrap();
+    catalog.species.insert(other.id.clone(), other.clone());
+    let content = Content::new(game.content().rules().clone(), catalog).unwrap();
+    let package = |id, species| {
+        Arc::new(BodyPackage {
+            id: BodyFormId::new(id).unwrap(),
+            species,
+            body: (*game.actors[&actor].body).clone(),
+            advancement: vec![PlannedAdvancement {
+                source: HdSource::Racial,
+                choices: HdChoices::default(),
+            }],
+        })
+    };
+    let base = package("natural_prefix_base", original_species);
+    let changed = package("natural_prefix_changed", other.id);
+    let content = Content::with_body_packages(
+        &content,
+        [base.clone(), changed.clone()]
+            .into_iter()
+            .map(|package| (package.id.clone(), package))
+            .collect(),
+    )
+    .unwrap();
+    // Enroll the ordinary source fixture into the same sealed package catalog.
+    game.actors.get_mut(&ActorId(2)).unwrap().ready_at = game.tick;
+    let mut shared = crate::checkpoint::SharedState::default();
+    let saved = game.checkpoint(&mut shared);
+    let mut game = crate::Game::restore_checkpoint(saved, &shared, content.clone()).unwrap();
+    let owned = game
+        .creature(actor)
+        .unwrap()
+        .build()
+        .with_body_package(base, 42)
+        .unwrap();
+    game.rebuild_creature(actor, owned).unwrap();
+    game.actors.get_mut(&ActorId(2)).unwrap().ready_at = 1000;
+    game.tick = 10;
+    game.resolve_preparations().unwrap();
+    assert_eq!(game.health(ActorId(2)).unwrap().0, 91);
+    assert!(game.preparation(actor).unwrap().has_prefix());
+    let captured = game.preparation(actor).unwrap().plan.clone();
+    let progress = game.preparation(actor).unwrap().progress;
+    let tick = game.tick;
+    assert_eq!(
+        game.polymorph_creature(actor, changed).unwrap(),
+        crate::BodyTransitionResult::Changed
+    );
+    assert_eq!(game.tick, tick);
+    assert_eq!(game.preparation(actor).unwrap().plan, captured);
+    assert_eq!(game.preparation(actor).unwrap().progress, progress);
+    let fresh = game
+        .ability_plan(
+            actor,
+            &crate::content_ids::AbilityId::new("basic_melee").unwrap(),
+            ActorId(2),
+        )
+        .unwrap();
+    assert_ne!(
+        fresh.as_ability().unwrap().strikes[0].on_success,
+        captured.as_ability().unwrap().strikes[0].on_success
+    );
+    game.tick = 15;
+    game.pause_preparation(actor).unwrap();
+    game.actors.get_mut(&ActorId(2)).unwrap().ready_at = game.tick;
+    let mut shared = crate::checkpoint::SharedState::default();
+    let saved = game.checkpoint(&mut shared);
+    let mut restored = crate::Game::restore_checkpoint(saved, &shared, content).unwrap();
+    assert_eq!(restored, game);
+    for candidate in [&mut game, &mut restored] {
+        candidate.tick = 25;
+        let resumed = candidate.plan_work(actor, captured.work()).unwrap();
+        assert_eq!(resumed, captured);
+        candidate.start_work(resumed, Some(intention)).unwrap();
+        candidate.tick = 30;
+        candidate.resolve_preparations().unwrap();
+        assert_eq!(
+            candidate.health(ActorId(2)).unwrap().0,
+            82,
+            "paid first strike is not replayed and frozen old natural tail is not rebound"
+        );
+    }
+    assert_eq!(restored, game);
+}
+
+#[test]
 fn natural_melee_source_rejects_forged_species_and_rider_boundary() {
     let (game, _) = source_game();
     let captured = &game.preparation(ActorId(1)).unwrap().plan;
@@ -268,6 +377,7 @@ fn natural_melee_source_keeps_fixed_rider_values_and_shared_edge_scope() {
                 (Stat::CheckEdge, -6),
             ] {
                 species.modifiers.push(Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Add { stat, value },
                 });
@@ -353,6 +463,7 @@ fn natural_melee_source_invalid_equipment_grant_rejects_atomically() {
         socket: crate::EquipmentSlotId(0),
         attack: None,
         modifiers: vec![Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::GrantAbility { ability: id },
         }],
@@ -503,6 +614,7 @@ fn natural_rider_rolls_receive_attack_bonus_but_not_primary_only_melee_bonus() {
                 ),
             ] {
                 species.modifiers.push(Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Add { stat, value },
                 });
@@ -530,4 +642,61 @@ fn natural_rider_rolls_receive_attack_bonus_but_not_primary_only_melee_bonus() {
         panic!("pool")
     };
     assert_eq!((pool.count(), pool.bonus()), (2, 2));
+}
+
+#[test]
+fn cancellation_projects_tagged_natural_payload_without_erasing_wrapper_or_ordinary_damage() {
+    let (mut game, _) = super::strike_tests::sequence_game_custom(
+        &[0],
+        |ability| {
+            ability.strikes = StrikeSource::NaturalMelee {
+                additional_riders: vec![rider(3)],
+            };
+        },
+        |_, species| {
+            let natural = &species.melee;
+            let strikes = [0, 10]
+                .into_iter()
+                .enumerate()
+                .map(|(ordinal, offset)| {
+                    let mut own_rider = rider(2);
+                    own_rider.cancellable = true;
+                    StrikeDef {
+                        cancellable: ordinal == 0,
+                        offset,
+                        unlock: None,
+                        check: None,
+                        on_success: vec![damage(4)],
+                        on_failure: vec![],
+                        descriptors: vec![],
+                        riders: vec![own_rider],
+                    }
+                })
+                .collect();
+            species.melee = crate::attacks::NaturalAttack::new(
+                natural.skill(),
+                natural.bonus(),
+                natural.wind_up(),
+                natural.recovery(),
+                strikes,
+            )
+            .unwrap();
+        },
+    );
+    let original = game.preparation(ActorId(1)).unwrap().plan.clone();
+    assert!(game.plan_source_valid(&original));
+    let mut control = game.clone();
+    control.tick = 10;
+    control.resolve_preparations().unwrap();
+    assert_eq!(control.health(ActorId(2)).unwrap().0, 91);
+    game.apply_effects(ActorId(1), &[Effect::CancelSpecials])
+        .unwrap();
+    assert!(game.creature(ActorId(1)).unwrap().cancelled());
+    assert_eq!(game.preparation(ActorId(1)).unwrap().plan, original);
+    assert!(game.plan_source_valid(&original));
+    for (tick, expected) in [(10, 97), (20, 90)] {
+        game.tick = tick;
+        game.resolve_preparations().unwrap();
+        assert_eq!(game.health(ActorId(2)).unwrap().0, expected);
+    }
 }

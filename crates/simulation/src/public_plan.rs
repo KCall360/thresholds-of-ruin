@@ -466,7 +466,13 @@ impl Game {
         } else {
             PublicPlanState::NoPublicPlan
         };
-        let name = crate::observation::projected_actor_name(owner, actor);
+        let presentation = self
+            .hallucinated_actor_presentation(observer, subject, &sight)
+            .ok()?;
+        let name = presentation.as_ref().map_or_else(
+            || crate::observation::projected_actor_name(owner, actor),
+            |value| value.name.as_ref(),
+        );
         Some(PublicPlanObservation {
             observed_at: self.tick,
             subject_name: if name.is_empty() {

@@ -38,6 +38,7 @@ fn fixture_sources(
             }
             for resource in Resource::ALL {
                 species.modifiers.push(Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Set {
                         stat: Stat::ResourceMax { resource },
@@ -378,6 +379,7 @@ fn selected_damage() -> Effect {
 }
 fn authored(check: Option<CheckDef>, effects: Vec<Effect>) -> StrikeDef {
     StrikeDef {
+        cancellable: false,
         offset: 0,
         unlock: None,
         check,
@@ -426,6 +428,7 @@ fn selected_weapon_self_target_opposed_roles_formula_and_rider_share_caster_cont
                     );
                     strike.on_failure = vec![selected_damage()];
                     strike.riders = vec![RiderDef {
+                        cancellable: false,
                         condition: None,
                         trigger: RiderTrigger::Success,
                         check: Some(RiderCheckDef {
@@ -440,6 +443,7 @@ fn selected_weapon_self_target_opposed_roles_formula_and_rider_share_caster_cont
                     };
                     document.abilities.push(ability);
                     species.modifiers.push(Modifier {
+                        cancellable: false,
                         scope: Scope::Always,
                         op: ModifierOp::GrantAbility {
                             ability: probe.clone(),
@@ -1342,6 +1346,14 @@ fn frozen_equip_compares_only_its_complete_pool_and_rejects_capacity_changes() {
             .unwrap();
         },
     );
+    let ring_socket = EquipmentSlotId(
+        game.anatomy(ActorId(1))
+            .unwrap()
+            .slots
+            .iter()
+            .position(|slot| slot == &ring_slot)
+            .unwrap() as u16,
+    );
     equip(&mut game, 0, false);
     let item = equip(&mut game, 10, false);
     stow_fixture_weapon(&mut game, item);
@@ -1370,8 +1382,7 @@ fn frozen_equip_compares_only_its_complete_pool_and_rejects_capacity_changes() {
     let ring = game
         .spawn_item_stack(at, Some(ActorId(1)), 1, ring)
         .unwrap();
-    game.equip_authored(ActorId(1), ring, EquipmentSlotId(11))
-        .unwrap();
+    game.equip_authored(ActorId(1), ring, ring_socket).unwrap();
     let Plan::Equip { allocation, .. } = &plan else {
         unreachable!()
     };
@@ -1402,9 +1413,7 @@ fn frozen_equip_compares_only_its_complete_pool_and_rejects_capacity_changes() {
         Some(&item)
     );
     assert_eq!(
-        game.equipment(ActorId(1))
-            .unwrap()
-            .get(&EquipmentSlotId(11)),
+        game.equipment(ActorId(1)).unwrap().get(&ring_socket),
         Some(&ring)
     );
 }
@@ -1514,11 +1523,14 @@ fn projectile_launch_fixture_with(
                 delivery: ProjectileDeliveryKind::Launch,
             };
             document.conditions.push(ConditionDef {
+                detecting_monsters: false,
+                hallucinating: false,
                 id: crate::content_ids::ConditionId::new("fixture_invisible").unwrap(),
                 family: crate::content_ids::ConditionFamilyId::new("fixture_invisible").unwrap(),
                 lifecycle: ConditionLifecycle::Timed,
                 name: "Invisible fixture".into(),
                 modifiers: vec![Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Perception {
                         value: crate::perception::PerceptionValue::Invisible { enabled: true },
@@ -3552,6 +3564,7 @@ fn ranged_gear_pair_scan_reuses_one_workspace_and_never_compiles_projectiles() {
     clear_ranged_fixture_equipment(&mut game);
     let mut spec = (*game.items[&launcher].spec).clone();
     spec.equipment.as_mut().unwrap().modifiers.push(Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Add {
             stat: Stat::Defense {
@@ -3828,6 +3841,7 @@ fn slow_quickdraw_bypasses_unused_large_equip_duration_but_ordinary_draw_rejects
         |_| {},
         |_, species| {
             species.modifiers.push(Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::ActionDuration {
                     value: crate::action_duration::ActionDuration::Slow,
@@ -3939,6 +3953,7 @@ fn projectile_attack_bonus_augments_only_rolled_pool_once() {
                 .unwrap()
                 .modifiers
                 .push(Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Add {
                         stat: Stat::AttackDamageRollBonus,

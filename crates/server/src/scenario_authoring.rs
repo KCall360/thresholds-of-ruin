@@ -649,6 +649,20 @@ pub enum Effect {
     },
     DrainLatestHitDie,
     RestoreHitDie,
+    GainStrength,
+    RaiseLevel,
+    RoomLight,
+    DetectMonsters {
+        condition: String,
+    },
+    DetectFood,
+    DetectMagic,
+    MapTopology,
+    DrainLife,
+    CancelSpecials,
+    BalefulPolymorph {
+        forms: Vec<String>,
+    },
     StepSelfOneCell,
     TeleportRandom,
     TeleportToRayOrigin,
@@ -687,6 +701,10 @@ pub enum Effect {
     ApplyCondition {
         condition: String,
         duration: u64,
+    },
+    HasteDose {
+        condition: String,
+        rest: String,
     },
     ApplyPersistentCondition {
         condition: String,
@@ -751,6 +769,7 @@ impl<'de> Deserialize<'de> for HoldPolicy {
 pub enum ItemDiscovery {
     #[default]
     SelfEffect,
+    DiscernibleEffect,
     OnUse,
     Never,
 }
@@ -758,6 +777,7 @@ impl<'de> Deserialize<'de> for ItemDiscovery {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         match String::deserialize(deserializer)?.as_str() {
             "self_effect" => Ok(Self::SelfEffect),
+            "discernible_effect" => Ok(Self::DiscernibleEffect),
             "on_use" => Ok(Self::OnUse),
             "never" => Ok(Self::Never),
             _ => Err(serde::de::Error::custom("invalid item discovery policy")),
@@ -768,6 +788,7 @@ impl From<ItemDiscovery> for tor_simulation::ItemDiscovery {
     fn from(value: ItemDiscovery) -> Self {
         match value {
             ItemDiscovery::SelfEffect => Self::SelfEffect,
+            ItemDiscovery::DiscernibleEffect => Self::DiscernibleEffect,
             ItemDiscovery::OnUse => Self::OnUse,
             ItemDiscovery::Never => Self::Never,
         }
@@ -839,11 +860,13 @@ impl ConsumableSpec {
         &self,
         rules: &tor_simulation::rules::Ruleset,
     ) -> Result<tor_simulation::ConsumableSpec, crate::Failure> {
-        Ok(tor_simulation::ConsumableSpec {
+        let spec = tor_simulation::ConsumableSpec {
             descriptors: compile_payload_descriptors(&self.descriptors, rules)?,
             effects: compile_item_effects(&self.effects, rules)?,
             discovery: self.discovery.into(),
-        })
+        };
+        super::require(spec.valid(), "Invalid consumable definition")?;
+        Ok(spec)
     }
 }
 
@@ -958,6 +981,49 @@ impl<'de> Deserialize<'de> for ChargeRange {
         })
     }
 }
+/// Authored portable-light policy. Defaults resolve once before retention.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct HeldLightSpec {
+    pub radius: u8,
+    pub fuel_ticks: u64,
+}
+impl<'de> Deserialize<'de> for HeldLightSpec {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        fn radius() -> u8 {
+            4
+        }
+        fn fuel_ticks() -> u64 {
+            100_000
+        }
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            #[serde(default = "radius")]
+            radius: u8,
+            #[serde(default = "fuel_ticks")]
+            fuel_ticks: u64,
+        }
+        let fields: Fields = crate::creature_authoring::named_map(d)?;
+        let value = Self {
+            radius: fields.radius,
+            fuel_ticks: fields.fuel_ticks,
+        };
+        value.compile().map_err(serde::de::Error::custom)?;
+        Ok(value)
+    }
+}
+impl HeldLightSpec {
+    pub(crate) fn compile(self) -> Result<tor_simulation::HeldLightSpec, crate::Failure> {
+        let value = tor_simulation::HeldLightSpec {
+            radius: self.radius,
+            fuel_ticks: self.fuel_ticks,
+        };
+        super::require(value.valid(), "Invalid held light policy")?;
+        Ok(value)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct DeviceSpec {
@@ -1136,6 +1202,23 @@ impl<'de> Deserialize<'de> for Effect {
             },
             DrainLatestHitDie {},
             RestoreHitDie {},
+            GainStrength {},
+            RaiseLevel {},
+            RoomLight {},
+            DetectMonsters {
+                condition: String,
+            },
+            DetectFood {},
+            DetectMagic {},
+            MapTopology {},
+            DrainLife {},
+            CancelSpecials {},
+            BalefulPolymorph {
+                #[serde(
+                    deserialize_with = "crate::creature_authoring::bounded_strike_vec::<_, _, {tor_simulation::limits::CATALOG_ENTRIES}>"
+                )]
+                forms: Vec<String>,
+            },
             StepSelfOneCell {},
             TeleportRandom {},
             TeleportToRayOrigin {},
@@ -1174,6 +1257,10 @@ impl<'de> Deserialize<'de> for Effect {
             ApplyCondition {
                 condition: String,
                 duration: u64,
+            },
+            HasteDose {
+                condition: String,
+                rest: String,
             },
             ApplyPersistentCondition {
                 condition: String,
@@ -1237,6 +1324,16 @@ impl<'de> Deserialize<'de> for Effect {
             },
             Fields::DrainLatestHitDie {} => Self::DrainLatestHitDie,
             Fields::RestoreHitDie {} => Self::RestoreHitDie,
+            Fields::GainStrength {} => Self::GainStrength,
+            Fields::RaiseLevel {} => Self::RaiseLevel,
+            Fields::RoomLight {} => Self::RoomLight,
+            Fields::DetectMonsters { condition } => Self::DetectMonsters { condition },
+            Fields::DetectFood {} => Self::DetectFood,
+            Fields::DetectMagic {} => Self::DetectMagic,
+            Fields::MapTopology {} => Self::MapTopology,
+            Fields::DrainLife {} => Self::DrainLife,
+            Fields::CancelSpecials {} => Self::CancelSpecials,
+            Fields::BalefulPolymorph { forms } => Self::BalefulPolymorph { forms },
             Fields::StepSelfOneCell {} => Self::StepSelfOneCell,
             Fields::TeleportRandom {} => Self::TeleportRandom,
             Fields::TeleportToRayOrigin {} => Self::TeleportToRayOrigin,
@@ -1269,6 +1366,7 @@ impl<'de> Deserialize<'de> for Effect {
                 condition,
                 duration,
             },
+            Fields::HasteDose { condition, rest } => Self::HasteDose { condition, rest },
             Fields::ApplyPersistentCondition { condition, cancels } => {
                 Self::ApplyPersistentCondition { condition, cancels }
             }
@@ -1827,9 +1925,118 @@ mod tests {
                 "device must reject {field}"
             );
         }
+        let mut unsupported = source.clone();
+        unsupported.discovery = ItemDiscovery::DiscernibleEffect;
+        assert!(
+            unsupported.compile(&valid).is_err(),
+            "damage rays do not own Polymorph discovery"
+        );
+        let mut polymorph = ability.clone();
+        polymorph.invocation = tor_simulation::abilities::InvocationKind::DirectionalContactRay;
+        polymorph.reach = tor_simulation::rules::Reach::UntilObstruction;
+        let tor_simulation::rules::StrikeSource::Authored { strikes } = &mut polymorph.strikes
+        else {
+            unreachable!()
+        };
+        strikes[0].check.as_mut().unwrap().against = tor_simulation::rules::Against::Opposed {
+            skill: tor_simulation::rules::SkillSelector::Named {
+                skill: tor_simulation::attributes::Skill::Lore,
+            },
+        };
+        strikes[0].on_failure = vec![tor_simulation::rules::Effect::BalefulPolymorph {
+            forms: vec![
+                tor_simulation::content_ids::BodyFormId::new("catalog_checked_form").unwrap(),
+            ],
+        }];
+        let mut document = rules().document().clone();
+        document.abilities.push(polymorph);
+        let supported = Ruleset::validate(document).unwrap();
+        assert_eq!(
+            unsupported.compile(&supported).unwrap().discovery,
+            tor_simulation::ItemDiscovery::DiscernibleEffect
+        );
         let mut hidden = source;
         hidden.discovery = ItemDiscovery::SelfEffect;
         assert!(hidden.compile(&valid).is_err());
+    }
+
+    #[test]
+    fn empty_effect_self_ability_is_valid_and_legal_as_a_nothing_device() {
+        use tor_simulation::rules::{AbilityDef, Ruleset, StrikeSource};
+        // One canonical checkless strike with no outcomes, not an invented
+        // Nothing effect or an invalid empty strike sequence.
+        let ability: AbilityDef = toml::from_str(r#"
+            id = "fixture.nothing"
+            name = "Nothing"
+            interaction = "non_hostile"
+            tags = []
+            basic_attack = false
+            invocation = "actor_target"
+            timing = { source = { kind = "fixed", prepare = 100, recover = 100 } }
+            reach = { kind = "self_only" }
+            strikes = { kind = "authored", strikes = [{ offset = 0, on_success = [], on_failure = [], descriptors = [], riders = [] }] }
+            ai = { priority = 0, hostile = false, minimum_resource_percent = 0, range_preference = "any" }
+        "#).unwrap();
+        let StrikeSource::Authored { strikes } = &ability.strikes else {
+            panic!("authored source")
+        };
+        assert_eq!(strikes.len(), 1);
+        assert!(strikes[0].check.is_none());
+        assert!(strikes[0].on_success.is_empty() && strikes[0].on_failure.is_empty());
+        let mut document = rules().document().clone();
+        document.abilities.push(ability);
+        let rules = Ruleset::validate(document)
+            .expect("ordinary self no-op is legal before device validation");
+        let device = DeviceSpec {
+            ability: "fixture.nothing".into(),
+            initial_charges: ChargeRange {
+                minimum: 3,
+                maximum: 3,
+            },
+            discovery: ItemDiscovery::Never,
+        };
+        let compiled = device
+            .compile(&rules)
+            .expect("a legal self no-op must be usable as a device");
+        assert_eq!(compiled.ability.as_str(), "fixture.nothing");
+        assert_eq!(compiled.initial_charges.minimum, 3);
+    }
+
+    #[test]
+    fn authored_discernible_discovery_is_explicit_and_compiles_without_policy_aliasing() {
+        let policy: ItemDiscovery =
+            serde_json::from_value(serde_json::json!("discernible_effect")).unwrap();
+        assert_eq!(policy, ItemDiscovery::DiscernibleEffect);
+        assert_eq!(
+            tor_simulation::ItemDiscovery::from(policy),
+            tor_simulation::ItemDiscovery::DiscernibleEffect
+        );
+        assert_eq!(serde_json::to_value(policy).unwrap(), "discernible_effect");
+        assert!(serde_json::from_value::<ItemDiscovery>(serde_json::json!("discernible")).is_err());
+    }
+
+    #[test]
+    fn authored_nondevice_discovery_rejects_polymorph_only_policy() {
+        for policy in ["self_effect", "on_use", "never"] {
+            let mut value = serde_json::json!({"discovery":policy,"effects":[{"kind":"heal","amount":{"kind":"fixed","amount":1}}]});
+            let source: ConsumableSpec = serde_json::from_value(value.clone()).unwrap();
+            source.compile(&rules()).unwrap();
+            value["discovery"] = serde_json::json!("discernible_effect");
+            let source: ConsumableSpec = serde_json::from_value(value).unwrap();
+            assert!(source.compile(&rules()).is_err());
+            for control in [false, true] {
+                let mut value = if control {
+                    serde_json::json!({"discovery":policy,"control":{"kind":"nothing"}})
+                } else {
+                    serde_json::json!({"discovery":policy,"effects":[{"kind":"heal","amount":{"kind":"fixed","amount":1}}]})
+                };
+                let source: ReadableSpec = serde_json::from_value(value.clone()).unwrap();
+                source.compile(&rules()).unwrap();
+                value["discovery"] = serde_json::json!("discernible_effect");
+                let source: ReadableSpec = serde_json::from_value(value).unwrap();
+                assert!(source.compile(&rules()).is_err());
+            }
+        }
     }
 
     #[test]
@@ -2204,5 +2411,127 @@ mod persistent_condition_authoring_tests {
             };
             assert!(spec.compile(&rules).is_err());
         }
+    }
+}
+
+#[cfg(test)]
+mod held_light_tests {
+    use super::HeldLightSpec;
+
+    #[test]
+    fn held_light_source_defaults_resolve_once_and_share_core_bounds() {
+        let default: HeldLightSpec = serde_json::from_str("{}").unwrap();
+        assert_eq!((default.radius, default.fuel_ticks), (4, 100_000));
+        assert!(default.compile().unwrap().valid());
+        let explicit: HeldLightSpec =
+            serde_json::from_str(r#"{"radius":1,"fuel_ticks":1}"#).unwrap();
+        assert_eq!((explicit.radius, explicit.fuel_ticks), (1, 1));
+        let limit = serde_json::json!({"radius": tor_simulation::limits::SIGHT_RANGE,
+            "fuel_ticks": tor_simulation::limits::NUMERIC});
+        assert!(serde_json::from_value::<HeldLightSpec>(limit)
+            .unwrap()
+            .compile()
+            .unwrap()
+            .valid());
+        for malformed in [
+            r#"{"radius":0}"#,
+            r#"{"radius":17}"#,
+            r#"{"fuel_ticks":0}"#,
+            r#"{"fuel_ticks":1000001}"#,
+            r#"{"radius":null}"#,
+            r#"{"fuel_ticks":null}"#,
+            r#"{"extra":1}"#,
+            r#"{"radius":4,"radius":4}"#,
+            r#"[4,100000]"#,
+        ] {
+            assert!(
+                serde_json::from_str::<HeldLightSpec>(malformed).is_err(),
+                "{malformed}"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod detection_item_bridge_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn ordinary_item_bridge_preserves_detection_operands_and_core_reference_constraints() {
+        let mut document: tor_simulation::rules::RulesetDocument =
+            toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML).unwrap();
+        document.conditions.push(
+            serde_json::from_value(json!({
+                "id":"fixture.detecting","family":"fixture.detecting","name":"Detecting",
+                "detecting_monsters":true,"hallucinating":false,"lifecycle":"timed",
+                "modifiers":[],"stacking":{"kind":"refresh"},"source_scoped":false,
+                "descriptors":[],"capacity":"reject","timing":{"kind":"actor_active",
+                "on_expiry":{"kind":"remove"}},"restrictions":[],"preparation":"preserve"
+            }))
+            .unwrap(),
+        );
+        let rules = tor_simulation::rules::Ruleset::validate(document).unwrap();
+        for value in [
+            json!({"kind":"detect_monsters","condition":"fixture.detecting"}),
+            json!({"kind":"detect_food"}),
+            json!({"kind":"detect_magic"}),
+        ] {
+            let source: ConsumableSpec = serde_json::from_value(json!({
+                "effects":[value.clone()],"discovery":"self_effect","descriptors":[]
+            }))
+            .unwrap();
+            let compiled = source.compile(&rules).unwrap();
+            assert_eq!(
+                serde_json::to_value(&compiled.effects).unwrap(),
+                json!([value])
+            );
+            assert_eq!(
+                compiled.discovery,
+                tor_simulation::ItemDiscovery::SelfEffect
+            );
+        }
+        for condition in ["missing", "braced"] {
+            let source: ConsumableSpec = serde_json::from_value(json!({"effects":[
+                {"kind":"detect_monsters","condition":condition}]}))
+            .unwrap();
+            assert!(
+                source.compile(&rules).is_err(),
+                "condition must exist and carry the detection marker"
+            );
+        }
+        let mixed: ConsumableSpec = serde_json::from_value(json!({"effects":[
+            {"kind":"detect_food"},{"kind":"heal","amount":{"kind":"fixed","amount":1}}
+        ]}))
+        .unwrap();
+        assert!(
+            mixed.compile(&rules).is_err(),
+            "sole chart payload rule belongs to the core validator"
+        );
+    }
+}
+
+#[cfg(test)]
+mod mapping_item_bridge_tests {
+    use super::*;
+    use serde_json::json;
+    #[test]
+    fn mapping_readable_preserves_closed_sole_payload_and_explicit_on_use_policy() {
+        let rules = tor_simulation::rules::Ruleset::validate(
+            toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML).unwrap(),
+        )
+        .unwrap();
+        let source: ReadableSpec = serde_json::from_value(
+            json!({"discovery":"on_use","effects":[{"kind":"map_topology"}]}),
+        )
+        .unwrap();
+        let compiled = source.compile(&rules).unwrap();
+        assert_eq!(
+            serde_json::to_value(&compiled.effects).unwrap(),
+            json!([{"kind":"map_topology"}])
+        );
+        assert_eq!(compiled.discovery, tor_simulation::ItemDiscovery::OnUse);
+        let mixed:ReadableSpec=serde_json::from_value(json!({"effects":[{"kind":"map_topology"},{"kind":"heal","amount":{"kind":"fixed","amount":1}}]})).unwrap();
+        assert!(mixed.compile(&rules).is_err());
     }
 }

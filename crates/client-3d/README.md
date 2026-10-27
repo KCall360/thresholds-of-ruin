@@ -179,6 +179,19 @@ Logs and source/toolchain receipts stay under `.local/verify-3d/`.
 Failed native processes retain their bounded diagnostics in that run's
 `process-failures/` directory, which the independent workflow uploads with its logs.
 
+With explicit maintainer authorization for an unavailable local display, the
+independent verifier also accepts `--waive-local-graphical MANIFEST` for either
+profile. It reuses the [exact local graphical waiver contract](../../docs/development/testing.md#focused-iteration-and-local-mouse-exception): current discovered method IDs,
+not class names or fixed counts, and an immutable validated manifest snapshot.
+Non-graphical checks and both profiles remain required; CI rejects the option.
+The pre-window invalid-appearance rejection is non-graphical and cannot be waived.
+Receipt `tor-client-3d-verification-v3` separates `gate_passed` from
+`clean_passed`; legacy `passed` remains equal to `clean_passed`. An authorized
+waived gate may exit zero while both clean fields remain false. Missing or
+mismatched actual waiver accounting and changed checked inputs fail the gate.
+This mechanism grants no authorization itself and does not replace hosted native
+acceptance or the unchanged default verification commands.
+
 Core verification deliberately excludes this workspace. Core changes do not
 require maintaining or checking the 3D client; its own workflow runs when its
 files change or when manually requested. When resuming 3D maintenance, build and

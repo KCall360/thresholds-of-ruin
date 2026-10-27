@@ -29,16 +29,16 @@ fn response(query: Value, entries: Value, total: u16, next: Option<u16>) -> Valu
         "page":{"basis":basis(),"revision":"5","query":query,"total":total,"next":next,"entries":entries}})
 }
 fn overview() -> Value {
-    json!({"kind":"overview","value":{
+    json!({"kind":"overview","value":{"strength_acquired":0,
         "starting_skills":[{"id":"athletics","name":"Athletics"},{"id":"lore","name":"Lore"}],
         "points":{"earned":"2","spent":"1","unspent":"1"},
-        "growth":{"highest_applied_tier":"2","restorable_hit_dice":"0","restoration_blocker":null,"highest_earned_tier":"2","peak_threat":"2","held_xp":"0","earned_xp":"0","spent_xp":"0","next_threshold":"100","future":{"kind":"disabled"}},
+        "growth":{"body_package_hit_dice":null,"highest_applied_tier":"2","restorable_hit_dice":"0","restoration_blocker":null,"highest_earned_tier":"2","peak_threat":"2","held_xp":"0","earned_xp":"0","spent_xp":"0","next_threshold":"100","future":{"kind":"disabled"}},
         "timings":{"purchase_recovery":"0","respec_prepare":"600","respec_recovery":"0","received_loss_interval":"600","provisional":true},
         "ration":{"supply":{"id":"ration","name":"Ration"},"quantity":"1","access":"carried_only"},
         "received_loss_remaining":"0","perceived_threat":false,"ready":true,"other_preparation":false,"respec":null}})
 }
 fn summary() -> Value {
-    json!({"kind":"summary","value":{
+    json!({"kind":"summary","value":{"strength_acquired":0,
         "proposal":proposal(),"resulting_build_epoch":"8","removed_count":1,"refund_count":1,"removed_condition_count":0,
         "health":{"current":"8","maximum":"10","injury":"2","dead":false},
         "health_recovery":{"period_ticks":"600","elapsed_ticks":"12","stopped":false},
@@ -179,6 +179,7 @@ fn owner_advancement_named_map_contract_rejects_ordered_positional_aliases() {
         (
             "/page/entries/0/value",
             vec![
+                "strength_acquired",
                 "proposal",
                 "resulting_build_epoch",
                 "removed_count",
@@ -226,6 +227,7 @@ fn owner_advancement_named_map_contract_rejects_ordered_positional_aliases() {
         (
             "/page/entries/0/value",
             vec![
+                "strength_acquired",
                 "starting_skills",
                 "points",
                 "timings",
@@ -807,11 +809,12 @@ fn future_growth_source_actions_and_previews_are_exact_and_have_no_xp_authority(
 fn growth_overview_requires_complete_checked_accounting_and_future_policy() {
     let mut good = overview_page();
     good["page"]["entries"][0]["value"]["growth"] = json!({
-        "highest_applied_tier":"2","restorable_hit_dice":"0","restoration_blocker":null,"highest_earned_tier":"2","peak_threat":"3","held_xp":"60","earned_xp":"160","spent_xp":"100",
+        "body_package_hit_dice":null,"highest_applied_tier":"2","restorable_hit_dice":"0","restoration_blocker":null,"highest_earned_tier":"2","peak_threat":"3","held_xp":"60","earned_xp":"160","spent_xp":"100",
         "next_threshold":"100","future":{"kind":"selected","source":{"kind":"racial"}}
     });
     decode_response(&good.to_string()).expect("complete earned progress");
     for field in [
+        "body_package_hit_dice",
         "highest_applied_tier",
         "restorable_hit_dice",
         "restoration_blocker",
@@ -1068,5 +1071,106 @@ fn intellect_expertise_pages_keep_the_shared_entry_and_full_frame_budgets() {
         json!({"id":"spear","name":"x".repeat(32768)});
     assert!(
         matches!(decode_response(&oversized.to_string()), Err(tor_protocol::DecodeError::TooLarge { limit }) if limit == 32 * 1024)
+    );
+}
+
+#[test]
+fn permanent_potion_strength_is_required_bounded_and_not_a_refund_row() {
+    for mut page in [
+        overview_page(),
+        response(
+            json!({"kind":"preview","basis":basis(),"proposal":proposal(),"section":"summary","offset":0}),
+            json!([summary()]),
+            1,
+            None,
+        ),
+    ] {
+        for count in [0, 3, 7] {
+            page["page"]["entries"][0]["value"]["strength_acquired"] = json!(count);
+            decode_response(&page.to_string()).unwrap();
+        }
+        for invalid in [json!(8), json!(-1), json!("1"), Value::Null] {
+            let mut bad = page.clone();
+            bad["page"]["entries"][0]["value"]["strength_acquired"] = invalid;
+            assert!(decode_response(&bad.to_string()).is_err());
+        }
+        page["page"]["entries"][0]["value"]
+            .as_object_mut()
+            .unwrap()
+            .remove("strength_acquired");
+        assert!(decode_response(&page.to_string()).is_err());
+    }
+}
+
+#[test]
+fn owned_growth_disclosure_separates_personal_tiers_from_authored_body_loss_capacity() {
+    let ordinary = overview_page();
+    decode_response(&ordinary.to_string()).expect("explicit null retains ordinary domain");
+    let mut owned = ordinary.clone();
+    let growth = &mut owned["page"]["entries"][0]["value"]["growth"];
+    growth["body_package_hit_dice"] = json!("5");
+    growth["highest_applied_tier"] = json!("0");
+    growth["highest_earned_tier"] = json!("0");
+    decode_response(&owned.to_string()).expect("body-only actor has no personal advancement");
+    for loss in [1, 5] {
+        let mut drained = owned.clone();
+        drained["page"]["entries"][0]["value"]["growth"]["restorable_hit_dice"] =
+            json!(loss.to_string());
+        decode_response(&drained.to_string())
+            .expect("body losses do not require personal earned tiers");
+    }
+    let mut both = owned.clone();
+    let growth = &mut both["page"]["entries"][0]["value"]["growth"];
+    growth["highest_applied_tier"] = json!("2");
+    growth["highest_earned_tier"] = json!("3");
+    growth["restorable_hit_dice"] = json!("7");
+    decode_response(&both.to_string())
+        .expect("personal losses plus full authored package capacity");
+    let mut maximum = owned.clone();
+    maximum["page"]["entries"][0]["value"]["growth"]["body_package_hit_dice"] = json!("256");
+    maximum["page"]["entries"][0]["value"]["growth"]["restorable_hit_dice"] = json!("256");
+    decode_response(&maximum.to_string()).expect("bounded authored package maximum");
+    for (field, value) in [
+        ("body_package_hit_dice", Value::Null),
+        ("body_package_hit_dice", json!("0")),
+        ("body_package_hit_dice", json!("257")),
+        ("body_package_hit_dice", json!(5)),
+        ("body_package_hit_dice", json!("05")),
+        ("highest_applied_tier", json!("1")),
+        ("restorable_hit_dice", json!("6")),
+        ("earned_xp", json!("1")),
+    ] {
+        let mut bad = owned.clone();
+        bad["page"]["entries"][0]["value"]["growth"][field] = value;
+        assert!(
+            decode_response(&bad.to_string()).is_err(),
+            "invalid owned {field}"
+        );
+    }
+    let mut missing = ordinary.clone();
+    missing["page"]["entries"][0]["value"]["growth"]
+        .as_object_mut()
+        .unwrap()
+        .remove("body_package_hit_dice");
+    assert!(
+        decode_response(&missing.to_string()).is_err(),
+        "ownership domain is required, never defaulted"
+    );
+    let mut overflow = owned.clone();
+    let growth = &mut overflow["page"]["entries"][0]["value"]["growth"];
+    growth["highest_applied_tier"] = json!(u64::MAX.to_string());
+    growth["highest_earned_tier"] = json!(u64::MAX.to_string());
+    assert!(
+        decode_response(&overflow.to_string()).is_err(),
+        "loss ceiling cannot overflow"
+    );
+    let mut excess = both.clone();
+    excess["page"]["entries"][0]["value"]["growth"]["restorable_hit_dice"] = json!("8");
+    assert!(decode_response(&excess.to_string()).is_err());
+    let mut unowned = ordinary;
+    unowned["page"]["entries"][0]["value"]["growth"]["restorable_hit_dice"] = json!("3");
+    assert!(
+        decode_response(&unowned.to_string()).is_err(),
+        "unowned loss bound remains personal applied tier"
     );
 }

@@ -104,6 +104,7 @@ fn native_key(key: NativeKey) -> Option<Key> {
         NativeKey::Space | NativeKey::Period => Key::Wait,
         NativeKey::G | NativeKey::Comma => Key::Pickup,
         NativeKey::I => Key::Inventory,
+        NativeKey::M => Key::Charts,
         NativeKey::Semicolon => Key::Look,
         NativeKey::D => Key::Drop,
         NativeKey::W => Key::Equip,
@@ -112,6 +113,8 @@ fn native_key(key: NativeKey) -> Option<Key> {
         NativeKey::E => Key::Eat,
         NativeKey::F6 => Key::Read,
         NativeKey::F12 => Key::Zap,
+        NativeKey::X => Key::Ignite,
+        NativeKey::V => Key::Extinguish,
         NativeKey::O => Key::OpenDoor,
         NativeKey::C => Key::CloseDoor,
         NativeKey::F3 => Key::Control,
@@ -292,6 +295,14 @@ fn window_loop(
                                 state
                                     .apply_map_memory_update(*update)
                                     .map_err(|e| format!("Invalid presentation map: {e:?}"))?;
+                            }
+                        }
+                        Event::ChartCancelled(query) => app.chart_cancelled(&query),
+                        Event::ChartPresentation(update) => {
+                            if app.charts_open {
+                                if let Some(state) = &app.state {
+                                    let _ = app.charts.install(update, state);
+                                }
                             }
                         }
                         Event::CreatureInspection(report) => app.show_inspection(&report)?,
@@ -497,6 +508,9 @@ fn window_loop(
         }
         for effect in effects {
             match effect {
+                Effect::CancelCharts => {
+                    let _ = network.commands.try_send(Command::CancelCharts);
+                }
                 Effect::None => {}
                 Effect::Quit => {
                     quit = true;
@@ -586,8 +600,9 @@ fn window_loop(
                 "narration":state.map(|s|s.narration())});
             let screen_report = serde_json::json!({
                 "messages":{"shown":app.messages.shown(app.role!=tor_protocol::AccessRole::Spectator),"more":app.messages.more(),"turn":app.messages.text(),"log":app.messages.log().collect::<Vec<_>>()},
-                "screen":{"pickup":!app.pickup.is_empty(),"inventory":app.inventory_open,"help":app.help_open,"stats":app.stats_open,"stats_scroll":app.stats_scroll,"message_log":app.message_log,"look_cursor":app.look_cursor,"running":app.running},
+                "screen":{"pickup":!app.pickup.is_empty(),"inventory":app.inventory_open,"charts":app.charts_open,"help":app.help_open,"stats":app.stats_open,"stats_scroll":app.stats_scroll,"message_log":app.message_log,"look_cursor":app.look_cursor,"running":app.running},
                 "inventory_rows":if app.inventory_open { state.map(|s|tor_client_ascii::inventory_entries(&app,&s.state().observation).iter().take(26).map(|entry|entry.long()).collect::<Vec<_>>()) } else { None },
+                "chart_rows":if app.charts_open { Some(app.chart_lines()) } else { None },
                 "stats_rows":if app.stats_open { Some(app.stats_rows()) } else { None },
                 "advancement_open":app.advancement_open,"advancement_rows":app.advancement_rows(),"advancement_command":app.advancement_command,
                 "ability_choices":app.ability_choices,"selected_ability":app.selected_ability,
@@ -659,10 +674,13 @@ mod tests {
         assert_eq!(native_key(NativeKey::P), None);
         assert_eq!(native_key(NativeKey::F6), Some(Key::Read));
         assert_eq!(native_key(NativeKey::F12), Some(Key::Zap));
+        assert_eq!(native_key(NativeKey::X), Some(Key::Ignite));
+        assert_eq!(native_key(NativeKey::V), Some(Key::Extinguish));
         assert_eq!(native_key(NativeKey::R), Some(Key::Release));
         assert_eq!(native_key(NativeKey::Z), Some(Key::Abilities));
         assert_eq!(native_key(NativeKey::F7), Some(Key::Wizard));
         assert_eq!(native_key(NativeKey::I), Some(Key::Inventory));
+        assert_eq!(native_key(NativeKey::M), Some(Key::Charts));
         assert_eq!(native_key(NativeKey::Semicolon), Some(Key::Look));
         assert_eq!(native_key(NativeKey::Comma), Some(Key::Pickup));
         assert_eq!(native_key(NativeKey::G), Some(Key::Pickup));

@@ -72,6 +72,17 @@ impl Health {
         u32::try_from(applied).expect("applied damage is bounded by its effect operand")
     }
 
+    /// Exact wide injury for direct life loss; no armor or resistance calculation.
+    pub(crate) fn direct_loss(&mut self, amount: u64) -> u64 {
+        let applied = amount.min(self.current());
+        self.injury = self
+            .injury
+            .checked_add(applied)
+            .expect("applied loss cannot exceed maximum Health");
+        self.dead |= self.injury >= self.maximum;
+        applied
+    }
+
     /// Healing cannot revive a dead actor. Returns injury actually removed.
     pub fn heal(&mut self, amount: u32) -> u32 {
         u32::try_from(self.recover(u64::from(amount)))

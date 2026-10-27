@@ -186,9 +186,15 @@ fn fainting_style_status_expires_without_acquiring_ice_protection() {
 
 #[test]
 fn timing_and_restriction_inputs_require_explicit_closed_named_semantics() {
-    let valid = definition("fixture_lock", Some(400));
-    let parsed: ConditionDef = serde_json::from_value(valid.clone()).unwrap();
+    let authored = definition("fixture_lock", Some(400));
+    let parsed: ConditionDef = serde_json::from_value(authored.clone()).unwrap();
+    assert!(!parsed.hallucinating && !parsed.detecting_monsters);
+    let mut valid = authored;
+    valid["hallucinating"] = json!(false);
+    valid["detecting_monsters"] = json!(false);
     assert_eq!(serde_json::to_value(parsed).unwrap(), valid);
+    let explicit: ConditionDef = serde_json::from_value(valid.clone()).unwrap();
+    assert_eq!(serde_json::to_value(explicit).unwrap(), valid);
     for (path, value) in [
         ("/timing", json!(null)),
         ("/timing", json!(["actor_active", {"kind":"remove"}])),
@@ -477,6 +483,7 @@ fn gaining_and_losing_descriptor_immunity_ends_effect_once_without_erasing_prote
         item: tor_simulation::ItemId(1),
         socket: tor_simulation::EquipmentSlotId(0),
         modifiers: vec![Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Immunity {
                 selector: Selector::Descriptor {

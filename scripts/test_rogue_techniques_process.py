@@ -7,7 +7,7 @@ from scalar_wire import u64
 import unittest
 
 from process_harness import (
-    ProcessTestCase, content_ids, disclosed_exploration_route, resource, settle_rogue_action, underfoot,
+    ProcessTestCase, content_ids, disclosed_exploration_route, resource, settle_rogue_action, underfoot, hit_die_counts,
 )
 from rogue_magic_receipts import (
     EQUIPMENT_ITEM_STAGE_IDS, CONTROL_ITEM_STAGE_IDS, MAGIC_ITEM_STAGE_IDS,
@@ -118,12 +118,15 @@ class RogueTechniquesProcesses(ProcessTestCase):
     def buy_first(self, player, selection, identity):
         before = self.request(player, {"type": "snapshot"})
         self.assertNotIn(identity, content_ids(combat(before)["own_stats"]["abilities"]))
+        counts = hit_die_counts(combat(before)["own_stats"]["hit_dice"])
+        self.assertIn(counts, [{("racial", "racial"): 1, ("class", "warrior"): 1},
+                               {("racial", "racial"): 1, ("class", "mage"): 1}])
         # Ordinary advancement previews require an owner page's current basis;
         # a world snapshot alone does not open that private editing context.
         opened = self.command(player, {"type": "advancement", "command": "overview"})
         self.assertIsNone(opened["error"])
         preview = self.command(player, {"type": "advancement", "command":
-                                       "purchase 1 advancement " + selection})
+                                       "purchase 2 advancement " + selection})
         self.assertIsNone(preview["error"])
         self.assertNotIn(identity, content_ids(combat(preview)["own_stats"]["abilities"]))
         confirmed = self.command(player, {"type": "advancement", "command": "confirm"})

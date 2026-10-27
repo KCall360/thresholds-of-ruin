@@ -61,11 +61,43 @@ class CorruptedItemShapes(unittest.TestCase):
 
     def test_retained_size_delta_preserves_current_ground_metadata(self):
         ground = self.delta('oversized_retained_state')['ground_items'][0]['insert'][0]
+        self.assertEqual(set(ground), {
+            'presentation', 'reachable', 'supply_reachable', 'position', 'item'})
+        self.assertIsNone(ground['presentation'])
         self.assertIn('supply_reachable', tuple(ground))
         self.assertFalse(ground['supply_reachable'])
         self.assert_nonsupply(ground['item'])
         self.assertFalse(ground['reachable'])
         self.assertEqual(len(ground['item']['description']), 8 * 1024 * 1024)
+
+    def test_retained_size_payload_halves_fit_but_combined_records_exceed_ceiling(self):
+        # Independent payload arithmetic, not a substitute for typed decoding:
+        # the real-process relay also bounds each complete encoded frame.
+        ceiling = 16 * 1024 * 1024
+        observation = {'inventory': []}
+        snapshot = {'type': 'snapshot', 'request_id': 'attach',
+                    'snapshot': {'state': {'observation': observation}}}
+        self.assertTrue(self.relay(large_base=True).corrupt_observation(snapshot))
+        delta = self.delta('oversized_retained_state')
+        self.assertEqual(delta['inventory'], [], 'delta must retain the large base item')
+        self.assertEqual(len(delta['ground_items']), 1)
+        edit = delta['ground_items'][0]
+        self.assertEqual((edit['start'], edit['remove']), (0, 0))
+        self.assertEqual(len(edit['insert']), 1)
+        inserted = edit['insert'][0]
+        self.assertNotEqual(observation['inventory'][0]['id'], inserted['item']['id'])
+        message = {'type': 'update', 'update': {'body': {
+            'type': 'observation_delta', 'state': delta}}}
+
+        def size(value):
+            return len(json.dumps(value, ensure_ascii=False, separators=(',', ':')).encode('utf-8'))
+
+        self.assertLess(size(snapshot), ceiling)
+        self.assertLess(size(message), ceiling)
+        # Even this subset exceeds the retained full-StateView ceiling. All
+        # remaining state fields and their envelope only increase its size.
+        self.assertGreater(size({'inventory': observation['inventory'],
+                                 'ground_items': edit['insert']}), ceiling)
 
 
 class SharedActorTraffic(unittest.TestCase):

@@ -1,7 +1,7 @@
 //! Selection of cosmetic recipes, separate from mesh construction.
 use std::sync::OnceLock;
 use tor_client_common::{AssetTable, Palette};
-use tor_protocol::{ActorView, ItemClass, ItemView};
+use tor_protocol::{ActorView, ItemClass, ItemView, ObjectPresentation, ObjectPresentationKind};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum CreatureModel {
@@ -35,6 +35,7 @@ pub enum CreatureModel {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ItemModel {
+    Stairs,
     Placeholder,
     Mace,
     Greatsword,
@@ -140,10 +141,24 @@ pub fn creature_model(palette: &Palette, asset: Option<&str>) -> CreatureModel {
 
 /// Class is a disclosed shape fallback; display text never identifies a model.
 pub fn item_model(palette: &Palette, item: &ItemView) -> ItemModel {
-    if let Some(model) = palette.resolve(items(), item.asset.as_deref()) {
+    item_shape(palette, item.class, item.asset.as_deref())
+}
+
+/// Use only the sampled visual recipe, never the real item's class or corpse.
+pub fn object_model(palette: &Palette, presentation: &ObjectPresentation) -> ItemModel {
+    match presentation.kind {
+        ObjectPresentationKind::Item { class } => {
+            item_shape(palette, class, presentation.asset.as_deref())
+        }
+        ObjectPresentationKind::Stairs => ItemModel::Stairs,
+    }
+}
+
+fn item_shape(palette: &Palette, class: ItemClass, asset: Option<&str>) -> ItemModel {
+    if let Some(model) = palette.resolve(items(), asset) {
         return *model;
     }
-    match item.class {
+    match class {
         ItemClass::Weapon => ItemModel::ShortSword,
         ItemClass::Armor => ItemModel::RingMail,
         ItemClass::Potion => ItemModel::Potion,

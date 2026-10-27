@@ -17,7 +17,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, call, patch
 
-from process_harness import AdventureProcess, Process, TOKEN, SPECTATOR_TOKEN
+from process_harness import AdventureProcess, Process, ProcessTestCase, TOKEN, SPECTATOR_TOKEN
 import test_run_until_blocked_process as pressure
 
 
@@ -246,6 +246,74 @@ class SegmentedProcessCapture(unittest.TestCase):
                 self.assertIsNone(process.lines._error)
             finally:
                 process.stop(save=False)
+
+    def test_headless_frame_never_replays_an_already_matched_lossless_capture(self):
+        from segmented_process_capture import iter_retained_lines, validate_retained_capture
+        frames = [
+            {"type": "update", "message": {"phase": "queued", "id": "paid-1"}},
+            {"type": "update", "message": {"phase": "resolved", "id": "paid-1"}},
+            {"type": "ready", "readiness": {"admission": True}},
+        ]
+        lines = [json.dumps(frame) for frame in frames]
+        child = SimpleNamespace(
+            pid=12345, stdin=io.StringIO(), stdout=io.StringIO("\n".join(lines) + "\n"),
+            stderr=io.StringIO(), poll=Mock(return_value=0),
+            wait=Mock(return_value=0), kill=Mock(),
+        )
+        with capture_directory() as directory:
+            with patch("process_harness.subprocess.Popen", return_value=child):
+                process = Process("tor-client-headless", [], diagnostics=Path(directory),
+                    separate_stderr=True, extra_env={"TOR_TEST_SEGMENTED_STDOUT_BYTES": "128"})
+            try:
+                process.reader.join(timeout=5)
+                self.assertFalse(process.reader.is_alive())
+                # Exact response matching must finish without rebuilding an
+                # ignored string from archived chunks. Default full-transcript
+                # callers still exercise their original deadline test above.
+                with patch.object(process.lines, "read_between", side_effect=queue.Empty) as replay:
+                    result = ProcessTestCase().frame(process, lambda value:
+                        value.get("message") == {"phase": "resolved", "id": "paid-1"})
+                    self.assertEqual(result, frames[1])
+                    self.assertEqual(len(process.transcript), 2)
+                    self.assertEqual(ProcessTestCase().frame(process,
+                        lambda value: value["type"] == "ready"), frames[2])
+                    replay.assert_not_called()
+                self.assertEqual(list(process.transcript), lines)
+            finally:
+                process.stop(save=False)
+            self.assertEqual(validate_retained_capture(process.stdout_path)["total_lines"], 3)
+            self.assertEqual(list(iter_retained_lines(process.stdout_path)), lines)
+
+    def test_headless_frame_keeps_wait_and_predicate_deadlines_without_transcript_replay(self):
+        for slow in ("waiting", "predicate"):
+            with self.subTest(slow=slow), capture_directory() as directory:
+                child = SimpleNamespace(
+                    pid=12345, stdin=io.StringIO(), stdout=io.StringIO('{"type":"ready"}\n'),
+                    stderr=io.StringIO(), poll=Mock(return_value=0),
+                    wait=Mock(return_value=0), kill=Mock(),
+                )
+                with patch("process_harness.subprocess.Popen", return_value=child):
+                    process = Process("tor-client-headless", [], diagnostics=Path(directory),
+                        separate_stderr=True, extra_env={"TOR_TEST_SEGMENTED_STDOUT_BYTES": "128"})
+                try:
+                    process.reader.join(timeout=5)
+                    self.assertFalse(process.reader.is_alive())
+                    now = [100.0]
+                    def matched(_value):
+                        now[0] = 116.0
+                        return True
+                    waiting = (patch.object(process.lines, "get", side_effect=queue.Empty)
+                               if slow == "waiting" else nullcontext())
+                    with waiting as get, patch("process_harness.time.monotonic", side_effect=lambda: now[0]), \
+                            patch.object(process.lines, "read_between") as replay:
+                        with self.assertRaisesRegex(AssertionError, "Process output deadline"):
+                            ProcessTestCase().frame(process, matched, seconds=15)
+                        if slow == "waiting":
+                            get.assert_called_once_with(timeout=15.0)
+                        replay.assert_not_called()
+                    self.assertIsNone(process.lines._error)
+                finally:
+                    process.stop(save=False)
 
     def test_reader_exception_after_valid_prefix_never_marks_capture_complete(self):
         from segmented_process_capture import CaptureError

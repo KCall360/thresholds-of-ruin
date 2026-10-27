@@ -825,6 +825,7 @@ fn wizard_templates_use_authored_definitions_and_preserve_replay_retry_and_confl
         .unwrap()
         .modifiers
         .push(tor_server::creature_authoring::Modifier {
+            cancellable: false,
             scope: tor_server::creature_authoring::Scope::Always,
             op: tor_server::creature_authoring::Op::Add {
                 stat: tor_server::creature_authoring::Stat::ResourceMax {

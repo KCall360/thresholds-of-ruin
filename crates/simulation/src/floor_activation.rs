@@ -1079,9 +1079,11 @@ impl Game {
         if self.region_transition_pending() || self.host_region_continuation {
             return Err(invalid());
         }
+        self.light_settled_witness = self.light_optical_witness();
         self.host_region_continuation = true;
         let result = self.act(id, action);
         self.host_region_continuation = false;
+        self.light_settled_witness = None;
         result.map(|value| self.candidate_step(value))
     }
     pub fn execute_next_intention_for_host(
@@ -1090,9 +1092,11 @@ impl Game {
         if self.region_transition_pending() || self.host_region_continuation {
             return None;
         }
+        self.light_settled_witness = self.light_optical_witness();
         self.host_region_continuation = true;
         let result = self.execute_next_intention();
         self.host_region_continuation = false;
+        self.light_settled_witness = None;
         result.map(|value| self.candidate_step(value))
     }
     pub fn cancel_intention_with_step_for_host(
@@ -1104,9 +1108,11 @@ impl Game {
         if self.region_transition_pending() || self.host_region_continuation {
             return Err(invalid());
         }
+        self.light_settled_witness = self.light_optical_witness();
         self.host_region_continuation = true;
         let result = self.cancel_intention_with_step(actor, id, step);
         self.host_region_continuation = false;
+        self.light_settled_witness = None;
         result.map(|value| self.candidate_step(value))
     }
     pub fn teleport_for_host(
@@ -1117,9 +1123,11 @@ impl Game {
         if self.region_transition_pending() || self.host_region_continuation {
             return Err(invalid());
         }
+        self.light_settled_witness = self.light_optical_witness();
         self.host_region_continuation = true;
         let result = self.teleport(actor, at);
         self.host_region_continuation = false;
+        self.light_settled_witness = None;
         result.map(|value| self.candidate_step(value))
     }
     pub(crate) fn activation_item_births_at(&self, tick: u64) -> BTreeSet<ItemId> {
@@ -1503,6 +1511,7 @@ impl Game {
         self.population_entry_pending()
             || self.preparation_region_boundary.is_some()
             || self.trap_region_boundary.is_some()
+            || self.light_region_boundary.is_some()
     }
     /// The host calls this only after successful no-time-advance horizon
     /// settlement. A subsequent entry may request another boundary; it is still
@@ -1518,16 +1527,24 @@ impl Game {
         {
             return Err(invalid());
         }
+        if self.light_region_boundary.as_ref().is_some_and(|boundary| {
+            boundary.tick != self.tick || !self.light_missing_regions(boundary).is_empty()
+        }) {
+            return Err(invalid());
+        }
+        let light = self.light_region_boundary.take();
         let preparation = self.preparation_region_boundary.take();
         let pending = self.population_entry_boundary.take();
         if pending.is_some_and(|tick| tick != self.tick) {
             return Err(invalid());
         }
         if pending.is_some()
+            || light.is_some()
             || preparation.is_some()
             || self.trap_region_boundary.is_some()
             || !report.frozen.is_empty()
         {
+            self.light_settled_witness = self.light_optical_witness();
             self.host_region_continuation = true;
             let result = self.resume_trap_region_boundary().and_then(|_| {
                 if self.trap_region_boundary.is_some() {
@@ -1537,6 +1554,7 @@ impl Game {
                     .and_then(|()| self.advance_to_next_decision())
             });
             self.host_region_continuation = false;
+            self.light_settled_witness = None;
             result?;
         }
         Ok(())

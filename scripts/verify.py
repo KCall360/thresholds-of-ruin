@@ -2,15 +2,18 @@
 
 Tiers (see docs/development/testing.md#running-the-checks):
 
-  quick  at stable checkpoints: formatting, clippy and debug tests for affected
-         packages, the Python tool tests, and the process tests the change maps to
-  push   before pushing: broad local debug checks; affected release checks as needed
+  quick  at stable checkpoints: formatting and clippy for affected packages, debug
+         tests for directly changed packages, the Python tool tests, and the
+         process tests the change maps to, minus extended-cost ones
+  push   before pushing: quick plus workspace clippy, API docs, the isolated
+         simulation fixture gate and debug tests for every affected package
   full   exhaustive checks on one platform, debug and release; also covers
          the push gate for unchanged inputs, toolchain and test configuration
 
 Affected packages include every workspace package that depends on a changed one.
 Anything the mapping doesn't recognize selects everything, so a tier can run more
-than it needs but never less. CI independently selects reviewed PR/main contracts
+than it needs but never less. quick and push defer extended-cost process tests,
+listing each one; full and CI still run them. CI independently selects reviewed PR/main contracts
 or exhaustive coverage; both platform aggregates remain required before merging.
 Exhaustive CI partitions each debug/release profile into Rust and Python/native
 checks. One partition is never a full or merge gate. Scheduled, manual and release
@@ -35,6 +38,7 @@ import time
 
 import graphical_waiver
 import ci_observation
+import ci_test_contracts
 import ci_example_prerequisites
 import parallel_tests
 from ci_scope import RUST_DOCUMENTATION_INPUTS
@@ -86,6 +90,18 @@ HARNESS = "process_harness"
 SMOKE_PROCESS_TESTS = ("test_adventure_process", "test_ascii_process", "test_checkpoint_process",
                        "test_doors_process", "test_headless_process", "test_intention_process",
                        "test_scenario_packages_process")
+# Extended-cost process tests that CI's reviewed EXTENDED set does not list, each
+# measured at two minutes or more in a local debug quick run on 2026-10-26.
+# quick and push defer these and EXTENDED; full and CI run them as before.
+LOCAL_EXTENDED = (
+    "test_fall_credit_process.FallCreditProcesses.test_immediate_fatal_fall_owner_survives_journal_only_and_checkpoint_tail",
+    "test_performance_process.PerformanceProcesses.test_rogue_benchmark_preserves_floor_work_and_residency_bounds",
+    "test_performance_process.PerformanceProcesses.test_small_maintained_producers_emit_complete_valid_reports",
+    "test_performance_process.PerformanceProcesses.test_streaming_benchmark_emits_valid_nested_acquisition_profiles",
+    "test_rogue_playable_process.RoguePlayableProcesses.test_ordinary_first_floor_foes_earn_second_hd_and_ground_supplies_are_finite",
+    "test_rogue_wraith_process.RogueWraithProcesses.test_autonomous_wraith_paid_latest_row_loss_survives_source_free_restart",
+    "test_wandering_population_process.WanderingPopulationProcesses.test_scheduler_restart_cap_and_paid_created_births_then_blocked_consumption",
+)
 CLIENT_BINARIES = {
     "tor-client-ascii": ("tor-client-ascii", ".window(", ".ascii_frame(", ".key(", ".native_keys("),
     "tor-client-text": ("tor-client-text", ".text_client(", ".adventure("),
@@ -182,9 +198,12 @@ def process_tests(scripts_dir):
     return sorted(p.stem for p in scripts_dir.glob("test_*process.py"))
 
 
-def select_process_tests(paths, affected, everything, scripts_dir, smoke=SMOKE_PROCESS_TESTS):
-    """Process tests for the quick tier: the ones a change touches, plus the smoke set
-    whenever the change can reach every test. Push and full always run them all."""
+def select_process_tests(paths, affected, everything, scripts_dir, smoke=SMOKE_PROCESS_TESTS, direct=None):
+    """Process tests for quick and push: the ones a change touches, those that can
+    launch a directly changed client, plus the smoke set whenever the change can
+    reach every test. A client reached only through reverse dependencies falls under
+    that broad rule. Without `direct`, every affected client counts as changed.
+    Full runs every process test."""
     all_tests = process_tests(scripts_dir)
     runtime = affected - set(CLIENT_BINARIES) - {"tor-test-support"}
     # Data dependencies are not represented in Python imports. Unknown data
@@ -202,16 +221,25 @@ def select_process_tests(paths, affected, everything, scripts_dir, smoke=SMOKE_P
         return texts[module]
 
     changed_modules = {Path(p).stem for p in paths if p.startswith("scripts/") and p.endswith(".py")}
+    clients = (affected if direct is None else set(direct)) & set(CLIENT_BINARIES)
     selected = set()
     for test, closure in closures.items():
         if closure & changed_modules:
             selected.add(test)
-        for package in affected & set(CLIENT_BINARIES):
+        for package in clients:
             if any(marker in text(m) for m in closure - {HARNESS} for marker in CLIENT_BINARIES[package]):
                 selected.add(test)
     if broad:
         selected.update(set(smoke) & set(all_tests))
     return sorted(selected)
+
+
+def deferred_process_tests(process, paths):
+    """Extended-cost tests of the selected modules that quick and push leave to full
+    and CI. A test module the change edits keeps all of its tests."""
+    keep = set(process) - set(changed_test_modules(paths))
+    return sorted(test for test in {*ci_test_contracts.EXTENDED, *LOCAL_EXTENDED}
+                  if test.split(".")[0] in keep)
 
 
 UNTESTED_WARNING = (
@@ -352,8 +380,13 @@ def ci_binary_steps(steps, artifact, profile, source_sha):
     return result
 
 
-def plan(tier, affected, process, xvfb=False, ci_profile=None, ci_partition=None, workers=1, failfast=False):
-    """Ordered steps; CI may partition only an explicitly selected full profile."""
+def plan(tier, affected, process, xvfb=False, ci_profile=None, ci_partition=None, workers=1, failfast=False,
+         deferred=(), tested=None):
+    """Ordered steps; CI may partition only an explicitly selected full profile.
+
+    quick runs Rust tests for the `tested` packages (default: every affected one)
+    and clippy for every affected package. quick and push leave the `deferred`
+    process tests out of their run. Full ignores both arguments."""
     if ci_profile is not None and (tier != "full" or ci_profile not in ("debug", "release")):
         raise ValueError("CI profile partitions require full and a debug/release profile")
     if ci_partition is not None and (tier != "full" or ci_profile is None or ci_partition not in CI_PARTITIONS):
@@ -390,12 +423,14 @@ def plan(tier, affected, process, xvfb=False, ci_profile=None, ci_partition=None
         steps.append(("architecture", [sys.executable, "scripts/check_architecture.py"], {}))
         steps.append(build_tools)
         steps.append(("python-tools", [*unittest, *options, *tool_modules], {"_cwd": "scripts", **compiler_environment}))
-        if "tor-simulation" in affected:
+        if tier == "push" and "tor-simulation" in affected:
             steps.append(isolated)
-        if affected:
-            steps.append(("rust-debug", rust_test_command(affected), {}))
+        rust = affected if tier == "push" or tested is None else set(tested) & affected
+        if rust:
+            steps.append(("rust-debug", rust_test_command(rust), {}))
         if process:
-            steps.append(("process-debug", [*unittest, *options, "-v", *process], {"_cwd": "scripts"}))
+            excluded = [arg for test in sorted(deferred) for arg in ("--exclude", test)]
+            steps.append(("process-debug", [*unittest, *options, *excluded, "-v", *process], {"_cwd": "scripts"}))
         if tier == "push":
             steps.append(rustdoc)
         return steps
@@ -497,10 +532,13 @@ def graphical_waiver_evidence(path, expected):
     return sorted(actual)
 
 
-def process_summary(tier, selected, available):
-    """quick and push select process tests; full runs every one."""
+def process_summary(tier, selected, available, deferred=()):
+    """quick and push select process tests and defer extended-cost ones; full runs every one."""
     if tier in ("quick", "push"):
-        return f"process tests: {len(selected)} of {len(available)} (touched and smoke)"
+        summary = f"process tests: {len(selected)} of {len(available)} (touched, changed clients and smoke)"
+        if deferred:
+            summary += f"; {len(deferred)} extended-cost tests deferred to full and CI"
+        return summary
     return f"process tests: all {len(available)}"
 
 
@@ -720,6 +758,8 @@ def main(argv=None):
     parser.add_argument("--fail-fast", action="store_true",
                         help="Stop starting Python tests after the first failure (local feedback; never a gate result)")
     parser.add_argument("--allow-concurrent", action="store_true", help="Start even though other cargo/rustc processes are running")
+    parser.add_argument("--with-extended", action="store_true",
+                        help="quick/push: also run the extended-cost process tests they defer to full and CI")
     parser.add_argument("--dry-run", action="store_true", help="Print the selection and steps without running them")
     parser.add_argument("--waive-local-mouse", action="store_true",
                         help="Record only the native travel mouse test failure as locally waived; forbidden in CI")
@@ -771,7 +811,10 @@ def main(argv=None):
         direct, everything, unknown = classify(paths, dirs)
     untested = missing_tests(paths, diff)
     affected = set(dirs) if everything else dependents(direct, deps)
-    process = select_process_tests(paths, affected, everything, SCRIPTS)
+    process = select_process_tests(paths, affected, everything, SCRIPTS, direct=direct)
+    deferred = [] if args.with_extended or args.tier == "full" else deferred_process_tests(process, paths)
+    # quick tests directly changed packages; push tests every affected one.
+    tested = affected if everything else direct & affected
     free = free_memory_gb()
     jobs = args.jobs or jobs_for_memory(free, os.cpu_count())
     if args.test_workers is not None and args.test_workers < 1:
@@ -781,7 +824,7 @@ def main(argv=None):
                  xvfb=args.ci_partition != "rust" and sys.platform.startswith("linux")
                       and not os.environ.get("DISPLAY") and graphical_manifest is None,
                  ci_profile=args.ci_profile, ci_partition=args.ci_partition,
-                 workers=workers, failfast=args.fail_fast)
+                 workers=workers, failfast=args.fail_fast, deferred=deferred, tested=tested)
     if args.ci_python_shard is not None:
         steps = [(name, [*command[:2], "--ci-python-shard", str(args.ci_python_shard), *command[2:]],
                           {**env, "TOR_TEST_PROFILE": "debug"} if name == "python-debug" else env)
@@ -802,7 +845,9 @@ def main(argv=None):
     if unknown:
         print("unmapped paths select everything: " + ", ".join(unknown[:5]) + (" ..." if len(unknown) > 5 else ""))
     print("packages: " + (", ".join(sorted(affected)) or "none"))
-    print(process_summary(args.tier, process, process_tests(SCRIPTS)))
+    if args.tier == "quick" and affected - tested:
+        print("clippy only (tested by push): " + ", ".join(sorted(affected - tested)))
+    print(process_summary(args.tier, process, process_tests(SCRIPTS), deferred))
     if untested:
         print(UNTESTED_WARNING)
     if args.dry_run:
@@ -858,6 +903,11 @@ def main(argv=None):
         lines.append(f"recorded {len(recorded)} test durations in scripts/test_durations.json")
     if untested:
         lines.append(UNTESTED_WARNING)
+    if args.tier == "quick" and affected - tested:
+        lines.append("clippy only (tested by push): " + ", ".join(sorted(affected - tested)))
+    if deferred:
+        lines.append(f"deferred {len(deferred)} extended-cost process tests to full and CI "
+                     "(--with-extended runs them): " + ", ".join(deferred))
     if args.ci_profile:
         partition = f"{args.ci_profile}/{args.ci_partition}" if args.ci_partition else args.ci_profile
         lines.append(f"CI {partition} partition only; all Rust and Python/native partitions of both profiles on both platforms are required. This partition is not a full run or a merge gate.")
@@ -881,6 +931,7 @@ def main(argv=None):
                 "receipt_completeness": receipt_completeness(steps, results, logs, jobs),
                 "gate_passed": not failed, "clean_passed": not failed and not waived and not not_run,
                 "waived_steps": waived, "not_run_steps": not_run, "total_seconds": total,
+                "deferred_process_tests": deferred,
                 "graphical_waiver": graphical_manifest,
                 "steps": [{**result, "log": str(result["log"].relative_to(ROOT)) if result["log"] else None,
                            "status": "waived" if result["step"] in waived else "not_run" if result["code"] is None

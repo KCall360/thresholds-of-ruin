@@ -142,6 +142,7 @@ fn progression_requirements_catalog_subtype_and_species_flag_are_distinct() {
             .insert(SubtypeId::new("goblinoid").unwrap());
         if species_flag {
             species.modifiers.push(Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Flag {
                     flag: FlagId::new("magical").unwrap(),

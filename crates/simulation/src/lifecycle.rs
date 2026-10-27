@@ -12,23 +12,23 @@ thread_local! {
     static TOKEN_PLAN_COMPARISONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-/// One strike has at most a source and a target; riders never retarget.
-/// This is transient publication state, never part of a frozen or saved plan.
+/// Transient once-per-publication damage activity, including area recipients.
+/// Entries are actual owned actors, never retained in a frozen or saved plan.
 #[derive(Default)]
 pub(crate) struct DamageActivityGuard {
     actors: [Option<ActorId>; 2],
+    overflow: std::collections::BTreeSet<ActorId>,
 }
 impl DamageActivityGuard {
     fn first(&mut self, actor: ActorId) -> bool {
         if self.actors.contains(&Some(actor)) {
             return false;
         }
-        let Some(slot) = self.actors.iter_mut().find(|slot| slot.is_none()) else {
-            // A bounded resolution unit never introduces a third participant.
-            return false;
-        };
-        *slot = Some(actor);
-        true
+        if let Some(slot) = self.actors.iter_mut().find(|slot| slot.is_none()) {
+            *slot = Some(actor);
+            return true;
+        }
+        self.overflow.insert(actor)
     }
 }
 
@@ -36,11 +36,15 @@ impl DamageActivityGuard {
 /// fields are private so only successful lifecycle publication can create it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct PublishedResolution {
+    chart_completion: Option<crate::detection_lifecycle::CompletionReceipt>,
     created_hold: Option<crate::linked_hold::HoldId>,
     event: usize,
     role: PublishedRole,
 }
 impl PublishedResolution {
+    pub(crate) fn chart_completion(self) -> Option<crate::detection_lifecycle::CompletionReceipt> {
+        self.chart_completion
+    }
     pub(crate) fn created_hold(self) -> Option<crate::linked_hold::HoldId> {
         self.created_hold
     }
@@ -70,24 +74,29 @@ pub(crate) enum ResolutionPublication {
     },
 }
 
-pub(crate) enum ApplicationOutcome {
-    Resolved(Outcome, Option<u16>),
-    Actor(ActorOutcome),
-    Item(ItemOutcome),
+/// Static lifecycle dispatch without a large temporary wrapper enum or heap
+/// allocation. Only lifecycle-owned outcome implementations publish state.
+pub(crate) trait ApplicationOutcome {
+    fn apply(self, game: &mut Game) -> Result<(), GameError>;
 }
-impl From<Outcome> for ApplicationOutcome {
-    fn from(value: Outcome) -> Self {
-        Self::Resolved(value, None)
+impl ApplicationOutcome for Outcome {
+    fn apply(self, game: &mut Game) -> Result<(), GameError> {
+        game.apply_resolved_outcome(
+            self,
+            ResolutionPublication::Standalone,
+            &mut DamageActivityGuard::default(),
+        )?;
+        Ok(())
     }
 }
-impl From<ActorOutcome> for ApplicationOutcome {
-    fn from(value: ActorOutcome) -> Self {
-        Self::Actor(value)
+impl ApplicationOutcome for ActorOutcome {
+    fn apply(self, game: &mut Game) -> Result<(), GameError> {
+        game.commit_actor_outcome(self)
     }
 }
-impl From<ItemOutcome> for ApplicationOutcome {
-    fn from(value: ItemOutcome) -> Self {
-        Self::Item(value)
+impl ApplicationOutcome for ItemOutcome {
+    fn apply(self, game: &mut Game) -> Result<(), GameError> {
+        game.apply_item_outcome(self)
     }
 }
 
@@ -97,6 +106,8 @@ pub(crate) struct ActorOutcome {
     pub(crate) entry_cause: crate::floor_activation::EntryCause,
     pub(crate) spent_items: Option<crate::supplies::PreparationLineage>,
     pub(crate) nutrition_empty_depletion: bool,
+    /// Item-owned changes staged with an atomic body/equipment candidate.
+    pub(crate) extinguish_lights: std::collections::BTreeSet<ItemId>,
     pub(crate) survival: crate::survival_diagnostics::SurvivalFlows,
     events: Vec<CombatEvent>,
     disclosure_origin: Option<crate::event_history::EventOrigin>,
@@ -202,9 +213,16 @@ pub(crate) struct ItemOutcome {
     pub change: ItemChange,
 }
 pub(crate) enum ItemChange {
+    PortableLight {
+        item: crate::ItemId,
+        lit: bool,
+        actor: ActorOutcome,
+    },
     CurseBlocked(ActorOutcome),
     Equipment(ActorOutcome),
-    Consumed { actor: ActorOutcome },
+    Consumed {
+        actor: ActorOutcome,
+    },
 }
 
 /// Valid only inside the caller's uninterrupted transaction or discarded preview.
@@ -255,6 +273,7 @@ impl Game {
             state,
             spent_items: None,
             nutrition_empty_depletion: false,
+            extinguish_lights: Default::default(),
             survival: Default::default(),
             events: vec![],
             disclosure_origin: None,
@@ -290,6 +309,18 @@ impl Game {
         let clock = self.actor_clock(id);
         let elapsed = clock.saturating_sub(state.active_since);
         if elapsed > 0 {
+            // Only the old generation owns this elapsed interval. Conditions
+            // advance below; final candidate reconciliation happens afterwards.
+            if let Some((_, remaining)) = crate::hallucination_clock::hallucination_instance(state)
+            {
+                crate::hallucination_clock::settle_before_expiry(
+                    &mut state.hallucination,
+                    remaining,
+                    elapsed,
+                )?;
+            } else {
+                state.hallucination = None;
+            }
             if state.alive() {
                 state.periodic_relocations.advance(elapsed)?;
             }
@@ -455,39 +486,36 @@ impl Game {
 
     pub(crate) fn apply_outcome(
         &mut self,
-        outcome: impl Into<ApplicationOutcome>,
+        outcome: impl ApplicationOutcome,
     ) -> Result<(), GameError> {
-        match outcome.into() {
-            ApplicationOutcome::Resolved(outcome, strike) => {
-                let site = strike.map_or(ResolutionPublication::Standalone, |strike| {
-                    ResolutionPublication::Primary { strike }
-                });
-                self.apply_resolved_outcome(outcome, site, &mut DamageActivityGuard::default())?;
-            }
-            ApplicationOutcome::Actor(outcome) => self.commit_actor_outcome(outcome)?,
-            ApplicationOutcome::Item(outcome) => {
-                self.push_event(
-                    if matches!(&outcome.change, ItemChange::CurseBlocked(_)) {
-                        CombatEvent::ItemCurseBlocked {
-                            actor: outcome.actor,
-                            item: outcome.work.item().ok_or(GameError::ItemUnavailable)?,
-                            intention: outcome.intention,
-                        }
-                    } else {
-                        CombatEvent::ItemCompleted {
-                            actor: outcome.actor,
-                            work: outcome.work,
-                            intention: outcome.intention,
-                        }
-                    },
-                    None,
-                )?;
-                match outcome.change {
-                    ItemChange::CurseBlocked(actor) | ItemChange::Equipment(actor) => {
-                        self.commit_actor_outcome(actor)?
-                    }
-                    ItemChange::Consumed { actor } => self.commit_actor_outcome(actor)?,
+        outcome.apply(self)
+    }
+
+    fn apply_item_outcome(&mut self, outcome: ItemOutcome) -> Result<(), GameError> {
+        self.push_event(
+            if matches!(&outcome.change, ItemChange::CurseBlocked(_)) {
+                CombatEvent::ItemCurseBlocked {
+                    actor: outcome.actor,
+                    item: outcome.work.item().ok_or(GameError::ItemUnavailable)?,
+                    intention: outcome.intention,
                 }
+            } else {
+                CombatEvent::ItemCompleted {
+                    actor: outcome.actor,
+                    work: outcome.work,
+                    intention: outcome.intention,
+                }
+            },
+            None,
+        )?;
+        match outcome.change {
+            ItemChange::CurseBlocked(actor) | ItemChange::Equipment(actor) => {
+                self.commit_actor_outcome(actor)?
+            }
+            ItemChange::Consumed { actor } => self.commit_actor_outcome(actor)?,
+            ItemChange::PortableLight { item, lit, actor } => {
+                self.set_item_light(item, lit)?;
+                self.commit_actor_outcome(actor)?;
             }
         }
         Ok(())
@@ -607,6 +635,76 @@ impl Game {
             self.reveal_guise(outcome.target)?;
         }
 
+        // Detection is a sole self operation. Commit only its real actor
+        // mutation on this outer unpublished transaction candidate before the
+        // producer performs its one complete census/projection/delivery pass.
+        let mut chart_completion = None;
+        if let Some(kind) = outcome
+            .effects
+            .iter()
+            .find_map(crate::detection_lifecycle::resolved_kind)
+        {
+            if !crate::detection_lifecycle::resolved_shape_valid(&outcome)
+                || matches!(role, PublishedRole::Rider { .. })
+            {
+                return Err(GameError::Rule(RuleError::InvalidPlan));
+            }
+            let mut condition_changed = false;
+            if let ResolvedEffect::DetectMonsters { id, duration, .. } = &outcome.effects[0] {
+                if !crate::detection_lifecycle::valid_resolved_duration(*duration)
+                    || !self
+                        .content
+                        .rules()
+                        .condition(id)
+                        .is_some_and(|definition| definition.detecting_monsters)
+                {
+                    return Err(GameError::Rule(RuleError::InvalidPlan));
+                }
+                let mut activation = self.settled_actor_outcome(outcome.actor)?;
+                if !activation.state.alive() {
+                    return Err(GameError::UnknownActor);
+                }
+                let combat = activation
+                    .state
+                    .combat
+                    .as_mut()
+                    .ok_or(GameError::UnknownActor)?;
+                let before = combat.creature().conditions().clone();
+                combat.apply_condition(id, outcome.actor, *duration, None)?;
+                condition_changed = &before != combat.creature().conditions();
+                self.commit_actor_outcome(activation)?;
+            }
+            let completed = self.complete_detection_chart(outcome.actor, kind)?;
+            let receipt = crate::detection_lifecycle::CompletionReceipt::from_admitted(
+                kind,
+                &completed.candidate,
+            )?;
+            debug_assert_eq!(receipt.identifies(), completed.admitted_nonempty());
+            let changed = condition_changed || completed.history_changed;
+            match &mut outcome.effects[0] {
+                ResolvedEffect::DetectMonsters { changed: value, .. }
+                | ResolvedEffect::DetectFood { changed: value }
+                | ResolvedEffect::MapTopology { changed: value }
+                | ResolvedEffect::DetectMagic { changed: value } => *value = changed,
+                _ => unreachable!("closed detection kind"),
+            }
+            chart_completion = Some(receipt);
+        }
+
+        if outcome
+            .effects
+            .iter()
+            .any(|effect| matches!(effect, ResolvedEffect::DrainLife { .. }))
+        {
+            if outcome.actor != outcome.target || outcome.effects.len() != 1 {
+                return Err(GameError::Rule(RuleError::InvalidPlan));
+            }
+            // Snapshot/distribute before taking the outer actor candidate: nested
+            // ordinary damage/death/XP publication must never be overwritten.
+            let changed = self.apply_drain_life(&outcome, activity)?;
+            outcome.effects[0] = ResolvedEffect::DrainLife { changed };
+        }
+
         let strike = match role {
             PublishedRole::Primary { strike } => Some(strike),
             PublishedRole::Standalone | PublishedRole::Rider { .. } => None,
@@ -647,6 +745,22 @@ impl Game {
         let mut created_hold = None;
         for index in 0..outcome.effects.len() {
             let effect = &outcome.effects[index];
+            if matches!(effect, ResolvedEffect::DrainLife { .. })
+                || crate::detection_lifecycle::resolved_kind(effect).is_some()
+            {
+                outcome.effects[applied_count] = effect.clone();
+                applied_count += 1;
+                continue;
+            }
+            if matches!(effect, ResolvedEffect::RoomLight { .. }) {
+                if recipient_id != outcome.actor || outcome.actor != outcome.target {
+                    return Err(GameError::Rule(RuleError::InvalidPlan));
+                }
+                let changed = self.apply_room_light(placement.location)?;
+                outcome.effects[applied_count] = ResolvedEffect::RoomLight { changed };
+                applied_count += 1;
+                continue;
+            }
             if let ResolvedEffect::SearchAdjacentGuises { roll } = effect {
                 if recipient_id != outcome.actor || outcome.actor != outcome.target {
                     return Err(GameError::Rule(RuleError::InvalidPlan));
@@ -711,6 +825,7 @@ impl Game {
                 effect,
                 ResolvedEffect::ApplyCondition { .. }
                     | ResolvedEffect::ApplyPersistentCondition { .. }
+                    | ResolvedEffect::HasteDose { .. }
             ) && !self.actors.contains_key(&outcome.actor)
                 && !self.detached_actor(outcome.actor)
             {
@@ -749,21 +864,52 @@ impl Game {
                 .combat
                 .as_ref()
                 .map(|combat| combat.creature().nutrition());
-            let Some(applied) = transition
-                .state
-                .combat
-                .as_mut()
-                .ok_or(GameError::Rule(RuleError::InvalidDefinition))?
-                .apply_effect(
-                    outcome.actor,
-                    effect,
-                    &mut transition.state.public_plan,
-                    &mut placement,
-                    context,
-                )?
-            else {
+            let cancellation_return = if matches!(effect, ResolvedEffect::CancelSpecials { .. }) {
+                transition.state.location = placement.location;
+                transition.state.orientation = placement.orientation;
+                self.stage_cancellation_return(&mut transition)?
+            } else {
+                None
+            };
+            let applied = if let Some(changed) = cancellation_return {
+                Some(ResolvedEffect::CancelSpecials { changed })
+            } else {
+                transition
+                    .state
+                    .combat
+                    .as_mut()
+                    .ok_or(GameError::Rule(RuleError::InvalidDefinition))?
+                    .apply_effect(
+                        outcome.actor,
+                        effect,
+                        &mut transition.state.public_plan,
+                        &mut placement,
+                        context,
+                    )?
+            };
+            let Some(mut applied) = applied else {
                 continue;
             };
+            if let ResolvedEffect::BalefulPolymorph { form, changed } = &mut applied {
+                *changed = false;
+                if let Some(form) = form {
+                    let package = self.content.polymorph_body_package(form).cloned().ok_or(
+                        GameError::Build(crate::creatures::BuildError::InvalidDefinition),
+                    )?;
+                    transition.state.location = placement.location;
+                    transition.state.orientation = placement.orientation;
+                    *changed = self.stage_body_transition(&mut transition, package)?
+                        == crate::BodyTransitionResult::Changed;
+                }
+            }
+            if let ResolvedEffect::CancelSpecials { changed } = &mut applied {
+                let before = transition.state.guise.clone();
+                transition.state.guise.reveal();
+                *changed |= transition.state.guise != before;
+                *changed |= self.stage_polymorph_return(&mut transition)?;
+                // Normal commit reconciles exactly those reciprocal linked
+                // holds whose explicitly tagged sustaining flag disappeared.
+            }
             if self.survival_diagnostics.is_some() {
                 transition.survival.effect(&applied, nutrition_before);
             }
@@ -817,7 +963,9 @@ impl Game {
                     }),
                 });
             }
-            if matches!(applied, ResolvedEffect::Damage { amount } if amount > 0) {
+            if matches!(applied, ResolvedEffect::Damage { amount } if amount > 0)
+                || matches!(applied, ResolvedEffect::DirectHealthLoss { amount } if amount > 0)
+            {
                 // The policy at the first actual damage wins; a later
                 // effect cannot retroactively preserve earlier progress.
                 if !damaged && activity.first(recipient_id) {
@@ -889,6 +1037,7 @@ impl Game {
             },
         );
         let receipt = PublishedResolution {
+            chart_completion,
             created_hold,
             event: self.event_log.len(),
             role,
@@ -951,6 +1100,7 @@ impl Game {
         }
         let role = self.publication_role(&outcome, ResolutionPublication::Primary { strike })?;
         let receipt = PublishedResolution {
+            chart_completion: None,
             created_hold: None,
             event: self.event_log.len(),
             role,
@@ -983,7 +1133,10 @@ impl Game {
         Ok(receipt.event)
     }
 
-    fn published_resolution(&self, receipt: PublishedResolution) -> Result<&Outcome, GameError> {
+    pub(crate) fn published_resolution(
+        &self,
+        receipt: PublishedResolution,
+    ) -> Result<&Outcome, GameError> {
         let Some(CombatEvent::Resolved {
             outcome, strike, ..
         }) = self.event_log.get(receipt.event)
@@ -999,7 +1152,12 @@ impl Game {
                 strike.is_none() && outcome.ability.is_none() && !outcome.target_rider_participated
             }
         };
-        if valid_role && outcome.valid() {
+        if valid_role
+            && outcome.valid()
+            && receipt
+                .chart_completion
+                .is_none_or(|chart| chart.matches(outcome))
+        {
             Ok(outcome)
         } else {
             Err(GameError::Rule(RuleError::InvalidPlan))
@@ -1129,6 +1287,9 @@ impl Game {
             outcome.state.behavior.engagement =
                 outcome.state.engagement_at(self.actor_clock(outcome.id));
         }
+        if !outcome.state.alive() {
+            self.set_return_pending(&mut outcome, false)?;
+        }
         let died = before.alive() && !outcome.state.alive();
         if let Some(horizon) = outcome
             .state
@@ -1238,6 +1399,20 @@ impl Game {
             .awareness
             .rephase(outcome.state.perception().aggravation);
         self.reconcile_relocation_sources(&mut outcome)?;
+        let generation = crate::hallucination_clock::hallucination_instance(&outcome.state)
+            .map(|(generation, _)| generation);
+        crate::hallucination_clock::reconcile(
+            &mut outcome.state.hallucination,
+            generation,
+            outcome.state.turn_ticks,
+        );
+        if let Some(interval) = crate::hallucination_clock::next_in(&outcome.state) {
+            outcome
+                .state
+                .active_since
+                .checked_add(interval)
+                .ok_or(GameError::Schedule(crate::ScheduleError::TimeExhausted))?;
+        }
         Ok(PreparedActorOutcome {
             outcome,
             death,
@@ -1255,9 +1430,11 @@ impl Game {
         } = prepared;
         let id = outcome.id;
         let from = self.actors[&id].location;
+        let from_orientation = self.actors[&id].orientation;
         let to = outcome.state.location;
         let ground_contact_changed = from != to
             || self.actors[&id].orientation != outcome.state.orientation
+            || self.actors[&id].body != outcome.state.body
             || self.actors[&id].locomotion().hovers() != outcome.state.locomotion().hovers();
         let entry_cause = outcome.entry_cause;
         // Capture private prior knowledge before publishing the destination:
@@ -1353,6 +1530,10 @@ impl Game {
         }
         self.publish_relocation_sources(&outcome)?;
         self.actors.insert(id, outcome.state);
+        self.relocate_body_return_authority(id, from, from_orientation);
+        for item in outcome.extinguish_lights {
+            self.set_item_light(item, false)?;
+        }
         self.reconcile_holds_for_actor(id)?;
         self.reconcile_spatial_condition_anchors(id)?;
         self.suspend_condition_denied_continuation(id);
@@ -1437,7 +1618,7 @@ impl Game {
             self.accepted_region_entry(id, from, to, entry_cause)?;
         }
         if ground_contact_changed {
-            if self.actor_frozen(id) {
+            if self.actor_frozen(id) && !self.body_return_continuation_authorized(id) {
                 // Trusted relocation can move a frozen actor. Old contact
                 // identity must not follow it, and an active destination must
                 // thaw before its new contact is evaluated.
@@ -1449,6 +1630,8 @@ impl Game {
             }
             self.reconcile_trap_contacts_after_entry(id, None, avoidable_traps)?;
         }
+        self.finish_pending_body_return(id)?;
+        self.refresh_light_boundary();
         Ok(())
     }
 
@@ -1483,11 +1666,12 @@ impl Game {
         actor.motion.active_fall = None;
         let body = Item {
             relocation_elapsed: None,
+            fuel: None,
             condition: crate::armor::ItemCondition::default(),
             charges: None,
             corpse: Some(crate::CorpseAppearance {
                 actor: outcome.id,
-                asset: actor.asset.clone(),
+                asset: actor.current_body_asset(),
             }),
             holds: vec![],
             spec: tor_world::Shared::new(spec),
@@ -1532,7 +1716,7 @@ impl Game {
         );
         let mut checked = owner.earned_progress().clone();
         checked
-            .award(amount, owner.build().ledger().total_hd(), policy)
+            .award(amount, owner.build().personal_hd_count(), policy)
             .map_err(|error| {
                 GameError::Creature(crate::creatures::CreatureStateError::Growth(error))
             })?;
@@ -1571,6 +1755,8 @@ mod tests {
         ability.cost = None;
         document.abilities.push(ability.clone());
         document.conditions.push(crate::rules::ConditionDef {
+            detecting_monsters: false,
+            hallucinating: false,
             id: crate::content_ids::ConditionId::new("borrowed_grant").unwrap(),
             family: crate::content_ids::ConditionFamilyId::new("borrowed_grant").unwrap(),
             lifecycle: crate::rules::ConditionLifecycle::Timed,
@@ -1579,6 +1765,7 @@ mod tests {
             preparation: tor_simulation::rules::ConditionPreparation::Preserve,
             name: "Borrowed grant".into(),
             modifiers: vec![Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::GrantAbility {
                     ability: ability.id.clone(),
@@ -1592,12 +1779,14 @@ mod tests {
         let mut template =
             crate::creatures::Template::new(TemplateId::new("borrowed_grant").unwrap(), 0);
         template.modifiers.push(Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::GrantAbility {
                 ability: ability.id,
             },
         });
         template.modifiers.push(Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::GrantAbility {
                 ability: AbilityId::new("fixture_paid_melee").unwrap(),
@@ -1650,6 +1839,111 @@ mod tests {
             .unwrap();
         }
         game
+    }
+
+    #[test]
+    fn equipment_refresh_validates_candidate_anatomy_without_publishing_it() {
+        use crate::{AnatomySpec, EquipmentSlotId, EquipmentSpec, ItemSpec};
+        use std::collections::BTreeMap;
+        use tor_world::Shared;
+
+        let content = game().content().clone();
+        let mut game = Game::two_room_in_stone(42, content);
+        let at = tor_world::Location {
+            region: tor_world::RegionId(1),
+            position: tor_world::Position { x: 1, y: 1, z: 0 },
+        };
+        let actor = game
+            .spawn_actor(at, std::num::NonZeroU64::new(100).unwrap())
+            .unwrap();
+        let anatomy = AnatomySpec::from_rules(game.content().rules());
+        game.configure_anatomy(actor, anatomy.clone()).unwrap();
+        let ring = crate::EquipmentSlot::new("ring").unwrap();
+        let existing_socket =
+            EquipmentSlotId(anatomy.slots.iter().position(|slot| *slot == ring).unwrap() as u16);
+        let mut spec = ItemSpec::ordinary("candidate ring".into());
+        spec.class = crate::ItemClass::Ring;
+        spec.equipment = Some(EquipmentSpec {
+            periodic_relocation: None,
+            slot: ring.clone(),
+            armor: None,
+            attack: None,
+            weapon_profile: None,
+            modifiers: vec![],
+            potency_modifiers: vec![],
+        });
+        let item = game
+            .place_item_stack(game.next_item_id, at, Some(actor), 1, spec)
+            .unwrap();
+        let before = game.clone();
+        let mut unchanged = game.settled_actor_outcome(actor).unwrap();
+        game.refresh_equipment_outcome(&mut unchanged, BTreeMap::from([(existing_socket, item)]))
+            .unwrap();
+        let mut removed = game.settled_actor_outcome(actor).unwrap();
+        removed.state.anatomy = Shared::new(AnatomySpec::default());
+        assert!(
+            game.refresh_equipment_outcome(&mut removed, BTreeMap::from([(existing_socket, item)]))
+                .is_err(),
+            "an old socket must not validate after its removal"
+        );
+        assert!(removed.state.equipment.is_empty());
+        let mut added = game.settled_actor_outcome(actor).unwrap();
+        let mut expanded = anatomy;
+        let new_socket = EquipmentSlotId(expanded.slots.len() as u16);
+        expanded.slots.push(ring);
+        assert!(expanded.valid(game.content().rules()));
+        added.state.anatomy = Shared::new(expanded);
+        game.refresh_equipment_outcome(&mut added, BTreeMap::from([(new_socket, item)]))
+            .unwrap();
+        assert_eq!(added.state.equipment.get(&new_socket), Some(&item));
+        assert_eq!(
+            game, before,
+            "candidate validation does not mutate the live actor"
+        );
+    }
+
+    #[test]
+    fn same_anchor_body_changes_reconcile_new_and_removed_trap_contacts() {
+        let mut game = game();
+        let actor = ActorId(1);
+        let at = game.actors[&actor].location;
+        let extra = tor_world::Location {
+            region: at.region,
+            position: tor_world::Position {
+                x: at.position.x,
+                y: at.position.y + 1,
+                z: at.position.z,
+            },
+        };
+        game.place_trap(
+            extra,
+            tor_world::Trap {
+                id: 1,
+                dc: 99,
+                avoidance_dc: None,
+                kind: tor_world::TrapKind::Mysterious {},
+            },
+        )
+        .unwrap();
+        assert!(game.actors[&actor].trap_contacts.ids().next().is_none());
+        let original_body = game.actors[&actor].body.clone();
+        let mut expanded = (*original_body).clone();
+        expanded.cells.push([0, 1, 0]);
+        assert!(game.body_fits(actor, at, game.actors[&actor].orientation, &expanded));
+        let mut outcome = game.settled_actor_outcome(actor).unwrap();
+        outcome.state.body = tor_world::Shared::new(expanded);
+        game.commit_actor_outcome(outcome).unwrap();
+        assert_eq!(game.actors[&actor].location, at);
+        assert_eq!(
+            game.actors[&actor].trap_contacts.ids().collect::<Vec<_>>(),
+            vec![1]
+        );
+        assert!(game.feature_family_known(actor, tor_world::ConcealedFeatureId::Trap(1)));
+        let mut outcome = game.settled_actor_outcome(actor).unwrap();
+        outcome.state.body = original_body;
+        game.commit_actor_outcome(outcome).unwrap();
+        assert!(game.actors[&actor].trap_contacts.ids().next().is_none());
+        assert_eq!(game.actors[&actor].location, at);
     }
 
     fn prepared_game_with_token(token: bool) -> Game {
@@ -2379,6 +2673,7 @@ mod growth_tests {
                 .unwrap()
                 .modifiers
                 .push(crate::rules::Modifier {
+                    cancellable: false,
                     scope: crate::rules::Scope::Always,
                     op: crate::rules::ModifierOp::Set {
                         stat: crate::rules::Stat::Health,
@@ -2407,6 +2702,7 @@ mod growth_tests {
         equip_growth_obstruction(
             &mut game,
             vec![crate::rules::Modifier {
+                cancellable: false,
                 scope: crate::rules::Scope::Always,
                 op: crate::rules::ModifierOp::Set {
                     stat: crate::rules::Stat::Health,
@@ -2723,6 +3019,8 @@ mod growth_tests {
             rules.growth.minimum_reward = 100;
             rules.growth.maximum_reward = 100;
             rules.conditions.push(crate::rules::ConditionDef {
+                detecting_monsters: false,
+                hallucinating: false,
                 id: condition.clone(),
                 family: crate::content_ids::ConditionFamilyId::new("growth_health_buffer").unwrap(),
                 lifecycle: crate::rules::ConditionLifecycle::Timed,
@@ -2919,6 +3217,7 @@ mod growth_tests {
                 .iter()
                 .cloned()
                 .map(|descriptor| crate::rules::Modifier {
+                    cancellable: false,
                     scope: crate::rules::Scope::Always,
                     op: crate::rules::ModifierOp::Immunity {
                         selector: crate::rules::Selector::Descriptor { descriptor },

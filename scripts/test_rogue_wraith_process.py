@@ -20,9 +20,24 @@ from status_condition_package import actor_creature, checkpoint, combat, observa
 
 DRAIN = "rogue.energy_drain"
 DISK_LIMIT = 128 * 1024 * 1024
-EMPTY = {"purchases": [], "attribute": None}
+EMPTY = {"purchase_highwater": 0, "purchases": [], "attribute": None}
 RATTLING = {"pool": "advancement", "selection": {"kind": "talent", "talent": "rattling_blow"}}
 LORE = {"pool": "advancement", "selection": {"kind": "skill_rank", "skill": "lore"}}
+
+
+def owned_rows(build, kind):
+    return [{"hit_die": row, "choices": build["choices"][index]}
+            for index, row in enumerate(build["hd"]) if row["owner"]["kind"] == kind]
+
+
+def paid_choice(owner, purchase):
+    return {"purchase_highwater": 1, "purchases": [dict(purchase, id={"owner": owner, "serial": 1})],
+            "attribute": None}
+
+
+def survived_personal_drain(frame):
+    # Public deficit, not a fixed total-HD stop or a private saved build.
+    return u64(stats(frame)["restorable_losses"]["hit_dice"]) == 1
 
 
 def stats(frame):
@@ -136,6 +151,8 @@ class RogueWraithProcesses(ProcessTestCase):
             "authored_baseline": 2, "highest_applied_tier": 2, "highest_earned_tier": 2,
             "earned_xp": earned, "spent_xp": spent, "held_xp": earned - spent})
         self.assertEqual(len(creature["build"]["hd"]), hd)
+        self.assertEqual(len(owned_rows(creature["build"], "body")), 1)
+        self.assertEqual(len(owned_rows(creature["build"], "personal")), hd - 1)
         self.assertFalse(creature["dead"])
 
     def audit(self, player, current, events=()):
@@ -155,18 +172,24 @@ class RogueWraithProcesses(ProcessTestCase):
         self.assert_progress(saved, earned, spent, u64(stats(current)["hit_dice"]["total"]))
         if self.paid is not None:
             build = actor_creature(saved)["build"]
-            self.assertEqual(build["health_root_seed"], self.paid["health_root_seed"])
+            self.assertIsNone(build["health_root_seed"])
+            self.assertEqual(build["body_build"]["health_root"], self.paid["body_build"]["health_root"])
+            self.assertEqual(owned_rows(build, "body"), owned_rows(self.paid, "body"))
+            self.assertEqual(owned_rows(build, "personal")[0], owned_rows(self.paid, "personal")[0])
             self.assertEqual(build["hd"][0], self.paid["hd"][0])
             self.assertEqual(build["choices"][0], self.paid["choices"][0])
-            if len(build["hd"]) == 1 and self.drained is None:
-                self.assertEqual(build["hd"], self.paid["hd"][:1])
-                self.assertEqual(build["choices"], self.paid["choices"][:1])
+            if len(owned_rows(build, "personal")) == 1 and self.drained is None:
+                self.assertEqual(build["hd"], self.paid["hd"][:2])
+                self.assertEqual(build["body_build"]["drained"], [owned_rows(self.paid, "personal")[1]])
+                self.assertEqual(build["drained_hd"], [])
+                self.assertEqual(build["choices"], self.paid["choices"][:2])
                 self.assertEqual(lore(current), 0)
                 self.assertEqual(u64(stats(current)["restorable_losses"]["hit_dice"]), 1)
                 prior_creature = actor_creature(self.saved)
                 boundary = drain_interval(events, wraith=self.wraith, victim=observation(current)["self_target"],
                     prior_earned=prior["earned_xp"], earned=earned,
-                    prior_hd=len(prior_creature["build"]["hd"]), hd=len(build["hd"]))
+                    prior_hd=len(owned_rows(prior_creature["build"], "personal")),
+                    hd=len(owned_rows(build, "personal")))
                 self.drained = saved
                 self.sample["drain_boundary"] = boundary
                 (self.directory / "survived-drain.json").write_text(json.dumps({
@@ -205,7 +228,7 @@ class RogueWraithProcesses(ProcessTestCase):
         self.assertEqual(page["points"], {"earned": "2", "spent": str(2 - unspent), "unspent": str(unspent)})
         after = checkpoint(self, player)
         self.assertEqual(actor_creature(after)["build"]["choices"][ordinal - 1],
-                         {"purchases": [expected], "attribute": None})
+                         paid_choice(actor_creature(after)["build"]["hd"][ordinal - 1]["owner"], expected))
         self.assertEqual({key: value for key, value in actor_creature(after)["earned_progress"].items()
                           if key != "peak_threat"},
                          {key: value for key, value in actor_creature(before)["earned_progress"].items()
@@ -269,7 +292,7 @@ class RogueWraithProcesses(ProcessTestCase):
     def fight(self, player, current, target, name):
         self.sample["phase"] = "fight_" + name
         while True:
-            if name == "wraith" and u64(stats(current)["hit_dice"]["total"]) == 1:
+            if name == "wraith" and survived_personal_drain(current):
                 # Reapproach is paid too: a drain during that Move must stop
                 # before another hostile player input, just like an attack.
                 self.check_disk()
@@ -287,7 +310,7 @@ class RogueWraithProcesses(ProcessTestCase):
             current, events = self.action(player, current, {"type": "use_ability",
                 "id": "rattling_blow" if paid else "basic_melee",
                 "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}}})
-            if name == "wraith" and u64(stats(current)["hit_dice"]["total"]) == 1:
+            if name == "wraith" and survived_personal_drain(current):
                 # action() already required a live actor and audited the real
                 # contact/row loss. Choose this stop only from disclosed own HD.
                 self.check_disk()
@@ -305,26 +328,38 @@ class RogueWraithProcesses(ProcessTestCase):
         self.assertFalse(initial["state"]["wizard_game"])
         self.assertEqual({row["name"]: int(row["quantity"]) for row in observation(initial)["inventory"]},
                          {"mace": 1, "ring mail": 1, "clean bandage": 3, "food ration": 1})
-        self.assertEqual(u64(stats(initial)["hit_dice"]["total"]), 2)
+        self.assertEqual(u64(stats(initial)["hit_dice"]["total"]), 3)
         current, _ = self.action(player, initial, {"type": "wait"})
         original = actor_creature(self.saved)["build"]
-        self.assertEqual(original["choices"], [EMPTY, EMPTY])
+        self.assertEqual(original["choices"], [EMPTY, EMPTY, EMPTY])
+        self.assertEqual(original["hd"][0]["owner"], {"kind": "body", "form": "rogue.body.human", "ordinal": 0})
+        self.assertEqual([row["hit_die"]["owner"] for row in owned_rows(original, "personal")],
+                         [{"kind": "personal", "id": 1}, {"kind": "personal", "id": 2}])
+        self.assertEqual([row["health_policy"] for row in original["hd"]], ["maximized", "seeded", "seeded"])
+        self.assertEqual(original["body_build"]["birth_personal_count"], 2)
+        self.assertEqual(original["body_build"]["next_personal_id"], 3)
+        self.assertEqual(original["body_build"]["drained"], [])
         self.assertEqual(original["restoration"], {"kind": "choose_again"})
         self.assertEqual([row["source"] for row in original["hd"]],
-                         [{"kind": "class", "id": "warrior"}] * 2)
-        self.assertIs(type(original["health_root_seed"]), int)
+                         [{"kind": "racial"}] + [{"kind": "class", "id": "warrior"}] * 2)
+        self.assertIsNone(original["health_root_seed"])
+        self.assertIs(type(original["body_build"]["health_root"]), int)
         self.assertTrue(all(type(row["health_seed"]) is int for row in original["hd"]))
         wraith = actor_creature(self.saved, 11)
         self.assertEqual(len(wraith["build"]["hd"]), 5)
-        self.assertEqual(wraith["build"]["choices"], [{"purchases": [{"pool": "advancement",
-            "selection": {"kind": "talent", "talent": DRAIN}}], "attribute": None}] + [EMPTY] * 4)
+        self.assertEqual(wraith["build"]["choices"], [paid_choice(
+            {"kind": "body", "form": "rogue.body.wraith", "ordinal": 0},
+            {"pool": "advancement", "selection": {"kind": "talent", "talent": DRAIN}})] + [EMPTY] * 4)
+        self.assertEqual(owned_rows(wraith["build"], "personal"), [])
+        self.assertEqual([row["owner"] for row in wraith["build"]["hd"]], [
+            {"kind": "body", "form": "rogue.body.wraith", "ordinal": index} for index in range(5)])
         self.assertEqual(wraith["earned_progress"]["peak_threat"], 4)
         self.assertTrue(all(actor_creature(self.saved, actor)["earned_progress"]["peak_threat"] == 1
                             for actor in (*range(3, 11), 12)))
         self.assertFalse(any(row["location"] == {"Carried": 11} for row in self.saved["items"].values()))
-        self.assert_progress(self.saved, 0, 0, 2)
-        current = self.purchase(player, current, 1, "talent rattling_blow", RATTLING, 1)
-        current = self.purchase(player, current, 2, "skill lore", LORE, 0)
+        self.assert_progress(self.saved, 0, 0, 3)
+        current = self.purchase(player, current, 2, "talent rattling_blow", RATTLING, 1)
+        current = self.purchase(player, current, 3, "skill lore", LORE, 0)
         self.paid = actor_creature(self.saved)["build"]
         self.assertEqual(self.paid["hd"], original["hd"])
         self.assertEqual(lore(current), 1)
@@ -332,7 +367,7 @@ class RogueWraithProcesses(ProcessTestCase):
             self.sample["phase"] = f"approach_emu_{ordinal + 1}"
             current, target = self.approach(player, current, "emu")
             current = self.fight(player, current, target, "emu")
-            self.assert_progress(self.saved, (ordinal + 1) * 20, 0, 2)
+            self.assert_progress(self.saved, (ordinal + 1) * 20, 0, 3)
             if ordinal == 0:
                 before_retry = self.saved
                 refused = self.act(player, {"type": "use_ability", "id": "basic_melee",
@@ -366,7 +401,7 @@ class RogueWraithProcesses(ProcessTestCase):
             for event in events_since(player, start, revision)), "Passive W cannot attack before provocation")
         current = self.fight(player, current, self.wraith, "wraith")
         self.assertIsNotNone(self.drained, "W died without a survived successful drain; not an accepted witness")
-        self.assert_progress(self.saved, 160, 0, 1)
+        self.assert_progress(self.saved, 160, 0, 2)
         self.assertEqual(self.dead, set(range(3, 11)))
         self.assertFalse(actor_creature(self.saved, 11)["dead"])
         self.assertEqual(self.sample["drain_boundary"], "separate_160_checkpoint")
@@ -382,7 +417,7 @@ class RogueWraithProcesses(ProcessTestCase):
         player, reopened = self.client(actor=1)
         self.assertEqual(reopened["state"], current["state"])
         self.assertEqual(checkpoint(self, player), before)
-        self.assert_progress(before, 160, 0, 1)
+        self.assert_progress(before, 160, 0, 2)
         self.assertEqual(lore(reopened), 0)
         self.assertEqual(u64(stats(reopened)["restorable_losses"]["hit_dice"]), 1)
         # No further gameplay input: the separate controlled Service case owns
@@ -399,8 +434,8 @@ class RogueWraithTargetSelection(unittest.TestCase):
         initial = {"state": {"observation": {"self_target": "self",
             "visible_actors": [{"id": "foe", "position": {"x": 2, "y": 0, "z": 0}}],
             "visible_cells": [{"key": "next", "position": {"x": 1, "y": 0, "z": 0}, "wall": False}],
-            "combat": {"own_stats": {"hit_dice": {"total": "2"}}}}}}
-        drained = {"state": {"observation": {"combat": {"own_stats": {"hit_dice": {"total": "1"}}}}}}
+            "combat": {"own_stats": {"hit_dice": {"total": "2"}, "restorable_losses": {"hit_dice": "0"}}}}}}
+        drained = {"state": {"observation": {"combat": {"own_stats": {"hit_dice": {"total": "1"}, "restorable_losses": {"hit_dice": "1"}}}}}}
         with patch.object(driver, "step", return_value=(drained, [])) as step, \
                 patch.object(driver, "action") as action, patch.object(driver, "check_disk"):
             self.assertIs(driver.fight(None, initial, "foe", "wraith"), drained)
@@ -431,6 +466,7 @@ class RogueWraithTargetSelection(unittest.TestCase):
             return {"state": {"observation": {"self_target": "self", "visible_actors": [
                 {"id": "foe", "name": "foe", "position": {"x": 1, "y": 0, "z": 0}}],
                 "combat": {"dead": False, "own_stats": {"hit_dice": {"total": str(hd)},
+                    "restorable_losses": {"hit_dice": str(2 - hd)},
                     "abilities": [{"id": "rattling_blow", "cost": {"start": 1, "resolution": 1}}],
                     "resources": [{"resource": {"id": "stamina"}, "available": 2}]}}}}}
         initial, drained = frame(2), frame(1)

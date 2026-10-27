@@ -839,6 +839,7 @@ mod tests {
         let mut shared = crate::checkpoint::SharedState::default();
         let snapshot = game.checkpoint(&mut shared);
         let mut context = crate::checkpoint::RestoreContext::new(&shared, game.content.clone());
+        context.bind_spatial_roots(&[&snapshot]).unwrap();
         assert_eq!(context.restore(snapshot).unwrap(), game);
         let encoded = serde_json::to_value(game.floor_activation.as_ref().unwrap()).unwrap();
         let restored: ActivationState = serde_json::from_value(encoded.clone()).unwrap();
@@ -1128,6 +1129,7 @@ mod tests {
         let mut shared = crate::checkpoint::SharedState::default();
         let snapshot = game.checkpoint(&mut shared);
         let mut context = crate::checkpoint::RestoreContext::new(&shared, game.content.clone());
+        context.bind_spatial_roots(&[&snapshot]).unwrap();
         let mut resumed = context.restore(snapshot).unwrap();
         assert_eq!(resumed, game);
         assert_eq!(resumed.rules_rng, rng);

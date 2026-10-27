@@ -147,12 +147,17 @@ pub fn supply_candidates_for_costs(
 ) -> Vec<SupplyCandidate> {
     let mut seen = std::collections::BTreeSet::new();
     let mut values = Vec::new();
-    for (item, carried) in view.inventory.iter().map(|item| (item, true)).chain(
-        view.ground_items
-            .iter()
-            .filter(|ground| ground.supply_reachable)
-            .map(|ground| (&ground.item, false)),
-    ) {
+    for (item, carried, name) in view
+        .inventory
+        .iter()
+        .map(|item| (item, true, item.name.as_str()))
+        .chain(
+            view.ground_items
+                .iter()
+                .filter(|ground| ground.supply_reachable)
+                .map(|ground| (&ground.item, false, crate::items::ground_name(ground))),
+        )
+    {
         let Some(supply) = item.known_supply.as_ref().filter(|_| item.identified) else {
             continue;
         };
@@ -166,7 +171,7 @@ pub fn supply_candidates_for_costs(
             values.push(SupplyCandidate {
                 cost_ordinal: ordinal as u8,
                 item: item.id,
-                name: item.name.clone(),
+                name: name.to_owned(),
                 quantity: item.quantity,
                 carried,
             });
@@ -474,6 +479,7 @@ mod tests {
         view.interactions = Some(tor_protocol::InteractionView {
             identification: None,
             completed: vec![],
+            refused: vec![],
             curse_blocked: vec![],
             slots: vec![slot.clone()],
             preparation: None,
@@ -489,6 +495,8 @@ mod tests {
                 edible: false,
                 readable: false,
                 zappable: false,
+                portable_light: None,
+                device_activation: None,
                 charges: None,
             }],
         });
@@ -673,6 +681,7 @@ mod supply_tests {
             .abilities
             .push(ability);
         view.ground_items.push(GroundItemView {
+            presentation: None,
             reachable: false,
             supply_reachable: true,
             position: Position { x: 1, y: 0, z: 0 },
@@ -695,6 +704,27 @@ mod supply_tests {
         });
         view
     }
+    #[test]
+    fn cosmetic_supply_labels_keep_only_actual_supply_authority() {
+        let mut view = fixture();
+        let ability = choices(&view).pop().unwrap();
+        view.ground_items[0].item.name = "object".into();
+        view.ground_items[0].item.appearance = "object".into();
+        let real = view.ground_items[0].item.clone();
+        view.ground_items[0].presentation = Some(ObjectPresentation {
+            name: "stairs".into(),
+            asset: None,
+            kind: ObjectPresentationKind::Stairs,
+        });
+        let rows = supply_candidates(&view, &ability);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].name, "stairs");
+        assert_eq!(rows[0].item, real.id);
+        assert_eq!(view.ground_items[0].item, real);
+        view.ground_items[0].item.known_supply = None;
+        assert!(supply_candidates(&view, &ability).is_empty());
+    }
+
     #[test]
     fn phase5_exact_ground_selection_uses_disclosed_touch_and_no_private_availability() {
         let mut view = fixture();

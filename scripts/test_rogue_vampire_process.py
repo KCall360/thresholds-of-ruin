@@ -12,7 +12,7 @@ import sqlite3
 import unittest
 
 from checkpoint_payload import decode_checkpoint_payload
-from process_harness import ProcessTestCase, SPECTATOR_TOKEN, settle_rogue_action
+from process_harness import ProcessTestCase, SPECTATOR_TOKEN, settle_rogue_action, hit_die_counts
 from process_work_budget import ProcessWorkBudget
 from rogue_earned_route import first_purchase
 from rogue_roster_package import unrelated_fallback
@@ -138,10 +138,12 @@ class RogueVampireProcesses(ProcessTestCase):
     def buy_first(self, player, peer, character):
         identity = "rattling_blow" if character == 1 else "spark_lance_cold"
         before = self.snapshot(player)
+        self.assertEqual(hit_die_counts(combat(before)["own_stats"]["hit_dice"]),
+                         {("racial", "racial"): 1, ("class", "warrior" if character == 1 else "mage"): 1})
         opened = self.command(player, {"type": "advancement", "command": "overview"})
         self.assertEqual(opened["advancement_page"]["entries"][0]["value"]["points"],
                          {"earned": "1", "spent": "0", "unspent": "1"})
-        preview = self.command(player, {"type": "advancement", "command": first_purchase(character)})
+        preview = self.command(player, {"type": "advancement", "command": first_purchase(character, body_hd=1)})
         self.assertIsNone(preview["error"])
         self.assertEqual(preview["state"], before["state"], "A purchase preview cannot grant progression")
         self.assertIsNone(self.command(player, {"type": "advancement", "command": "confirm"})["error"])
@@ -210,7 +212,8 @@ class RogueVampireProcesses(ProcessTestCase):
                 player, initial = self.client(actor=character, omit_memory=True)
                 vampire, foe = self.client(actor=3, omit_memory=True)
                 self.assertFalse(initial["state"]["wizard_game"])
-                self.assertEqual(u64(combat(initial)["own_stats"]["hit_dice"]["total"]), 1)
+                self.assertEqual(hit_die_counts(combat(initial)["own_stats"]["hit_dice"]),
+                                 {("racial", "racial"): 1, ("class", "warrior" if character == 1 else "mage"): 1})
                 self.assertEqual(u64(combat(foe)["own_stats"]["hit_dice"]["total"]), 8)
                 self.assertIn(DRAIN, [row["id"] for row in combat(foe)["own_stats"]["abilities"]])
                 self.assertEqual(combat(foe)["own_stats"]["nutrition"]["kind"], "exempt")
@@ -319,8 +322,14 @@ class RogueVampireProcesses(ProcessTestCase):
         self.assertEqual(killed["items"]["1000"]["quantity"], 1)
         self.assertEqual(killed["items"]["1000"]["spec"], before["items"]["1000"]["spec"])
         self.assertGreater(growth["earned_xp"], 0, "Death awards ordinary kill XP")
-        self.assertEqual(actor_creature(killed, 2)["build"]["hd"][:1],
-                         actor_creature(before, 2)["build"]["hd"], "The actual starter row remains owned")
+        birth_rows = actor_creature(before, 2)["build"]["hd"]
+        self.assertEqual([row["owner"] for row in birth_rows], [
+            {"kind": "body", "form": "rogue.body.human", "ordinal": 0},
+            {"kind": "personal", "id": 1}])
+        self.assertEqual([row["source"] for row in birth_rows], [
+            {"kind": "racial"}, {"kind": "class", "id": "mage"}])
+        self.assertEqual(actor_creature(killed, 2)["build"]["hd"][:2], birth_rows,
+                         "Both actual starter rows retain ownership and complete Health provenance")
         self.assertEqual(len([row for row in observation(current)["ground_items"]
                              if row["item"]["name"] == "food ration"]), 1)
         # The target's known adjacent ground cell, never its private save ID,

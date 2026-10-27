@@ -6,13 +6,16 @@ record accepted work that is not yet complete. “Implemented” describes code 
 this tree, not a promise that every related product or performance goal is closed.
 Every change still requires the [testing policy](development/testing.md).
 
-**Current formats:** protocol **60**, save format **58**, scenario format **31**, ruleset
-**`interactions-v52`**, scenario validator **`tor-scenario-43`**. Unsupported
-protocol/save/rules identities are rejected rather than migrated. Other current
-guides refer here instead of copying these identities.
+**Current formats:** protocol **63**, save format **61**, scenario format **33**, ruleset
+**`interactions-v54`**, scenario validator **`tor-scenario-45`**. Unsupported
+protocol/save/rules identities are rejected rather than migrated. Current private
+creature records also require explicit Health roll policy, stable HD/purchase
+ownership, body snapshots and pending-return state; authored packages may
+explicitly register body forms and eligibility. Other current guides refer here
+instead of copying these identities.
 
-The independent compiled inputs use RulesInput **24**, ContentPackage **28** and
-RegionInput **8**. Physical TORB/TORJ/TORR framing stays at **6** and TORC at **1**;
+The independent compiled inputs use RulesInput **26**, ContentPackage **30** and
+RegionInput **9**. Physical TORB/TORJ/TORR framing stays at **6** and TORC at **1**;
 rooms **2**, grid-rooms **1** and world-family **1** are unchanged. The independent
 arena run report is **`tor-arena-run-v5`**; its enclosing batch/matrix/search
 formats remain unchanged. Current payloads require explicit nullable rider
@@ -33,6 +36,129 @@ frozen equipped-item alterations, signed weapon
 damage enchantment and explicit Psychic damage, and owned-HD Health improvements with immutable
 acquisition witnesses and bounded dormant drain records. Prior payload identities
 remain rejection-only. Physical framing remains unchanged.
+
+The approved [missing-consumables batch](plans/rogue-missing-consumables.md) is
+being reconstructed from published source after its previous local implementation
+became unavailable. Strict device aim, captured self-device planning and
+knowledge-gated common/Text/ASCII prompts now have fresh focused coverage. Paid
+self-device execution passes Nothing and nonempty-effect Service contrasts,
+including charge/retry and paused identification with source-deleted reopen. The
+room/passage foundation and appearance selector pass their fresh tests; the
+appearance selector now supports integrated opt-in Hallucination gameplay, with
+the focused runtime and consumer checkpoint described below.
+Fresh Service checks cover OnUse observer isolation and storage rollback;
+actual Text/process checks and genuine current save/wire fixtures pass.
+Remaining consumables and broader qualification are unfinished. The opt-in
+Nothing catalog definition now has pure content coverage, a freshly validated
+package certificate, and imported-catalog Text/Service acceptance including
+source-deleted reopen. The complete-pool test fixture is corrected and the
+fresh full server library passes. Live pools are unchanged. Historical local
+results do not qualify this tree.
+A bounded row-run registry, pooled Game/history retention and canonical authored/
+generated source verification now support the opt-in Room Light device. Focused
+Service coverage includes paid room illumination, passage/maze no-ops, connected
+cross-region loading, frozen foreign surfaces and source-deleted reopening.
+Live distributions remain unchanged. Core result-projection, package certificate
+and actual Text room/passage use now pass, including exact payment, identification,
+repeat use and source-deleted reopening from real compressed checkpoints. Strict
+checkpoint decoding binds the actual current/history spatial roots before its
+canonical comparison, and restoration independently revalidates those roots.
+Focused spatial/effect tests and the full server library pass; remaining
+consumables and broader verification gates are still unfinished.
+The [spatial integration plan](plans/rogue-spatial-registry-reconstruction.md) owns
+exact acceptance scope and remaining qualification.
+The opt-in Drain Life wand now has paid weak-refusal, empty-target and exact
+wide/odd-Health behavior, canonical asymmetric room/passage targeting, frozen
+contact, privacy and source-free persistence coverage. Three actual imported
+processes and genuine refusal recording pass. The final ten-case focused rerun
+closes the privacy fixture failure from the preceding 1,074-pass server run;
+this is not a new full-suite or gate result. Remaining consumables and final
+verification remain unfinished.
+The opt-in Cancellation and Magic Missile wands now use physical first-body
+contact with load-only frontier preparation and strict saved plans. Cancellation
+suppresses marked specials without a global future-invisibility veto; Missile
+uses one opposed save and ordinary damage adjustments. Fresh simulation/server
+libraries pass 1,850/1,084 tests, protocol integration 282 and client-common 145;
+the selected World ray owner passes 18. Three imported-device processes cover
+paid use and source-deleted interval-one reopening; a separate production-catalog
+process passes three Ice Monster, Phantom and Xeroc contrasts. Genuine recording
+contains 50 generated client examples/53 captured server samples, and all 44 live
+scenario certificates were
+regenerated. These are internal reconstruction results, not final quick/push/full,
+native, release or hosted verification. Live weighted stock and kits are unchanged.
+The opt-in portable torch now supports explicit paid ignition/extinguishing,
+one-grip equipment, lit dropping, extinguishing on stow, active-location fuel and
+exact expiry. Dynamic illumination and dependency-only load preparation preserve
+ordinary visible-region activation policy. Fresh core/server libraries pass
+1,868/1,094 tests, including seven torch Service cases; affected protocol, common,
+Text, ASCII and World owners also pass. Current-state map-work controls prove
+steady-fuel updates avoid reacquisition while preserving exact state; they are not
+whole-pipeline performance measurements. A final hash-verified application build
+passes actual Text Adventure use and source-deleted reopening, and its compiler
+checks all 44 live certificates. Genuine wire recording contains 52 generated
+client examples and 55 captured server frames, including torch lit/off states.
+Native ASCII, independent 3D, final verification/release/hosted gates and broader
+performance qualification remain pending. No live weighted stock or kit changes.
+ASCII retained-map rendering now borrows original appearance payloads through
+compact occurrence-position references instead of cloning remembered payloads.
+A causal storage-pointer regression and independent materialized-output oracle
+pass, alongside all 150 ASCII integration tests. This establishes the exercised
+storage/rendering contract, not timing or broader performance parity; native and
+final verification obligations remain separate.
+The opt-in Haste potion now uses finite actor-active haste and named-condition
+overdose with forced rest, interoperating with the persistent wand through explicit
+mixed-lifetime Keep semantics. Slow-masked applications still count; unrelated
+innate/equipment speed sources are not stripped. Fresh core 1,879 and seven focused
+Service/save controls pass. The full server collection's 1,099 passes plus two
+stale-certificate failures is closed by both exact-binary reruns after genuine
+certificate refresh, not reported as a new full run. Actual ordinary Adventure
+use/source-deleted reopening and a separate granted-ability diagnostic process
+pass. Genuine recording now has 52 generated client examples and 57 captured
+server frames. The updated protocol library/integration and common library pass 36/283/146
+tests. Final/native/release gates remain pending; live weighted pools and kits
+remain unchanged.
+The opt-in growth potions now have paid/source-free acceptance: Strength preserves the
+ordinary-five cap and limits ordinary plus acquired permanent magic to seven,
+with innate modifiers afterward; each Raise dose funds one additional level
+beyond all levels already funded by XP, even while actual growth is blocked,
+without bypassing ordinary advancement admission.
+Their provenance, refund/history and actual-caller checks pass, including the
+corrected full core/server regressions and current protocol/common/ASCII consumers.
+Existing live item distributions remain unchanged. The separate
+[baleful Polymorph implementation](plans/baleful-polymorph.md) now has source-staged
+body/personal ownership, atomic transitions and opt-in wand content. All 26 NPC
+body types are now enrolled: the approved class-only trio adds one racial body HD
+while retaining personal classes; Dragon retains ten racial HD with separately
+funded personal attribute/Breath receipts. Only emu/snake/troll are opt-in form
+destinations; live weighted stock and kits remain unchanged. Personal restoration
+must distinguish empty-choice `ChooseAgain` from original-choice `Authored`, with
+stable purchase high-water marks and authored package restoration.
+
+Current application writers validate all 44 packages and produce protocol 63 and
+save 61 fixtures without altering historical formats. Ordinary paid
+`ChooseAgain` purchase/drain/XP restoration now has corresponding first-red and
+green process evidence; retained Authored attribute receipts have a separate
+explicitly privileged-builder witness. Aggregate qualification remains a release
+requirement, not something inferred from these selected checks. The approved
+100-method local native deferral remains **deferred, not passed**; final-head
+hosted graphical gates are mandatory. Consumables PR #195 merged at `feae51f`,
+and the separate Polymorph branch is based on it. No additional live tuning or
+next Rogue implementation milestone is implied.
+
+The opt-in Hallucination potion now uses one pure timed condition and saved
+base-turn presentation cadence. Extend preserves its generation/deadline; Extra
+Healing removes exactly that condition. Genuine visual actors, ground/guise objects
+and unknown stair artwork receive observer-specific canonical cosmetics without
+changing real targets, actions or navigation. Nonvisual Awareness stays factual;
+map and public-plan samples retain their acquisition-time presentation.
+Fresh core/server libraries pass 1,927/1,121 tests. Protocol library/integration
+pass 37/288, common 150, Text 77/192 and ASCII integration 152. Three real-process
+cases cover Adventure display, blind/repeat/cure and source-deleted map/history
+reopening. All 44 certificates and current saved/wire artifacts were genuinely
+regenerated (52 client examples, 62 captured server frames). These are scoped
+reconstruction results: detection/mapping and final quick/push/full, native,
+release/performance and hosted gates remain unfinished. Independent 3D changes
+remain isolated, not integrated or qualified by these results.
 
 Characters retain last-seen terrain, doors, stairs and item appearances in the
 saved game. Returning to an explored neighborhood or opening a fresh client
@@ -522,7 +648,7 @@ checks do not replace the current
   language. Runtime scripting and its language remain undecided.
 - Shared rule/effect infrastructure does not imply complete survival, carrying
   capacity, curses, enchantment, rust, identification, ranged projectile/ray,
-  secret-search or hallucination gameplay. See the current references and
+  secret-search or complete detection/mapping gameplay. See the current references and
   [remaining requirements](plans/requirements.md) for their boundaries.
 - Rogue actor/player/item appearances use existing asset fields and structural
   palette forecasts. Text and ASCII share a minimal keyed English vocabulary;
@@ -591,8 +717,9 @@ The earlier all-dark discovery failure motivated the approved tactile rule, not 
 weaker fixture, private route oracle or larger navigation cap.
 
 Live maze and omission policies remain disabled; numerical enablement is separate
-work. Development is paused at this completed batch. Further implementation or
-tuning requires a new go-ahead. Remaining work includes shared survival, items and
+work. The separately approved missing-consumables reconstruction is in progress;
+balance tuning and unrelated milestones remain deferred. Remaining work includes
+shared survival, items and
 species behavior, the complete 26-species roster's integrated acceptance and
 pressured runs. Topology/persistence witnesses do not establish survival balance.
 Local graphical waivers were not passes; they did not remove required CI coverage.

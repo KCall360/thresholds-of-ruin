@@ -112,6 +112,21 @@ pub fn lines(report: &CombatDiagnosticsView) -> Result<Vec<String>, InvalidComba
                     result,
                 } => format!("  Actor {}: {:?} movement, {:?}", target.0, mode, result),
                 DiagnosticEffect::Relocate { target, mode, result } => format!("  Actor {}: {:?} relocation, {:?}", target.0, mode, result),
+                DiagnosticEffect::GainStrength { target, change } => format!("  Actor {}: Strength {}", target.0, match change {
+                    StrengthGain::Unchanged => "unchanged",
+                    StrengthGain::Restored => "restored by one",
+                    StrengthGain::Acquired => "permanently increased by one",
+                }),
+                DiagnosticEffect::RaiseLevel { target, amount } => format!("  Actor {}: credited {amount} growth XP", target.0),
+                DiagnosticEffect::HasteDose { target, condition, rest, outcome } => match outcome {
+                    HasteDoseOutcome::Hasted { duration } => format!("  Actor {}: {} for {duration} active ticks", target.0, condition.name),
+                    HasteDoseOutcome::Overdose { rest: duration } => format!("  Actor {}: haste overdose; {} for {duration} active ticks", target.0, rest.name),
+                },
+                DiagnosticEffect::DrainLife { target, changed } => format!("  Actor {}: drain life {}", target.0, if *changed { "changed" } else { "unchanged" }),
+                DiagnosticEffect::DirectHealthLoss { target, amount } => format!("  Actor {}: {amount} direct health loss", target.0),
+                DiagnosticEffect::BalefulPolymorph { target, changed } => format!("  Actor {}: body {}", target.0, if *changed { "transformed" } else { "unchanged" }),
+                DiagnosticEffect::CancelSpecials { target, changed } => format!("  Actor {}: special capabilities {}", target.0, if *changed { "cancelled" } else { "unchanged" }),
+                DiagnosticEffect::RoomLight { target, changed } => format!("  Actor {}: room light {}", target.0, if *changed { "changed" } else { "unchanged" }),
                 DiagnosticEffect::ArrestDescent { target } => format!("  Actor {}: descent arrested", target.0),
                 DiagnosticEffect::CorrodeArmor { target, amount } => {
                     format!("  Actor {}: armor protection reduced by {amount}", target.0)
@@ -335,6 +350,201 @@ pub(crate) mod tests {
             assert!(rows
                 .iter()
                 .any(|row| row.contains("preparation 5, started 5, remaining 5, recovery 2")));
+        }
+    }
+
+    #[test]
+    fn polymorph_diagnostic_is_changed_only_and_targets_recipient() {
+        for changed in [false, true] {
+            let effect = DiagnosticEffect::BalefulPolymorph {
+                target: ActorId(2),
+                changed,
+            };
+            let encoded = serde_json::to_value(&effect).unwrap();
+            assert_eq!(
+                encoded,
+                serde_json::json!({"type":"baleful_polymorph", "target":"2", "changed":changed})
+            );
+            let decoded: DiagnosticEffect = serde_json::from_value(encoded.clone()).unwrap();
+            assert_eq!(decoded, effect);
+            assert!(lines(&report_with_effects(vec![effect])).is_ok());
+            let forged = DiagnosticEffect::BalefulPolymorph {
+                target: ActorId(1),
+                changed,
+            };
+            assert!(lines(&report_with_effects(vec![forged])).is_err());
+            let mut leaked = encoded;
+            leaked["form"] = serde_json::json!("private_form");
+            assert!(serde_json::from_value::<DiagnosticEffect>(leaked).is_err());
+        }
+    }
+
+    #[test]
+    fn cancellation_diagnostic_targets_recipient_not_source() {
+        for changed in [false, true] {
+            let report = report_with_effects(vec![DiagnosticEffect::CancelSpecials {
+                target: ActorId(2),
+                changed,
+            }]);
+            assert!(lines(&report).is_ok());
+            let mut forged = report.clone();
+            forged.records[0].outcome.effects = vec![DiagnosticEffect::CancelSpecials {
+                target: ActorId(1),
+                changed,
+            }];
+            assert!(lines(&forged).is_err());
+        }
+    }
+
+    #[test]
+    fn drain_diagnostics_keep_full_width_and_source_target_roles() {
+        let report = report_with_effects(vec![
+            DiagnosticEffect::DrainLife {
+                target: ActorId(1),
+                changed: true,
+            },
+            DiagnosticEffect::DirectHealthLoss {
+                target: ActorId(2),
+                amount: u64::MAX,
+            },
+        ]);
+        let rows = lines(&report).unwrap();
+        assert!(rows.contains(&"  Actor 2: 18446744073709551615 direct health loss".to_owned()));
+        let mut forged = report.clone();
+        forged.records[0].outcome.effects = vec![DiagnosticEffect::DrainLife {
+            target: ActorId(2),
+            changed: true,
+        }];
+        assert!(lines(&forged).is_err());
+        forged.records[0].outcome.effects = vec![DiagnosticEffect::DirectHealthLoss {
+            target: ActorId(1),
+            amount: 0,
+        }];
+        assert!(lines(&forged).is_err());
+    }
+
+    #[test]
+    fn growth_diagnostics_render_actual_results_and_reject_wrong_recipient() {
+        let zero = report_with_effects(vec![DiagnosticEffect::RaiseLevel {
+            target: ActorId(2),
+            amount: 0,
+        }]);
+        assert!(
+            lines(&zero).is_err(),
+            "an internal pure-resolution marker is not a published credit"
+        );
+        for (effect, expected) in [
+            (
+                DiagnosticEffect::GainStrength {
+                    target: ActorId(2),
+                    change: StrengthGain::Unchanged,
+                },
+                "  Actor 2: Strength unchanged",
+            ),
+            (
+                DiagnosticEffect::GainStrength {
+                    target: ActorId(2),
+                    change: StrengthGain::Restored,
+                },
+                "  Actor 2: Strength restored by one",
+            ),
+            (
+                DiagnosticEffect::GainStrength {
+                    target: ActorId(2),
+                    change: StrengthGain::Acquired,
+                },
+                "  Actor 2: Strength permanently increased by one",
+            ),
+            (
+                DiagnosticEffect::RaiseLevel {
+                    target: ActorId(2),
+                    amount: u64::MAX,
+                },
+                "  Actor 2: credited 18446744073709551615 growth XP",
+            ),
+        ] {
+            let report = report_with_effects(vec![effect]);
+            assert!(lines(&report).unwrap().contains(&expected.to_string()));
+            let mut forged = report.clone();
+            match &mut forged.records[0].outcome.effects[0] {
+                DiagnosticEffect::GainStrength { target, .. }
+                | DiagnosticEffect::RaiseLevel { target, .. } => *target = ActorId(1),
+                _ => unreachable!(),
+            }
+            assert!(lines(&forged).is_err());
+        }
+    }
+
+    #[test]
+    fn haste_dose_diagnostics_render_both_branches_and_reject_forged_recipients() {
+        let condition = ContentRef {
+            id: "rogue.hasted".into(),
+            name: "Hasted".into(),
+        };
+        let rest = ContentRef {
+            id: "rogue.haste_exhaustion".into(),
+            name: "Exhausted".into(),
+        };
+        for (outcome, expected) in [
+            (
+                HasteDoseOutcome::Hasted { duration: 400 },
+                "  Actor 2: Hasted for 400 active ticks",
+            ),
+            (
+                HasteDoseOutcome::Overdose { rest: 0 },
+                "  Actor 2: haste overdose; Exhausted for 0 active ticks",
+            ),
+            (
+                HasteDoseOutcome::Overdose { rest: 700 },
+                "  Actor 2: haste overdose; Exhausted for 700 active ticks",
+            ),
+        ] {
+            let report = report_with_effects(vec![DiagnosticEffect::HasteDose {
+                target: ActorId(2),
+                condition: condition.clone(),
+                rest: rest.clone(),
+                outcome,
+            }]);
+            assert!(lines(&report).unwrap().contains(&expected.to_string()));
+            for invalid in 0..3 {
+                let mut forged = report.clone();
+                let DiagnosticEffect::HasteDose {
+                    target,
+                    condition,
+                    rest,
+                    outcome,
+                } = &mut forged.records[0].outcome.effects[0]
+                else {
+                    unreachable!()
+                };
+                match invalid {
+                    0 => *target = ActorId(1),
+                    1 => *rest = condition.clone(),
+                    _ => *outcome = HasteDoseOutcome::Hasted { duration: 0 },
+                }
+                assert!(lines(&forged).is_err());
+            }
+        }
+    }
+
+    #[test]
+    fn room_light_diagnostics_distinguish_changed_from_paid_noop() {
+        for (changed, expected) in [(true, "changed"), (false, "unchanged")] {
+            let report = report_with_effects(vec![DiagnosticEffect::RoomLight {
+                target: ActorId(1),
+                changed,
+            }]);
+            let rows = lines(&report).unwrap();
+            assert!(rows.contains(&format!("  Actor 1: room light {expected}")));
+            let mut forged = report.clone();
+            forged.records[0].outcome.effects = vec![DiagnosticEffect::RoomLight {
+                target: ActorId(2),
+                changed,
+            }];
+            assert!(
+                lines(&forged).is_err(),
+                "room light cannot claim a nominal recipient instead of its source"
+            );
         }
     }
 

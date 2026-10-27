@@ -1341,7 +1341,9 @@ fn owner_advancement_message(context: ReplyContext, id: &str) -> ServerMessage {
         next: None,
         entries: vec![AdvancementEntry::Overview {
             value: Box::new(AdvancementOverview {
+                strength_acquired: 0,
                 growth: AdvancementGrowth {
+                    body_package_hit_dice: None,
                     highest_applied_tier: 2,
                     restorable_hit_dice: 0,
                     restoration_blocker: None,
@@ -1980,6 +1982,7 @@ async fn spectator_map_hydration_survives_cancellation_without_blocking_live_sta
         queried.send(()).unwrap();
         released.await.unwrap();
         let cell = |x, key: &str| RememberedMapCell {
+            object_presentation: None,
             key: key.into(),
             position: Position {
                 x,
@@ -2532,4 +2535,200 @@ fn timing_non_request_diagnostics_keep_existing_payload() {
         assert!(decoded.get("request_kind").is_none());
         assert_eq!(decoded.as_object().unwrap().len(), 8);
     }
+}
+
+#[tokio::test]
+async fn chart_continuations_are_pure_atomic_and_old_generation_pages_do_not_restore_current_rows()
+{
+    use tor_protocol::chart_pages::*;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let mut initial = snapshot();
+    Arc::make_mut(&mut initial.state).observation.charts = vec![ChartSummary {
+        supported: true,
+        kind: ChartKind::Monsters,
+        mode: ChartMode::Live,
+        status: ChartStatus::Available,
+        acquired_at: Some(initial.cursor.tick),
+        chart: Some("sample".into()),
+        latest_attempt: None,
+    }];
+    initial.state.validate().unwrap();
+    let expected = initial.clone();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut socket = accept_async(stream).await.unwrap();
+        assert!(matches!(
+            receive(&mut socket).await,
+            ClientMessage::Hello { .. }
+        ));
+        send(
+            &mut socket,
+            ServerMessage::Welcome {
+                protocol: PROTOCOL_VERSION,
+                capabilities: ServerCapabilities::new(MAX_RESPONSE_BYTES as u32, 16),
+                user: "test".into(),
+                actors: vec![initial.actor],
+                role: AccessRole::Player,
+            },
+        )
+        .await;
+        assert!(
+            matches!(receive(&mut socket).await, ClientMessage::Request { request, .. } if matches!(*request, Request::Attach { .. }))
+        );
+        send(
+            &mut socket,
+            ServerMessage::Snapshot {
+                request_id: "attach".into(),
+                snapshot: Box::new(initial.clone()),
+            },
+        )
+        .await;
+        let ClientMessage::Request {
+            request_id: first_id,
+            request,
+        } = receive(&mut socket).await
+        else {
+            panic!("chart request")
+        };
+        let Request::Chart { query: first } = *request else {
+            panic!("not a pure chart request")
+        };
+        assert_eq!(first.cursor, None);
+        let prefix = ChartPage {
+            context: first.context.clone(),
+            branch: first.branch.clone(),
+            base: first.base,
+            chart: first.chart.clone(),
+            kind: ChartKind::Monsters,
+            mode: ChartMode::Live,
+            acquired_at: initial.cursor.tick,
+            total_components: 1,
+            total_records: 3,
+            start: 0,
+            records: vec![ChartRecord::Component(ChartComponent {
+                component: 0,
+                alignment: ChartAlignment::Aligned,
+            })],
+            next: Some(1),
+        };
+        let old = ServerMessage::ChartPage {
+            context: initial.reply_context(),
+            request_id: first_id,
+            page: Box::new(prefix),
+        };
+        send(&mut socket, old.clone()).await;
+        let ClientMessage::Request {
+            request_id,
+            request,
+        } = receive(&mut socket).await
+        else {
+            panic!("continuation")
+        };
+        let Request::Chart { query } = *request else {
+            panic!("continuation must remain pure query")
+        };
+        assert_eq!(query.cursor, Some(1));
+        assert_eq!(query.chart, first.chart);
+        assert_eq!(query.base, first.base);
+        send(&mut socket, old).await; // delayed duplicate must be ignored, not published
+        let page = ChartPage {
+            context: query.context,
+            branch: query.branch,
+            base: query.base,
+            chart: query.chart,
+            kind: ChartKind::Monsters,
+            mode: ChartMode::Live,
+            acquired_at: initial.cursor.tick,
+            total_components: 1,
+            total_records: 3,
+            start: 1,
+            records: vec![
+                ChartRecord::Row(ChartRow {
+                    component: 0,
+                    position: Some([4, -2, 8]),
+                    mark: ChartMark::Monster {
+                        name: "".into(),
+                        asset: None
+                    }
+                });
+                2
+            ],
+            next: None,
+        };
+        send(
+            &mut socket,
+            ServerMessage::ChartPage {
+                context: initial.reply_context(),
+                request_id,
+                page: Box::new(page),
+            },
+        )
+        .await;
+        let mut next = (*initial.state).clone();
+        next.revision += 1;
+        next.observation.tick += 1;
+        next.observation.charts[0].status = ChartStatus::Inactive;
+        next.observation.charts[0].acquired_at = None;
+        next.observation.charts[0].chart = None;
+        send(
+            &mut socket,
+            ServerMessage::Update {
+                update: Box::new(StreamUpdate {
+                    context: initial.context,
+                    actor: initial.actor,
+                    branch: initial.branch,
+                    cursor: StreamCursor {
+                        sequence: initial.cursor.sequence + 1,
+                        tick: next.observation.tick,
+                    },
+                    body: UpdateBody::Observation {
+                        state: Arc::new(next),
+                        event: None,
+                    },
+                }),
+            },
+        )
+        .await;
+    });
+    let mut connection = Connection::connect(address, "token".into(), expected.actor, "chart-test")
+        .await
+        .unwrap();
+    let before = connection.state.snapshot();
+    let request = connection
+        .charts
+        .request(
+            crate::charts::ChartInput::Select(ChartKind::Monsters),
+            &connection.state,
+        )
+        .unwrap()
+        .unwrap();
+    connection.request(request).await.unwrap();
+    assert!(
+        matches!(connection.next().await.unwrap(), ServerMessage::ChartPage { page, .. } if page.next.is_some())
+    );
+    assert!(connection.charts.display().is_none());
+    assert_eq!(connection.state.snapshot(), before);
+    assert!(
+        matches!(connection.next().await.unwrap(), ServerMessage::ChartPage { page, .. } if page.next.is_none())
+    );
+    assert_eq!(connection.charts.display().unwrap().rows.len(), 2);
+    assert!(connection
+        .charts
+        .lines(&connection.state)
+        .join("\n")
+        .contains(": creature"));
+    assert_eq!(connection.state.snapshot(), before);
+    assert!(matches!(
+        connection.next().await.unwrap(),
+        ServerMessage::Update { .. }
+    ));
+    assert!(connection.charts.display().is_none());
+    assert!(!connection.charts.loading());
+    assert!(connection
+        .charts
+        .lines(&connection.state)
+        .join("\n")
+        .contains("inactive"));
+    server.await.unwrap();
 }

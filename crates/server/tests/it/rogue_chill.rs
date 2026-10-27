@@ -19,8 +19,10 @@ fn rogue_chill_is_a_purchased_checked_status_signature_with_no_fake_damage() {
     assert!(trained.derive().unwrap().abilities.contains(&ability));
     let mut untrained = build.clone();
     untrained.hit_dice[0].purchases.clear();
-    let untrained = catalog
-        .prepare(&untrained)
+    // The package owns its innate purchase. Author a matching unpaid package
+    // variant rather than editing a locked purchase under the original package.
+    assert!(catalog.prepare(&untrained).is_err());
+    let untrained = super::rogue_roster::prepare_roster_variant(&catalog, &manifest, &untrained)
         .unwrap()
         .instantiate(42)
         .unwrap();

@@ -132,6 +132,7 @@ mod tests {
 
     fn cell(at: Position, wall: bool) -> CellView {
         CellView {
+            object_presentation: None,
             position: at,
             wall,
             lit: true,

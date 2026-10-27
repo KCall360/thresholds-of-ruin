@@ -13,6 +13,7 @@ fn snapshot() -> Snapshot {
     let mut species = crate::test_creatures::species();
     species.modifiers = vec![
         Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Set {
                 stat: Stat::Health,
@@ -20,6 +21,7 @@ fn snapshot() -> Snapshot {
             },
         },
         Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Set {
                 stat: Stat::ResourceMax {
@@ -78,6 +80,7 @@ fn captured_plan_with_modifiers(
     let mut species = crate::test_creatures::species();
     species.modifiers.extend(modifiers);
     species.modifiers.push(Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::GrantAbility {
             ability: id.clone(),
@@ -379,6 +382,7 @@ fn final_plan_and_timing_bounds_reject_plus_one_without_mutation() {
         definition.basic_attack = false;
         definition.strikes = crate::rules::StrikeSource::Authored {
             strikes: vec![crate::rules::StrikeDef {
+                cancellable: false,
                 offset: 0,
                 unlock: None,
                 check: Some(crate::rules::CheckDef {
@@ -424,12 +428,14 @@ fn final_plan_and_timing_bounds_reject_plus_one_without_mutation() {
         .unwrap();
         species.modifiers.extend([
             Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::GrantAbility {
                     ability: ability.clone(),
                 },
             },
             Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Add {
                     stat: Stat::Ability {
@@ -1423,6 +1429,7 @@ fn shared_effect_edge_and_check_only_tokens_are_frozen_separately() {
         let (mut game, _) = captured_plan_with_modifiers(
             "basic_melee",
             vec![Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Add {
                     stat: Stat::Edge,
@@ -1535,6 +1542,7 @@ fn observation_protection_snapshot(immune: bool) -> Snapshot {
     let mut species = crate::test_creatures::species();
     if immune {
         species.modifiers.push(Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Immunity {
                 selector: Selector::Descriptor {
@@ -1748,6 +1756,7 @@ fn attack_roll_bonus_is_captured_for_damage_but_not_consumable_effects() {
     let (game, plan) = captured_plan_with_modifiers(
         "basic_melee",
         vec![Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Add {
                 stat: Stat::AttackDamageRollBonus,

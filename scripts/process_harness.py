@@ -735,7 +735,13 @@ class Process:
         finally:
             self.lines.put(None)
 
-    def until(self, predicate, seconds=15):
+    def until(self, predicate, seconds=15, *, include_transcript=True):
+        """Wait within one deadline; optionally return only the matched line.
+
+        JSON-frame callers already retain their parsed result and need no second
+        read of consumed capture chunks. This changes only the return value;
+        FIFO consumption, the diagnostic tail and lossless retention are shared.
+        """
         deadline = time.monotonic() + seconds
         start = self.lines.offset
         while True:
@@ -760,6 +766,8 @@ class Process:
             if time.monotonic() >= deadline:
                 raise self._failure("Process output deadline")
             if matched:
+                if not include_transcript:
+                    return line
                 if getattr(self, "_segmented_stdout", False):
                     try:
                         result = self.lines.read_between(start, self.lines.offset, deadline=deadline)
@@ -1006,7 +1014,9 @@ class ProcessTestCase(unittest.TestCase):
                 found.append(value)
                 return True
             return False
-        client.until(match, seconds)
+        # The parsed frame is the result; replaying the consumed transcript here
+        # can wait on archival even after the exact response arrived in time.
+        client.until(match, seconds, include_transcript=False)
         return found[-1]
 
     def client(self, token=TOKEN, observe=False, actor=None, *, omit_memory=False, compact_background=False):
@@ -1231,7 +1241,7 @@ class ProcessTestCase(unittest.TestCase):
             def key(name, down):
                 vk = {"i": 0x49, "semicolon": 0xBA, "o": 0x4F, "c": 0x43, "Right": 0x27, "Up": 0x26, "Escape": 0x1B, "y": 0x59, "u": 0x55, "b": 0x42,
                       "n": 0x4E, "F4": 0x73, "F6": 0x75, "F7": 0x76, "F8": 0x77, "F9": 0x78, "F10": 0x79, "F11": 0x7A, "F12": 0x7B, "Shift_L": 0x10, "comma": 0xBC, "period": 0xBE, "g": 0x47,
-                      "w": 0x57, "t": 0x54, "q": 0x51, "e": 0x45, "z": 0x5A, "2": 0x32, "Return": 0x0D, "Down": 0x28,
+                      "w": 0x57, "t": 0x54, "q": 0x51, "e": 0x45, "z": 0x5A, "x": 0x58, "v": 0x56, "2": 0x32, "Return": 0x0D, "Down": 0x28,
                       "PageUp": 0x21, "PageDown": 0x22, "Tab": 0x09, "space": 0x20,
                       "bracketleft": 0xDB, "bracketright": 0xDD}[name]
                 scan = user32.MapVirtualKeyW(vk, 0)

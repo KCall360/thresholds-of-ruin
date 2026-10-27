@@ -319,12 +319,33 @@ impl From<&crate::rules::EquipmentSlotDef> for EquipmentSlotView {
     }
 }
 
+/// Closed paid device refusal; does not disclose identity, Health or recipients.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ItemRefusal {
+    TooWeak,
+}
+impl<'de> serde::Deserialize<'de> for ItemRefusal {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match <String as serde::Deserialize>::deserialize(d)?.as_str() {
+            "too_weak" => Ok(Self::TooWeak),
+            _ => Err(serde::de::Error::custom("unknown item refusal")),
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ItemRefusalView {
+    pub work: Work,
+    pub reason: ItemRefusal,
+}
+
 /// Controlled actor's anatomy and carried-item affordances. Equipment statistics
 /// remain absent until that actor knows the item's identity.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InteractionView {
     pub identification: Option<crate::IdentificationChoiceView>,
     pub completed: Vec<Work>,
+    pub refused: Vec<ItemRefusalView>,
     pub curse_blocked: Vec<ItemId>,
     pub slots: Vec<EquipmentSlotView>,
     pub preparation: Option<PreparationView>,
@@ -344,6 +365,7 @@ pub struct ProjectileBonusView {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ItemInteractionView {
+    pub portable_light: Option<crate::PortableLightView>,
     pub item: ItemId,
     pub slot: Option<EquipmentSlotView>,
     pub equipped_slot: Option<EquipmentSlotId>,
@@ -354,12 +376,14 @@ pub struct ItemInteractionView {
     pub drinkable: bool,
     pub readable: bool,
     pub zappable: bool,
+    pub device_activation: Option<crate::DeviceActivation>,
     pub charges: Option<u16>,
     pub edible: bool,
 }
 impl ConsumableSpec {
     pub fn valid(&self) -> bool {
-        crate::magic_items::valid_payload_descriptor_shape(&self.descriptors)
+        self.discovery != crate::ItemDiscovery::DiscernibleEffect
+            && crate::magic_items::valid_payload_descriptor_shape(&self.descriptors)
             && !self.effects.is_empty()
             && self.effects.len() <= crate::limits::CONSUMABLE_EFFECTS
             && self
@@ -392,6 +416,12 @@ pub enum Work {
     Unequip {
         item: ItemId,
     },
+    Ignite {
+        item: ItemId,
+    },
+    Extinguish {
+        item: ItemId,
+    },
     Drink {
         item: ItemId,
     },
@@ -400,7 +430,7 @@ pub enum Work {
     },
     Zap {
         item: ItemId,
-        direction: crate::abilities::StepDirection,
+        aim: crate::DeviceAim,
     },
     Eat {
         item: ItemId,
@@ -431,6 +461,12 @@ impl<'de> serde::Deserialize<'de> for Work {
             Unequip {
                 item: ItemId,
             },
+            Ignite {
+                item: ItemId,
+            },
+            Extinguish {
+                item: ItemId,
+            },
             Drink {
                 item: ItemId,
             },
@@ -439,7 +475,7 @@ impl<'de> serde::Deserialize<'de> for Work {
             },
             Zap {
                 item: ItemId,
-                direction: crate::abilities::StepDirection,
+                aim: crate::DeviceAim,
             },
             Eat {
                 item: ItemId,
@@ -467,9 +503,11 @@ impl<'de> serde::Deserialize<'de> for Work {
             },
             Fields::Equip { item, slot } => Self::Equip { item, slot },
             Fields::Unequip { item } => Self::Unequip { item },
+            Fields::Ignite { item } => Self::Ignite { item },
+            Fields::Extinguish { item } => Self::Extinguish { item },
             Fields::Drink { item } => Self::Drink { item },
             Fields::Read { item } => Self::Read { item },
-            Fields::Zap { item, direction } => Self::Zap { item, direction },
+            Fields::Zap { item, aim } => Self::Zap { item, aim },
             Fields::Eat { item } => Self::Eat { item },
         })
     }
@@ -502,11 +540,13 @@ impl Work {
                 slot: *slot,
             },
             Self::Unequip { item } => Action::Unequip { item: *item },
+            Self::Ignite { item } => Action::Ignite { item: *item },
+            Self::Extinguish { item } => Action::Extinguish { item: *item },
             Self::Drink { item } => Action::Drink { item: *item },
             Self::Read { item } => Action::Read { item: *item },
-            Self::Zap { item, direction } => Action::Zap {
+            Self::Zap { item, aim } => Action::Zap {
                 item: *item,
-                direction: *direction,
+                aim: *aim,
             },
             Self::Eat { item } => Action::Eat { item: *item },
         }
@@ -522,6 +562,8 @@ impl Work {
             | Self::Respec { .. }
             | Self::Equip { .. }
             | Self::Unequip { .. }
+            | Self::Ignite { .. }
+            | Self::Extinguish { .. }
             | Self::Read { .. }
             | Self::Zap { .. }
             | Self::Drink { .. }
@@ -533,6 +575,8 @@ impl Work {
             Self::Escape { .. } | Self::UseAbility { .. } | Self::Respec { .. } => None,
             Self::Equip { item, .. }
             | Self::Unequip { item }
+            | Self::Ignite { item }
+            | Self::Extinguish { item }
             | Self::Read { item }
             | Self::Zap { item, .. }
             | Self::Drink { item }
@@ -546,6 +590,8 @@ impl Work {
             Self::Respec { .. } => "replace advancement",
             Self::Equip { .. } => "equip",
             Self::Unequip { .. } => "remove",
+            Self::Ignite { .. } => "ignite",
+            Self::Extinguish { .. } => "extinguish",
             Self::Drink { .. } => "drink",
             Self::Read { .. } => "read",
             Self::Zap { .. } => "zap",
@@ -567,6 +613,8 @@ impl Work {
                 item.0 > 0 && usize::from(slot.0) < crate::limits::EQUIPMENT_SOCKETS
             }
             Self::Unequip { item }
+            | Self::Ignite { item }
+            | Self::Extinguish { item }
             | Self::Read { item }
             | Self::Zap { item, .. }
             | Self::Drink { item }
@@ -634,11 +682,41 @@ impl Game {
         >,
     > {
         let owner = self.actors.get(&actor)?;
+        self.equipment_capacity_state_for(actor, owner, equipment)
+    }
+
+    /// Validate the candidate's anatomy and expertise, not its published predecessor.
+    fn equipment_capacity_state_for(
+        &self,
+        actor: ActorId,
+        owner: &crate::Actor,
+        equipment: &BTreeMap<EquipmentSlotId, ItemId>,
+    ) -> Option<
+        BTreeMap<
+            crate::content_ids::EquipmentCapacityId,
+            crate::equipment_capacity::EquipmentCapacityDeficit,
+        >,
+    > {
         let anatomy = &owner.anatomy;
         let no_expertise = crate::expertise::ExpertiseOwnership::default();
         let expertises = owner.combat.as_ref().map_or(&no_expertise, |combat| {
             &combat.creature().derived().expertises
         });
+        self.equipment_capacity_state_for_facts(actor, anatomy, expertises, equipment)
+    }
+
+    pub(crate) fn equipment_capacity_state_for_facts(
+        &self,
+        actor: ActorId,
+        anatomy: &AnatomySpec,
+        expertises: &crate::expertise::ExpertiseOwnership,
+        equipment: &BTreeMap<EquipmentSlotId, ItemId>,
+    ) -> Option<
+        BTreeMap<
+            crate::content_ids::EquipmentCapacityId,
+            crate::equipment_capacity::EquipmentCapacityDeficit,
+        >,
+    > {
         let mut demands = Vec::new();
         for (socket, item) in equipment {
             let slot = self
@@ -724,7 +802,7 @@ impl Game {
         equipment: BTreeMap<EquipmentSlotId, ItemId>,
     ) -> Result<(), GameError> {
         let actor = outcome.id;
-        self.equipment_capacity_state(actor, &equipment)
+        self.equipment_capacity_state_for(actor, &outcome.state, &equipment)
             .ok_or(GameError::ItemUnavailable)?;
         if let Some(combat) = outcome.state.combat.as_mut() {
             let sources = equipment
@@ -783,6 +861,8 @@ impl Game {
             Work::Unequip { .. } => {
                 i.spec.equipment.is_some() && a.equipment.values().any(|id| *id == item)
             }
+            Work::Ignite { .. } => self.light_work_available(actor, item, true),
+            Work::Extinguish { .. } => self.light_work_available(actor, item, false),
             Work::Drink { .. } => i.spec.consumable.is_some() && a.combat.is_some(),
             Work::Read { .. } => {
                 i.spec.readable.is_some() && a.combat.is_some() && a.identification.is_none()
@@ -856,6 +936,12 @@ impl Game {
                     .ok_or(GameError::ItemUnavailable)?
                     .unequip_turns
             }
+            Work::Ignite { .. } | Work::Extinguish { .. } => {
+                if !self.light_work_available(actor, item, matches!(work, Work::Ignite { .. })) {
+                    return Err(GameError::ItemUnavailable);
+                }
+                timing.consume_turns
+            }
             Work::Drink { .. } => {
                 if i.spec.consumable.is_none() || a.combat.is_none() {
                     return Err(GameError::ItemUnavailable);
@@ -927,8 +1013,8 @@ impl Game {
             return self.respec_plan(actor, basis, replacement, supplies);
         }
         let preparation = self.item_work_duration(actor, work.clone())?;
-        if let Work::Zap { item, direction } = work {
-            let ray = self.compile_device_ray_plan(actor, item, direction, preparation)?;
+        if let Work::Zap { item, aim } = work {
+            let ray = self.compile_device_plan(actor, item, aim, preparation)?;
             self.item_allocation(&ray)?;
             return Ok(ray);
         }
@@ -950,6 +1036,16 @@ impl Game {
                     allocation,
                 }
             }
+            Work::Ignite { item } => crate::abilities::Plan::Ignite {
+                actor,
+                item,
+                preparation,
+            },
+            Work::Extinguish { item } => crate::abilities::Plan::Extinguish {
+                actor,
+                item,
+                preparation,
+            },
             Work::Unequip { item } => crate::abilities::Plan::Unequip {
                 actor,
                 item,
@@ -1335,10 +1431,13 @@ impl Game {
             .with_context(self.resolution_context(resolution, actor, actor)?);
         let mut rng = self.rules_rng;
         let outcome = crate::abilities::resolve(resolution, &snapshot, &mut rng, &mut ())?;
-        let observed = outcome.result == crate::abilities::OutcomeStatus::Applied;
         self.rules_rng = rng;
-        self.apply_outcome(outcome)?;
-        Ok(observed)
+        let receipt = self.apply_resolved_outcome(
+            outcome,
+            crate::lifecycle::ResolutionPublication::Standalone,
+            &mut crate::lifecycle::DamageActivityGuard::default(),
+        )?;
+        Ok(self.published_resolution(receipt)?.result == crate::abilities::OutcomeStatus::Applied)
     }
     pub(crate) fn finish_item_work(
         &mut self,
@@ -1406,7 +1505,31 @@ impl Game {
                     .equipment
                     .clone();
                 equipment.retain(|_, equipped| *equipped != item);
-                ItemChange::Equipment(self.equipment_candidate(actor, equipment)?)
+                let outcome = self.equipment_candidate(actor, equipment)?;
+                if self
+                    .items
+                    .get(&item)
+                    .is_some_and(|item| item.fuel.is_some())
+                {
+                    ItemChange::PortableLight {
+                        item,
+                        lit: false,
+                        actor: outcome,
+                    }
+                } else {
+                    ItemChange::Equipment(outcome)
+                }
+            }
+            Work::Ignite { .. } | Work::Extinguish { .. } => {
+                let lit = matches!(work, Work::Ignite { .. });
+                if !self.light_work_available(actor, item, lit) {
+                    return Err(GameError::ItemUnavailable);
+                }
+                ItemChange::PortableLight {
+                    item,
+                    lit,
+                    actor: self.actor_outcome(actor)?,
+                }
             }
             Work::Drink { .. } | Work::Eat { .. } | Work::Read { .. } | Work::Zap { .. } => {
                 let mut outcome = self.actor_outcome(actor)?;
@@ -1501,7 +1624,7 @@ impl Game {
                     && p.plan.actor() == actor
                     && match p.plan.work() {
                         Work::Read {item}=>self.items.get(&item).and_then(|i|i.spec.readable.as_ref()).is_some_and(|s|matches!(&p.plan,crate::abilities::Plan::Read {control,effects,identify,discovery,descriptors,..} if *control==s.control&&*descriptors==s.descriptors&&*identify==s.identify&&*discovery==s.discovery&&crate::abilities::item_effects_match_definition(&s.effects,effects))),
-                        Work::Zap {item,..}=>self.items.get(&item).is_some_and(|i|matches!(&p.plan,crate::abilities::Plan::Zap {charges,ray,discovery,..} if i.charges==Some(*charges)&&i.spec.device.as_ref().is_some_and(|d|d.ability==ray.ability && d.discovery == *discovery))),
+                        Work::Zap {item,..}=>self.items.get(&item).is_some_and(|i|matches!(&p.plan,crate::abilities::Plan::Zap {charges,delivery,discovery,..} if i.charges==Some(*charges)&&i.spec.device.as_ref().is_some_and(|d|&d.ability==delivery.ability() && d.discovery == *discovery))),
                         Work::Eat { item } => self
                             .items
                             .get(&item)

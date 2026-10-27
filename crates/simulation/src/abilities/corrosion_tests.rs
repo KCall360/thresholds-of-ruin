@@ -30,6 +30,7 @@ fn fixture_config(
         |ability| {
             ability.strikes = StrikeSource::NaturalMelee {
                 additional_riders: vec![RiderDef {
+                    cancellable: false,
                     trigger: RiderTrigger::Success,
                     condition: Some(RiderCondition::SequenceSuccessfulHits { minimum: 1 }),
                     check: None,
@@ -50,6 +51,7 @@ fn fixture_config(
                     unreachable!()
                 };
                 additional_riders.push(RiderDef {
+                    cancellable: false,
                     trigger: RiderTrigger::Success,
                     condition: None,
                     check: None,
@@ -75,6 +77,7 @@ fn fixture_config(
             // NaturalAttack resolves the real named skill, not legacy melee
             // metadata accuracy. Keep this synthetic contact witness explicit.
             species.modifiers.push(Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Add {
                     stat: Stat::Ability {
@@ -92,6 +95,7 @@ fn fixture_config(
                 offsets
                     .iter()
                     .map(|offset| StrikeDef {
+                        cancellable: false,
                         offset: *offset,
                         unlock: None,
                         check: Some(CheckDef {
@@ -153,6 +157,7 @@ fn fixture_config(
                     armor: Some(armor),
                     attack: None,
                     modifiers: vec![Modifier {
+                        cancellable: false,
                         scope: Scope::Always,
                         op: ModifierOp::Reduction {
                             selector: Selector::Category {
@@ -514,6 +519,7 @@ fn worn_armor_protection_prevents_new_corrosion_without_repair_and_removal_resto
         armor: None,
         attack: None,
         modifiers: vec![Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::ProtectArmor {},
         }],

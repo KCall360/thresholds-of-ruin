@@ -551,3 +551,67 @@ fn persistent_personal_conditions_require_null_and_never_disclose_private_identi
         );
     }
 }
+
+#[test]
+fn until_obstruction_reach_is_named_closed_and_directional_only() {
+    let valid = serde_json::json!({"kind":"until_obstruction"});
+    let reach: tor_protocol::AbilityReach = serde_json::from_value(valid.clone()).unwrap();
+    assert_eq!(serde_json::to_value(reach).unwrap(), valid);
+    for bad in [
+        serde_json::json!({"kind":"until_obstruction","range":6}),
+        serde_json::json!({"kind":"until_obstruction","check":null}),
+        serde_json::json!(["until_obstruction"]),
+    ] {
+        assert!(serde_json::from_value::<tor_protocol::AbilityReach>(bad).is_err());
+    }
+    let baseline = tor_protocol::AbilityView {
+        id: "fixture.contact".into(),
+        name: "Contact".into(),
+        cost: None,
+        reach: tor_protocol::AbilityReach::UntilObstruction,
+        target_kind: tor_protocol::AbilityTargetKind::DirectionalRay,
+        basic_attack: false,
+        weapon_selection: false,
+        cooldown_remaining: 0,
+        supply_costs: vec![],
+    };
+    assert!(baseline.valid());
+    let decoded: tor_protocol::AbilityView =
+        serde_json::from_value(serde_json::to_value(&baseline).unwrap()).unwrap();
+    assert_eq!(decoded, baseline);
+    assert!(decoded.valid());
+    for target in [
+        tor_protocol::AbilityTargetKind::Actor,
+        tor_protocol::AbilityTargetKind::DirectionalProjectile,
+        tor_protocol::AbilityTargetKind::SelfOnly,
+    ] {
+        let mut invalid = baseline.clone();
+        invalid.target_kind = target;
+        assert!(!invalid.valid());
+    }
+    let mut basic = baseline.clone();
+    basic.basic_attack = true;
+    assert!(!basic.valid());
+    let mut selected = baseline.clone();
+    selected.weapon_selection = true;
+    assert!(!selected.valid());
+    assert!(
+        baseline.valid(),
+        "independent mutations must not invalidate control"
+    );
+}
+#[test]
+fn cancellation_diagnostic_is_target_only_and_closed() {
+    for changed in [false, true] {
+        let value = serde_json::json!({"type":"cancel_specials","target":"2","changed":changed});
+        let parsed: tor_protocol::DiagnosticEffect = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(serde_json::to_value(parsed).unwrap(), value);
+    }
+    for bad in [
+        serde_json::json!({"type":"cancel_specials","target":"2"}),
+        serde_json::json!({"type":"cancel_specials","target":"2","changed":true,"source":"1"}),
+        serde_json::json!(["cancel_specials", "2", true]),
+    ] {
+        assert!(serde_json::from_value::<tor_protocol::DiagnosticEffect>(bad).is_err());
+    }
+}

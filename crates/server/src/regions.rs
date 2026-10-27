@@ -44,6 +44,8 @@ type PreparationLineage = (
 );
 
 type TrapLineage = (
+    tor_simulation::TrapRegionPhase,
+    Option<u64>,
     tor_simulation::ActorId,
     tor_world::Location,
     u8,
@@ -56,10 +58,27 @@ type TrapLineage = (
 struct BoundaryProgress {
     preparations: BTreeMap<PreparationLineage, BTreeSet<RegionId>>,
     population_tick: Option<u64>,
+    lights: Vec<(tor_simulation::LightRegionBoundary, BTreeSet<RegionId>)>,
     traps: BTreeMap<TrapLineage, BTreeSet<RegionId>>,
 }
 
 impl BoundaryProgress {
+    fn light(
+        &mut self,
+        boundary: &tor_simulation::LightRegionBoundary,
+        missing: BTreeSet<RegionId>,
+    ) -> Result<(), Failure> {
+        if let Some((_, previous)) = self.lights.iter_mut().find(|(key, _)| key == boundary) {
+            if missing.len() >= previous.len() || !missing.is_subset(previous) {
+                return Err(storage_failure());
+            }
+            *previous = missing;
+        } else {
+            self.lights.push((boundary.clone(), missing));
+        }
+        Ok(())
+    }
+
     fn preparation(
         &mut self,
         boundary: &tor_simulation::theft::PreparationRegionBoundary,
@@ -88,6 +107,8 @@ impl BoundaryProgress {
         missing: BTreeSet<RegionId>,
     ) -> Result<(), Failure> {
         let key = (
+            boundary.phase,
+            boundary.active_clock,
             boundary.actor,
             boundary.location,
             boundary.orientation,
@@ -499,6 +520,9 @@ impl Regions {
             if game.population_entry_pending() {
                 progress.population(game.tick())?;
             }
+            if let Some(boundary) = game.light_region_boundary().cloned() {
+                progress.light(&boundary, game.light_missing_regions(&boundary))?;
+            }
             if let Some(boundary) = game.trap_region_boundary().cloned() {
                 progress.trap(&boundary, game.trap_missing_regions(&boundary))?;
             }
@@ -618,6 +642,7 @@ impl Regions {
                 );
                 group_files.extend(batch.files);
                 let activation = batch.activation;
+                let spatial = batch.spatial;
                 let mut store = Pending {
                     regions: self,
                     made: &mut staged,
@@ -628,6 +653,7 @@ impl Regions {
                 {
                     return Err(storage_failure());
                 }
+                self.package.install_spatial_scope(&mut next, spatial)?;
                 if let Some(scope) = activation {
                     next.register_activation_scope(scope)
                         .map_err(|_| storage_failure())?;
@@ -654,6 +680,7 @@ impl Regions {
                 return Err(failure.unwrap_or_else(storage_failure));
             }
         };
+        self.package.install_authored_spatial(&mut next)?;
         *game = next;
         *made = staged;
         self.need_files(group_files);
@@ -733,6 +760,40 @@ impl Regions {
         self.resident.len()
     }
 
+    #[cfg(test)]
+    pub(crate) fn test_prepare_record_read(&mut self, id: RecordId) {
+        self.start_preloading();
+        self.preload.as_ref().unwrap().want(&[Job::Read(id)]);
+        self.settle_preloading();
+    }
+    #[cfg(test)]
+    pub(crate) fn test_pending_get(
+        &mut self,
+        id: RecordId,
+        record: Shared<RegionRecord>,
+    ) -> Option<Shared<RegionRecord>> {
+        let mut made = vec![(id, record)];
+        Pending {
+            regions: self,
+            made: &mut made,
+        }
+        .get(id)
+    }
+    /// A decoded detached chart is not authority until its retained source is
+    /// checked. Keep unopened/no-chart blobs lazy; never read unrelated records
+    /// merely because a checkpoint names them. All get paths use this boundary.
+    fn checked_history_record(&self, record: Shared<RegionRecord>) -> Option<Shared<RegionRecord>> {
+        if record.historical_chart_authorities().next().is_none() {
+            return Some(record);
+        }
+        let mut audit =
+            crate::scenario_package::HistoricalSourceAudit::new(Some(&self.package), self.seed)
+                .ok()?;
+        for (world, registry, scope) in record.historical_chart_authorities() {
+            audit.check_shared(world, registry, scope).ok()?;
+        }
+        Some(record)
+    }
     pub(crate) fn encoded_resident(&self) -> Result<Vec<(u64, Vec<u8>)>, Failure> {
         self.resident
             .iter()
@@ -750,9 +811,10 @@ impl RecordStore for Regions {
     }
     fn get(&mut self, id: RecordId) -> Option<Shared<RegionRecord>> {
         if let Some(record) = self.resident.get(&id) {
-            return Some(record.clone());
+            return self.checked_history_record(record.clone());
         }
         if let Some((record, _)) = self.preload.as_ref().and_then(|p| p.take(Job::Read(id))) {
+            let record = self.checked_history_record(record)?;
             self.reads += 1;
             self.prepared += 1;
             if let Some(acquisition) = &mut self.acquisition {
@@ -762,6 +824,7 @@ impl RecordStore for Regions {
         }
         let started = self.acquisition.as_ref().map(|_| Instant::now());
         let record = Shared::new(self.disk.as_ref()?.read_region(id).ok()??);
+        let record = self.checked_history_record(record)?;
         self.reads += 1;
         if let (Some(acquisition), Some(started)) = (&mut self.acquisition, started) {
             acquisition.fallback_reads += 1;
@@ -842,7 +905,7 @@ impl RecordStore for Pending<'_> {
     }
     fn get(&mut self, id: RecordId) -> Option<Shared<RegionRecord>> {
         match self.made.iter().find(|(made, _)| *made == id) {
-            Some((_, record)) => Some(record.clone()),
+            Some((_, record)) => self.regions.checked_history_record(record.clone()),
             None => self.regions.get(id),
         }
     }
@@ -949,6 +1012,26 @@ mod boundary_progress_tests {
             .is_err());
         progress.preparation(&boundary, regions(&[2])).unwrap();
         assert!(progress.preparation(&boundary, BTreeSet::new()).is_err());
+    }
+
+    #[test]
+    fn portable_light_progress_distinguishes_same_tick_geometry_and_rejects_stalls() {
+        let mut progress = BoundaryProgress::default();
+        let mut boundary = tor_simulation::LightRegionBoundary {
+            tick: 7,
+            optical: None,
+            required: regions(&[1, 2, 3]),
+        };
+        progress.light(&boundary, regions(&[2, 3])).unwrap();
+        progress.light(&boundary, regions(&[3])).unwrap();
+        assert!(progress.light(&boundary, regions(&[3])).is_err());
+        assert!(progress.light(&boundary, regions(&[2])).is_err());
+        progress.light(&boundary, BTreeSet::new()).unwrap();
+        assert!(progress.light(&boundary, BTreeSet::new()).is_err());
+        boundary.required = regions(&[1, 4]);
+        progress.light(&boundary, regions(&[4])).unwrap();
+        boundary.tick = 8;
+        progress.light(&boundary, regions(&[4])).unwrap();
     }
 
     #[test]

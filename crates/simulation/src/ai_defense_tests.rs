@@ -75,6 +75,7 @@ fn fixture(change: impl FnOnce(&mut Value, &mut crate::creatures::Species)) -> G
         .push(definition("probe_defense", "probe_guard"));
     let mut owner = test_creatures::species();
     owner.modifiers.push(Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::GrantAbility {
             ability: id("probe_defense"),
@@ -386,6 +387,7 @@ fn self_defense_reordering_uses_authored_priority_then_stable_identity() {
                 candidate["ai"]["priority"] = json!(priority);
                 doc["abilities"].as_array_mut().unwrap().push(candidate);
                 owner.modifiers.push(Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::GrantAbility { ability: id(name) },
                 });
@@ -502,6 +504,7 @@ fn self_defense_healing_and_disclosed_self_step_retreat_keep_priority() {
             };
             doc["abilities"].as_array_mut().unwrap().push(other);
             owner.modifiers.push(Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::GrantAbility { ability: id(name) },
             });
@@ -551,6 +554,7 @@ fn paid_prefix_retains_priority(erratic: bool) {
     let mut game = fixture(|doc, owner| {
         if erratic {
             owner.modifiers.push(Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Locomotion {
                     value: crate::locomotion::LocomotionValue::Erratic {
@@ -577,6 +581,7 @@ fn paid_prefix_retains_priority(erratic: bool) {
             .push(second);
         doc["abilities"].as_array_mut().unwrap().push(other);
         owner.modifiers.push(Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::GrantAbility {
                 ability: id("probe_sequence"),
@@ -855,6 +860,7 @@ fn self_defense_reserved_token_blocks_an_equivalent_fresh_ability() {
         let alias = definition("probe_alias", "probe_guard");
         doc["abilities"].as_array_mut().unwrap().push(alias);
         owner.modifiers.push(Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::GrantAbility {
                 ability: id("probe_alias"),

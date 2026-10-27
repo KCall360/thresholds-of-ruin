@@ -241,5 +241,79 @@ class NativeMouseContract(unittest.TestCase):
                         mouse((0.5, 0.5), True)
                     self.assertEqual(desktop.buttons, [])
 
+
+class LocalGraphicalWaiverContracts(unittest.TestCase):
+    def module(self):
+        spec = importlib.util.spec_from_file_location("client_3d_verify_waiver", HERE / "verify.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_pre_window_appearance_validation_is_required_non_graphical(self):
+        import test_client_process
+        from process_harness import is_graphical_test
+        case = test_client_process.Native3DProcesses("test_live_appearance_override_is_rejected_before_connecting")
+        self.assertFalse(is_graphical_test(case))
+
+    def test_local_only_rejects_ci_before_any_verification(self):
+        module = self.module()
+        with mock.patch.dict(os.environ, {"CI": "1"}), mock.patch.object(module, "steps") as steps:
+            with self.assertRaises(SystemExit):
+                module.main(["--waive-local-graphical", "unused.json"])
+            steps.assert_not_called()
+
+    def test_exact_discovery_rejects_unknown_duplicate_and_non_graphical_ids(self):
+        module = self.module()
+        class Native(unittest.TestCase):
+            graphical = True
+            def test_window(self): pass
+        class Pure(unittest.TestCase):
+            def test_pure(self): pass
+        native, pure = Native("test_window"), Pure("test_pure")
+        for names in ([native.id(), native.id()], [pure.id()], ["test_missing.Class.test_window"]):
+            with self.subTest(names=names), mock.patch.object(module.graphical_waiver, "read_manifest",
+                    return_value={"reason": "explicit local authorization", "tests": names}), \
+                    mock.patch.object(module.unittest.defaultTestLoader, "discover",
+                    return_value=unittest.TestSuite([native, pure])):
+                with self.assertRaises(ValueError):
+                    module.waiver_plan("fixture.json")
+
+    def test_zero_exit_requires_exact_accounting_and_stable_source_and_never_claims_clean(self):
+        module = self.module()
+        name = "test_fixture.Native.test_window"
+        manifest = {"reason": "explicit local authorization", "tests": [name]}
+        rows = [{"kind": "local_graphical_waiver", **manifest},
+                {"kind": "test", "test_id": name, "outcome": "waived"},
+                {"kind": "suite", "waived": 1, "waived_tests": [name]}]
+        for mode in ("valid", "missing", "mismatch", "source-change"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory(dir=ROOT / ".local") as temporary:
+                directory = Path(temporary)
+                def run(command, **kwargs):
+                    self.assertIn("--waive-local-graphical", command)
+                    self.assertIn("test_runner.py", command[1])
+                    snapshot = Path(command[command.index("--waive-local-graphical") + 1])
+                    self.assertNotEqual(snapshot, Path("fixture.json"))
+                    self.assertEqual(json.loads(snapshot.read_text()), manifest)
+                    if mode != "missing":
+                        actual = rows if mode != "mismatch" else rows[:-1]
+                        Path(kwargs["env"]["TOR_TEST_TIMINGS"]).write_text(
+                            "\n".join(json.dumps(row) for row in actual) + "\n")
+                    return SimpleNamespace(returncode=0)
+                with mock.patch.object(module, "ROOT", directory), \
+                        mock.patch.object(module, "TARGET", directory / "target"), \
+                        mock.patch.object(module, "waiver_plan", return_value=manifest), \
+                        mock.patch.object(module, "steps", return_value=[("process-tests", ["python", "-m", "unittest", "discover"])]), \
+                        mock.patch.object(module, "source_identity", side_effect=[{"hash": "a"}, {"hash": "b" if mode == "source-change" else "a"}]), \
+                        mock.patch.object(module.subprocess, "check_output", return_value="fixture toolchain"), \
+                        mock.patch.object(module.subprocess, "run", side_effect=run), \
+                        mock.patch.dict(os.environ, {}, clear=True), contextlib.redirect_stdout(io.StringIO()):
+                    code = module.main(["--waive-local-graphical", "fixture.json"])
+                receipt = json.loads(next((directory / ".local/verify-3d").glob("*/receipt.json")).read_text())
+                self.assertEqual(code, 0 if mode == "valid" else 1)
+                self.assertEqual(receipt["schema"], "tor-client-3d-verification-v3")
+                self.assertEqual(receipt["gate_passed"], mode == "valid")
+                self.assertFalse(receipt["clean_passed"])
+                self.assertFalse(receipt["passed"])
+
 if __name__ == "__main__":
     unittest.main()

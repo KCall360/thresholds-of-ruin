@@ -49,7 +49,7 @@ fn nutrition_and_eat_wire_shapes_are_strict_and_personal() {
 
 fn personal_state(stats: OwnStats) -> StateView {
     serde_json::from_value(json!({"wizard_game":false,"revision":"1","observation":{
-        "linked_holds":[],"actor":"1","self_target":ActorTarget::from_digest([1;32]),"tick":"15",
+        "charts":[],"linked_holds":[],"actor":"1","self_target":ActorTarget::from_digest([1;32]),"tick":"15",
         "position":{"x":0,"y":0,"z":0},"visible_cells":[],"ground_items":[],
         "inventory":[],"visible_actors":[],"places":[],"ready":false,
         "interactions":null,"motion":null,"combat":{

@@ -21,6 +21,7 @@ fn fixture(
     let mut catalog = (*original.content().catalog()).clone();
     let mut health = Template::new(TemplateId::new("target_health").unwrap(), 0);
     health.modifiers = vec![Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Add {
             stat: Stat::Health,
@@ -32,6 +33,7 @@ fn fixture(
     template.modifiers = abilities
         .iter()
         .map(|definition| Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::GrantAbility {
                 ability: definition.id.clone(),

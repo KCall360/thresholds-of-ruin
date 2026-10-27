@@ -167,7 +167,10 @@ impl Messages {
             [] => {}
             [item] => self.push(format!(
                 "You see here {}.",
-                crate::item_phrase(&item.item.name, item.item.quantity)
+                crate::item_phrase(
+                    tor_client_common::items::ground_name(item),
+                    item.item.quantity
+                )
             )),
             _ => self.push("There are several objects here."),
         }
@@ -176,7 +179,12 @@ impl Messages {
             .iter()
             .find(|cell| cell.position == view.position)
         {
-            if cell.stairs_down {
+            if let Some(presentation) = &cell.object_presentation {
+                self.push(format!(
+                    "You see here {}.",
+                    crate::item_phrase(tor_client_common::items::object_name(presentation), 1)
+                ));
+            } else if cell.stairs_down {
                 self.push("There is a staircase down here.");
             } else if cell.stairs_up {
                 self.push("There is a staircase up here.");

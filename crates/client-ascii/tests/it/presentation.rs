@@ -274,6 +274,7 @@ fn carried_rings() -> Snapshot {
     second.id = super::item_target(1);
     view.inventory = vec![first, second];
     view.interactions = Some(InteractionView {
+        refused: vec![],
         curse_blocked: vec![],
         identification: None,
         completed: Vec::new(),
@@ -297,6 +298,8 @@ fn carried_rings() -> Snapshot {
                 edible: false,
                 readable: false,
                 zappable: false,
+                portable_light: None,
+                device_activation: None,
                 charges: None,
             })
             .collect(),
@@ -1009,11 +1012,11 @@ fn state() -> ClientState {
     ClientState::from_snapshot(serde_json::from_value(serde_json::json!({
         "readiness":{"revision":"0","admission":true,"resume":[],"cancel":[]},"context":{"stream":"fixture-attachment","epoch":"0"},"actor":"1","branch":"test","cursor":{"sequence":"0","tick":"0"},"has_control":true, "intentions":[],
         "history":{"entries":[],"older_before":null},
-        "state":{"wizard_game":false,"revision":"3","observation":{"linked_holds":[],
+        "state":{"wizard_game":false,"revision":"3","observation":{"charts":[],"linked_holds":[],
             "actor":"1","self_target":super::actor_target(1),"tick":"0","position":{"x":1,"y":1,"z":0},
 
-            "places":[],"visible_cells": (0..5).flat_map(|x| (0..3).map(move |y| serde_json::json!({"key":format!("{x}:{y}"),"trap":null,"stairs_up":false,"stairs_down":false,"position":{"x":x,"y":y,"z":0},"wall":false,"lit":true,"place_hint":false}))).collect::<Vec<_>>(),
-            "ground_items":[{"supply_reachable":false,"reachable":true,"item":{"known_currency":null,"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(3),"name":"token"},"position":{"x":1,"y":1,"z":0}}],
+            "places":[],"visible_cells": (0..5).flat_map(|x| (0..3).map(move |y| serde_json::json!({"key":format!("{x}:{y}"),"trap":null,"object_presentation":null,"stairs_up":false,"stairs_down":false,"position":{"x":x,"y":y,"z":0},"wall":false,"lit":true,"place_hint":false}))).collect::<Vec<_>>(),
+            "ground_items":[{"presentation":null,"supply_reachable":false,"reachable":true,"item":{"known_currency":null,"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(3),"name":"token"},"position":{"x":1,"y":1,"z":0}}],
             "inventory":[],"visible_actors":[],
             "ready":true
         }}
@@ -1072,6 +1075,7 @@ fn only_disclosed_current_level_cells_are_drawn_and_actor_wins_over_item() {
         .retain(|cell| cell.position.x != 2);
     assert_eq!(glyph_at(&other_level, &Default::default(), 2, 1), ' ');
     other_level.visible_cells.push(CellView {
+        object_presentation: None,
         lit: true,
         asset: None,
         trap: None,
@@ -1146,6 +1150,7 @@ fn ambiguous_pickup_is_modal_free_and_invalidated_by_an_observation_change() {
         .observation
         .ground_items
         .push(GroundItemView {
+            presentation: None,
             reachable: true,
             item: ItemView {
                 corpse: None,
@@ -2239,6 +2244,7 @@ fn eat_picker_and_hunger_status_use_only_disclosed_nutrition() {
     item.class = ItemClass::Food;
     view.inventory = vec![item.clone()];
     view.interactions = Some(InteractionView {
+        refused: vec![],
         curse_blocked: vec![],
         identification: None,
         slots: vec![],
@@ -2256,6 +2262,8 @@ fn eat_picker_and_hunger_status_use_only_disclosed_nutrition() {
             edible: true,
             readable: false,
             zappable: false,
+            portable_light: None,
+            device_activation: None,
             charges: None,
         }],
     });
