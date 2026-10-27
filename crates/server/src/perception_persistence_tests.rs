@@ -58,10 +58,32 @@ fn scenario() -> Scenario {
     source["creatures"]["templates"]["fixture_paid_search"] = json!({
         "priority":0,"modifiers":[{"scope":"always","op":{"kind":"add","stat":{"kind":"ability",
             "ability":"rogue.search","stat":"check_bonus"},"value":50}}]});
+    // These template-bearing observers are synthetic unowned perception probes,
+    // not Polymorph subjects. Keep the current authored racial + personal class
+    // rows and every purchase; only opt out of body-package ownership, whose
+    // deliberate mixed-template rejection must remain strict in production.
+    let observer_build = &mut source["characters"][0]["creature"];
+    assert_eq!(observer_build["species"], json!("rogue.human"));
+    let observer_rows = observer_build["hit_dice"].clone();
+    assert_eq!(observer_rows.as_array().unwrap().len(), 2);
+    assert_eq!(observer_rows[0]["source"], json!("racial"));
+    assert_eq!(observer_rows[1]["source"], json!("warrior"));
+    assert_eq!(observer_rows[0]["purchases"], json!([]));
+    assert_eq!(observer_rows[1]["purchases"], json!([]));
+    assert_eq!(
+        observer_build
+            .as_object_mut()
+            .unwrap()
+            .remove("body_package"),
+        Some(json!("rogue.body.human"))
+    );
+    assert_eq!(observer_build["hit_dice"], observer_rows);
     source["characters"][0]["creature"]["templates"] = json!(["fixture_paid_search"]);
     let mut observer = source["characters"][0]["creature"].clone();
     observer["name"] = json!("fixture observer");
     observer["templates"] = json!(["fixture_detection"]);
+    assert!(observer.get("body_package").is_none());
+    assert_eq!(observer["hit_dice"], observer_rows);
     source["archetypes"]["fixture.observer"] = json!({"turn_ticks":100,
         "body":source["characters"][0]["body"],"creature":observer});
     let room = crate::generation_recipe::GridRoomsPreset {

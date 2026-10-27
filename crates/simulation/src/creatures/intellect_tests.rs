@@ -131,6 +131,7 @@ fn permanent_requirements_control_talents_without_effective_fold_or_clone() {
     build.advancement.choices[0]
         .purchases
         .push(super::AdvancementPurchase {
+            id: None,
             pool: crate::content_ids::PointPoolId::new("advancement").unwrap(),
             selection: super::PurchaseSelection::Talent(talent.id.clone()),
         });
@@ -314,6 +315,7 @@ fn birth_type_and_subtype_sources_and_requirements_ignore_later_form() {
     build.advancement.choices[0]
         .purchases
         .push(super::AdvancementPurchase {
+            id: None,
             pool: crate::content_ids::PointPoolId::new("advancement").unwrap(),
             selection: super::PurchaseSelection::Talent(talent.id.clone()),
         });
@@ -361,10 +363,12 @@ fn historical_talent_eligibility_uses_recorded_choices_and_initial_values() {
         4
     ];
     rows[0].1.purchases.push(super::AdvancementPurchase {
+        id: None,
         pool: crate::content_ids::PointPoolId::new("advancement").unwrap(),
         selection: super::PurchaseSelection::Talent(talent.id.clone()),
     });
     rows[1].1.purchases.push(super::AdvancementPurchase {
+        id: None,
         pool: crate::content_ids::PointPoolId::new("advancement").unwrap(),
         selection: super::PurchaseSelection::SkillRank(crate::attributes::Skill::Deception),
     });

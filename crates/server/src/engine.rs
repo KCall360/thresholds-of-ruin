@@ -22,7 +22,7 @@ use crate::journal::{
     WizardResult,
 };
 
-pub(crate) const ARCHIVE_VERSION: u32 = 60;
+pub(crate) const ARCHIVE_VERSION: u32 = 61;
 #[path = "action_resolution.rs"]
 mod action_resolution;
 #[path = "advancement_query.rs"]
@@ -4319,12 +4319,14 @@ impl Candidate {
                         let replacement = match replacement {
                             R::Refund {} => None,
                             R::SkillRank { pool, skill } => Some(AdvancementPurchase {
+                                id: None,
                                 pool: point_pool(pool)?,
                                 selection: PurchaseSelection::SkillRank(
                                     crate::creature_authoring::skill(skill)?,
                                 ),
                             }),
                             R::Expertise { pool, expertise } => Some(AdvancementPurchase {
+                                id: None,
                                 pool: point_pool(pool)?,
                                 selection: PurchaseSelection::Expertise(
                                     crate::creature_authoring::expertise(
@@ -4334,6 +4336,7 @@ impl Candidate {
                                 ),
                             }),
                             R::Talent { pool, talent } => Some(AdvancementPurchase {
+                                id: None,
                                 pool: point_pool(pool)?,
                                 selection: PurchaseSelection::Talent(
                                     crate::creature_authoring::talent(
@@ -5107,7 +5110,7 @@ mod earned_growth_identity_tests {
         let engine = Engine::memory(Scenario::two_room(42)).unwrap();
         Engine::replay(engine.archive.clone(), None, None).unwrap();
         assert_eq!(engine.archive.version, ARCHIVE_VERSION);
-        assert_eq!(engine.archive.ruleset, "interactions-v53");
+        assert_eq!(engine.archive.ruleset, "interactions-v54");
         for previous_archive in [true, false] {
             let mut previous = engine.archive.clone();
             if previous_archive {

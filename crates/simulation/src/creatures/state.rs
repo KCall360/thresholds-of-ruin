@@ -112,6 +112,7 @@ pub(super) fn equipment_sources(
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CreatureState {
     cancelled: bool,
+    polymorph_return_pending: bool,
     build: Shared<CreatureBuild>,
     build_epoch: BuildEpoch,
     earned_progress: crate::earned_growth::EarnedProgress,
@@ -174,9 +175,11 @@ impl CreatureState {
         let health = Health::new(derived.maximum_health);
         let health_recovery = HealthRecovery::new(derived.quiet_health_recovery_period);
         let costs = CostLedger::new(Resources::new(derived.resources, build.ruleset()));
-        let threat = permanent.threat_tier();
+        let threat = build
+            .reward_threat_tier(permanent.threat_tier())
+            .map_err(CreatureStateError::Build)?;
         let earned_progress =
-            crate::earned_growth::EarnedProgress::new(build.ledger().total_hd(), threat);
+            crate::earned_growth::EarnedProgress::new(build.personal_hd_count(), threat);
         Ok(Self {
             build: Shared::new(build),
             permanent,
@@ -184,6 +187,7 @@ impl CreatureState {
             earned_progress,
             restorable_losses: RestorableLosses::default(),
             cancelled: false,
+            polymorph_return_pending: false,
             baseline: Shared::new(derived.clone()),
             derived: Shared::new(derived),
             extra_sources: BTreeMap::new(),
@@ -284,9 +288,11 @@ impl CreatureState {
         let health = Health::from_recorded(derived.maximum_health, injury, dead)
             .map_err(CreatureStateError::Health)?;
         let health_recovery = HealthRecovery::new(derived.quiet_health_recovery_period);
-        let threat = permanent.threat_tier();
+        let threat = build
+            .reward_threat_tier(permanent.threat_tier())
+            .map_err(CreatureStateError::Build)?;
         let earned_progress =
-            crate::earned_growth::EarnedProgress::new(build.ledger().total_hd(), threat);
+            crate::earned_growth::EarnedProgress::new(build.personal_hd_count(), threat);
         if Resource::ALL
             .into_iter()
             .any(|resource| costs.resources().maximum(resource) != *derived.resources.get(resource))
@@ -307,6 +313,7 @@ impl CreatureState {
             earned_progress,
             restorable_losses,
             cancelled,
+            polymorph_return_pending: false,
             derived,
             extra_sources,
             equipment,
@@ -324,14 +331,58 @@ impl CreatureState {
         })
     }
 
+    pub fn polymorph_return_pending(&self) -> bool {
+        self.polymorph_return_pending
+    }
+    pub(crate) fn set_polymorph_return_pending(
+        &mut self,
+        pending: bool,
+    ) -> Result<(), CreatureStateError> {
+        if pending
+            && (!self.cancelled
+                || self.health.dead()
+                || self
+                    .build
+                    .base_body_package()
+                    .zip(self.build.active_body_package())
+                    .is_none_or(|(base, active)| base.id == active.id))
+        {
+            return Err(CreatureStateError::Inconsistent);
+        }
+        self.polymorph_return_pending = pending;
+        Ok(())
+    }
+    /// Commit only the final body/equipment combination to sticky Health.
+    pub(crate) fn stage_body_rebuild_with_equipment(
+        &mut self,
+        build: CreatureBuild,
+        equipment: Vec<EquipmentSource>,
+    ) -> Result<RebuildOutcome, CreatureStateError> {
+        let mut candidate = self.clone();
+        candidate.extra_sources = equipment_sources(&equipment)?;
+        candidate.equipment = equipment;
+        let base_period = candidate.health_recovery.base_period();
+        let result = candidate.rebuild_one_with_recovery_context(
+            build,
+            ConditionReconciliation::Explicit,
+            || Ok(RecoveryContext::Pending { base_period }),
+        )?;
+        candidate.polymorph_return_pending = false;
+        *self = candidate;
+        Ok(result)
+    }
+    pub(crate) fn resolve_body_recovery_context(&mut self, context: RecoveryContext) {
+        self.apply_recovery_context(context);
+    }
+
     pub fn cancelled(&self) -> bool {
         self.cancelled
     }
 
-    /// Exact candidate refold; caller publishes this through normal lifecycle.
-    /// Ownership, HD and purchases remain; only pure current invisibility
-    /// conditions are removed, without a veto on later independent applications.
-    pub(crate) fn cancel_specials(&mut self) -> Result<bool, CreatureStateError> {
+    /// Stage suppression inputs without deriving an intermediate Health maximum.
+    /// The caller must perform one final refold before publishing this candidate.
+    /// Only pure current invisibility conditions are removed; no future veto.
+    pub(crate) fn stage_cancellation_inputs(&mut self) -> Result<bool, CreatureStateError> {
         let mut invisible = std::collections::BTreeSet::new();
         for entry in self.conditions.instances() {
             match self
@@ -352,10 +403,17 @@ impl CreatureState {
         if self.cancelled && invisible.is_empty() {
             return Ok(false);
         }
-        let mut candidate = self.clone();
-        candidate.cancelled = true;
+        self.cancelled = true;
         for id in invisible {
-            candidate.conditions.remove(&id);
+            self.conditions.remove(&id);
+        }
+        Ok(true)
+    }
+
+    pub(crate) fn cancel_specials(&mut self) -> Result<bool, CreatureStateError> {
+        let mut candidate = self.clone();
+        if !candidate.stage_cancellation_inputs()? {
+            return Ok(false);
         }
         let baseline_sources = condition_sources(
             &candidate.build,
@@ -408,11 +466,14 @@ impl CreatureState {
     ) -> Result<(), CreatureStateError> {
         progress
             .validate(
-                self.build.ledger().total_hd(),
+                self.build.personal_hd_count(),
                 &self.build.ruleset().document().growth,
             )
             .map_err(CreatureStateError::Growth)?;
-        let current_threat = self.permanent.threat_tier();
+        let current_threat = self
+            .build
+            .reward_threat_tier(self.permanent.threat_tier())
+            .map_err(CreatureStateError::Build)?;
         if progress.peak_threat() < current_threat {
             return Err(CreatureStateError::Inconsistent);
         }
@@ -432,15 +493,15 @@ impl CreatureState {
     pub fn restorable_hit_dice(&self) -> crate::HdCount {
         self.earned_progress
             .highest_applied_tier()
-            .checked_sub(self.derived.total_hd())
+            .checked_sub(self.build.personal_hd_count())
             .expect("validated applied growth watermark")
+            .checked_add(self.build.body_package_loss_count().get())
+            .expect("bounded owned package losses")
     }
 
     fn restoration_source(&self) -> Result<crate::progression::HdSource, CreatureStateError> {
-        if let super::RestorationPolicy::Authored(plan) = self.build.restoration_policy() {
-            if let Some(ordinal) = plan.get(self.build.ledger().entries().len()) {
-                return Ok(ordinal.source.clone());
-            }
+        if let Some(source) = self.build.next_authored_restoration_source() {
+            return Ok(source);
         }
         match self.build.future_growth() {
             crate::earned_growth::FutureGrowth::Selected { source } => Ok(source.hd_source()),
@@ -451,12 +512,15 @@ impl CreatureState {
     }
 
     pub fn hit_die_restoration_blocker(&self) -> Option<super::HitDieRestorationBlocker> {
-        if self.health.dead() || self.restorable_hit_dice().get() == 0 {
+        if self.health.dead()
+            || self.restorable_hit_dice().get() == 0
+            || self.build.body_package_loss_count().get() > 0
+        {
             return None;
         }
         if self.restoration_source().is_err() {
             Some(super::HitDieRestorationBlocker::MissingSource)
-        } else if self.build.ledger().health_root_seed().is_none() {
+        } else if self.build.personal_health_root_seed().is_none() {
             Some(super::HitDieRestorationBlocker::MissingHealthRoot)
         } else {
             None
@@ -491,15 +555,21 @@ impl CreatureState {
             return Ok(RestorableLossOutcome::default());
         }
         let mut build = (*self.build).clone();
-        if restore {
+        if restore
+            && build
+                .restore_owned_package_hit_die()
+                .map_err(CreatureStateError::Build)?
+        {
+            // Exact package ownership is restored before personal losses. It
+            // requires neither a new future source nor newly spent XP.
+        } else if restore {
             if let Some(blocker) = self.hit_die_restoration_blocker() {
                 return Err(CreatureStateError::HitDieRestoration(blocker));
             }
             let source = self.restoration_source()?;
             let root =
                 build
-                    .ledger()
-                    .health_root_seed()
+                    .personal_health_root_seed()
                     .ok_or(CreatureStateError::HitDieRestoration(
                         super::HitDieRestorationBlocker::MissingHealthRoot,
                     ))?;
@@ -893,6 +963,7 @@ impl CreatureState {
 
     /// Death releases unpaid reservations and removes conditions exactly once.
     fn clear_dead_state(&mut self) -> Vec<IntentionId> {
+        self.polymorph_return_pending = false;
         let canceled: Vec<_> = self.costs.reservations().keys().copied().collect();
         for intention in &canceled {
             self.costs.cancel(*intention);
@@ -955,7 +1026,7 @@ impl CreatureState {
         self.earned_progress
             .award(
                 amount,
-                self.build.ledger().total_hd(),
+                self.build.personal_hd_count(),
                 &self.build.ruleset().document().growth,
             )
             .map_err(CreatureStateError::Growth)
@@ -985,7 +1056,7 @@ impl CreatureState {
     /// Fund one additional ordinary obligation beyond all currently banked XP.
     /// Actual HD application remains the ordinary owning Game finalizer's job.
     pub(crate) fn stage_raise_level(&mut self) -> Result<u64, CreatureStateError> {
-        let current = self.build.ledger().total_hd();
+        let current = self.build.personal_hd_count();
         let policy = &self.build.ruleset().document().growth;
         let amount = self
             .earned_progress
@@ -1001,7 +1072,7 @@ impl CreatureState {
         // Temporary actual-row admission guard. Funded scalar projection is
         // independent of this limit; archive/disclosure widening will remove it.
         if self.health.dead()
-            || self.build.ledger().health_root_seed().is_none()
+            || self.build.personal_health_root_seed().is_none()
             || self.build.ledger().entries().len() >= crate::limits::HIT_DICE
         {
             return Ok(false);
@@ -1015,8 +1086,7 @@ impl CreatureState {
                 crate::earned_growth::FutureGrowth::Disabled {} => false,
                 crate::earned_growth::FutureGrowth::Selected { .. } => true,
                 crate::earned_growth::FutureGrowth::Authored {} => {
-                    matches!(self.build.restoration_policy(),
-                    super::RestorationPolicy::Authored(plan) if plan.get(self.build.ledger().entries().len()).is_some())
+                    self.build.next_authored_restoration_source().is_some()
                 }
             })
     }
@@ -1072,7 +1142,7 @@ impl CreatureState {
             return Ok(());
         }
         loop {
-            let current = self.build.ledger().total_hd();
+            let current = self.build.personal_hd_count();
             if self.build.ledger().entries().len() >= crate::limits::HIT_DICE
                 || self.earned_progress.held_xp()
                     < self
@@ -1082,12 +1152,7 @@ impl CreatureState {
             {
                 break;
             }
-            let intended = match self.build.restoration_policy() {
-                super::RestorationPolicy::Authored(plan) => plan
-                    .get(self.build.ledger().entries().len())
-                    .map(|entry| entry.source.clone()),
-                super::RestorationPolicy::ChooseAgain => None,
-            };
+            let intended = self.build.next_authored_restoration_source();
             let source = match self.build.future_growth() {
                 crate::earned_growth::FutureGrowth::Disabled {} => break,
                 crate::earned_growth::FutureGrowth::Selected { source } => {
@@ -1100,7 +1165,7 @@ impl CreatureState {
                     source
                 }
             };
-            let Some(root) = self.build.ledger().health_root_seed() else {
+            let Some(root) = self.build.personal_health_root_seed() else {
                 break;
             };
             let mut build = (*self.build).clone();
@@ -1222,10 +1287,12 @@ impl CreatureState {
             )
             .map_err(CreatureStateError::Build)?;
         let mut earned_progress = self.earned_progress.clone();
-        let threat = permanent.threat_tier();
+        let threat = build
+            .reward_threat_tier(permanent.threat_tier())
+            .map_err(CreatureStateError::Build)?;
         earned_progress
-            .reconcile_build(
-                build.ledger().total_hd(),
+            .reconcile_personal_build(
+                build.personal_hd_count(),
                 threat,
                 &build.ruleset().document().growth,
             )

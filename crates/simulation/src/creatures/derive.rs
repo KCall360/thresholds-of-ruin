@@ -38,6 +38,53 @@ pub(super) fn with_acquired_strength(
     Attributes::new(values).map_err(|_| BuildError::AttributeCap)
 }
 
+/// Validated ordinary receipt subtotal, before body-specific effective caps.
+/// Never use this directly as a combat sheet or an acquisition-admission result.
+#[derive(Clone, Copy)]
+pub(super) struct RawOrdinaryAttributes(pub(super) Attributes);
+
+/// Retained body-owned physical receipts may exceed a particular form's ordinary
+/// subtotal. Their raw values remain provenance; only this projection is capped.
+pub(super) fn effective_ordinary_attributes(
+    build: &CreatureBuild,
+    raw: RawOrdinaryAttributes,
+) -> Result<Attributes, BuildError> {
+    if build.body_build.is_none() {
+        return Ok(raw.0);
+    }
+    let mut values = raw.0.values();
+    let cap = build.ruleset().constants().attribute_cap;
+    values.strength = values.strength.min(cap);
+    values.speed = values.speed.min(cap);
+    Attributes::new(values).map_err(|_| BuildError::AttributeCap)
+}
+
+pub(super) fn effective_acquired_strength(
+    build: &CreatureBuild,
+    raw: RawOrdinaryAttributes,
+    acquired: u8,
+) -> Result<Attributes, BuildError> {
+    if build.body_build.is_none() {
+        return with_acquired_strength(raw.0, acquired);
+    }
+    if acquired > 7 {
+        return Err(BuildError::AttributeCap);
+    }
+    let mut values = effective_ordinary_attributes(build, raw)?.values();
+    // Magic can fill remaining natural headroom, never reduce an ordinary
+    // subtotal already above seven under a custom ordinary cap.
+    let effective_gain = u16::from(acquired).min(7_u16.saturating_sub(values.strength));
+    values.strength = values
+        .strength
+        .checked_add(effective_gain)
+        .ok_or(BuildError::Arithmetic)?;
+    Attributes::new(values).map_err(|_| BuildError::AttributeCap)
+}
+
+pub(super) fn retained_physical(build: &CreatureBuild, attribute: Attribute) -> bool {
+    build.body_build.is_some() && matches!(attribute, Attribute::Strength | Attribute::Speed)
+}
+
 /// Thread-local deltas isolate deterministic work assertions from parallel tests.
 #[cfg(test)]
 pub(super) fn fold_count() -> usize {
@@ -844,7 +891,7 @@ impl crate::rules::TalentFacts for PermanentFacts<'_> {
 pub(super) fn advancement_facts(
     build: &CreatureBuild,
     mut attributes: Attributes,
-) -> Result<(Attributes, SkillRanks, BTreeSet<TalentId>), BuildError> {
+) -> Result<(RawOrdinaryAttributes, SkillRanks, BTreeSet<TalentId>), BuildError> {
     let rules = build.ruleset();
     if build.choices().len() != build.ledger().entries().len() {
         return Err(BuildError::InvalidOwnership);
@@ -866,6 +913,8 @@ pub(super) fn advancement_facts(
             .map_err(|_| BuildError::RankCap)?;
     }
     let mut selected = BTreeSet::new();
+    let mut grant_provenance: BTreeMap<TalentId, (&super::PurchaseSelection, BTreeSet<bool>)> =
+        BTreeMap::new();
     for (index, choice) in build.choices().iter().enumerate() {
         crate::diagnostics::advancement_choice_visit();
         build.point_balances(crate::HdIndex::from_usize(index).map_err(BuildError::from)?)?;
@@ -881,12 +930,18 @@ pub(super) fn advancement_facts(
                 .map_err(|_| BuildError::RankCap)?;
         }
         if let Some(attribute) = choice.attribute {
-            if !(index + 1).is_multiple_of(usize::from(
-                rules.constants().attribute_opportunity_interval,
-            )) {
+            if !build
+                .personal_attribute_ordinal(index)
+                .is_some_and(|ordinal| {
+                    ordinal
+                        .is_multiple_of(u64::from(rules.constants().attribute_opportunity_interval))
+                })
+            {
                 return Err(BuildError::NoAttributeOpportunity);
             }
-            if attributes.get(attribute) >= rules.constants().attribute_cap {
+            if !retained_physical(build, attribute)
+                && attributes.get(attribute) >= rules.constants().attribute_cap
+            {
                 return Err(BuildError::AttributeCap);
             }
             let mut adjustment = ByAttribute::default();
@@ -900,15 +955,64 @@ pub(super) fn advancement_facts(
             let Some(talent) = purchase.selection.talent() else {
                 continue;
             };
-            if !selected.insert(talent.clone()) {
-                return Err(BuildError::DuplicateTalent);
+            let domain = purchase.id.as_ref().map(|id| id.owner.is_personal());
+            if let Some((previous_selection, domains)) = grant_provenance.get_mut(talent) {
+                let Some(domain) = domain else {
+                    return Err(BuildError::DuplicateTalent);
+                };
+                if *previous_selection != &purchase.selection || !domains.insert(domain) {
+                    return Err(BuildError::DuplicateTalent);
+                }
+            } else {
+                let mut domains = BTreeSet::new();
+                if let Some(domain) = domain {
+                    domains.insert(domain);
+                }
+                grant_provenance.insert(talent.clone(), (&purchase.selection, domains));
             }
+            selected.insert(talent.clone());
             if selected.len() > crate::limits::OWNED_TALENTS {
                 return Err(BuildError::TooManyOwnedTalents);
             }
         }
     }
-    Ok((attributes, skills, selected))
+    if let Some(body) = &build.body_build {
+        body.validate_personal_body_grants(build.content())?;
+        for (&ordinal, grant) in &body.personal_body_grants {
+            // A smaller/different form does not remove personal acquisitions.
+            // Only actual loss of the original funding row suspends this receipt.
+            if !body.personal_body_grant_active(ordinal) {
+                continue;
+            }
+            for skill in grant.skills() {
+                skills = skills
+                    .with_rank(
+                        skill,
+                        skills
+                            .get(skill)
+                            .checked_add(1)
+                            .ok_or(BuildError::RankCap)?,
+                    )
+                    .map_err(|_| BuildError::RankCap)?;
+            }
+            if let Some(attribute) = grant.attribute {
+                if !retained_physical(build, attribute)
+                    && attributes.get(attribute) >= rules.constants().attribute_cap
+                {
+                    return Err(BuildError::AttributeCap);
+                }
+                let mut adjustment = ByAttribute::default();
+                *adjustment.get_mut(attribute) = 1;
+                attributes = attributes
+                    .adjusted(adjustment)
+                    .map_err(|_| BuildError::AttributeCap)?;
+            }
+        }
+    }
+    // Each raw contribution was validated against a resident personal milestone
+    // above. Authored restoration may lawfully reunite more than cap receipts
+    // after another acquisition while a donor was absent; only projection caps.
+    Ok((RawOrdinaryAttributes(attributes), skills, selected))
 }
 
 pub(super) fn derive(build: &CreatureBuild) -> Result<DerivedCreature, BuildError> {
@@ -1098,9 +1202,10 @@ fn compile_permanent(build: &CreatureBuild) -> Result<DerivedCreature, BuildErro
                 .ok_or(BuildError::UnknownTemplate)
         })
         .collect::<Result<_, _>>()?;
-    let (mut attributes, skills, selected) = advancement_facts(build, build.initial_attributes())?;
-    let advancement_attributes = attributes;
-    attributes = with_acquired_strength(attributes, build.strength_acquired())?;
+    let (advancement_attributes, skills, selected) =
+        advancement_facts(build, build.initial_attributes())?;
+    let mut attributes =
+        effective_acquired_strength(build, advancement_attributes, build.strength_acquired())?;
     let mut kind = species.kind.clone();
     let mut subtypes = species.subtypes.clone();
     apply_templates(&templates, &mut kind, &mut subtypes, &mut attributes)?;

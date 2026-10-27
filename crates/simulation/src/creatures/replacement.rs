@@ -67,16 +67,32 @@ impl CreatureBuild {
         replacement: Option<AdvancementPurchase>,
     ) -> Result<AdvancementReplacementPreview, BuildError> {
         let owner = target.owner.to_usize().map_err(BuildError::from)?;
+        let ownership = self
+            .ledger()
+            .entries()
+            .get(owner)
+            .ok_or(BuildError::InvalidOwnership)?
+            .owner()
+            .cloned();
+        if ownership.as_ref().is_some_and(|owner| !owner.is_personal()) {
+            return Err(BuildError::InvalidOwnership);
+        }
+        let mut replacement = replacement;
         let original = self
             .choices()
             .get(owner)
             .and_then(|choices| choices.purchases.get(target.index))
             .ok_or(BuildError::InvalidOwnership)?
             .clone();
-        if replacement.as_ref() == Some(&original) {
+        if replacement.as_ref().is_some_and(|purchase| {
+            purchase.pool == original.pool && purchase.selection == original.selection
+        }) {
             return Err(BuildError::NoAdvancementChange);
         }
         if let Some(purchase) = &replacement {
+            if purchase.id.is_some() {
+                return Err(BuildError::InvalidOwnership);
+            }
             purchase.selection.validate(self.ruleset())?;
         }
         let previously_owned: BTreeSet<_> = self
@@ -89,21 +105,35 @@ impl CreatureBuild {
             purchase: original.clone(),
         }];
         let (candidate, derived) = self.preview_intellect_advancement(|build| {
-            let purchases = &mut build.advancement.choices[owner].purchases;
-            if let Some(purchase) = replacement.clone() {
-                purchases[target.index] = purchase;
+            let choice = &mut build.advancement.choices[owner];
+            if let Some(purchase) = replacement.take() {
+                let purchase = choice.allocate_purchase(
+                    ownership.as_ref(),
+                    purchase.pool,
+                    purchase.selection,
+                )?;
+                choice.purchases[target.index] = purchase.clone();
+                replacement = Some(purchase);
             } else {
-                purchases.remove(target.index);
+                choice.purchases.remove(target.index);
             }
-            let mut owned = BTreeSet::new();
-            for talent in build.choices().iter().flat_map(|choice| choice.talents()) {
-                if build.ruleset().talent(talent).is_none() {
-                    return Err(BuildError::UnknownTalent);
-                }
-                if !owned.insert(talent.clone()) {
-                    return Err(BuildError::DuplicateTalent);
-                }
-            }
+            // Use the builder's canonical provenance validation: identical
+            // package/personal roots grant once, while conflicting variants or
+            // duplicate roots within either ownership domain still reject.
+            let (_, _, mut owned) =
+                super::derive::advancement_facts(build, build.initial_attributes())?;
+            let package_owned: BTreeSet<_> = build
+                .choices()
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| {
+                    build.ledger().entries()[*index]
+                        .owner()
+                        .is_some_and(|owner| !owner.is_personal())
+                })
+                .flat_map(|(_, choice)| choice.talents().cloned())
+                .collect();
+            let mut remove_personal = BTreeSet::new();
             let mut lost = BTreeSet::new();
             if let Some(id) = original.selection.talent() {
                 if !owned.contains(id) {
@@ -125,11 +155,22 @@ impl CreatureBuild {
                     .any(|parent| lost.contains(parent))
                     || lost_parent_route(&definition.requirement, &owned, &lost)
                 {
-                    owned.remove(id);
-                    lost.insert(id.clone());
+                    remove_personal.insert(id.clone());
+                    // An immutable package still owns its authored purchase.
+                    // It may become dormant; it never refunds into the person.
+                    if !package_owned.contains(id) {
+                        owned.remove(id);
+                        lost.insert(id.clone());
+                    }
                 }
             }
             for (owner, choice) in self.choices().iter().enumerate() {
+                if self.ledger().entries()[owner]
+                    .owner()
+                    .is_some_and(|owner| !owner.is_personal())
+                {
+                    continue;
+                }
                 for (index, purchase) in choice.purchases.iter().enumerate() {
                     let location = PurchaseLocation {
                         owner: crate::HdIndex::from_usize(owner).map_err(BuildError::from)?,
@@ -139,7 +180,7 @@ impl CreatureBuild {
                         && purchase
                             .selection
                             .talent()
-                            .is_some_and(|id| lost.contains(id))
+                            .is_some_and(|id| remove_personal.contains(id))
                     {
                         removed.push(RemovedPurchase {
                             location,
@@ -148,12 +189,18 @@ impl CreatureBuild {
                     }
                 }
             }
-            for choice in &mut build.advancement.choices {
+            for (index, choice) in build.advancement.choices.iter_mut().enumerate() {
+                if build.ledger.entries()[index]
+                    .owner()
+                    .is_some_and(|owner| !owner.is_personal())
+                {
+                    continue;
+                }
                 choice.purchases.retain(|purchase| {
                     !purchase
                         .selection
                         .talent()
-                        .is_some_and(|id| lost.contains(id))
+                        .is_some_and(|id| remove_personal.contains(id))
                 });
             }
             Ok(())

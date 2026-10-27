@@ -27,6 +27,8 @@ record!(Sources {
 });
 record!(HistoryRow {
     owner: crate::HdIndex,
+    #[serde(deserialize_with = "required_option")]
+    ownership: Option<crate::creatures::composition::HdOwner>,
     #[serde(deserialize_with = "named_map")]
     source: SourceRecord,
     health_seed: u64,
@@ -104,6 +106,7 @@ impl Learning {
                     .iter()
                     .map(|row| HistoryRow {
                         owner: row.owner,
+                        ownership: row.ownership.clone(),
                         source: SourceRecord::capture(row.source.clone()),
                         health_seed: row.health_seed,
                         choices: ChoiceRecord::capture(&row.choices),
@@ -152,6 +155,7 @@ impl Learning {
                 .iter()
                 .map(|row| domain::IntellectChoiceWitness {
                     owner: row.owner,
+                    ownership: row.ownership.clone(),
                     source: row.source.restore(),
                     health_seed: row.health_seed,
                     choices: row.choices.restore(),

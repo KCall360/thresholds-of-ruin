@@ -46,18 +46,32 @@ fn baseline(
     }
     let rules = build.ruleset();
     let mut values = initial_attributes.values();
+    if Attribute::ALL
+        .into_iter()
+        .any(|attribute| initial_attributes.get(attribute) > rules.constants().attribute_cap)
+    {
+        return Err(BuildError::AttributeCap);
+    }
     for attribute in Attribute::ALL {
         let value = values.get_mut(attribute);
         *value = value
             .checked_add(*witness.attribute_increases.get(attribute))
             .ok_or(BuildError::Arithmetic)?;
-        if *value > rules.constants().attribute_cap {
+        if (!super::derive::retained_physical(build, attribute)
+            && *value > rules.constants().attribute_cap)
+            // Exact history reconstruction checks each milestone receipt; this
+            // aggregate bound is structural, not a lifetime acquisition cap.
+            || usize::from(*witness.attribute_increases.get(attribute)) > crate::limits::HIT_DICE
+        {
             return Err(BuildError::AttributeCap);
         }
     }
     let ordinary = Attributes::new(values).map_err(|_| BuildError::AttributeCap)?;
-    let mut attributes =
-        super::derive::with_acquired_strength(ordinary, witness.strength_acquired)?;
+    let mut attributes = super::derive::effective_acquired_strength(
+        build,
+        super::derive::RawOrdinaryAttributes(ordinary),
+        witness.strength_acquired,
+    )?;
     let templates = birth_templates
         .iter()
         .map(|id| {
@@ -135,6 +149,14 @@ pub(super) fn eligible_intellect(
     birth_templates: &[TemplateId],
     witness: &IntellectSources,
 ) -> Result<u16, BuildError> {
+    if let Some(projected) = build.intellect_build()? {
+        return eligible_intellect_at(
+            &projected,
+            projected.initial_attributes(),
+            birth_templates,
+            witness,
+        );
+    }
     eligible_intellect_at(build, build.initial_attributes(), birth_templates, witness)
 }
 
@@ -146,6 +168,9 @@ pub(super) fn eligible_intellect_at(
     birth_templates: &[TemplateId],
     witness: &IntellectSources,
 ) -> Result<u16, BuildError> {
+    if let Some(projected) = build.intellect_build()? {
+        return eligible_intellect_at(&projected, initial_attributes, birth_templates, witness);
+    }
     let mut baseline = baseline(build, initial_attributes, birth_templates, witness)?;
     for talent in &witness.talents {
         add_source(
@@ -171,11 +196,14 @@ pub(super) fn eligible_intellect_at(
 pub(super) fn current_sources_from_facts(
     build: &CreatureBuild,
     birth_templates: &[TemplateId],
-    attributes: Attributes,
+    attributes: super::derive::RawOrdinaryAttributes,
     skills: &SkillRanks,
     selected: &BTreeSet<TalentId>,
     hit_dice: &HitDiceSummary,
 ) -> Result<IntellectSources, BuildError> {
+    if let Some(projected) = build.intellect_build()? {
+        return current_sources(&projected, birth_templates);
+    }
     sources_from_facts(
         build,
         birth_templates,
@@ -195,7 +223,7 @@ pub(super) fn current_sources_from_facts(
 struct SourceFacts<'a> {
     initial_attributes: Attributes,
     strength_acquired: u8,
-    attributes: Attributes,
+    attributes: super::derive::RawOrdinaryAttributes,
     skills: &'a SkillRanks,
     selected: &'a BTreeSet<TalentId>,
     hit_dice: &'a HitDiceSummary,
@@ -221,6 +249,7 @@ fn sources_from_facts(
     };
     for attribute in Attribute::ALL {
         *witness.attribute_increases.get_mut(attribute) = attributes
+            .0
             .get(attribute)
             .checked_sub(initial_attributes.get(attribute))
             .ok_or(BuildError::InvalidOwnership)?;
@@ -297,7 +326,7 @@ pub(super) fn historical_sources(
         initial_attributes,
         birth_templates,
         0,
-        rows.iter().map(|(source, choices)| (source, choices)),
+        rows.iter().map(|(source, choices)| (source, choices, None)),
     )
 }
 
@@ -306,10 +335,19 @@ pub(super) fn historical_sources_refs<'a>(
     initial_attributes: Attributes,
     birth_templates: &[TemplateId],
     strength_acquired: u8,
-    rows: impl ExactSizeIterator<Item = (&'a HdSource, &'a HdChoices)>,
+    rows: impl ExactSizeIterator<
+        Item = (
+            &'a HdSource,
+            &'a HdChoices,
+            Option<&'a super::composition::HdOwner>,
+        ),
+    >,
 ) -> Result<IntellectSources, BuildError> {
     if rows.len() > crate::limits::HIT_DICE {
         return Err(BuildError::InvalidOwnership);
+    }
+    if let Some(body) = &build.body_build {
+        body.validate_personal_body_grants(build.content())?;
     }
     let rules = build.ruleset();
     let mut attributes = initial_attributes;
@@ -330,12 +368,20 @@ pub(super) fn historical_sources_refs<'a>(
             .map_err(|_| BuildError::RankCap)?;
     }
     let mut selected = BTreeSet::new();
+    let mut talent_origins: BTreeMap<
+        &TalentId,
+        (
+            Option<&super::composition::HdOwner>,
+            &super::PurchaseSelection,
+        ),
+    > = BTreeMap::new();
+    let mut talent_domains = BTreeSet::new();
     let mut hit_dice = HitDiceSummary {
         total: HdCount::from_usize(rows.len()).map_err(BuildError::from)?,
         racial: HdCount::ZERO,
         classes: BTreeMap::new(),
     };
-    for (index, (source, choices)) in rows.enumerate() {
+    for (index, (source, choices, ownership)) in rows.enumerate() {
         crate::diagnostics::raw_hit_die_visit();
         crate::diagnostics::advancement_choice_visit();
         match source {
@@ -356,7 +402,32 @@ pub(super) fn historical_sources_refs<'a>(
                 *count = count.checked_add(1).ok_or(BuildError::Arithmetic)?;
             }
         }
-        for skill in choices.skills() {
+        // Historical presence, not today's drained/active form, controls this
+        // immutable original donor receipt. Explicit identity prevents a sparse
+        // personal row from accidentally standing in for a missing body donor.
+        let retained = match (&build.body_build, ownership) {
+            (Some(body), Some(super::composition::HdOwner::Body { form, ordinal })) => {
+                if form != &body.base.id || usize::from(*ordinal) != index {
+                    return Err(BuildError::InvalidOwnership);
+                }
+                let original = body
+                    .base
+                    .advancement
+                    .get(usize::from(*ordinal))
+                    .ok_or(BuildError::InvalidOwnership)?;
+                let mut canonical = original.choices.clone();
+                canonical.enroll_owner(ownership.ok_or(BuildError::InvalidOwnership)?)?;
+                if source != &original.source || choices != &canonical {
+                    return Err(BuildError::InvalidOwnership);
+                }
+                body.personal_body_grants.get(ordinal)
+            }
+            _ => None,
+        };
+        for skill in choices
+            .skills()
+            .chain(retained.into_iter().flat_map(HdChoices::skills))
+        {
             skills = skills
                 .with_rank(
                     skill,
@@ -368,11 +439,31 @@ pub(super) fn historical_sources_refs<'a>(
                 .map_err(|_| BuildError::RankCap)?;
         }
         if let Some(attribute) = choices.attribute {
-            if !(index + 1).is_multiple_of(usize::from(
+            let ordinal = if let Some(body) = &build.body_build {
+                (index + 1)
+                    .checked_sub(body.base.advancement.len())
+                    .filter(|ordinal| *ordinal > 0)
+                    .ok_or(BuildError::NoAttributeOpportunity)?
+            } else {
+                index + 1
+            };
+            if !ordinal.is_multiple_of(usize::from(
                 rules.constants().attribute_opportunity_interval,
             )) {
                 return Err(BuildError::NoAttributeOpportunity);
             }
+            if !super::derive::retained_physical(build, attribute)
+                && attributes.get(attribute) >= rules.constants().attribute_cap
+            {
+                return Err(BuildError::AttributeCap);
+            }
+            let mut adjustment = ByAttribute::default();
+            *adjustment.get_mut(attribute) = 1;
+            attributes = attributes
+                .adjusted(adjustment)
+                .map_err(|_| BuildError::AttributeCap)?;
+        }
+        if let Some(attribute) = retained.and_then(|grant| grant.attribute) {
             if attributes.get(attribute) >= rules.constants().attribute_cap {
                 return Err(BuildError::AttributeCap);
             }
@@ -385,9 +476,22 @@ pub(super) fn historical_sources_refs<'a>(
         for purchase in &choices.purchases {
             purchase.selection.validate(rules)?;
             if let Some(talent) = purchase.selection.talent() {
-                if !selected.insert(talent.clone()) {
+                let owner = purchase.id.as_ref().map(|id| &id.owner);
+                if !talent_domains
+                    .insert((talent, owner.map(super::composition::HdOwner::is_personal)))
+                {
                     return Err(BuildError::DuplicateTalent);
                 }
+                if let Some((previous_owner, previous_selection)) = talent_origins.get(talent) {
+                    let distinct_domains = matches!((previous_owner, owner),
+                        (Some(left), Some(right)) if left.is_personal() != right.is_personal());
+                    if !distinct_domains || *previous_selection != &purchase.selection {
+                        return Err(BuildError::DuplicateTalent);
+                    }
+                } else {
+                    talent_origins.insert(talent, (owner, &purchase.selection));
+                }
+                selected.insert(talent.clone());
                 if selected.len() > crate::limits::OWNED_TALENTS {
                     return Err(BuildError::TooManyOwnedTalents);
                 }
@@ -400,7 +504,7 @@ pub(super) fn historical_sources_refs<'a>(
         SourceFacts {
             initial_attributes,
             strength_acquired,
-            attributes,
+            attributes: super::derive::RawOrdinaryAttributes(attributes),
             skills: &skills,
             selected: &selected,
             hit_dice: &hit_dice,

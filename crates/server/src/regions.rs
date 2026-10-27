@@ -44,6 +44,8 @@ type PreparationLineage = (
 );
 
 type TrapLineage = (
+    tor_simulation::TrapRegionPhase,
+    Option<u64>,
     tor_simulation::ActorId,
     tor_world::Location,
     u8,
@@ -105,6 +107,8 @@ impl BoundaryProgress {
         missing: BTreeSet<RegionId>,
     ) -> Result<(), Failure> {
         let key = (
+            boundary.phase,
+            boundary.active_clock,
             boundary.actor,
             boundary.location,
             boundary.orientation,

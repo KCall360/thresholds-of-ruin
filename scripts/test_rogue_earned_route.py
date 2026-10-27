@@ -26,8 +26,9 @@ def foe(identity, x, y, z=0, **extra):
     return {"id": identity, "position": {"x": x, "y": y, "z": z}, **extra}
 
 
-def overview(character=1, hd=1, xp=0, spent=0):
+def overview(character=1, hd=1, xp=0, spent=0, *, body_hd=None):
     return {"points": {"earned": str(hd), "spent": "1", "unspent": str(hd - 1)}, "growth": {
+        "body_package_hit_dice": None if body_hd is None else str(body_hd),
         "highest_earned_tier": str(hd), "highest_applied_tier": str(hd), "earned_xp": str(xp),
         "spent_xp": str(spent), "held_xp": str(xp - spent),
         "restorable_hit_dice": "0", "restoration_blocker": None,
@@ -148,6 +149,11 @@ class EarnedRouteControllerTests(unittest.TestCase):
     def test_first_purchases_keep_actual_actor_identity_and_fixed_cold_form(self):
         self.assertEqual(first_purchase(1), "purchase 1 advancement talent rattling_blow")
         self.assertEqual(first_purchase(2), "purchase 1 advancement talent evocation_initiate form spark_lance_cold")
+        self.assertEqual(first_purchase(1, body_hd=1), "purchase 2 advancement talent rattling_blow")
+        self.assertEqual(first_purchase(2, body_hd=1), "purchase 2 advancement talent evocation_initiate form spark_lance_cold")
+        for unsupported in (True, -1, 2, "1"):
+            with self.subTest(body_hd=unsupported), self.assertRaises(ControllerError):
+                first_purchase(1, body_hd=unsupported)
         with self.assertRaises(ValueError):
             first_purchase(3)
 
@@ -537,6 +543,50 @@ class EarnedRouteControllerTests(unittest.TestCase):
         self.assertEqual(len(controller.growth_history), 2)
         self.assertEqual(controller.growth_history[0]["hit_dice"]["total"], "1")
         self.assertEqual(controller.growth_history[-1]["hit_dice"]["total"], "2")
+
+    def test_body_plus_class_start_requires_personal_growth_and_preserves_history(self):
+        def composed(character, personal, racial):
+            current = state(character, hd=personal)
+            summary = current["observation"]["combat"]["own_stats"]["hit_dice"]
+            summary["total"] = str(personal + racial)
+            if racial:
+                summary["sources"].append({"source_kind": "racial", "source": {"id": "racial"}, "count": str(racial)})
+            return current
+
+        for character in (1, 2):
+            with self.subTest(character=character):
+                initial = composed(character, 1, 1)
+                original = copy.deepcopy(initial)
+                controller, _ = self.choose(initial, character=character,
+                                            advancement=overview(character, body_hd=1))
+                historical = copy.deepcopy(controller.growth_history)
+                self.assertFalse(controller.earned_hd2)
+                self.assertEqual(initial, original)
+                # More body HD and positive XP are not the earned class witness.
+                body_only = composed(character, 1, 2)
+                controller.observe(body_only, overview(character, hd=2, xp=100, spent=100, body_hd=2))
+                self.assertFalse(controller.earned_hd2)
+                self.assertEqual(controller.growth_history[0], historical[0])
+                # Even class growth cannot silently accept a changed body baseline.
+                changed_body = composed(character, 2, 2)
+                controller.observe(changed_body, overview(character, hd=2, xp=100, spent=100, body_hd=2))
+                self.assertFalse(controller.earned_hd2)
+                restored = Controller.load(controller.dump())
+                earned = composed(character, 2, 1)
+                restored.observe(earned, overview(character, hd=2, xp=100, spent=100, body_hd=1))
+                self.assertEqual(restored.choose(earned).outcome, "earned_hd2")
+                self.assertEqual(restored.growth_history[0], historical[0])
+                self.assertEqual(restored.growth_history[-1]["hit_dice"]["total"], "3")
+
+        for personal, racial in ((1, 2), (2, 0), (2, 1), (0, 1)):
+            with self.subTest(unsupported_start=(personal, racial)), self.assertRaises(ControllerError):
+                self.choose(composed(1, personal, racial))
+
+    def test_earned_witness_requires_tier_growth_not_merely_a_high_baseline(self):
+        controller, _ = self.choose(advancement=overview(hd=2))
+        current = state(hd=2)
+        controller.observe(current, overview(hd=2, xp=100, spent=100))
+        self.assertFalse(controller.earned_hd2)
 
     def test_synthetic_two_hd_or_points_alone_never_qualifies(self):
         for xp, spent, tier in [(0, 0, 2), (100, 0, 2), (100, 100, 1)]:

@@ -65,6 +65,74 @@ def recording_case(failure=None):
 
 
 class CompleteRecordingContracts(unittest.TestCase):
+    def test_polymorph_factories_reuse_two_actual_non_graphical_boundaries(self):
+        for factory, method in ((record_wire_samples.polymorph_recording_case,
+                "test_text_paid_self_polymorph_reopens_and_retries_without_source_or_private_ledger"),
+                (record_wire_samples.polymorph_diagnostic_recording_case,
+                 "test_polymorph_self_ability_privileged_capture_has_changed_only_effect")):
+            case = factory()
+            self.assertEqual(case.id(), "test_magic_items_process.MagicItemProcesses." + method)
+            self.assertFalse(is_graphical_test(case))
+
+    def test_polymorph_recording_preserves_real_envelopes_and_rejects_private_or_incomplete_variants(self):
+        ordinary = {"affordance": {"type": "snapshot", "request_id": "actual-snapshot",
+            "snapshot": {"state": {"wizard_game": False, "observation": {"interactions": {"inventory": [
+                {"item": "exact-item", "device_activation": "direction_or_self"}]}}}}},
+            "request": {"type": "request", "request_id": "actual-self-zap", "request": {"type": "command",
+                "context": {"epoch": "exact-epoch"}, "command": {"type": "act", "expected_revision": "7",
+                    "action": {"type": "zap", "item": "exact-item", "aim": {"kind": "self_target"}}}}}}
+        diagnostic = {"type": "combat_diagnostics", "report": {"enabled": True, "records": [
+            {"ability": {"id": "fixture.polymorph"}, "outcome": {"effects": [
+                {"type": "baleful_polymorph", "target": "1", "changed": True}]}}]}}
+
+        def case_for(attribute, artifact, failure=None):
+            case, trace = recording_case(failure)
+            original = type(case).runTest
+            def body(subject):
+                setattr(subject, attribute, copy.deepcopy(artifact))
+                original(subject)
+            type(case).runTest = body
+            return case, trace
+
+        def record(first, second, failure=None):
+            one, trace_one = case_for("polymorph_samples", first)
+            two, trace_two = case_for("polymorph_diagnostic_sample", second, failure)
+            recorder = record_wire_samples.Recorder()
+            recorder.recorded_client_samples = [{"existing": "unchanged"}]
+            samples = {"existing": {"type": "palette"}}
+            with patch("record_wire_samples.polymorph_recording_case", return_value=one), \
+                    patch("record_wire_samples.polymorph_diagnostic_recording_case", return_value=two):
+                try:
+                    recorder.record_polymorph(samples)
+                except AssertionError:
+                    self.assertEqual(samples, {"existing": {"type": "palette"}})
+                    self.assertEqual(recorder.recorded_client_samples, [{"existing": "unchanged"}])
+                    raise
+            return recorder, samples, trace_one, trace_two
+
+        recorder, samples, one, two = record(ordinary, diagnostic)
+        self.assertEqual(samples["zz.polymorph_affordance"], ordinary["affordance"])
+        self.assertEqual(samples["zz.polymorph_effect"], diagnostic)
+        self.assertEqual(recorder.recorded_client_samples[-1], ordinary["request"])
+        self.assertEqual((one[-1], two[-1]), ("class_cleanup", "class_cleanup"))
+        self.assertIsNot(recorder.recorded_client_samples[-1], ordinary["request"])
+        for failure in ("body", "cleanup", "class_cleanup"):
+            with self.subTest(failure=failure), self.assertRaises(AssertionError):
+                record(ordinary, diagnostic, failure)
+        for mutation in ("old_mode", "wrong_item", "form_leak", "unchanged"):
+            first, second = copy.deepcopy(ordinary), copy.deepcopy(diagnostic)
+            effect = second["report"]["records"][0]["outcome"]["effects"][0]
+            if mutation == "old_mode":
+                first["affordance"]["snapshot"]["state"]["observation"]["interactions"]["inventory"][0]["device_activation"] = "self_target"
+            elif mutation == "wrong_item":
+                first["request"]["request"]["command"]["action"]["item"] = "not-the-affordance"
+            elif mutation == "form_leak":
+                effect["form"] = "private.body.changed"
+            else:
+                effect["changed"] = False
+            with self.subTest(mutation=mutation), self.assertRaises((AssertionError, ValueError)):
+                record(first, second)
+
     def test_preview_request_fixture_echoes_a_complete_public_action(self):
         commands = [entry["request"]["command"] for entry in record_wire_samples.CLIENT
                     if entry["type"] == "request" and entry["request"]["type"] == "command"]
@@ -1137,8 +1205,8 @@ class HallucinationRecordingContracts(unittest.TestCase):
             "combat": {"own_stats": {"conditions": [condition]}},
             "visible_actors": [{"id": "a_peer", "name": "emu", "asset": "creature.bird.emu", "description": "",
                                 "appearance_seed": "p_" + "00" * 32}],
-            "ground_items": [{"presentation": {"name": "scroll titled SAH REN", "asset": "item.scroll",
-                "kind": {"kind": "item", "class": "scroll"}}, "item": {
+            "ground_items": [{"presentation": {"name": "smoky potion", "asset": "item.potion",
+                "kind": {"kind": "item", "class": "potion"}}, "item": {
                     "class": "coin", "quantity": "7", "known_currency": "gold", "name": "object", "appearance": "object", "description": ""}}],
             "visible_cells": [{"stairs_up": False, "stairs_down": False}]}
         raw = {"type": "snapshot", "request_id": "exact-hallucination-request",
@@ -1148,8 +1216,8 @@ class HallucinationRecordingContracts(unittest.TestCase):
         extended["tick"] = "200"
         extended["combat"]["own_stats"]["conditions"][0]["remaining_ticks"] = "161500"
         extended["visible_actors"][0].update(name="bat", asset="creature.bat")
-        extended["ground_items"][0]["presentation"] = {"name": "yew wand", "asset": "item.wand",
-            "kind": {"kind": "item", "class": "wand"}}
+        extended["ground_items"][0]["presentation"] = {"name": "ivory ring", "asset": "item.ring",
+            "kind": {"kind": "item", "class": "ring"}}
         cured = source["cured"]["snapshot"]["state"]["observation"]
         cured["tick"] = "300"
         cured["visible_actors"][0].update(name="actual visible peer", asset=None)

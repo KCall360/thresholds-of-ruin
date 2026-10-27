@@ -950,6 +950,9 @@ pub fn observation(
                     device_activation: item.device_activation.map(|activation| match activation {
                         s::DeviceActivation::Direction => p::DeviceActivation::Direction,
                         s::DeviceActivation::SelfTarget => p::DeviceActivation::SelfTarget,
+                        s::DeviceActivation::DirectionOrSelf => {
+                            p::DeviceActivation::DirectionOrSelf
+                        }
                     }),
                     charges: item.charges,
                 })

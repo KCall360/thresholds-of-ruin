@@ -36,12 +36,14 @@ impl<'de> Deserialize<'de> for DeviceAim {
 pub enum DeviceActivation {
     Direction,
     SelfTarget,
+    DirectionOrSelf,
 }
 impl<'de> Deserialize<'de> for DeviceActivation {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         match String::deserialize(d)?.as_str() {
             "direction" => Ok(Self::Direction),
             "self_target" => Ok(Self::SelfTarget),
+            "direction_or_self" => Ok(Self::DirectionOrSelf),
             _ => Err(serde::de::Error::custom("invalid device activation")),
         }
     }
@@ -54,6 +56,7 @@ pub enum ItemDiscovery {
     #[default]
     SelfEffect,
     OnUse,
+    DiscernibleEffect,
     Never,
 }
 
@@ -62,6 +65,7 @@ impl<'de> Deserialize<'de> for ItemDiscovery {
         match String::deserialize(d)?.as_str() {
             "self_effect" => Ok(Self::SelfEffect),
             "on_use" => Ok(Self::OnUse),
+            "discernible_effect" => Ok(Self::DiscernibleEffect),
             "never" => Ok(Self::Never),
             _ => Err(serde::de::Error::custom("invalid item discovery policy")),
         }
@@ -198,6 +202,9 @@ pub(crate) fn valid_identification_classes(classes: &[ItemClass]) -> bool {
 }
 impl ReadableSpec {
     pub fn valid(&self) -> bool {
+        if self.discovery == ItemDiscovery::DiscernibleEffect {
+            return false;
+        }
         if let Some(control) = &self.control {
             return control.valid_shape()
                 && self.identify.is_none()
@@ -275,13 +282,22 @@ impl<'de> Deserialize<'de> for DeviceSpec {
 impl DeviceSpec {
     pub fn valid(&self) -> bool {
         self.initial_charges.valid()
-            && matches!(self.discovery, ItemDiscovery::OnUse | ItemDiscovery::Never)
+            && matches!(
+                self.discovery,
+                ItemDiscovery::OnUse | ItemDiscovery::DiscernibleEffect | ItemDiscovery::Never
+            )
     }
     pub fn validate_rules(
         &self,
         rules: &crate::rules::Ruleset,
     ) -> Result<(), crate::rules::RulesetError> {
-        if !self.valid() || !crate::abilities::device_definition_valid(rules, &self.ability) {
+        if !self.valid()
+            || !crate::abilities::device_definition_valid(rules, &self.ability)
+            || (self.discovery == ItemDiscovery::DiscernibleEffect
+                && !rules
+                    .ability(&self.ability)
+                    .is_some_and(crate::abilities::discernible_device_definition_valid))
+        {
             return Err(crate::rules::RulesetError::Bound {
                 field: "device".into(),
             });
@@ -531,6 +547,18 @@ impl Game {
 mod identification_format_tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn discernible_device_policy_roundtrips_without_aliasing_other_policies() {
+        let value = json!({"ability":"fixture_ray", "initial_charges":{"minimum":2,"maximum":2}, "discovery":"discernible_effect"});
+        let device: DeviceSpec = serde_json::from_value(value.clone()).unwrap();
+        assert!(device.valid());
+        assert_eq!(device.discovery, ItemDiscovery::DiscernibleEffect);
+        assert_eq!(serde_json::to_value(device).unwrap(), value);
+        assert!(serde_json::from_value::<ItemDiscovery>(json!("discernible")).is_err());
+        assert_ne!(ItemDiscovery::DiscernibleEffect, ItemDiscovery::OnUse);
+        assert_ne!(ItemDiscovery::DiscernibleEffect, ItemDiscovery::Never);
+    }
 
     #[test]
     fn runtime_identification_sets_are_required_bounded_scalar_sorted_and_unique() {

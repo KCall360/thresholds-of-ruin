@@ -35,7 +35,7 @@ class RogueEarnedRouteProcesses(ProcessTestCase):
                                'kind': 'current_production_package'}, start_depth=1)
         snapshot = source_snapshot(candidate / 'package', self.directory / 'candidate-snapshot',
             compiler, reference='Generated eighteen-species source: ' + digest(candidate / 'inputs.json'))
-        arm_sources = {'production': ROOT / 'scripts/fixtures/rogue-earned-baseline-v24',
+        arm_sources = {'production': ROOT / 'scripts/fixtures/rogue-earned-baseline-v25',
                        'candidate': snapshot}
         inventory = prepare_campaign(directory, self.bin, arm_sources=arm_sources)
         self.assertEqual(len(inventory['slots']), 8)
@@ -74,7 +74,7 @@ class RogueEarnedRouteProcesses(ProcessTestCase):
         self.assertEqual(report['checkpoints']['1']['state'], report['initial']['state'])
         self.assertEqual(report['checkpoints']['1']['overview']['points'],
                          {'earned': "1", 'spent': "0", 'unspent': "1"})
-        self.assertEqual(u64(report['state']['observation']['combat']['own_stats']['hit_dice']['total']), 1)
+        self.assertEqual(u64(report['state']['observation']['combat']['own_stats']['hit_dice']['total']), 2)
 
     def test_fixed_seed42_earned_hd_reexecutes_with_exact_source_free_restore_and_gross_flows(self):
         directory = self.campaign()

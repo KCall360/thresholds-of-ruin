@@ -23,9 +23,13 @@ fn source(root: &Path) -> crate::Scenario {
     manifest["creatures"]["species"]["fixture.hallucination"]["modifiers"] = json!([
         {"scope":"always","op":{"kind":"set","stat":{"kind":"attribute","attribute":"speed"},"value":0}}
     ]);
+    let mut body_package = manifest["creatures"]["body_packages"]["rogue.body.human"].clone();
+    body_package["species"] = json!("fixture.hallucination");
+    manifest["creatures"]["body_packages"]["fixture.hallucination.body"] = body_package;
     let owner = &mut manifest["characters"][0];
     owner["turn_ticks"] = json!(100);
     owner["creature"]["species"] = json!("fixture.hallucination");
+    owner["creature"]["body_package"] = json!("fixture.hallucination.body");
     owner["known_identities"] = json!(["rogue.gold"]);
     let mut peer = owner["creature"].clone();
     peer["name"] = json!("actual visible peer");
@@ -131,22 +135,22 @@ fn ground(view: &Observation) -> &GroundItemView {
 
 fn assert_sample(view: &Observation, phase: u64) {
     // Frozen values independently evaluated from the documented integer recipe
-    // against the actual production 26-creature/80-object cosmetic roster.
+    // against the actual production 26-creature/81-object cosmetic roster.
     // Seed42, observer1, peer2 / item40. Not a probabilistic inequality.
     let (name, asset, object, object_asset, class) = match phase {
         0 => (
             "emu",
             "creature.bird.emu",
-            "scroll titled SAH REN",
-            Some("item.scroll"),
-            ItemClass::Scroll,
+            "smoky potion",
+            Some("item.potion"),
+            ItemClass::Potion,
         ),
         1 => (
             "bat",
             "creature.bat",
-            "yew wand",
-            Some("item.wand"),
-            ItemClass::Wand,
+            "ivory ring",
+            Some("item.ring"),
+            ItemClass::Ring,
         ),
         _ => panic!("unlisted literal phase witness"),
     };

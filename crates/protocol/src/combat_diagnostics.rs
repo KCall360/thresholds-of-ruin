@@ -180,6 +180,10 @@ pub enum DiagnosticEffect {
         rest: ContentRef,
         outcome: HasteDoseOutcome,
     },
+    BalefulPolymorph {
+        target: ActorId,
+        changed: bool,
+    },
     CancelSpecials {
         target: ActorId,
         changed: bool,
@@ -418,7 +422,8 @@ impl CombatDiagnosticRecord {
                 DiagnosticEffect::RaiseLevel { target, amount } => {
                     *target == self.target && *amount > 0
                 }
-                DiagnosticEffect::CancelSpecials { target, .. }
+                DiagnosticEffect::BalefulPolymorph { target, .. }
+                | DiagnosticEffect::CancelSpecials { target, .. }
                 | DiagnosticEffect::Translate { target, .. }
                 | DiagnosticEffect::Relocate { target, .. }
                 | DiagnosticEffect::ArrestDescent { target } => *target == self.target,
@@ -537,6 +542,10 @@ impl<'de> Deserialize<'de> for DiagnosticEffect {
                 #[serde(deserialize_with = "crate::bounded::named_map")]
                 rest: ContentRef,
                 outcome: HasteDoseOutcome,
+            },
+            BalefulPolymorph {
+                target: ActorId,
+                changed: bool,
             },
             CancelSpecials {
                 target: ActorId,
@@ -663,6 +672,9 @@ impl<'de> Deserialize<'de> for DiagnosticEffect {
                 rest,
                 outcome,
             },
+            Fields::BalefulPolymorph { target, changed } => {
+                Self::BalefulPolymorph { target, changed }
+            }
             Fields::CancelSpecials { target, changed } => Self::CancelSpecials { target, changed },
             Fields::DrainLife { target, changed } => Self::DrainLife { target, changed },
             Fields::DirectHealthLoss { target, amount } => {

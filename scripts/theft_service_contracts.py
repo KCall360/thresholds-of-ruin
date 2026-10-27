@@ -29,7 +29,9 @@ def fixture():
     # Complete owned N/L rows and source damage survive. Both real checks roll
     # against an explicitly vulnerable fixture target, without seed searching.
     names = ("rogue.human", "rogue.nymph", "rogue.leprechaun")
-    manifest["creatures"] = {"species": {name: copy.deepcopy(species[name]) for name in names}}
+    bodies = tomllib.loads((source / "catalog/bodies.toml").read_text(encoding="utf-8"))["creatures"]["body_packages"]
+    manifest["creatures"] = {"species": {name: copy.deepcopy(species[name]) for name in names},
+        "body_packages": {identity: copy.deepcopy(body) for identity, body in bodies.items() if body["species"] in names}}
     manifest["creatures"]["species"]["rogue.human"].setdefault("modifiers", []).extend([
         {"scope": "always", "op": {"kind": "set", "stat": {"kind": "defense", "defense": "physical"}, "value": 0}},
         {"scope": "always", "op": {"kind": "set", "stat": {"kind": "defense", "defense": "cognitive"}, "value": 0}},

@@ -1712,24 +1712,26 @@ impl App {
         let Input::Key { key } = input else {
             return Effect::None;
         };
-        let Some(direction) = key.step_direction() else {
+        let direction = key.step_direction();
+        if direction.is_none() && key != Key::Wait {
             return Effect::None;
-        };
+        }
         let Some(item) = self.zap_item() else {
             self.zap_selection = None;
             self.status = "That device selection is no longer current.".into();
             return Effect::None;
         };
-        let result = zap_action(
-            &self
-                .state
-                .as_ref()
-                .expect("current device")
-                .state()
-                .observation,
-            item,
-            direction,
-        );
+        let view = &self
+            .state
+            .as_ref()
+            .expect("current device")
+            .state()
+            .observation;
+        let result = if let Some(direction) = direction {
+            zap_action(view, item, direction)
+        } else {
+            tor_client_common::items::zap_self_action(view, item)
+        };
         self.zap_selection = None;
         match result {
             Ok(action) => self.act(action),
@@ -2502,8 +2504,20 @@ impl App {
                             }
                             self.zap_selection = Some((item, state.snapshot().reply_context()));
                             self.pickup.clear();
-                            self.status =
-                                "Zap in which direction? Movement keys select; Esc cancels.".into();
+                            let dual = state
+                                .state()
+                                .observation
+                                .interactions
+                                .as_ref()
+                                .and_then(|interactions| {
+                                    interactions.inventory.iter().find(|row| row.item == item)
+                                })
+                                .is_some_and(|row| {
+                                    row.device_activation
+                                        == Some(tor_protocol::DeviceActivation::DirectionOrSelf)
+                                });
+                            self.status = if dual { "Zap in which direction? Movement keys select; . targets yourself; Esc cancels." }
+                                else { "Zap in which direction? Movement keys select; Esc cancels." }.into();
                             return Effect::None;
                         }
                         let result = item_action(

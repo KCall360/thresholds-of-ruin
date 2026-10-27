@@ -148,7 +148,7 @@ class BundledRulesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = root / "import.toml"
-            source.write_text('import = "interactions-v53"\noverrides = [{op = "set", path = ["resources", "mana", "recovery_period"], value = 897}]\n', encoding="utf-8")
+            source.write_text('import = "interactions-v54"\noverrides = [{op = "set", path = ["resources", "mana", "recovery_period"], value = 897}]\n', encoding="utf-8")
             expected = load_rules(source)
             result = create_matrix(root / "matrix", DEFAULT_COMPILER, str(source), ["42"],
                                    families=["strength_heavy"], levels=[1])
@@ -156,7 +156,7 @@ class BundledRulesTests(unittest.TestCase):
                 actual = tomllib.loads(path.read_text())
                 self.assertEqual(actual, expected)
                 self.assertNotIn("import", actual)
-            self.assertEqual(set(result["rules_dependencies"]), {"interactions-v53"})
+            self.assertEqual(set(result["rules_dependencies"]), {"interactions-v54"})
 
     def test_generated_packages_bundle_the_explicit_rules_source(self):
         from ruleset_sources import DEFAULT_COMPILER, DEFAULT_RULESET

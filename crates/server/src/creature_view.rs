@@ -1080,9 +1080,11 @@ mod tests {
         .unwrap();
         let choices = (0..count.div_ceil(usize::from(points)))
             .map(|owner| HdChoices {
+                purchase_highwater: 0,
                 purchases: (owner * usize::from(points)
                     ..((owner + 1) * usize::from(points)).min(count))
                     .map(|index| AdvancementPurchase {
+                        id: None,
                         pool: PointPoolId::new("advancement").unwrap(),
                         selection: PurchaseSelection::Talent(
                             TalentId::new(format!("talent_{index:04}")).unwrap(),
@@ -1197,6 +1199,7 @@ mod tests {
             .iter()
             .enumerate()
             .map(|(index, definition)| AdvancementPurchase {
+                id: None,
                 pool: pools[index / 16].clone(),
                 selection: PurchaseSelection::Talent(definition.id.clone()),
             })
@@ -1211,6 +1214,7 @@ mod tests {
             .into_iter()
             .enumerate()
             .map(|(index, skill)| AdvancementPurchase {
+                id: None,
                 pool: pools[index / 16].clone(),
                 selection: PurchaseSelection::SkillRank(skill),
             })

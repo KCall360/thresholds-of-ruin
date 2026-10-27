@@ -35,7 +35,13 @@ class RoguePlayableContent(unittest.TestCase):
                 self.assertEqual(build["starting_skills"], ranks)
                 self.assertEqual(build["restoration"], "choose_again")
                 self.assertEqual(build["nutrition"], {"kind": "required"})
-                self.assertEqual(build["hit_dice"], [{"source": class_id, "purchases": []}])
+                self.assertEqual(build["body_package"], "rogue.body.human")
+                self.assertEqual(build["hit_dice"], [{"source": "racial", "purchases": []},
+                                                     {"source": class_id, "purchases": []}])
+                package = source("catalog/bodies.toml")["creatures"]["body_packages"][build["body_package"]]
+                self.assertEqual(package["species"], build["species"])
+                self.assertEqual(package["hit_dice"], build["hit_dice"][:1])
+                self.assertEqual(package["body"], character["body"])
                 self.assertEqual(build["future_growth"], {
                     "kind": "selected", "source": {"kind": "class", "class": class_id}})
 
@@ -48,7 +54,7 @@ class RoguePlayableContent(unittest.TestCase):
             {"archetype": "rogue.clean_bandage", "quantity": 3},
             {"archetype": "rogue.ration", "quantity": 1},
         ]
-        self.assertEqual(set(items), {'rogue.monster_detection', 'rogue.food_detection', 'rogue.magic_detection', 'rogue.magic_mapping', 'rogue.hallucination', 'rogue.gain_strength', 'rogue.raise_level', 'rogue.haste', 'rogue.torch', 'rogue.wand_cancellation', 'rogue.wand_magic_missile', 'rogue.wand_drain_life', 'rogue.wand_light', 'rogue.wand_nothing', 'rogue.clean_bandage', 'rogue.identify_armor', 'rogue.ration', 'rogue.dagger', 'rogue.banded_mail', 'rogue.healing', 'rogue.confusion', 'rogue.blindness', 'rogue.poison', 'rogue.see_invisible', 'rogue.extra_healing', 'rogue.wand_invisibility', 'rogue.wand_haste', 'rogue.wand_slow', 'rogue.generated_ring_mail', 'rogue.enchant_armor', 'rogue.long_sword', 'rogue.remove_curse', 'rogue.wand_lightning', 'rogue.wand_cold', 'rogue.studded_leather', 'rogue.two_handed_sword', 'rogue.splint_mail', 'rogue.identify_weapon', 'rogue.plate_mail', 'rogue.enchant_weapon', 'rogue.identify_wand', 'rogue.amulet_of_yendor', 'rogue.protect_armor', 'rogue.mace', 'rogue.restore_strength', 'rogue.identify_scroll', 'rogue.leather_armor', 'rogue.chain_mail', 'rogue.ring_mail', 'rogue.generated_mace', 'rogue.spear', 'rogue.gold', 'rogue.identify_potion', 'rogue.sleep', 'rogue.scale_mail', 'rogue.wand_fire', 'rogue.shortbow', 'rogue.arrow', 'rogue.ring_protection', 'rogue.ring_add_strength', 'rogue.ring_sustain_strength', 'rogue.ring_see_invisible', 'rogue.ring_adornment', 'rogue.ring_dexterity', 'rogue.ring_increase_damage', 'rogue.ring_regeneration', 'rogue.ring_slow_digestion', 'rogue.ring_maintain_armor', 'rogue.ring_searching', 'rogue.ring_teleportation', 'rogue.levitation', 'rogue.teleportation', 'rogue.wand_teleport_away', 'rogue.wand_teleport_to', 'rogue.ring_stealth', 'rogue.ring_aggravation', 'rogue.aggravate_monster', 'rogue.create_monster', 'rogue.hold_monster', 'rogue.monster_confusion', 'rogue.scare_monster'})
+        self.assertEqual(set(items), {'rogue.wand_polymorph', 'rogue.monster_detection', 'rogue.food_detection', 'rogue.magic_detection', 'rogue.magic_mapping', 'rogue.hallucination', 'rogue.gain_strength', 'rogue.raise_level', 'rogue.haste', 'rogue.torch', 'rogue.wand_cancellation', 'rogue.wand_magic_missile', 'rogue.wand_drain_life', 'rogue.wand_light', 'rogue.wand_nothing', 'rogue.clean_bandage', 'rogue.identify_armor', 'rogue.ration', 'rogue.dagger', 'rogue.banded_mail', 'rogue.healing', 'rogue.confusion', 'rogue.blindness', 'rogue.poison', 'rogue.see_invisible', 'rogue.extra_healing', 'rogue.wand_invisibility', 'rogue.wand_haste', 'rogue.wand_slow', 'rogue.generated_ring_mail', 'rogue.enchant_armor', 'rogue.long_sword', 'rogue.remove_curse', 'rogue.wand_lightning', 'rogue.wand_cold', 'rogue.studded_leather', 'rogue.two_handed_sword', 'rogue.splint_mail', 'rogue.identify_weapon', 'rogue.plate_mail', 'rogue.enchant_weapon', 'rogue.identify_wand', 'rogue.amulet_of_yendor', 'rogue.protect_armor', 'rogue.mace', 'rogue.restore_strength', 'rogue.identify_scroll', 'rogue.leather_armor', 'rogue.chain_mail', 'rogue.ring_mail', 'rogue.generated_mace', 'rogue.spear', 'rogue.gold', 'rogue.identify_potion', 'rogue.sleep', 'rogue.scale_mail', 'rogue.wand_fire', 'rogue.shortbow', 'rogue.arrow', 'rogue.ring_protection', 'rogue.ring_add_strength', 'rogue.ring_sustain_strength', 'rogue.ring_see_invisible', 'rogue.ring_adornment', 'rogue.ring_dexterity', 'rogue.ring_increase_damage', 'rogue.ring_regeneration', 'rogue.ring_slow_digestion', 'rogue.ring_maintain_armor', 'rogue.ring_searching', 'rogue.ring_teleportation', 'rogue.levitation', 'rogue.teleportation', 'rogue.wand_teleport_away', 'rogue.wand_teleport_to', 'rogue.ring_stealth', 'rogue.ring_aggravation', 'rogue.aggravate_monster', 'rogue.create_monster', 'rogue.hold_monster', 'rogue.monster_confusion', 'rogue.scare_monster'})
         for character in manifest["characters"]:
             self.assertEqual(character["loadout"], expected)
             self.assertEqual(set(character["known_identities"]), {"rogue.mace", "rogue.ring_mail", "rogue.clean_bandage", "rogue.ration", "rogue.amulet_of_yendor"})
@@ -127,7 +133,7 @@ class RoguePlayableContent(unittest.TestCase):
     def test_playable_catalog_keeps_compact_geometry_and_shared_rules(self):
         manifest = source("scenario.toml")
         self.assertEqual(manifest["modules"], [
-            "catalog/creatures.toml", "catalog/actors.toml", "catalog/items.toml"])
+            "catalog/creatures.toml", "catalog/bodies.toml", "catalog/actors.toml", "catalog/items.toml"])
         self.assertEqual(set(manifest["procedural_worlds"]), {"dungeon"})
         family = manifest["procedural_worlds"]["dungeon"]
         self.assertEqual(family["grid"], [3, 3])

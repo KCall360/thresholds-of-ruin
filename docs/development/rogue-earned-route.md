@@ -18,21 +18,21 @@ The route arm named `production` is the explicit, frozen preactivation E/S sourc
 snapshot at `8d09063840c51aa4189b146c287829102856b279`, with an explicitly recorded
 adaptation for the current scenario format. Its ordinary population remains two
 emus and two snakes. The source-only fixture
-`scripts/fixtures/rogue-earned-baseline-v24` retains exact package inputs and its
-current bundled-rule dependency hash. Its latest source-only transition advances
-the scenario header from 31 to 32 for detection/mapping compatibility and the
-bundled import from the preceding pinned identity to current `interactions-v53`.
-The [prior source receipt](../../scripts/fixtures/rogue-earned-baseline-v23/source.json)
-and [current transition receipt](../../scripts/fixtures/rogue-earned-baseline-v24/format-transition.json)
+`scripts/fixtures/rogue-earned-baseline-v25` retains exact package inputs and its
+current bundled-rule source hash. Its latest source-only transition advances
+the scenario header from 32 to 33 and the bundled import from its prior pinned
+identity to current `interactions-v54` for Polymorph-compatible formats.
+The [prior source receipt](../../scripts/fixtures/rogue-earned-baseline-v24/source.json)
+and [current transition receipt](../../scripts/fixtures/rogue-earned-baseline-v25/format-transition.json)
 retain the exact old/new identities and hashes; their historical proof is not
-rewritten. The fresh rules identity records the already-authored portable-light
-held-light anatomy and slot addition. This is not a claim that prior rule
-semantics or outcomes are unchanged, and the transition does not qualify
-compiler output or route outcomes.
+rewritten. The dependency digest attests to actual bundled source bytes, not a
+compiler certificate. No body-package enrollment, two-HD player kit, roster or
+loot changes enter this frozen comparator. Shared rules may change outcomes;
+this transition does not qualify compiler output or route outcomes.
 All other authored package bytes, including anatomy, items, player kits and
 population stages, are unchanged; no maze or room-omission policy, wandering policy, control
 scrolls, utility-magic or ring loot, discovery stages, traps or secret closures are
-imported. Frozen v6–v23 inputs and their source/transition receipts remain immutable research
+imported. Frozen v6–v24 inputs and their source/transition receipts remain immutable research
 evidence. Shared living-dungeon, awareness, hazards, levitation, discovery, wearable, utility-magic, persistent-condition and
 action-duration rules
 make this a new experiment input, with no claim of identical outcomes or a

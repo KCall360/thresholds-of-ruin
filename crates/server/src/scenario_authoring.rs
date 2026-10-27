@@ -660,6 +660,9 @@ pub enum Effect {
     MapTopology,
     DrainLife,
     CancelSpecials,
+    BalefulPolymorph {
+        forms: Vec<String>,
+    },
     StepSelfOneCell,
     TeleportRandom,
     TeleportToRayOrigin,
@@ -766,6 +769,7 @@ impl<'de> Deserialize<'de> for HoldPolicy {
 pub enum ItemDiscovery {
     #[default]
     SelfEffect,
+    DiscernibleEffect,
     OnUse,
     Never,
 }
@@ -773,6 +777,7 @@ impl<'de> Deserialize<'de> for ItemDiscovery {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         match String::deserialize(deserializer)?.as_str() {
             "self_effect" => Ok(Self::SelfEffect),
+            "discernible_effect" => Ok(Self::DiscernibleEffect),
             "on_use" => Ok(Self::OnUse),
             "never" => Ok(Self::Never),
             _ => Err(serde::de::Error::custom("invalid item discovery policy")),
@@ -783,6 +788,7 @@ impl From<ItemDiscovery> for tor_simulation::ItemDiscovery {
     fn from(value: ItemDiscovery) -> Self {
         match value {
             ItemDiscovery::SelfEffect => Self::SelfEffect,
+            ItemDiscovery::DiscernibleEffect => Self::DiscernibleEffect,
             ItemDiscovery::OnUse => Self::OnUse,
             ItemDiscovery::Never => Self::Never,
         }
@@ -854,11 +860,13 @@ impl ConsumableSpec {
         &self,
         rules: &tor_simulation::rules::Ruleset,
     ) -> Result<tor_simulation::ConsumableSpec, crate::Failure> {
-        Ok(tor_simulation::ConsumableSpec {
+        let spec = tor_simulation::ConsumableSpec {
             descriptors: compile_payload_descriptors(&self.descriptors, rules)?,
             effects: compile_item_effects(&self.effects, rules)?,
             discovery: self.discovery.into(),
-        })
+        };
+        super::require(spec.valid(), "Invalid consumable definition")?;
+        Ok(spec)
     }
 }
 
@@ -1205,6 +1213,12 @@ impl<'de> Deserialize<'de> for Effect {
             MapTopology {},
             DrainLife {},
             CancelSpecials {},
+            BalefulPolymorph {
+                #[serde(
+                    deserialize_with = "crate::creature_authoring::bounded_strike_vec::<_, _, {tor_simulation::limits::CATALOG_ENTRIES}>"
+                )]
+                forms: Vec<String>,
+            },
             StepSelfOneCell {},
             TeleportRandom {},
             TeleportToRayOrigin {},
@@ -1319,6 +1333,7 @@ impl<'de> Deserialize<'de> for Effect {
             Fields::MapTopology {} => Self::MapTopology,
             Fields::DrainLife {} => Self::DrainLife,
             Fields::CancelSpecials {} => Self::CancelSpecials,
+            Fields::BalefulPolymorph { forms } => Self::BalefulPolymorph { forms },
             Fields::StepSelfOneCell {} => Self::StepSelfOneCell,
             Fields::TeleportRandom {} => Self::TeleportRandom,
             Fields::TeleportToRayOrigin {} => Self::TeleportToRayOrigin,
@@ -1910,6 +1925,36 @@ mod tests {
                 "device must reject {field}"
             );
         }
+        let mut unsupported = source.clone();
+        unsupported.discovery = ItemDiscovery::DiscernibleEffect;
+        assert!(
+            unsupported.compile(&valid).is_err(),
+            "damage rays do not own Polymorph discovery"
+        );
+        let mut polymorph = ability.clone();
+        polymorph.invocation = tor_simulation::abilities::InvocationKind::DirectionalContactRay;
+        polymorph.reach = tor_simulation::rules::Reach::UntilObstruction;
+        let tor_simulation::rules::StrikeSource::Authored { strikes } = &mut polymorph.strikes
+        else {
+            unreachable!()
+        };
+        strikes[0].check.as_mut().unwrap().against = tor_simulation::rules::Against::Opposed {
+            skill: tor_simulation::rules::SkillSelector::Named {
+                skill: tor_simulation::attributes::Skill::Lore,
+            },
+        };
+        strikes[0].on_failure = vec![tor_simulation::rules::Effect::BalefulPolymorph {
+            forms: vec![
+                tor_simulation::content_ids::BodyFormId::new("catalog_checked_form").unwrap(),
+            ],
+        }];
+        let mut document = rules().document().clone();
+        document.abilities.push(polymorph);
+        let supported = Ruleset::validate(document).unwrap();
+        assert_eq!(
+            unsupported.compile(&supported).unwrap().discovery,
+            tor_simulation::ItemDiscovery::DiscernibleEffect
+        );
         let mut hidden = source;
         hidden.discovery = ItemDiscovery::SelfEffect;
         assert!(hidden.compile(&valid).is_err());
@@ -1955,6 +2000,43 @@ mod tests {
             .expect("a legal self no-op must be usable as a device");
         assert_eq!(compiled.ability.as_str(), "fixture.nothing");
         assert_eq!(compiled.initial_charges.minimum, 3);
+    }
+
+    #[test]
+    fn authored_discernible_discovery_is_explicit_and_compiles_without_policy_aliasing() {
+        let policy: ItemDiscovery =
+            serde_json::from_value(serde_json::json!("discernible_effect")).unwrap();
+        assert_eq!(policy, ItemDiscovery::DiscernibleEffect);
+        assert_eq!(
+            tor_simulation::ItemDiscovery::from(policy),
+            tor_simulation::ItemDiscovery::DiscernibleEffect
+        );
+        assert_eq!(serde_json::to_value(policy).unwrap(), "discernible_effect");
+        assert!(serde_json::from_value::<ItemDiscovery>(serde_json::json!("discernible")).is_err());
+    }
+
+    #[test]
+    fn authored_nondevice_discovery_rejects_polymorph_only_policy() {
+        for policy in ["self_effect", "on_use", "never"] {
+            let mut value = serde_json::json!({"discovery":policy,"effects":[{"kind":"heal","amount":{"kind":"fixed","amount":1}}]});
+            let source: ConsumableSpec = serde_json::from_value(value.clone()).unwrap();
+            source.compile(&rules()).unwrap();
+            value["discovery"] = serde_json::json!("discernible_effect");
+            let source: ConsumableSpec = serde_json::from_value(value).unwrap();
+            assert!(source.compile(&rules()).is_err());
+            for control in [false, true] {
+                let mut value = if control {
+                    serde_json::json!({"discovery":policy,"control":{"kind":"nothing"}})
+                } else {
+                    serde_json::json!({"discovery":policy,"effects":[{"kind":"heal","amount":{"kind":"fixed","amount":1}}]})
+                };
+                let source: ReadableSpec = serde_json::from_value(value.clone()).unwrap();
+                source.compile(&rules()).unwrap();
+                value["discovery"] = serde_json::json!("discernible_effect");
+                let source: ReadableSpec = serde_json::from_value(value).unwrap();
+                assert!(source.compile(&rules()).is_err());
+            }
+        }
     }
 
     #[test]

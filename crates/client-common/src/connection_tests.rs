@@ -1343,6 +1343,7 @@ fn owner_advancement_message(context: ReplyContext, id: &str) -> ServerMessage {
             value: Box::new(AdvancementOverview {
                 strength_acquired: 0,
                 growth: AdvancementGrowth {
+                    body_package_hit_dice: None,
                     highest_applied_tier: 2,
                     restorable_hit_dice: 0,
                     restoration_blocker: None,

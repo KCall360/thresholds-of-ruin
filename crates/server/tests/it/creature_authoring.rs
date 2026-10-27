@@ -753,3 +753,113 @@ fn nutrition_requirement_is_explicit_and_independent_of_policy_enablement() {
         NutritionRequirement::Exempt
     );
 }
+
+#[test]
+fn explicit_body_packages_enroll_only_authored_prefix_and_reseed_personal_birth_rows() {
+    use tor_server::creature_authoring::{Advancement, BodyPackage, Restoration};
+    use tor_simulation::content_ids::BodyFormId;
+    let mut catalog = catalog();
+    catalog.body_packages.insert(
+        "human_body".into(),
+        BodyPackage {
+            species: "human".into(),
+            body: serde_json::from_value(
+                serde_json::json!({"cells":[[0,0,0]],"eye":[0,0,0],"mass":80}),
+            )
+            .unwrap(),
+            hit_dice: vec![Advancement {
+                source: "racial".into(),
+                purchases: vec![],
+                attribute: None,
+            }],
+            polymorph_eligible: false,
+        },
+    );
+    let compiled = catalog.compile(rules()).unwrap();
+    let id = BodyFormId::new("human_body").unwrap();
+    assert!(compiled.content().body_package(&id).is_some());
+    assert!(compiled.content().polymorph_body_package(&id).is_none());
+    let mut spec = specification();
+    spec.body_package = Some("human_body".into());
+    spec.restoration = Restoration::ChooseAgain;
+    spec.hit_dice = vec![
+        Advancement {
+            source: "racial".into(),
+            purchases: vec![],
+            attribute: None,
+        },
+        Advancement {
+            source: "warrior".into(),
+            purchases: vec![],
+            attribute: None,
+        },
+    ];
+    // Exact authored birth plans enroll too; only authored future schedules are excluded.
+    spec.restoration = Restoration::Authored;
+    let recipe = compiled.prepare(&spec).unwrap();
+    let first = recipe.instantiate(42).unwrap();
+    let second = recipe.instantiate(43).unwrap();
+    assert_eq!(first.personal_hd_count().get(), 1);
+    assert_eq!(first.ledger().total_hd().get(), 2);
+    assert_eq!(
+        first.ledger().entries()[1].owner(),
+        second.ledger().entries()[1].owner()
+    );
+    assert_ne!(
+        first.ledger().entries()[1].health_seed(),
+        second.ledger().entries()[1].health_seed()
+    );
+    assert_eq!(first.unspent_points(), 1);
+    let restored = recipe
+        .recorded()
+        .restore(compiled.content().clone())
+        .unwrap();
+    assert_eq!(restored.instantiate_seeded(42).unwrap(), first);
+    let deeper = restored.instantiate_seeded_racial(42, 2).unwrap();
+    assert_eq!(deeper.personal_hd_count().get(), 3);
+    assert_eq!(deeper.active_body_package().unwrap().advancement.len(), 1);
+    let mut advanced = spec.clone();
+    advanced.hit_dice.extend(vec![
+        Advancement {
+            source: "warrior".into(),
+            purchases: vec![],
+            attribute: None
+        };
+        3
+    ]);
+    advanced.hit_dice[4].attribute = Some("strength".into());
+    let advanced = compiled
+        .prepare(&advanced)
+        .unwrap()
+        .instantiate(44)
+        .unwrap();
+    assert_eq!(advanced.personal_hd_count().get(), 4);
+    assert_eq!(
+        advanced
+            .derive()
+            .unwrap()
+            .attributes
+            .get(Attribute::Strength),
+        3
+    );
+    let mut unknown = spec.clone();
+    unknown.body_package = Some("missing".into());
+    assert!(compiled.prepare(&unknown).is_err());
+    let mut wrong = spec;
+    wrong.hit_dice[0].source = "warrior".into();
+    assert!(compiled.prepare(&wrong).is_err());
+    catalog
+        .body_packages
+        .get_mut("human_body")
+        .unwrap()
+        .polymorph_eligible = true;
+    let compiled = catalog.compile(rules()).unwrap();
+    assert!(compiled.content().polymorph_body_package(&id).is_some());
+    catalog
+        .body_packages
+        .get_mut("human_body")
+        .unwrap()
+        .hit_dice[0]
+        .source = "warrior".into();
+    assert!(catalog.compile(rules()).is_err());
+}

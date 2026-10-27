@@ -23,6 +23,7 @@ from haste_catalog_package import prepare as prepare_imported_haste
 from growth_catalog_package import prepare as prepare_imported_growth
 from hallucination_catalog_package import prepare as prepare_imported_hallucination
 import detection_process_package as detection
+import polymorph_process_package as polymorph
 from hallucination_package import assert_sample as assert_hallucination_sample, initial_items as hallucination_initial_items
 from utility_potions_package import condition as hallucination_condition, deadline as hallucination_deadline, inventory_item as hallucination_item
 
@@ -123,6 +124,131 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         self.assertEqual(charges(zapped, first["id"]), 2)
         self.assertEqual(len(items(zapped, "wand")), 2)
         self.assertFalse(zapped["state"]["wizard_game"])
+
+    @non_graphical
+    def test_text_paid_self_polymorph_reopens_and_retries_without_source_or_private_ledger(self):
+        package = polymorph.prepare(self)
+        server = self.server("--checkpoint-interval", 1, scenario=package)
+        probe, initial = self.client(observe=True)
+
+        def text_through_relay():
+            relay = polymorph.PolymorphRetryRelay(self.address)
+            self.addCleanup(relay.close)
+            upstream, self.address = self.address, relay.address
+            try:
+                text, _ = self.text_client()
+            finally:
+                self.address = upstream
+            return text, relay
+
+        def private_projection(frame):
+            public = json.dumps(frame)
+            for secret in (polymorph.BASE, polymorph.FORM, "body_build", "personal_seed_offset",
+                           "purchase_highwater", "health_root"):
+                self.assertNotIn(secret, public)
+
+        text, relay = text_through_relay()
+        for ground in observation(initial)["ground_items"]:
+            self.assertIn("Taken", text.command("take #" + ground["item"]["id"]))
+        carried = self.snapshot(probe)
+        wand, = items(carried, "wand")
+        scroll, = items(carried, "scroll")
+        self.assertFalse(wand["identified"])
+        before_read = checkpoint(self, probe)
+        text.command("read #" + scroll["id"])
+        after_read = checkpoint(self, probe)
+        read_ticks = after_read["tick"] - before_read["tick"]
+        self.assertGreater(read_ticks, 0)
+        text.command("identify #" + wand["id"])
+        known = self.snapshot(probe)
+        self.assertTrue(items(known, "wand")[0]["identified"])
+        self.assertEqual(charges(known, wand["id"]), 3)
+        affordance = next(row for row in interactions(known)["inventory"] if row["item"] == wand["id"])
+        self.assertEqual(affordance["device_activation"], "direction_or_self")
+        raw = [json.loads(line).get("message") for line in probe.transcript if line.startswith("{")]
+        affordance_sample = next(row for row in reversed(raw) if row and row["type"] == "snapshot")
+        self.assertEqual(affordance_sample["snapshot"]["state"], known["state"])
+        before = checkpoint(self, probe)
+        born = actor_creature(before)
+        self.assertEqual(born["build"]["body_build"]["active"]["id"], polymorph.BASE)
+        self.assertEqual(len(born["build"]["hd"]), 2)
+        self.assertEqual(len(polymorph.personal(born)), 1)
+        self.assertNotIn("Server error", text.command("zap #" + wand["id"] + " self"))
+        self.assertTrue(relay.captured.wait(15), "real Text self-Zap must be captured")
+        changed = self.advance(probe, [])
+        saved = checkpoint(self, probe)
+        transformed = actor_creature(saved)
+        self.assertEqual(saved["tick"] - before["tick"], read_ticks)
+        self.assertEqual(charges(changed, wand["id"]), 2)
+        self.assertEqual(saved["items"]["30"]["charges"], 2)
+        self.assertEqual(transformed["build"]["body_build"]["active"]["id"], polymorph.FORM)
+        self.assertEqual(transformed["build"]["body_build"]["base"]["id"], polymorph.BASE)
+        self.assertEqual(len(transformed["build"]["hd"]), 3)
+        self.assertEqual(polymorph.personal(transformed), polymorph.personal(born))
+        self.assertEqual(transformed["earned_progress"], born["earned_progress"])
+        self.assertEqual(transformed["injury"], born["injury"])
+        self.assertEqual(transformed["build"]["starting_skills"], born["build"]["starting_skills"])
+        attributes = observation(changed)["combat"]["own_stats"]["attributes"]
+        self.assertEqual(attributes["strength"], 3)
+        for attribute in ("intellect", "willpower", "awareness", "presence"):
+            self.assertEqual(attributes[attribute], 0)
+        self.assertFalse(changed["state"]["wizard_game"])
+        private_projection(changed)
+        original_frame, original_id = relay.saved_frame, relay.request_id
+        self.assertFalse(relay.errors)
+        text.stop(save=False)
+        probe.stop(save=False)
+        server.stop(save=False)
+        shutil.rmtree(package)
+        self.assertFalse(package.exists())
+        self.server("--checkpoint-interval", 1, scenario=ROOT / "scenarios/two-room", seed=None)
+        probe, restored = self.client(observe=True)
+        self.assertEqual(checkpoint(self, probe), saved)
+        self.assertEqual(charges(restored, wand["id"]), 2)
+        private_projection(restored)
+        text, reopened_relay = text_through_relay()
+        receipt = reopened_relay.retry(original_frame, original_id)
+        self.assertEqual(receipt["phase"], "resolved")
+        self.assertEqual(checkpoint(self, probe), saved, "exact retry cannot pay, draw or transform twice")
+        spectator, watched = self.client(SPECTATOR_TOKEN, observe=True)
+        private_projection(watched)
+        self.assertFalse(reopened_relay.errors)
+        self.polymorph_samples = {"affordance": affordance_sample, "request": relay.saved_message}
+
+    @non_graphical
+    def test_polymorph_self_ability_privileged_capture_has_changed_only_effect(self):
+        package = polymorph.prepare(self, diagnostic_ability=True)
+        self.server("--checkpoint-interval", 1, scenario=package, wizard=True)
+        owner, initial = self.client()
+        wizard, _ = self.client(WIZARD_TOKEN, observe=True)
+        enabled = self.command(wizard, {"type": "wizard", "command": "combat capture on"})
+        self.assertIsNone(enabled["error"])
+        # Refresh the owner's attachment/revision after capture configuration;
+        # never reuse an opaque target from before another connection's command.
+        initial = self.snapshot(owner)
+        self.assertTrue(settled(initial))
+        ability, = [row for row in observation(initial)["combat"]["own_stats"]["abilities"]
+                    if row["id"] == "fixture.polymorph"]
+        self.assertEqual(ability["reach"], {"kind": "self_only"})
+        before = observation(initial)["tick"]
+        result = self.act(owner, {"type": "use_ability", "id": "fixture.polymorph",
+            "invocation": {"aim": {"kind": "actor_target", "target": observation(initial)["self_target"]},
+                           "weapon": {"kind": "default"}}})
+        self.assertIsNone(result["error"])
+        after = self.advance(owner, [])
+        self.assertGreater(int(observation(after)["tick"]), int(before))
+        self.assertEqual(actor_creature(checkpoint(self, owner))["build"]["body_build"]["active"]["id"], polymorph.FORM)
+        queried = self.command(wizard, {"type": "wizard", "command": "combat inspect"})
+        self.assertIsNone(queried["error"])
+        messages = [json.loads(line).get("message") for line in wizard.transcript if line.startswith("{")]
+        sample = next(row for row in reversed(messages) if row and row["type"] == "combat_diagnostics")
+        record, = [row for row in sample["report"]["records"] if row.get("ability", {}).get("id") == "fixture.polymorph"]
+        effect, = [row for row in record["outcome"]["effects"] if row["type"] == "baleful_polymorph"]
+        self.assertEqual(effect, {"type": "baleful_polymorph", "target": "1", "changed": True})
+        for secret in (polymorph.BASE, polymorph.FORM, "body_build", "personal_seed_offset", "purchase_highwater"):
+            self.assertNotIn(secret, json.dumps(sample))
+        self.assertNotIn('"type":"combat_diagnostics"', "".join(owner.transcript).replace(" ", ""))
+        self.polymorph_diagnostic_sample = sample
 
     @non_graphical
     def test_text_cursed_armor_enchantment_and_source_free_reopen(self):
@@ -305,6 +431,86 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
             self.assertIsNone(value["known_cursed"])
             self.assertIsNone(value["known_equipment"])
         self.assertFalse(failed["state"]["wizard_game"])
+
+    def test_native_polymorph_direction_or_self_cancel_and_paid_self_reopen(self):
+        # One genuine OS-key boundary owns the new dual-aim affordance. Text's
+        # separate process owner covers source deletion and exact-request retry.
+        package = polymorph.prepare(self)
+        server = self.server("--checkpoint-interval", 1, scenario=package)
+        probe, initial = self.client()
+        carried = self.collect(probe, initial)
+        wand, = items(carried, "wand")
+        scroll, = items(carried, "scroll")
+        before_read = checkpoint(self, probe)
+        read = self.act(probe, {"type": "read", "item": scroll["id"]})
+        self.assertIsNone(read["error"])
+        pending = self.advance(probe, [])
+        read_ticks = checkpoint(self, probe)["tick"] - before_read["tick"]
+        self.assertGreater(read_ticks, 0)
+        choice = interactions(pending)["identification"]
+        self.assertEqual(choice["classes"], ["wand"])
+        self.assertEqual(choice["items"], [wand["id"]])
+        learned = self.act(probe, {"type": "identify", "choice": choice["choice"], "item": wand["id"]})
+        self.assertIsNone(learned["error"])
+        known = self.advance(probe, [])
+        self.assertTrue(items(known, "wand")[0]["identified"])
+        self.assertEqual(charges(known, wand["id"]), 3)
+        affordance = next(row for row in interactions(known)["inventory"] if row["item"] == wand["id"])
+        self.assertEqual(affordance["device_activation"], "direction_or_self")
+        self.assertIsNone(self.request(probe, {"type": "release_control"})["error"])
+        window = self.launch("tor-client-ascii", ["--connect", self.address, "--report-frames"])
+        shown = self.ascii_frame(window, lambda frame: frame["has_control"] and not frame["busy"]
+                                 and frame["can_admit_intention"])
+        native = self.native_keys(window)
+        if shown["messages"]["more"]:
+            shown = self.native_press(window, native, "Escape", "escape")
+        before = checkpoint(self, probe)
+        born = actor_creature(before)
+        self.assertEqual(born["build"]["body_build"]["active"]["id"], polymorph.BASE)
+        menu = self.native_press(window, native, "F12", "zap")
+        self.assertEqual(len(menu["item_rows"]), 1)
+        self.assertIn("charges: 3", menu["item_rows"][0])
+        aimed = self.native_press(window, native, "Return", "enter")
+        self.assertEqual(aimed["zap_item"], wand["id"])
+        self.assertEqual(aimed["state"], shown["state"], "opening dual aim is free")
+        cancelled = self.native_press(window, native, "Escape", "escape")
+        self.assertIsNone(cancelled["zap_item"])
+        self.assertEqual(cancelled["state"], shown["state"])
+        self.assertEqual(charges(cancelled, wand["id"]), 3)
+        self.assertEqual(checkpoint(self, probe), before, "Escape spends no time, charge or form draw")
+        self.native_press(window, native, "F12", "zap")
+        aimed = self.native_press(window, native, "Return", "enter")
+        self.assertEqual(aimed["zap_item"], wand["id"])
+        # Unshifted period is the real native Wait key; in dual aim it selects
+        # explicit Self instead of waiting or emitting a zero direction.
+        changed = self.native_press(window, native, "period", "wait",
+                                    wait_for_ready=True, wait_for_admission=True)
+        self.assertIsNone(changed["zap_item"])
+        self.assertEqual(charges(changed, wand["id"]), 2)
+        self.assertTrue(changed["window_open"])
+        self.assertFalse(changed["state"]["wizard_game"])
+        self.assertEqual(observation(changed)["combat"]["own_stats"]["attributes"]["strength"], 3)
+        saved = checkpoint(self, probe)
+        transformed = actor_creature(saved)
+        self.assertEqual(saved["tick"] - before["tick"], read_ticks)
+        self.assertEqual(transformed["build"]["body_build"]["active"]["id"], polymorph.FORM)
+        self.assertEqual(polymorph.personal(transformed), polymorph.personal(born))
+        self.assertEqual(transformed["earned_progress"], born["earned_progress"])
+        window.stop(save=False)
+        probe.stop(save=False)
+        server.stop(save=False)
+        self.server("--checkpoint-interval", 1, scenario=package, seed=None)
+        probe, restored = self.client(observe=True)
+        self.assertEqual(checkpoint(self, probe), saved)
+        self.assertEqual(charges(restored, wand["id"]), 2)
+        window = self.launch("tor-client-ascii", ["--connect", self.address, "--report-frames"])
+        reopened = self.ascii_frame(window, lambda frame: frame["has_control"] and not frame["busy"]
+                                    and frame["can_admit_intention"])
+        self.assertTrue(reopened["window_open"])
+        self.assertIsNone(reopened["zap_item"])
+        self.assertEqual(charges(reopened, wand["id"]), 2)
+        self.assertEqual(observation(reopened)["combat"]["own_stats"]["attributes"]["strength"], 3)
+        self.assertEqual(checkpoint(self, probe), saved, "reopening the native UI cannot pay twice")
 
     def test_native_paid_choice_reopens_and_direction_cancel_keeps_exact_charges(self):
         package = self.package()
@@ -1010,7 +1216,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
                 self.assertEqual(creature["build"]["strength_acquired"], acquired)
                 self.assertEqual(observation(current)["combat"]["own_stats"]["attributes"]["strength"], 5 + acquired)
                 self.assertEqual(creature["earned_progress"], original["earned_progress"])
-                self.assertIn(f"Permanent potion Strength: +{acquired} (not refundable)", overview)
+                self.assertIn(f"Permanent potion Strength owned: {acquired} (not refundable; capped effect)", overview)
             else:
                 # Independent authored curve prices at tiers one and two; blocked
                 # first dose remains banked, so the second funds the next tier.
@@ -1511,7 +1717,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         self.assertEqual((clock["phase"], clock["period"], clock["remaining_to_shift"]), (0, 100, 100))
         seen = self.say(text, "look")
         self.assertIn("emu", seen.lower())
-        self.assertIn("scroll titled sah ren", seen.lower())
+        self.assertIn("smoky potion", seen.lower())
         self.assertNotIn("actual visible peer", seen.lower())
         self.assertNotIn("gold coin", seen.lower())
         for _ in range(3):

@@ -331,7 +331,9 @@ impl Game {
         identity: CreatureIdentity,
         build: CreatureBuild,
     ) -> Result<crate::lifecycle::ActorOutcome, GameError> {
-        if build.content().as_ref() != self.content.as_ref() {
+        if build.content().as_ref() != self.content.as_ref()
+            || !build.authored_body_packages_valid()
+        {
             return Err(GameError::Rule(
                 crate::abilities::RuleError::InvalidDefinition,
             ));
@@ -352,6 +354,15 @@ impl Game {
         let actor = &mut outcome.state;
         if actor.combat.is_some() || !actor.equipment.is_empty() {
             return Err(GameError::ActorBusy);
+        }
+        if creature
+            .build()
+            .active_body_package()
+            .is_some_and(|package| package.body != *actor.body)
+        {
+            return Err(GameError::Build(
+                crate::creatures::BuildError::InvalidDefinition,
+            ));
         }
         actor.active_since = active_since;
         actor.anatomy = Shared::new(creature.derived().anatomy.clone());

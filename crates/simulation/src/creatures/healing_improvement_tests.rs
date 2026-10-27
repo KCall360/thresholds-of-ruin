@@ -395,6 +395,7 @@ fn resolved_improvement_claims_reject_forgery_without_partial_healing() {
         "ordinal",
         "source",
         "health_seed",
+        "health_policy",
         "original_kind",
         "original_die",
         "previous",
@@ -403,8 +404,16 @@ fn resolved_improvement_claims_reject_forgery_without_partial_healing() {
         bad["improvements"][0].as_object_mut().unwrap().remove(key);
         assert!(serde_json::from_value::<ResolvedEffect>(bad).is_err());
     }
+    // Effective ordinal zero can now hold a retained personal seeded row.
+    // It is a valid claim shape, but cannot target this build's maximized row.
     let mut bad = value.clone();
     bad["improvements"][0]["ordinal"] = json!(0);
+    let forged: ResolvedEffect = serde_json::from_value(bad).unwrap();
+    let mut unchanged = original.clone();
+    assert!(apply(&mut unchanged, &forged).is_err());
+    assert_eq!(unchanged, original);
+    let mut bad = value.clone();
+    bad["improvements"][0]["health_policy"] = json!("maximized");
     assert!(serde_json::from_value::<ResolvedEffect>(bad).is_err());
     let mut bad = value.clone();
     bad["improvements"][0]["previous"] = json!(1000);
