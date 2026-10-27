@@ -819,10 +819,15 @@ class Native3DProcesses(ProcessTestCase):
             self.addCleanup(cleanup)
 
     def tap(self, window, native, name, done):
-        """Hold one key only until the client reports it pressed, then wait for
-        the frame showing its effect. Holding it while waiting would let X
-        auto-repeat typed characters; releasing at once can beat the client's
-        input sampling on Windows."""
+        """Type one key once, then wait for the frame showing its effect.
+
+        X delivers a whole keystroke, so nothing is held across slow frames
+        for it to auto-repeat. A posted Windows key-down must still be down
+        when the client samples input, so it is held only until the client
+        reports it pressed."""
+        if getattr(native, "stroke", None):
+            native.stroke(name)
+            return self.captured(window, lambda frame: not frame["busy"] and done(frame))
         code = ("Key" + name.upper() if name.isalpha() and len(name) == 1 else
                 "Digit" + name if name.isdigit() else {"Return": "Enter", "space": "Space"}.get(name, name))
         native(name, True)
@@ -851,15 +856,15 @@ class Native3DProcesses(ProcessTestCase):
                 self.assertTrue(user32.PostMessageW(handle, 0x100 if down else 0x101, vk,
                     1 | (scan << 16) | (0x01000000 if extended else 0) | (0 if down else 0xC0000000)))
             return key
-        # A key held across slow software-rendered frames must not auto-repeat;
-        # the test display is private to this run.
-        if shutil.which("xset"):
-            subprocess.run(["xset", "r", "off"], check=False, timeout=10)
         def key(name, down):
             # Winit consumes XInput events. Use XTEST on the focused game
             # window instead of synthetic core events sent with --window.
             subprocess.run(["xdotool", "windowfocus", "--sync", handle], check=True, timeout=10)
             subprocess.run(["xdotool", "keydown" if down else "keyup", name], check=True, timeout=10)
+        def stroke(name):
+            subprocess.run(["xdotool", "windowfocus", "--sync", handle], check=True, timeout=10)
+            subprocess.run(["xdotool", "key", name], check=True, timeout=10)
+        key.stroke = stroke
         return key
 
     def test_private_launches_keep_prior_saves_and_stop_their_own_server(self):
