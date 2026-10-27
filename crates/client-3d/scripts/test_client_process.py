@@ -798,6 +798,20 @@ class Native3DProcesses(ProcessTestCase):
                     os.close(handle)
             self.addCleanup(cleanup)
 
+    def tap(self, window, native, name, done):
+        """Hold one key only until the client reports it pressed, then wait for
+        the frame showing its effect. Holding it while waiting would let X
+        auto-repeat typed characters; releasing at once can beat the client's
+        input sampling on Windows."""
+        code = ("Key" + name.upper() if name.isalpha() and len(name) == 1 else
+                "Digit" + name if name.isdigit() else {"Return": "Enter", "space": "Space"}.get(name, name))
+        native(name, True)
+        try:
+            self.captured(window, lambda frame: code in frame["keys"])
+        finally:
+            native(name, False)
+        return self.captured(window, lambda frame: code not in frame["keys"] and not frame["busy"] and done(frame))
+
     def native_keys(self, client):
         handle = self._native_window(client)
         if os.name == "nt":
@@ -817,6 +831,10 @@ class Native3DProcesses(ProcessTestCase):
                 self.assertTrue(user32.PostMessageW(handle, 0x100 if down else 0x101, vk,
                     1 | (scan << 16) | (0x01000000 if extended else 0) | (0 if down else 0xC0000000)))
             return key
+        # A key held across slow software-rendered frames must not auto-repeat;
+        # the test display is private to this run.
+        if shutil.which("xset"):
+            subprocess.run(["xset", "r", "off"], check=False, timeout=10)
         def key(name, down):
             # Winit consumes XInput events. Use XTEST on the focused game
             # window instead of synthetic core events sent with --window.
@@ -1040,11 +1058,7 @@ class Native3DProcesses(ProcessTestCase):
         native = self.native_keys(window)
 
         def tap(name, done):
-            native(name, True)
-            try:
-                return self.captured(window, lambda frame: not frame["busy"] and done(frame))
-            finally:
-                native(name, False)
+            return self.tap(window, native, name, done)
 
         def action(frame, label):
             position = next(index for index, text in enumerate(frame["panel_actions"]) if text.endswith(label))
@@ -1092,11 +1106,7 @@ class Native3DProcesses(ProcessTestCase):
         native = self.native_keys(window)
 
         def tap(name, done):
-            native(name, True)
-            try:
-                return self.captured(window, lambda frame: not frame["busy"] and done(frame))
-            finally:
-                native(name, False)
+            return self.tap(window, native, name, done)
 
         def lines(frame):
             return chr(10).join((frame["advancement"] or {}).get("lines", []))
@@ -1132,11 +1142,7 @@ class Native3DProcesses(ProcessTestCase):
         native = self.native_keys(window)
 
         def tap(name, done):
-            native(name, True)
-            try:
-                return self.captured(window, lambda frame: not frame["busy"] and done(frame))
-            finally:
-                native(name, False)
+            return self.tap(window, native, name, done)
 
         def text(frame):
             return chr(10).join(frame["screen_text"] or [])
