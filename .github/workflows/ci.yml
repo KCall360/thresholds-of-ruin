@@ -158,7 +158,7 @@ jobs:
       - name: Cache Rust dependencies by profile
         id: rust_cache
         if: steps.build_key.outcome == 'success' && steps.build_key.outputs.key != ''
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           # The action omits a virtual workspace's root manifest from its own
           # hash. The recipe explicitly hashes that root plus actual commands,
@@ -252,7 +252,7 @@ jobs:
       - name: Install stable Rust
         run: rustup toolchain install stable --profile minimal
       - name: Cache ordinary application dependency recipe
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: ordinary-applications-v1-${{ matrix.profile }}-${{ hashFiles('Cargo.toml') }}
           save-if: ${{ job.status == 'success' && github.event_name != 'pull_request_target' && (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) }}
@@ -343,7 +343,7 @@ jobs:
       - name: Cache Rust dependencies by profile
         id: rust_cache
         if: steps.build_key.outcome == 'success' && steps.build_key.outputs.key != ''
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           # The action omits a virtual workspace's root manifest from its own
           # hash. The recipe explicitly hashes that root plus actual commands,
@@ -432,7 +432,7 @@ jobs:
       - name: Install Rust and lint tools
         run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
       - name: Restore dependency build candidates
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: selected-v2-${{ runner.os }}-debug-rust-${{ hashFiles('Cargo.toml') }}
           save-if: ${{ job.status == 'success' && github.event_name != 'pull_request_target' && (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) }}
@@ -503,7 +503,7 @@ jobs:
         run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
       - name: Restore dependency build candidates
         if: needs.scope.outputs.requires_apps == 'true'
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: selected-v2-${{ runner.os }}-debug-python-${{ hashFiles('Cargo.toml') }}
           save-if: ${{ job.status == 'success' && github.event_name != 'pull_request_target' && (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) }}
@@ -566,7 +566,7 @@ jobs:
         run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
       - name: Restore dependency build candidates
         if: needs.scope.outputs.requires_apps == 'true'
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: selected-v2-${{ runner.os }}-debug-python-${{ hashFiles('Cargo.toml') }}
           save-if: ${{ job.status == 'success' && github.event_name != 'pull_request_target' && (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) }}
@@ -623,7 +623,7 @@ jobs:
       - name: Install Rust and lint tools
         run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
       - name: Restore dependency build candidates
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: selected-v2-${{ runner.os }}-release-python-${{ hashFiles('Cargo.toml') }}
           save-if: ${{ job.status == 'success' && github.event_name != 'pull_request_target' && (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) }}
@@ -682,7 +682,7 @@ jobs:
       - name: Install Rust and lint tools
         run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
       - name: Restore dependency build candidates
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: "crates/client-3d -> target"
           shared-key: selected-v2-${{ runner.os }}-debug-consumer-${{ hashFiles('Cargo.toml') }}
@@ -769,7 +769,7 @@ jobs:
       - name: Install the scope-resolved compiler
         run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
       - name: Restore compilation candidates, never test passes
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
         with:
           shared-key: postmerge-v1-${{ runner.os }}-debug-${{ hashFiles('Cargo.lock', 'scripts/ci_postmerge.py') }}
           save-if: ${{ job.status == 'success' && github.event_name != 'pull_request_target' && (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) }}
