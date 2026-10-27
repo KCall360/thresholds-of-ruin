@@ -38,8 +38,9 @@ and never replaces, [development practices](CONTRIBUTING.md) and the
   for repeated single-target Rust edits; it does not qualify quick, push, full or CI.
   Run affected unit tests during edits, then integration, Service contracts and
   actual-process tests at completed behavior checkpoints; repeat affected checks
-  after later edits. At a stable checkpoint,
-  run `scripts/verify.py quick`, unless a required higher tier covers it.
+  after later edits. **Expedited, risk-based iteration is the default:** select
+  the smallest complete affected-contract set, batch fixes, and reuse still-valid
+  evidence. Do not repeatedly run broad local tiers as a publication ritual.
   `quick` tests directly changed packages; `quick` and `push` defer
   [extended-cost process tests](docs/development/testing.md#extended-cost-process-tests)
   to full and CI. Run the ones your change targets yourself.
@@ -52,11 +53,14 @@ and never replaces, [development practices](CONTRIBUTING.md) and the
   Reuse only qualified evidence and binaries, never duplicate full target builds
   across workers. Use owned sessions and exit receipts to establish run status;
   see [verification evidence](docs/development/testing.md#verification-evidence-and-reuse).
-- Before every push, pass the default `push` tier or `full`, except for the
-  [verified prose-only documentation path](docs/development/testing.md#prose-only-documentation-changes)
-  or an explicit task-scoped maintainer exception. Local `push` covers affected
-  packages/process owners plus workspace Clippy and API docs; it is not exhaustive
-  qualification. Keep the local feedback loop distinct from the
+- Before publishing, complete the [risk-based local checkpoint](docs/development/testing.md#broader-checkpoints)
+  and report selected, reused and CI-only coverage. Required hosted CI supplies
+  qualification; a local `quick`, `push` or `full` run is not mandatory merely
+  because a commit or push is due. Use a broader local tier only for a specific
+  justified risk or maintainer request, not as a substitute for diagnosis.
+  The [prose-only path](docs/development/testing.md#prose-only-documentation-changes)
+  still requires its documentation/tooling checks. The CLI still defaults to
+  `push`; explicitly choose the intended scope. Keep local feedback distinct from the
   [risk-based CI gate](docs/development/testing.md#risk-based-ci-assurance).
   CI reports **prose-only**, **selected-contract**, **exhaustive**, or the narrowly
   qualified **prior-exact-tree-full plus fresh-main** assurance below.
@@ -84,6 +88,12 @@ and never replaces, [development practices](CONTRIBUTING.md) and the
 - On failure, surface the relevant failure output, expanding log inspection only
   as needed to diagnose it.
 - Keep logs for investigation, but don't commit routine test output.
+- Maintain the [test-effectiveness ledger](docs/development/test-effectiveness.md)
+  when tests expose a genuine defect or fail because fixtures/oracles were not
+  updated. Distinguish production defects, stale tests, harness/infrastructure
+  and unresolved cases. Count root causes, distinct failing methods and repeated
+  executions separately; do not inflate totals with platform/profile repeats,
+  subtests, deliberate first-red feature work or unverified claims.
 - Quiet reporting must not skip tests or hide failures, skipped checks, or
   checks that couldn't run.
 - `.local/` files exist only on the development machine. Don't link to them from

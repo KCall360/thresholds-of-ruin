@@ -15,8 +15,12 @@ A selected result is not a full-matrix pass. The narrow
 
 Start with [development setup](setup.md): Rust components, the pinned
 Python environment, a graphical desktop and a local Git comparison base are
-required. From the repository root, `python scripts/verify.py` runs the local
-pre-push gate. The tier does not substitute for the test-writing obligations below.
+required for checks that use them. **Expedited, risk-based local iteration is the
+default.** Required hosted CI provides final qualification; local checks target
+the changed contracts, not a repeated broad-suite ritual. From the repository
+root, `python scripts/verify.py` still defaults to the `push` tier; that CLI default
+is not a requirement to run it before every push. Select the scope deliberately.
+No tier substitutes for the test-writing obligations below.
 
 ## Find the requirement
 
@@ -25,6 +29,7 @@ pre-push gate. The tier does not substitute for the test-writing obligations bel
 - [Test objectives](test-objectives.md): independent owners and retained extended witnesses
 - [CI cost baseline](ci-cost-baseline.md): measured cost and honest comparisons
 - [Evidence reuse](#verification-evidence-and-reuse): when an unchanged run counts
+- [Test effectiveness](test-effectiveness.md): genuine defects, stale-test failures and honest counting
 - [Exact local mouse exception](#focused-iteration-and-local-mouse-exception): one opt-in local waiver, never a CI waiver
 - [Required layers](#required-test-layers): unit through real-process acceptance
 - [Platform requirements](#cross-platform-requirements): native desktop and both profiles
@@ -334,6 +339,14 @@ When you find or fix a bug:
    found during long-history profiling gets a forced-checkpoint restart test).
 5. When a bug can't be fixed yet, record it with its reproduction in the
    [roadmap](../status.md) or feature guide. Don't add an ignored test.
+6. Update the [test-effectiveness ledger](test-effectiveness.md) with the supported
+   finding, regression and fix evidence. Also record failures caused by tests not
+   being updated with an approved contract change. Keep production defects,
+   stale fixtures/oracles, harness/infrastructure and unresolved cases distinct;
+   retain first-red feature work and mutation sensitivity as separate evidence.
+   Count a root cause once, preserve distinct failing method counts, and report
+   repeated executions/platforms/profiles and subtests separately. A compact
+   entry at the coherent fix checkpoint is enough; no per-run paperwork gate.
 
 ## Independent 3D client
 
@@ -420,16 +433,17 @@ while the complete suite remains maintained and required by exhaustive cadence.
 [`scripts/verify.py`](../../scripts/verify.py) runs these checks in tiers. It
 writes each step's log to the gitignored local directory, checks exit codes, and prints a compact
 table showing which steps passed, failed, or didn't run, with their durations.
-Use focused checks during development and broad tiers at stable checkpoints.
-The publication gates remain required; a higher tier can cover a lower tier
-without a duplicate run on unchanged inputs:
+Use focused checks during development and at coherent publication checkpoints.
+Choose a broader local tier only when its extra coverage answers an identified
+risk; required hosted CI is not a reason to duplicate its matrix locally. A higher
+tier can cover a lower tier without a duplicate run on unchanged inputs:
 
-| Tier | Required | What it runs | Why it matters |
+| Tier | When to use | What it runs | Why it matters |
 | --- | --- | --- | --- |
 | Focused checks | During edits and at completed behavior checkpoints | Failing behavior/regression and affected unit tests during edits; affected integration, Service contracts and actual-process scenarios when the behavior is complete, repeated after changes affecting it | Establish a failing reproduction first and give fast feedback while retaining complete coverage before merge |
-| `quick` | At a stable, cohesive checkpoint, unless a required higher tier covers it | Formatting and clippy for the affected packages, debug tests for the directly changed packages, the dependency check, an explicit scenario-compiler build, the Python tool tests, and the process tests the change touches, plus the smoke set when the change can reach every process test, minus [extended-cost process tests](#extended-cost-process-tests) | Catch broader regressions after focused checks and architectural review, before moving to another checkpoint |
-| `push` (default) | **Before every push**, unless a successful full run covers the same unchanged inputs and configuration | Everything in `quick`, plus workspace-wide clippy, warning-free API docs, the isolated simulation fixture gate and debug tests for every affected package; extended-cost process tests stay deferred | Catches regressions in what the change can reach, and the lint and doc failures CI would reject, in minutes rather than an hour. CI independently selects its required assurance gate |
-| `full` | Required when CI cannot run or on request; otherwise optional | Complete platform suite in debug and release; separate tooling/dependency jobs are not included | A local full run covers the local push gate and can investigate either profile; the canonical CI gate is still required before merging |
+| `quick` | Optional broader affected checkpoint when the focused set leaves a concrete integration risk | Formatting and clippy for the affected packages, debug tests for the directly changed packages, the dependency check, an explicit scenario-compiler build, the Python tool tests, and the process tests the change touches, plus the smoke set when the change can reach every process test, minus [extended-cost process tests](#extended-cost-process-tests) | Catch broader regressions after focused checks and architectural review, before moving to another checkpoint |
+| `push` (CLI default) | A justified broader local checkpoint or maintainer request; not required before each push | Everything in `quick`, plus workspace-wide clippy, warning-free API docs, the isolated simulation fixture gate and debug tests for every affected package; extended-cost process tests stay deferred | Catches regressions in what the change can reach, and the lint and doc failures CI would reject, in minutes rather than an hour. CI independently selects its required assurance gate |
+| `full` | Only for a specific risk not resolved by smaller checks/available hosted evidence, investigation when CI cannot run, or a maintainer request | Complete platform suite in debug and release; separate tooling/dependency jobs are not included | Investigates broad/profile interactions when justified; not a routine local publication gate or a replacement for final-head CI |
 | CI | **Required before every merge** | Canonical selected-contract or exhaustive plan, tooling/dependency checks and both platform aggregates; verified prose-only changes use the documentation path below | Report the actual assurance mode; only an exhaustive result proves the complete matrix |
 
 ### Risk-based CI assurance
@@ -552,7 +566,8 @@ unavailable discovery or uncertain ownership conservatively produces full mode.
 Inspect the reasons, contract IDs and exact lane test IDs rather than only the
 mode. The output is explicitly `local-proposed-plan-not-qualification`: its HEAD
 identity does not certify dirty inputs, it runs no tests, cannot set CI job
-outputs, and never waives local `quick`/`push` or a required full gate.
+outputs, and does not satisfy the risk-based local checkpoint or any required
+CI gate. A proposed full CI plan does not itself require duplicating it locally.
 
 The optional `--output` chooses a local destination; the default stays in the
 gitignored verification area. In CI, `python scripts/ci_test_plan.py` derives
@@ -641,6 +656,11 @@ validation and runtime costs together before claiming an improvement.
   real boundary witness where needed. A setup error is not an intended first-red.
   Selection defects need positive and negative change/ownership cases as well as
   exact selected-result accounting; test-count equality alone is insufficient.
+- Record diagnosed outcomes in the [test-effectiveness ledger](test-effectiveness.md),
+  including stale/unupdated tests and unresolved failures. Do not credit a setup
+  failure as catching the later production behavior or multiply one defect by
+  repeated jobs. Use the evidence to improve fixtures and selection, not to
+  weaken security, strict decoding, rejection or native assertions.
 - Recheck the exact final plan after source/control changes. Report selected and
   deferred coverage, full-cadence failures and local environment limitations.
   Main's selected pass does not close a separate failing exhaustive run.
@@ -848,73 +868,76 @@ and budget for both the incremental cache and the later qualification build.
 
 #### Broader checkpoints
 
-Batch a cohesive change through focused
-checks and architectural review before starting a broad tier. Run the new
-regression against the failing implementation first, apply the fix, then run
-its affected unit tests. Consolidate already-known source fixes before the next
-build, then build each required target/profile/configuration once per coherent
-checkpoint and reuse those qualified binaries for the selected checks. For a bounded
-no-run build, derive explicit library, binary, integration and test-enabled example
-targets from Cargo metadata: the default `cargo test --no-run` also builds non-test
-examples. Run affected
-integration, Service contract and process scenarios when the behavior is complete;
-repeat them when later changes affect it. Expand the focused set
-when a failure or changed boundary warrants it. Do not run quick, push and full
-back to back merely because all three commands exist. Run one `push` gate per
-stable PR checkpoint; a successful unchanged full run also covers that gate.
-Let the canonical CI plan select its complete affected coverage; use exhaustive
-mode when the planner or a reviewed risk decision requires it. Shared schemas,
-persistence, rules and toolchain changes need their broad cross-feature and
-profile owners, not only a newly added local regression.
+The default is a **risk-based local checkpoint**, not a mandatory local broad
+suite before every commit or push. Briefly identify changed contracts, their
+existing/new test owners and the highest-risk interactions. Use the smallest
+complete local evidence set that informs the change; report what remains for
+required hosted CI. Coverage obligations apply to the whole change, not to
+running every layer locally after each edit.
 
-Keep the intended package/feature configuration consistent within a qualification
-checkpoint. Cargo workspace feature unification can produce different dependency
-graphs and test binaries from a scoped package build; scoped binaries are not
-workspace-equivalent evidence. This does not require full-workspace compilation
-for each focused first-red test.
+1. Run applicable formatting, cheap schema/fixture/certificate checks and
+   affected-target compilation/lint before necessary expensive links. Choose
+   `check` or Clippy for the useful diagnostic, not both by habit. Prose-only
+   edits use the [documentation path](#prose-only-documentation-changes).
+2. Establish the intended first-red regression, then collect failures from the
+   affected owners and batch coherent fixes before rebuilding. Confirm valid
+   positive fixtures before negative mutations; never weaken strict assertions
+   to obtain green. Security, privacy, persistence and ordinary-actor witnesses
+   remain independent.
+3. Run affected unit/integration owners and the Service/real-process witnesses
+   needed for changed boundaries, including older cross-feature invariants.
+   Shared schemas, persistence, rules and toolchains need their affected broader
+   owners, not just new tests. Select targeted release checks for optimized,
+   timing or ordering behavior. Run affected extended-cost tests explicitly;
+   `quick`/`push` exclusions do not prove those routes.
+4. Build each required target/profile/configuration once per coherent checkpoint
+   and [reuse qualified evidence](#verification-evidence-and-reuse) when all its
+   relevant inputs are unchanged. Rerun changed/uncertain dependencies, not
+   unrelated green checks. A Rust filter does not avoid its owner's link cost.
+5. Before publication, summarize selected and reused checks, failures and exact
+   deferred/CI-only coverage. Fix known failures; do not knowingly ship a broken
+   test or hide unrun work. Let the canonical final-head CI plan supply required
+   platform/profile/native and cross-feature qualification. Pending CI is not
+   a pass, and merge still requires its complete gate.
 
-Run targeted local release tests when investigating debug/release differences,
-optimized behavior, timing or ordering issues, and use release builds for
-performance measurements. Select the affected tests and workloads based on the
-behavior being investigated. Do not run the whole local release suite merely
-because a performance measurement needs release binaries. Escalate to local
-`full` when CI cannot run or a maintainer requests it. Local full coverage does
-not waive the canonical final-head CI gate before merge.
+Use `quick`, `push` or local `full` only when the additional checks address a
+specific identified risk, CI is unavailable for a needed investigation, or the
+maintainer requests them. State the reason and choose the smallest useful scope;
+unknown local ownership first calls for investigation and a broader affected set,
+not automatic repeated full suites. Unknown ownership still escalates the
+canonical CI plan. Do not run quick, push and full back to back, restart a broad
+suite after each fixture correction, or repeat already-qualified preflights merely
+because a push is due. A failing broad run stays failed; close its affected
+corrections with focused evidence and disclose the unrun remainder.
 
-Focused commands use the existing suite; they introduce no separate test tier
-or exclusions. For example:
+Keep the intended package/feature configuration consistent within a checkpoint.
+Cargo workspace feature unification can produce different dependency graphs and
+test binaries from a scoped package build; scoped evidence is not workspace
+qualification. For a bounded no-run build, derive explicit library, binary,
+integration and test-enabled example targets from Cargo metadata: default
+`cargo test --no-run` also builds non-test examples. Qualified application builds
+are required for process tests; `cargo check` does not update executables.
+
+Focused commands use the existing suite, not a new weakened tier. For example:
 
 ```sh
 cargo test -p tor-server --lib checkpoint_rejects_terminal_effects_on_expired_pause_metadata --locked
 python -m unittest discover -s scripts -p test_intention_process.py -v
 ```
 
-The discovery form above makes the shared process harness importable. Keep command output and exit codes under the gitignored local
-log directory. Shared simulation, protocol or persistence changes need broader
-coverage at the stable checkpoint even if their focused regression is small.
-Do not overlap builds, suites or performance measurements on the development
-host. Keep native graphical tests serialized.
+The discovery form makes the shared process harness importable. Verify registered
+filters and nonzero counts; keep command output and exit codes in the gitignored
+local log directory. Do not overlap builds, suites or performance measurements on
+the development host. Keep native graphical tests serialized.
 
-An explicit maintainer-approved local adjustment applies only to its stated task
-and scope. Record the exact tested, waived and CI-only checks and the authorization;
-never generalize it into a new default tier or waiver. Use the existing
-[local graphical waiver mechanism](#focused-iteration-and-local-mouse-exception)
-when applicable. Otherwise the documented push/full gates remain unchanged, and
-the exact-head canonical CI gate is required before merge. A local exception
-does not reduce the required selected/full plan.
-
-A push-gate exception is not permission to defer predictable failures to CI.
-Unless explicitly waived within that authorization, retain a risk-based pre-push
-floor: formatting and workspace all-target Clippy; applicable schema/content and
-certificate validation across all affected scenario roots; affected older and new
-unit/integration owners; and a small set of real-client and save/recovery flows
-for changed mechanics. Select these through the contract-owner matrix, not only
-the edited test files. Collect the selected failures from each built binary before
-rebuilding, then batch fixes and reuse only still-qualified binaries. This floor
-is a stable pre-push checkpoint, not a demand for every unit test or full native
-suite on each edit. Keep the exact exception visible and report resource-blocked
-or unrun checks explicitly; complete platform/profile and graphical CI remains
-required under the unchanged gates above.
+This default changes local execution cadence, not tests, runner exclusions,
+required hosted coverage, security or native acceptance. It does not authorize
+silently skipping methods within an invoked suite. Explicit local exceptions
+remain limited to their authorized task/scope; use the existing
+[graphical waiver mechanism](#focused-iteration-and-local-mouse-exception) when
+applicable and record waived failures as such. Hosted CI rejects local waivers.
+The exact-head canonical plan and both required platform aggregates remain
+mandatory before merge; a selected result is not exhaustive qualification.
 
 ### Failure diagnostics and timing evidence
 
@@ -1060,10 +1083,11 @@ version rejection and independent reference oracles when consolidating setup.
 
 ### Verification evidence and reuse
 
-A successful full run covers all checks in the local push gate. It can satisfy
-that gate without an additional push-tier run only when the tested inputs,
-toolchain, build profiles and test configuration are unchanged. Record the
-checkout commit, uncommitted changes, relevant environment/configuration,
+A successful full run can cover narrower local checks without an additional
+push-tier run only when the tested inputs, toolchain, build profiles and test
+configuration are unchanged. Neither run is a prerequisite for the default
+risk-based local checkpoint. Record the checkout commit, uncommitted changes,
+relevant environment/configuration,
 commands, profiles, exit codes and log location, plus the binary paths and content
 hashes for executable-dependent evidence. Reuse requires identical relevant
 source, fixtures, configuration, toolchain and qualified binaries; an unchanged
@@ -1116,8 +1140,8 @@ intended regression was exercised.
 Do not infer validity from a timestamp, a previous green result or a matching
 branch name. Source, tests, fixtures, scenario packages, generated certificates,
 lockfiles, build configuration or toolchain changes invalidate affected evidence;
-run the required gate again after changes to its inputs. Failed, incomplete,
-waived or targeted runs do not count as a successful full run. Report waivers
+rerun affected local checks and the required final-head CI gate after changes
+to their inputs. Failed, incomplete, waived or targeted runs do not count as a successful full run. Report waivers
 separately; they do not remove ordinary CI coverage.
 
 A superseded CI run may be canceled, but preserve its partial, failed, canceled
@@ -1129,9 +1153,10 @@ At the same local stable checkpoint, a narrow correction does not require repeat
 checks whose complete source, test, fixture, dependency, toolchain and configuration
 inputs remain unchanged. Record the original immutable state, the corrected state,
 content hashes and the dependency-based affected set. Rerun the changed behavior
-and its affected checks, and complete every required target the earlier run did
-not reach. Preserve the original failed or interrupted result unchanged. A separate
-coverage ledger may reconcile completed, input-qualified checks with the fresh
+and its affected checks, and identify targets the earlier run did not reach.
+Complete those locally when the justified local scope still requires them;
+otherwise report them as CI-only, pending required hosted qualification. Preserve
+the original failed or interrupted result unchanged. A separate coverage ledger may reconcile completed, input-qualified checks with the fresh
 results; it must identify every required target and explicitly retain any local
 waiver. It is not a claim that the original gate passed. Failed checks, newly added
 tests, uncertain dependency boundaries and missing targets cannot be covered by
@@ -1139,8 +1164,10 @@ reuse. Broaden verification whenever the changed boundary requires it. The exact
 turn selected evidence into an exhaustive result.
 
 This permits rapid focused iteration without automatically rerunning a broad
-local gate after each narrow commit. Run the broad gate at meaningful integration
-checkpoints, then close any corrections with the smallest complete evidence set.
+local gate after each narrow commit. Use a broad local checkpoint only for an
+identified risk or maintainer request, then close corrections with the smallest
+complete affected evidence set. Reuse is not needed to invent a broad local gate
+that the risk-based default does not require.
 
 The final commit must pass every lane of its canonical selected or exhaustive
 CI plan. Evidence reuse does not remove, ignore or permanently exclude tests, and
@@ -1511,10 +1538,11 @@ Profiling never replaces the correctness tests above.
 During individual edits, run failing behavior/regression tests and affected unit
 tests. Run integration, Service contracts and real-process acceptance tests at
 completed behavior checkpoints, repeating them after changes to the covered
-behavior. Run quick at cohesive subsystem checkpoints, rather than after every
-small edit. Coverage of [every changed contract](#contract-ownership) remains
-required before merge; the local push floor and final-commit canonical CI gate
-remain mandatory. A native waiver never changes selected/full CI obligations.
+behavior. Use the [risk-based local checkpoint](#broader-checkpoints), not a
+mandatory quick/push/full run at every checkpoint. Coverage of
+[every changed contract](#contract-ownership) and the final-commit canonical CI
+gate remain mandatory before merge. A native waiver never changes selected/full
+CI obligations.
 
 The standing local waiver is
 `test_travel_process.TravelProcesses.test_native_underscore_and_mouse_click`. `python scripts/verify.py push --waive-local-mouse` records that
