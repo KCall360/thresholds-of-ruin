@@ -355,6 +355,19 @@ impl ItemSpec {
         }
         Ok(())
     }
+    /// Only plain standalone thrown weapons can be equipment stacks. Effects,
+    /// armor, launchers and unrelated equipment never gain per-stack semantics.
+    fn stackable_weapon_shape(&self) -> bool {
+        self.class == ItemClass::Weapon
+            && self.projectile.is_none()
+            && self.device.is_none()
+            && self.readable.is_none()
+            && self.ground_scare.is_none()
+            && self
+                .equipment
+                .as_ref()
+                .is_some_and(|gear| gear.supports_stacking(self.class))
+    }
     pub(crate) fn valid(&self) -> bool {
         self.magic_shape_valid()
             && self.held_light.is_none_or(|policy| {
@@ -388,7 +401,7 @@ impl ItemSpec {
                     && self.supply.is_none()
             })
             && self.equipment.as_ref().is_none_or(|equipment| {
-                !self.stackable
+                (!self.stackable || self.stackable_weapon_shape())
                     && self.consumable.is_none()
                     && self.edible.is_none()
                     && self.supply.is_none()

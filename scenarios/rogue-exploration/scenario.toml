@@ -1,4 +1,4 @@
-format = 33
+format = 34
 id = "rogue-exploration"
 version = "1.0"
 ruleset = "rules.toml"
@@ -328,6 +328,7 @@ dungeon = [
   "item.armor.plate.splint",
   "item.armor.plate.banded",
   "item.bandage",
+  "item.food",
   "item.food.ration",
   "item.amulet",
   "item.potion",

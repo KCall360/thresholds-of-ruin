@@ -359,6 +359,34 @@ impl ProjectileSpec {
         Ok(result)
     }
 }
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ThrownPayload {
+    pub damage: crate::creature_authoring::Damage,
+    pub recovery: HitRecovery,
+}
+impl ThrownPayload {
+    fn compile(
+        &self,
+        rules: &tor_simulation::rules::Ruleset,
+    ) -> Result<tor_simulation::projectile_profiles::ThrownPayload, crate::Failure> {
+        let result = tor_simulation::projectile_profiles::ThrownPayload {
+            damage: self.damage.compile(rules)?,
+            recovery: match self.recovery {
+                HitRecovery::ConsumedOnHit => {
+                    tor_simulation::projectile_profiles::HitRecovery::ConsumedOnHit
+                }
+                HitRecovery::Recoverable => {
+                    tor_simulation::projectile_profiles::HitRecovery::Recoverable
+                }
+            },
+        };
+        result
+            .validate_shape()
+            .map_err(|_| super::fail("Invalid thrown payload"))?;
+        Ok(result)
+    }
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum WeaponTrait {
@@ -408,12 +436,14 @@ pub struct WeaponTraitChanges {
 pub struct WeaponProfileSpec {
     pub expertise: String,
     pub launcher: Option<LauncherProfile>,
+    pub thrown_payload: Option<ThrownPayload>,
     pub base_traits: Vec<WeaponTrait>,
     pub expert_traits: WeaponTraitChanges,
 }
 impl WeaponProfileSpec {
     fn compile(
         &self,
+        rules: &tor_simulation::rules::Ruleset,
     ) -> Result<tor_simulation::weapon_profiles::WeaponProfileSpec, crate::Failure> {
         Ok(tor_simulation::weapon_profiles::WeaponProfileSpec {
             expertise: tor_simulation::content_ids::ExpertiseId::new(&self.expertise)
@@ -423,6 +453,12 @@ impl WeaponProfileSpec {
                 .as_ref()
                 .map(LauncherProfile::compile)
                 .transpose()?,
+            thrown_payload: self
+                .thrown_payload
+                .as_ref()
+                .map(|payload| payload.compile(rules))
+                .transpose()?
+                .map(Box::new),
             base_traits: self.base_traits.iter().copied().map(Into::into).collect(),
             expert_traits: tor_simulation::weapon_profiles::WeaponTraitChanges {
                 add: self
@@ -508,7 +544,7 @@ impl EquipmentSpec {
             weapon_profile: self
                 .weapon_profile
                 .as_ref()
-                .map(WeaponProfileSpec::compile)
+                .map(|profile| profile.compile(rules))
                 .transpose()?,
             armor: self.armor.map(ArmorSpec::compile).transpose()?,
             slot,
@@ -2187,6 +2223,174 @@ mod weapon_profile_authoring_tests {
         assert_eq!(toml::from_str::<EquipmentSpec>(&encoded).unwrap(), value);
         let legacy: EquipmentSpec = toml::from_str("slot = 'weapon'").unwrap();
         assert!(legacy.weapon_profile.is_none());
+    }
+
+    #[test]
+    fn authored_standalone_throw_has_distinct_damage_and_no_launcher() {
+        use tor_simulation::{
+            content_ids::ExpertiseId,
+            expertise::{ExpertiseCategory, ExpertiseDef},
+            rules::{Ruleset, RulesetDocument},
+        };
+        let mut document: RulesetDocument =
+            toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML).unwrap();
+        document.expertises.push(ExpertiseDef {
+            id: ExpertiseId::new("fixture.knife").unwrap(),
+            name: "Knife".into(),
+            category: ExpertiseCategory::Equipment,
+        });
+        let rules = Ruleset::validate(document).unwrap();
+        let mut source = serde_json::to_value(equipment()).unwrap();
+        source["weapon_profile"]["expert_traits"]["add"] =
+            json!([{"kind":"thrown","range":{"short_feet":20,"long_feet":60}}]);
+        source["weapon_profile"]["thrown_payload"] = json!({"recovery":"consumed_on_hit",
+            "damage":{"components":[{"category":"keen","amount":{"type":"rolled","count":2,"sides":4,"bonus":0}}],"primary":{"category":"keen","sides":4}}});
+        let authored: EquipmentSpec = serde_json::from_value(source).unwrap();
+        let text = toml::to_string(&authored).unwrap();
+        assert_eq!(toml::from_str::<EquipmentSpec>(&text).unwrap(), authored);
+        let compiled = authored.compile(&rules).unwrap();
+        compiled
+            .validate_rules(tor_simulation::ItemClass::Weapon, &rules)
+            .unwrap();
+        assert_eq!(
+            compiled.attack.unwrap().damage().components()[0].amount(),
+            tor_simulation::damage::DamageAmount::Fixed(1)
+        );
+        let profile = compiled.weapon_profile.unwrap();
+        assert!(profile.launcher.is_none());
+        let payload = profile.thrown_payload.unwrap();
+        assert_eq!(
+            payload.recovery,
+            tor_simulation::projectile_profiles::HitRecovery::ConsumedOnHit
+        );
+        assert_eq!(
+            payload.damage.components()[0].amount(),
+            tor_simulation::damage::DamageAmount::Rolled(
+                tor_simulation::dice::DicePool::new(2, 4, 0).unwrap()
+            )
+        );
+        let mut invalid = authored;
+        invalid
+            .weapon_profile
+            .as_mut()
+            .unwrap()
+            .thrown_payload
+            .as_mut()
+            .unwrap()
+            .damage
+            .primary = None;
+        assert!(
+            invalid.compile(&rules).is_err(),
+            "a thrown primary is required independently of melee"
+        );
+    }
+
+    #[test]
+    fn authored_standalone_stack_passes_package_validation_and_preserves_closed_allowlist() {
+        use super::super::{Manifest, Package, RegionDef};
+        use tor_simulation::{
+            content_ids::ExpertiseId,
+            expertise::{ExpertiseCategory, ExpertiseDef},
+            rules::RulesetDocument,
+        };
+        let mut rules: RulesetDocument =
+            toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML).unwrap();
+        rules.expertises.push(ExpertiseDef {
+            id: ExpertiseId::new("fixture.knife").unwrap(),
+            name: "Knife".into(),
+            category: ExpertiseCategory::Equipment,
+        });
+        let rules = toml::to_string(&rules).unwrap();
+        let manifest: Manifest =
+            toml::from_str(include_str!("../../../scenarios/two-room/scenario.toml")).unwrap();
+        let regions: Vec<RegionDef> = [
+            include_str!("../../../scenarios/two-room/regions/1.toml"),
+            include_str!("../../../scenarios/two-room/regions/2.toml"),
+        ]
+        .into_iter()
+        .map(|text| toml::from_str(text).unwrap())
+        .collect();
+        let package = |archetype: serde_json::Value, quantity: u64| {
+            let mut manifest = manifest.clone();
+            manifest.archetypes.insert(
+                "fixture.dart".into(),
+                serde_json::from_value(archetype).unwrap(),
+            );
+            let mut regions = regions.clone();
+            regions[0].items.push(
+                serde_json::from_value(json!({
+                    "id":100,"at":[1,1,0],"archetype":"fixture.dart","quantity":quantity
+                }))
+                .unwrap(),
+            );
+            Package::from_parts(manifest, regions, &rules).unwrap()
+        };
+        let mut authored = json!({
+            "name":"fixture dart", "class":"weapon", "stackable":false,
+            "equipment":equipment()
+        });
+        authored["equipment"]["weapon_profile"]["expert_traits"]["add"] =
+            json!([{"kind":"thrown","range":{"short_feet":20,"long_feet":60}}]);
+        authored["equipment"]["weapon_profile"]["thrown_payload"] = json!({
+            "recovery":"consumed_on_hit", "damage":{"components":[
+                {"category":"keen","amount":{"type":"rolled","count":1,"sides":3,"bonus":0}}
+            ],"primary":{"category":"keen","sides":3}}
+        });
+        // Prove all other author/runtime inputs before testing stack support.
+        let single = package(authored.clone(), 1);
+        single.check().unwrap();
+        single.build(42, false).unwrap();
+        authored["stackable"] = json!(true);
+        let stacked = package(authored.clone(), 3);
+        stacked.check().unwrap();
+        let game = stacked.build(42, false).unwrap();
+        let observation = game.observe(tor_simulation::ActorId(1)).unwrap();
+        let dart = observation
+            .ground_items
+            .iter()
+            .find(|item| item.id == tor_simulation::ItemId(100))
+            .unwrap();
+        assert_eq!(dart.quantity, 3);
+        assert_eq!(dart.class, tor_simulation::ItemClass::Weapon);
+        let mut currency = authored.clone();
+        currency["currency"] = json!("gold");
+        let error = package(currency, 3).check().unwrap_err();
+        assert!(
+            error.message.contains("Invalid equipment definition"),
+            "currency cannot share an equipment stack: {error:?}"
+        );
+        for (pointer, replacement) in [
+            ("/equipment/weapon_profile/thrown_payload", json!(null)),
+            (
+                "/equipment/weapon_profile/launcher",
+                json!({"family":"fixture.arrow","range":{"short_feet":20,"long_feet":60}}),
+            ),
+            (
+                "/equipment/modifiers",
+                json!([{"scope":"always","op":{"kind":"add","stat":{"kind":"attack_damage_roll_bonus"},"value":1}}]),
+            ),
+            (
+                "/equipment/potency_modifiers",
+                json!([{"scope":"always","op":{"kind":"add","stat":{"kind":"attack_damage_roll_bonus"},"value":1}}]),
+            ),
+            (
+                "/equipment/periodic_relocation",
+                json!({"interval":10,"chance_denominator":2}),
+            ),
+        ] {
+            let mut changed = authored.clone();
+            *changed.pointer_mut(pointer).unwrap() = replacement;
+            // Each capability is legal on a singleton but must not silently
+            // acquire per-stack equipment semantics through authoring.
+            changed["stackable"] = json!(false);
+            package(changed.clone(), 1).check().unwrap();
+            changed["stackable"] = json!(true);
+            let error = package(changed, 3).check().unwrap_err();
+            assert!(
+                error.message.contains("Invalid equipment definition"),
+                "{pointer}: {error:?}"
+            );
+        }
     }
 
     #[test]

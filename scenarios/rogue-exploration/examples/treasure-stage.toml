@@ -1,0 +1,18 @@
+# Opt-in authoring fragment; this file is NOT imported by the playable package.
+# Append this stage explicitly to enable the illustrative bounded policy.
+# One room is shared by both populations. Counts are independent inclusive
+# ranges capped by room area, a TOR adaptation, not Rogue's coupled counts.
+[[floor_activation.profiles."rogue.low_depth".stages]]
+id = "rogue.treasure_room"
+version = 1
+kind = "room_cluster"
+chance = { numerator = 1, denominator = 20 }
+item_count = [2, 9]
+actor_count = [4, 11]
+quantity = 1
+actor_depth_offset = 1
+ai = "rogue_hostile"
+depth_growth = { kind = "racial_after", depth = 26 }
+avoid_protagonist_sight = false
+item_bands = [{ depth = { kind = "open", minimum = 1 }, choices = [{ archetype = "rogue.gold", weight = 1 }, { archetype = "rogue.healing", weight = 1 }, { archetype = "rogue.fruit", weight = 1 }, { archetype = "rogue.dart", weight = 1 }, { archetype = "rogue.shuriken", weight = 1 }] }]
+actor_bands = [{ depth = { kind = "finite", minimum = 2, maximum = 5 }, choices = [{ archetype = "rogue.hobgoblin", weight = 1 }] }, { depth = { kind = "open", minimum = 6 }, choices = [{ archetype = "rogue.orc", weight = 1 }] }]

@@ -489,6 +489,32 @@ struct PopulationProfile {
     deny_unknown_fields
 )]
 enum PopulationStage {
+    RoomCluster {
+        id: String,
+        version: u32,
+        #[serde(with = "mapped")]
+        chance: source::CarryChance,
+        item_count: [u16; 2],
+        actor_count: [u16; 2],
+        actor_depth_offset: u32,
+        #[serde(
+            serialize_with = "mapped::serialize",
+            deserialize_with = "bounded_stored::<_, source::PopulationBand, 32>"
+        )]
+        item_bands: Vec<source::PopulationBand>,
+        #[serde(
+            serialize_with = "mapped::serialize",
+            deserialize_with = "bounded_stored::<_, source::ActorPopulationBand, 32>"
+        )]
+        actor_bands: Vec<source::ActorPopulationBand>,
+        #[serde(with = "mapped")]
+        quantity: source::QuantityExpression,
+        #[serde(deserialize_with = "required_option")]
+        ai: Option<String>,
+        #[serde(with = "mapped")]
+        depth_growth: source::PopulationDepthGrowth,
+        avoid_protagonist_sight: bool,
+    },
     Items {
         id: String,
         version: u32,
@@ -1258,11 +1284,21 @@ struct ProjectileSpec {
     recovery: source::HitRecovery,
 }
 #[derive(Serialize, Deserialize)]
+#[serde(remote = "source::ThrownPayload", deny_unknown_fields)]
+struct ThrownPayload {
+    #[serde(with = "mapped")]
+    damage: crate::creature_authoring::Damage,
+    #[serde(with = "HitRecovery")]
+    recovery: source::HitRecovery,
+}
+#[derive(Serialize, Deserialize)]
 #[serde(remote = "source::WeaponProfileSpec", deny_unknown_fields)]
 struct WeaponProfileSpec {
     expertise: String,
     #[serde(with = "mapped")]
     launcher: Option<source::LauncherProfile>,
+    #[serde(with = "mapped")]
+    thrown_payload: Option<source::ThrownPayload>,
     #[serde(
         serialize_with = "mapped::serialize",
         deserialize_with = "bounded_stored::<_, _, 4>"
@@ -4109,6 +4145,7 @@ named_remote!(
     NaturalAmount => crate::creature_authoring::Amount,
     LauncherProfile => source::LauncherProfile,
     ProjectileSpec => source::ProjectileSpec,
+    ThrownPayload => source::ThrownPayload,
     WeaponTrait => source::WeaponTrait,
     WeaponTraitChanges => source::WeaponTraitChanges,
     WeaponProfileSpec => source::WeaponProfileSpec,
@@ -4456,7 +4493,7 @@ struct ContentPackage {
     #[serde(with = "mapped")]
     index: source::RegionIndex,
 }
-const CONTENT_PACKAGE_FORMAT: u32 = 30;
+const CONTENT_PACKAGE_FORMAT: u32 = 31;
 pub(crate) fn check_metadata_capacity(package: &source::Package) -> Result<(), crate::Failure> {
     let bytes = serde_json::to_vec(&Borrowed(package)).map_err(|_| storage_failure())?;
     if bytes.len() > MAX_SAVE_METADATA_BYTES {
@@ -4928,7 +4965,7 @@ mod tests {
                 super::CONTENT_PACKAGE_FORMAT,
                 crate::arena_evaluation::FORMAT,
             ),
-            (61, 33, "interactions-v54", 26, 9, 30, "tor-arena-run-v5")
+            (62, 34, "interactions-v55", 26, 9, 31, "tor-arena-run-v5")
         );
     }
 
@@ -8005,6 +8042,53 @@ mod population_boundary_tests {
     }
 
     #[test]
+    fn saved_room_cluster_requires_complete_bounded_named_fields() {
+        let stage: source::PopulationStage = serde_json::from_value(json!({
+            "kind":"room_cluster", "id":"treasure", "version":1,
+            "chance":{"numerator":1,"denominator":20}, "item_count":[2,9], "actor_count":[4,11],
+            "actor_depth_offset":1, "quantity":1,
+            "item_bands":[{"depth":{"kind":"open","minimum":1},"choices":[{"archetype":"marker","weight":1}]}],
+            "actor_bands":[{"depth":{"kind":"open","minimum":2},"choices":[{"archetype":"rat","weight":1}]}]
+        })).unwrap();
+        reject_shape(&stage);
+        let good = serde_json::to_value(Borrowed(&stage)).unwrap();
+        serde_json::from_value::<Owned<source::PopulationStage>>(good.clone()).unwrap();
+        for field in [
+            "chance",
+            "item_count",
+            "actor_count",
+            "actor_depth_offset",
+            "item_bands",
+            "actor_bands",
+            "quantity",
+            "ai",
+            "depth_growth",
+            "avoid_protagonist_sight",
+        ] {
+            let mut bad = good.clone();
+            bad.as_object_mut().unwrap().remove(field);
+            assert!(
+                serde_json::from_value::<Owned<source::PopulationStage>>(bad).is_err(),
+                "{field}"
+            );
+        }
+        for field in ["item_bands", "actor_bands"] {
+            let mut bad = good.clone();
+            bad[field] = json!(vec![good[field][0].clone(); 33]);
+            assert!(
+                serde_json::from_value::<Owned<source::PopulationStage>>(bad).is_err(),
+                "{field}"
+            );
+            let mut bad = good.clone();
+            bad[field][0]["choices"] = json!(vec![good[field][0]["choices"][0].clone(); 65]);
+            assert!(
+                serde_json::from_value::<Owned<source::PopulationStage>>(bad).is_err(),
+                "{field}"
+            );
+        }
+    }
+
+    #[test]
     fn saved_population_rejects_over_limit_stage_and_choice_collections() {
         let stage: source::PopulationStage = serde_json::from_value(json!({"kind":"items",
             "id":"initial","version":1,"count":[1,1],
@@ -9188,7 +9272,7 @@ mod weapon_profile_record_tests {
     #[test]
     fn saved_weapon_profiles_are_independent_named_bounded_and_explicitly_nullable() {
         let good = json!({"slot":"weapon","armor":null,"attack":null,"modifiers":[],"potency_modifiers":[],"periodic_relocation":null,
-            "weapon_profile":{"expertise":"fixture.knife","launcher":null,
+            "weapon_profile":{"expertise":"fixture.knife","launcher":null,"thrown_payload":null,
                 "base_traits":[{"kind":"two_handed"},{"kind":"thrown","range":{"short_feet":20,"long_feet":60}}],
                 "expert_traits":{"add":[{"kind":"quickdraw"},{"kind":"offhand"}],"remove":["two_handed"]}}});
         let restored: Owned<source::EquipmentSpec> = serde_json::from_value(good.clone()).unwrap();
@@ -9197,6 +9281,7 @@ mod weapon_profile_record_tests {
         for pointer in [
             "/weapon_profile",
             "/weapon_profile/launcher",
+            "/weapon_profile/thrown_payload",
             "/weapon_profile/expertise",
             "/weapon_profile/base_traits",
             "/weapon_profile/expert_traits",
@@ -9216,7 +9301,7 @@ mod weapon_profile_record_tests {
         for (pointer, replacements) in [
             (
                 "/weapon_profile",
-                vec![json!(["fixture.knife",null,[],{"add":[],"remove":[]}])],
+                vec![json!(["fixture.knife",null,null,[],{"add":[],"remove":[]}])],
             ),
             (
                 "/weapon_profile/launcher",
@@ -9364,9 +9449,70 @@ mod projectile_record_tests {
     }
 
     #[test]
+    fn saved_thrown_payload_is_independent_strict_and_has_no_ammunition_family() {
+        let good = json!({"damage":{"components":[{"category":"keen","descriptor":null,"amount":{"type":"rolled","count":1,"sides":3,"bonus":0}}],
+            "primary":{"category":"keen","descriptor":null,"sides":3}},"recovery":"consumed_on_hit"});
+        let restored: Owned<source::ThrownPayload> = serde_json::from_value(good.clone()).unwrap();
+        assert_eq!(serde_json::to_value(Borrowed(&restored.0)).unwrap(), good);
+        for pointer in [
+            "/damage",
+            "/recovery",
+            "/damage/primary",
+            "/damage/components",
+            "/damage/primary/descriptor",
+            "/damage/primary/sides",
+            "/damage/components/0/descriptor",
+            "/damage/components/0/amount/bonus",
+        ] {
+            let mut bad = good.clone();
+            let (parent, key) = pointer.rsplit_once('/').unwrap();
+            bad.pointer_mut(parent)
+                .unwrap()
+                .as_object_mut()
+                .unwrap()
+                .remove(key);
+            assert!(
+                serde_json::from_value::<Owned<source::ThrownPayload>>(bad).is_err(),
+                "{pointer}"
+            );
+        }
+        for (pointer, replacement) in [
+            ("/damage", json!([[], null])),
+            ("/recovery", json!("always")),
+            (
+                "/damage/components",
+                json!(vec![good["damage"]["components"][0].clone(); 33]),
+            ),
+            ("/damage/primary", json!(["keen", null, 3])),
+        ] {
+            let mut bad = good.clone();
+            *bad.pointer_mut(pointer).unwrap() = replacement;
+            assert!(serde_json::from_value::<Owned<source::ThrownPayload>>(bad).is_err());
+        }
+        for pointer in [
+            "",
+            "/damage",
+            "/damage/primary",
+            "/damage/components/0",
+            "/damage/components/0/amount",
+        ] {
+            let mut bad = good.clone();
+            bad.pointer_mut(pointer)
+                .unwrap()
+                .as_object_mut()
+                .unwrap()
+                .insert("extra".into(), json!(0));
+            assert!(serde_json::from_value::<Owned<source::ThrownPayload>>(bad).is_err());
+        }
+        let mut bad = good;
+        bad["family"] = json!("fake.launcher");
+        assert!(serde_json::from_value::<Owned<source::ThrownPayload>>(bad).is_err());
+    }
+
+    #[test]
     fn saved_launcher_rejects_old_range_field_and_requires_family_and_range() {
         let good = json!({"expertise":"fixture.bow","launcher":{"family":"fixture.arrow",
-            "range":{"short_feet":20,"long_feet":60}},"base_traits":[],"expert_traits":{"add":[],"remove":[]}});
+            "range":{"short_feet":20,"long_feet":60}},"thrown_payload":null,"base_traits":[],"expert_traits":{"add":[],"remove":[]}});
         let restored: Owned<source::WeaponProfileSpec> =
             serde_json::from_value(good.clone()).unwrap();
         assert_eq!(serde_json::to_value(Borrowed(&restored.0)).unwrap(), good);

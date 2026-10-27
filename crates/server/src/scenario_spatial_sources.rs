@@ -573,27 +573,24 @@ pub(super) fn spatial_effect_enabled(package: &Package) -> Result<bool, Failure>
                 .get(profile)
                 .ok_or_else(|| fail("Unknown spatial source population profile"))?;
             for stage in &profile.stages {
-                match stage {
-                    PopulationStage::Items { bands, .. }
-                    | PopulationStage::RoomItems { bands, .. } => {
-                        for choice in bands.iter().flat_map(|b| &b.choices) {
-                            sources.add(Source::Item(choice.archetype.clone()));
-                        }
+                if let Some(bands) = stage.item_bands() {
+                    for choice in bands.iter().flat_map(|b| &b.choices) {
+                        sources.add(Source::Item(choice.archetype.clone()));
                     }
-                    PopulationStage::Actors { bands, .. } => {
-                        for choice in bands.iter().flat_map(|b| &b.choices) {
-                            sources.add(Source::Item(choice.archetype.clone()));
-                            for advancement in &choice.advancement {
-                                sources.purchases(&advancement.purchases);
-                            }
-                            if let Some(loot) = &choice.carried_loot {
-                                let pool = plan
-                                    .carried_item_pools
-                                    .get(&loot.pool)
-                                    .ok_or_else(|| fail("Unknown spatial source carried pool"))?;
-                                for item in &pool.choices {
-                                    sources.add(Source::Item(item.archetype.clone()));
-                                }
+                }
+                if let Some(bands) = stage.actor_bands() {
+                    for choice in bands.iter().flat_map(|b| &b.choices) {
+                        sources.add(Source::Item(choice.archetype.clone()));
+                        for advancement in &choice.advancement {
+                            sources.purchases(&advancement.purchases);
+                        }
+                        if let Some(loot) = &choice.carried_loot {
+                            let pool = plan
+                                .carried_item_pools
+                                .get(&loot.pool)
+                                .ok_or_else(|| fail("Unknown spatial source carried pool"))?;
+                            for item in &pool.choices {
+                                sources.add(Source::Item(item.archetype.clone()));
                             }
                         }
                     }

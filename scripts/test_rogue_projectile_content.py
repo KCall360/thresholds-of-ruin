@@ -115,5 +115,38 @@ class RogueProjectileContent(unittest.TestCase):
                 self.assertNotIn("discreet", profile["expert_traits"]["remove"])
 
 
+    def test_standalone_darts_and_shuriken_have_distinct_payloads_and_no_live_stock(self):
+        items = source("catalog/items.toml")["items"]
+        expected = {
+            "dart": ({"category": "keen"}, {"type": "fixed", "value": 1}, 1, 3),
+            "shuriken": ({"category": "keen", "sides": 2},
+                         {"type": "rolled", "count": 1, "sides": 2, "bonus": 0}, 2, 4),
+        }
+        for name, (primary, amount, count, sides) in expected.items():
+            identity = "rogue." + name
+            with self.subTest(identity=identity):
+                self.assertTrue(identity in items, f"Missing standalone inventory weapon {identity}")
+                self.assertEqual(items[identity], {
+                    "asset": "item.weapon", "name": name, "identity": identity,
+                    "class": "weapon", "stackable": True,
+                    "equipment_generation": {"kind": "weapon", "curse_percent": 10,
+                                             "enchant_percent": 5, "minimum": 1, "maximum": 3},
+                    "equipment": {"slot": "weapon", "modifiers": [], "attack": {
+                        "skill": "light_weaponry", "bonus": 0, "wind_up": 60, "recovery": 40,
+                        "damage": {"primary": primary, "components": [
+                            {"category": "keen", "amount": amount}]}}, "weapon_profile": {
+                        "expertise": "rogue.knife", "base_traits": [], "expert_traits": {
+                            "add": [{"kind": "thrown", "range": {"short_feet": 20, "long_feet": 60}}],
+                            "remove": []}, "thrown_payload": {"recovery": "consumed_on_hit",
+                            "damage": {"primary": {"category": "keen", "sides": sides}, "components": [
+                                {"category": "keen", "amount": {"type": "rolled", "count": count,
+                                                                "sides": sides, "bonus": 0}}]}}}}})
+                # These are real inventory weapons, never disguised ammunition.
+                self.assertNotIn("projectile", items[identity])
+                self.assertNotIn("launcher", items[identity]["equipment"]["weapon_profile"])
+                for path in ("scenario.toml", "catalog/actors.toml"):
+                    self.assertNotIn(identity, (PACKAGE / path).read_text(encoding="utf-8"))
+
+
 if __name__ == "__main__":
     unittest.main()

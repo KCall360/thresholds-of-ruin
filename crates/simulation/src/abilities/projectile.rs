@@ -109,6 +109,35 @@ impl ProjectileSource {
             Self::ThrowCarried { allocation, .. } => Some(&allocation.target),
         }
     }
+    fn thrown_payload(
+        &self,
+        rules: &crate::rules::Ruleset,
+    ) -> Option<crate::projectile_profiles::ThrownPayload> {
+        if matches!(self, Self::Launch { .. }) {
+            return None;
+        }
+        self.profile()?
+            .resolve(rules)
+            .ok()??
+            .thrown_payload()
+            .cloned()
+    }
+    pub(crate) fn hit_recovery(
+        &self,
+        rules: &crate::rules::Ruleset,
+    ) -> Option<crate::projectile_profiles::HitRecovery> {
+        match self {
+            Self::Launch { payload, .. } => Some(payload.recovery),
+            _ => {
+                let profile = self.profile()?.resolve(rules).ok()??;
+                profile.thrown()?;
+                Some(profile.thrown_payload().map_or(
+                    crate::projectile_profiles::HitRecovery::Recoverable,
+                    |payload| payload.recovery,
+                ))
+            }
+        }
+    }
     pub(crate) fn range(&self, rules: &crate::rules::Ruleset) -> Option<RangeBands> {
         let profile = self.profile()?.resolve(rules).ok()??;
         match self {
@@ -427,7 +456,7 @@ impl crate::Game {
             ProjectileDeliverySelection::Throw {
                 source: ThrownSourceSelection::Carried { item, socket },
             } => {
-                let allocation = self.capture_equip_allocation(actor, item, socket)?;
+                let allocation = self.capture_carried_weapon_allocation(actor, item, socket)?;
                 let gear = self
                     .items
                     .get(&item)
@@ -506,6 +535,24 @@ impl crate::Game {
                 )
             }
         };
+        if let Some(payload) = source.thrown_payload(self.content.rules()) {
+            let crate::attacks::SelectedMeleeAttack::Weapon(weapon) = &attack.attack else {
+                return Err(invalid());
+            };
+            // Replace only base damage. The selected attack already includes the
+            // instance's hit enchantment; retain both signed enchantments once.
+            let released = crate::attacks::MeleeAttack::new(
+                weapon.skill(),
+                weapon.bonus(),
+                weapon.wind_up(),
+                weapon.recovery(),
+                payload.damage,
+            )
+            .map_err(|_| invalid())?
+            .with_enchantment(0, weapon.damage_enchantment())
+            .map_err(|_| crate::GameError::Rule(super::RuleError::NumericBudget))?;
+            attack.attack = crate::attacks::SelectedMeleeAttack::Weapon(released);
+        }
         if source.range(self.content.rules()).is_none() || !source.matches(selection) {
             return Err(crate::GameError::ItemUnavailable);
         }
@@ -589,7 +636,7 @@ impl ProjectileSource {
                 socket,
                 allocation,
                 ..
-            } => game.frozen_equip_available(actor, *item, *socket, allocation),
+            } => game.frozen_weapon_allocation_available(actor, *item, *socket, allocation),
             Self::Launch {
                 weapon, ammunition, ..
             } => {

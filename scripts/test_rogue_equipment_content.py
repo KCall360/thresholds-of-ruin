@@ -20,7 +20,7 @@ class RogueEquipmentContent(unittest.TestCase):
                  "banded_mail": 5, "plate_mail": 6}
         generated = {key for key, value in items.items()
                      if value.get("equipment_generation", {}).get("kind") in ("weapon", "armor")}
-        self.assertEqual(generated, {"rogue." + key for key in weapons | armor} | {"rogue.shortbow"})
+        self.assertEqual(generated, {"rogue." + key for key in weapons | armor} | {"rogue.shortbow", "rogue.dart", "rogue.shuriken"})
         for key, dice in weapons.items():
             item = items["rogue." + key]
             self.assertEqual(item["class"], "weapon")

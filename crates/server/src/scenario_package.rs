@@ -53,7 +53,7 @@ pub use authoring::{
     DiceExpr, Effect, EquipmentAlteration, EquipmentGeneration, EquipmentSlot, EquipmentSpec,
     EquippedSelection, HealingOverflow, HeldLightSpec, HitRecovery, HoldPolicy, ItemClass,
     ItemDiscovery, LauncherProfile, PeriodicRelocation, PrimaryAttackSocket, ProjectileSpec,
-    PushDirection, ReadableSpec, RelocationGate, RelocationPolicy, TheftSelection,
+    PushDirection, ReadableSpec, RelocationGate, RelocationPolicy, TheftSelection, ThrownPayload,
     WeaponProfileSpec, WeaponRangeBands, WeaponTrait, WeaponTraitChanges, WeaponTraitKind,
 };
 use compiler::PreparedDefinitions;
@@ -65,13 +65,13 @@ pub use tor_simulation::EdibleSpec;
 use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
-pub const RULESET: &str = "interactions-v54";
-const VALIDATOR: &str = "tor-scenario-45";
+pub const RULESET: &str = "interactions-v55";
+const VALIDATOR: &str = "tor-scenario-46";
 /// The manifest and the validator's files are bounded to this.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 /// The package layout this version reads: `scenario.toml`, one file per
 /// region in `regions/`, and the validator's `index.json`.
-pub const FORMAT: u32 = 33;
+pub const FORMAT: u32 = 34;
 const REGION_DIR: &str = "regions";
 /// Regions a package may have.
 pub const MAX_REGIONS: usize = 65_536;
@@ -3446,7 +3446,11 @@ impl Package {
                 if let Some(equipment) = &a.equipment {
                     let spec = equipment.compile(&rules)?;
                     require(
-                        !a.stackable
+                        (!a.stackable
+                            || (a.projectile.is_none()
+                                && a.ground_scare.is_none()
+                                && a.currency.is_none()
+                                && spec.supports_stacking(a.class.into())))
                             && a.consumable.is_none()
                             && a.readable.is_none()
                             && a.device.is_none()
@@ -5173,8 +5177,8 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let original = read_package(&root).unwrap();
         original.check_identity().unwrap();
-        assert_eq!(original.certificate.validator, "tor-scenario-45");
-        assert_eq!(original.certificate.ruleset, "interactions-v54");
+        assert_eq!(original.certificate.validator, "tor-scenario-46");
+        assert_eq!(original.certificate.ruleset, "interactions-v55");
         let current_artifact = artifact::relative_root(&original);
         for (boundary, identity) in [
             ("validator", "tor-scenario-27"),
@@ -6847,7 +6851,7 @@ mod tests {
 
     #[test]
     fn shared_rules_import_accepts_validated_scenario_override() {
-        let source = r#"import = "interactions-v54"
+        let source = r#"import = "interactions-v55"
 [[overrides]]
 op = "set"
 path = ["constants", "base_defense"]

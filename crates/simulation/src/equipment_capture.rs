@@ -300,7 +300,18 @@ impl Game {
         item: ItemId,
         socket: EquipmentSlotId,
     ) -> Result<FrozenEquipAllocation, GameError> {
-        if !self.item_work_available(actor, &crate::Work::Equip { item, slot: socket }) {
+        if self.items.get(&item).is_none_or(|item| item.quantity != 1) {
+            return Err(GameError::ItemUnavailable);
+        }
+        self.capture_carried_weapon_allocation(actor, item, socket)
+    }
+    pub(crate) fn capture_carried_weapon_allocation(
+        &self,
+        actor: ActorId,
+        item: ItemId,
+        socket: EquipmentSlotId,
+    ) -> Result<FrozenEquipAllocation, GameError> {
+        if !self.item_socket_available(actor, item, socket) {
             return Err(GameError::ItemUnavailable);
         }
         let owner = self.actors.get(&actor).ok_or(GameError::UnknownActor)?;
@@ -382,8 +393,18 @@ impl Game {
         socket: EquipmentSlotId,
         captured: &FrozenEquipAllocation,
     ) -> bool {
+        self.items.get(&item).is_some_and(|item| item.quantity == 1)
+            && self.frozen_weapon_allocation_available(actor, item, socket, captured)
+    }
+    pub(crate) fn frozen_weapon_allocation_available(
+        &self,
+        actor: ActorId,
+        item: ItemId,
+        socket: EquipmentSlotId,
+        captured: &FrozenEquipAllocation,
+    ) -> bool {
         if !captured.source_valid(self, actor, item, socket)
-            || !self.item_work_available(actor, &crate::Work::Equip { item, slot: socket })
+            || !self.item_socket_available(actor, item, socket)
         {
             return false;
         }

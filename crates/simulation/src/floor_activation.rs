@@ -10,6 +10,8 @@ use tor_world::{Location, RegionId, Shared};
 
 #[path = "spawn_carried_loot.rs"]
 mod carried_loot;
+#[path = "room_cluster.rs"]
+mod room_cluster;
 #[path = "wandering_population.rs"]
 mod wandering_population;
 use carried_loot::{read_pools, BirthStockContext};
@@ -139,6 +141,17 @@ impl<'de, T: Deserialize<'de>> Deserialize<'de> for DepthBand<T> {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PopulationContent {
+    RoomCluster {
+        chance: CarryChance,
+        item_count: [u16; 2],
+        actor_count: [u16; 2],
+        actor_depth_offset: u32,
+        #[serde(deserialize_with = "read_bands")]
+        item_bands: Vec<DepthBand<PreparedItemChoice>>,
+        #[serde(deserialize_with = "read_bands")]
+        actor_bands: Vec<DepthBand<PreparedActorChoice>>,
+        avoid_protagonist_sight: bool,
+    },
     RoomItems {
         #[serde(deserialize_with = "read_bands")]
         bands: Vec<DepthBand<PreparedItemChoice>>,
@@ -245,6 +258,9 @@ pub struct StageDecision {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum StageResult {
+    RoomCluster {
+        selection: ClusterSelection,
+    },
     RoomsEvaluated {
         #[serde(deserialize_with = "read_room_decisions")]
         rooms: Vec<RoomDecision>,
@@ -258,6 +274,26 @@ pub enum StageResult {
         attempts: Vec<PlacementDecision>,
     },
 }
+/// Counts retain the independent authored requests, before room-area caps.
+/// Placements retain immutable births, not continued ownership or survival.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ClusterSelection {
+    ChanceMiss {},
+    NoEligibleRoom {},
+    Selected {
+        room: u32,
+        room_area: u16,
+        actor_depth: u32,
+        item_requested: u16,
+        actor_requested: u16,
+        #[serde(deserialize_with = "read_attempts")]
+        items: Vec<PlacementDecision>,
+        #[serde(deserialize_with = "read_attempts")]
+        actors: Vec<PlacementDecision>,
+    },
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RoomDecision {
@@ -302,13 +338,24 @@ impl<'de> Deserialize<'de> for RoomResult {
 impl StageResult {
     /// Every ordinary birth receipt, including room-scoped attempts.
     pub fn attempts(&self) -> impl Iterator<Item = &PlacementDecision> {
-        let (attempts, rooms): (&[PlacementDecision], &[RoomDecision]) = match self {
-            Self::Skipped { .. } => (&[], &[]),
-            Self::Evaluated { attempts, .. } => (attempts, &[]),
-            Self::RoomsEvaluated { rooms } => (&[], rooms),
+        let (attempts, actors, rooms): (
+            &[PlacementDecision],
+            &[PlacementDecision],
+            &[RoomDecision],
+        ) = match self {
+            Self::Skipped { .. }
+            | Self::RoomCluster {
+                selection: ClusterSelection::ChanceMiss {} | ClusterSelection::NoEligibleRoom {},
+            } => (&[], &[], &[]),
+            Self::Evaluated { attempts, .. } => (attempts, &[], &[]),
+            Self::RoomsEvaluated { rooms } => (&[], &[], rooms),
+            Self::RoomCluster {
+                selection: ClusterSelection::Selected { items, actors, .. },
+            } => (items, actors, &[]),
         };
         attempts
             .iter()
+            .chain(actors)
             .chain(rooms.iter().filter_map(|room| match &room.result {
                 RoomResult::ChanceMiss => None,
                 RoomResult::Attempt { decision } => Some(decision),
@@ -763,12 +810,34 @@ fn eligible_band<T>(bands: &[DepthBand<T>], depth: u32) -> Option<&DepthBand<T>>
     bands.iter().find(|band| band.depth.contains(depth))
 }
 impl PopulationContent {
+    /// Actor recipe vocabulary, shared by wizard inspection and source validation.
+    /// Explicit wizard birth depths already denote birth depth; no room offset applies.
+    pub fn actor_bands(&self) -> Option<&[DepthBand<PreparedActorChoice>]> {
+        match self {
+            Self::Actors { bands, .. }
+            | Self::RoomCluster {
+                actor_bands: bands, ..
+            } => Some(bands),
+            _ => None,
+        }
+    }
     fn eligible(&self, depth: u32) -> bool {
         match self {
             Self::Items { bands } | Self::RoomItems { bands, .. } => {
                 eligible_band(bands, depth).is_some()
             }
             Self::Actors { bands, .. } => eligible_band(bands, depth).is_some(),
+            Self::RoomCluster {
+                item_bands,
+                actor_bands,
+                actor_depth_offset,
+                ..
+            } => {
+                eligible_band(item_bands, depth).is_some()
+                    && depth
+                        .checked_add(*actor_depth_offset)
+                        .is_some_and(|depth| eligible_band(actor_bands, depth).is_some())
+            }
         }
     }
 }
@@ -862,9 +931,7 @@ impl PopulationPlan {
             .iter()
             .find(|stage| stage.id == stage_id)
             .ok_or_else(invalid)?;
-        let PopulationContent::Actors { bands, .. } = &stage.population else {
-            return Err(invalid());
-        };
+        let bands = stage.population.actor_bands().ok_or_else(invalid)?;
         let mut choices = bands
             .iter()
             .filter(|band| depth.is_none_or(|depth| band.depth.contains(depth)))
@@ -897,7 +964,7 @@ impl PopulationPlan {
                     && profile
                         .stages
                         .iter()
-                        .map(|stage| usize::from(stage.count[1]))
+                        .map(PopulationStage::maximum_attempts)
                         .sum::<usize>()
                         <= usize::from(MAX_ATTEMPTS)
                     && profile.stages.iter().all(|stage| {
@@ -907,6 +974,43 @@ impl PopulationPlan {
                             && stage.count[0] <= stage.count[1]
                             && stage.count[1] <= MAX_ATTEMPTS
                             && match &stage.population {
+                                PopulationContent::RoomCluster {
+                                    chance,
+                                    item_count,
+                                    actor_count,
+                                    actor_depth_offset,
+                                    item_bands,
+                                    actor_bands,
+                                    ..
+                                } => {
+                                    stage.count == [1, 1]
+                                        && chance.valid()
+                                        && *actor_depth_offset <= 1
+                                        && [item_count, actor_count].iter().all(|count| {
+                                            count[0] > 0
+                                                && count[0] <= count[1]
+                                                && count[1] <= MAX_ATTEMPTS
+                                        })
+                                        && stage.maximum_attempts() <= usize::from(MAX_ATTEMPTS)
+                                        && valid_bands(
+                                            item_bands,
+                                            |c| (&c.content, c.weight),
+                                            |c| c.valid(game),
+                                        )
+                                        && valid_bands(
+                                            actor_bands,
+                                            |c| (&c.content, c.weight),
+                                            |c| {
+                                                c.turn_ticks > 0
+                                                    && c.carried_loot.as_ref().is_none_or(
+                                                        |policy| {
+                                                            policy.valid(&self.carried_item_pools)
+                                                        },
+                                                    )
+                                                    && recipes.valid(c)
+                                            },
+                                        )
+                                }
                                 PopulationContent::Items { bands } => valid_bands(
                                     bands,
                                     |c| (&c.content, c.weight),
@@ -937,6 +1041,18 @@ impl PopulationPlan {
             })
     }
 }
+impl PopulationStage {
+    fn maximum_attempts(&self) -> usize {
+        match &self.population {
+            PopulationContent::RoomCluster {
+                item_count,
+                actor_count,
+                ..
+            } => usize::from(item_count[1]) + usize::from(actor_count[1]),
+            _ => usize::from(self.count[1]),
+        }
+    }
+}
 impl PopulationProfile {
     fn fits_scope(&self, rooms: usize) -> bool {
         self.stages
@@ -945,7 +1061,7 @@ impl PopulationProfile {
                 let attempts = if matches!(stage.population, PopulationContent::RoomItems { .. }) {
                     rooms
                 } else {
-                    usize::from(stage.count[1])
+                    stage.maximum_attempts()
                 };
                 count.checked_add(attempts)
             })
@@ -1403,7 +1519,10 @@ impl Game {
             && state.plan.profiles.values().all(|profile| {
                 profile.stages.iter().all(|stage| match &stage.population {
                     PopulationContent::Items { bands }
-                    | PopulationContent::RoomItems { bands, .. } => bands.iter().all(|band| {
+                    | PopulationContent::RoomItems { bands, .. }
+                    | PopulationContent::RoomCluster {
+                        item_bands: bands, ..
+                    } => bands.iter().all(|band| {
                         band.choices
                             .iter()
                             .all(|choice| !policy.reserves(&choice.spec))
@@ -1630,6 +1749,8 @@ impl Game {
                 StageResult::Skipped {
                     reason: SkipReason::NoEligibleContent,
                 }
+            } else if matches!(stage.population, PopulationContent::RoomCluster { .. }) {
+                self.evaluate_room_cluster(id, &scope, &profile, stage, &mut newborn)?
             } else if matches!(stage.population, PopulationContent::RoomItems { .. }) {
                 self.evaluate_room_items(id, &scope, &profile, stage)?
             } else {
@@ -1647,175 +1768,15 @@ impl Game {
                         &mut count_rng,
                         usize::from(stage.count[1] - stage.count[0]) + 1,
                     ) as u16;
-                let mut attempts = Vec::new();
-                for attempt in 0..requested {
-                    let mut choice_rng = stream(
-                        self.seed,
-                        &scope.scope,
-                        &scope.profile,
-                        &profile,
-                        stage,
-                        u64::from(attempt),
-                        "content",
-                    );
-                    let mut placement_rng = stream(
-                        self.seed,
-                        &scope.scope,
-                        &scope.profile,
-                        &profile,
-                        stage,
-                        u64::from(attempt),
-                        "placement",
-                    );
-                    let mut cells = scope.cells.clone();
-                    for i in (1..cells.len()).rev() {
-                        let j = index(&mut placement_rng, i + 1);
-                        cells.swap(i, j);
-                    }
-                    let occupied = |game: &Game, at: Location| {
-                        scope.protected.contains(&at)
-                            || !game.world.walkable(at)
-                            || game
-                                .actors
-                                .at(&game.world, at)
-                                .keys()
-                                .any(|other| *other == id || game.actors[other].alive())
-                    };
-                    let decision = match &stage.population {
-                        PopulationContent::RoomItems { .. } => {
-                            unreachable!("room stage evaluated separately")
-                        }
-                        PopulationContent::Items { bands } => {
-                            let choices = &eligible_band(bands, scope.depth).unwrap().choices;
-                            let choice = weighted_choice(&mut choice_rng, choices, |c| c.weight);
-                            let at = cells.into_iter().find(|at| {
-                                !occupied(self, *at)
-                                    && self.items.at(ItemLocation::Ground(*at)).next().is_none()
-                            });
-                            if let Some(location) = at {
-                                let mut quantity_rng = stream(
-                                    self.seed,
-                                    &scope.scope,
-                                    &scope.profile,
-                                    &profile,
-                                    stage,
-                                    u64::from(attempt),
-                                    "quantity",
-                                );
-                                let quantity = choice
-                                    .quantity
-                                    .resolve(Some(scope.depth))?
-                                    .sample(&mut quantity_rng)?;
-                                let item = self.spawn_item_stack(
-                                    location,
-                                    None,
-                                    quantity,
-                                    choice.spec.clone(),
-                                )?;
-                                PlacementDecision::Placed {
-                                    content: choice.content.clone(),
-                                    location,
-                                    entity: PopulationEntity::Item { id: item, quantity },
-                                }
-                            } else {
-                                PlacementDecision::Skipped {
-                                    content: choice.content.clone(),
-                                    reason: SkipReason::NoEligibleCell,
-                                }
-                            }
-                        }
-                        PopulationContent::Actors {
-                            bands,
-                            avoid_protagonist_sight,
-                        } => {
-                            let choices = &eligible_band(bands, scope.depth).unwrap().choices;
-                            let choice = weighted_choice(&mut choice_rng, choices, |c| c.weight);
-                            let body = choice.actor.body.clone().unwrap_or_default();
-                            let seen: BTreeSet<_> = if *avoid_protagonist_sight {
-                                self.scene(id)?
-                                    .into_iter()
-                                    .map(|cell| cell.location)
-                                    .collect()
-                            } else {
-                                BTreeSet::new()
-                            };
-                            let at = cells.into_iter().find(|at| {
-                                !occupied(self, *at)
-                                    && !seen.contains(at)
-                                    && self.body_fits(ActorId(0), *at, 0, &body)
-                                    && self.body_cells(*at, 0, &body).is_some_and(|cells| {
-                                        cells.iter().all(|(at, _)| {
-                                            scope.members.contains(&at.region)
-                                                && !occupied(self, *at)
-                                                && !seen.contains(at)
-                                        })
-                                    })
-                            });
-                            if let Some(location) = at {
-                                let seed = stream(
-                                    self.seed,
-                                    &scope.scope,
-                                    &scope.profile,
-                                    &profile,
-                                    stage,
-                                    u64::from(attempt),
-                                    "build",
-                                );
-                                let build = choice
-                                    .actor
-                                    .instantiate_build(
-                                        self.content.clone(),
-                                        seed,
-                                        choice.depth_growth,
-                                        scope.depth,
-                                        &choice.advancement,
-                                    )
-                                    .map_err(GameError::from)?;
-                                let stock = BirthStockContext {
-                                    seed: self.seed,
-                                    scope: &scope.scope,
-                                    profile_id: &scope.profile,
-                                    profile: &profile,
-                                    stage,
-                                    ordinal: u64::from(attempt),
-                                    depth: Some(scope.depth),
-                                }
-                                .select(choice, &plan.carried_item_pools)?;
-                                let (actor, item) = self.spawn_prepared_actor_in_candidate(
-                                    &choice.actor,
-                                    location,
-                                    NonZeroU64::new(choice.turn_ticks).ok_or_else(invalid)?,
-                                    build,
-                                    stock.map(|stock| (stock.quantity, stock.spec)),
-                                )?;
-                                let carried_loot =
-                                    choice.carried_loot.as_ref().map(|_| match stock {
-                                        Some(stock) => CarriedLootDecision::Carried {
-                                            content: stock.content.to_owned(),
-                                            quantity: stock.quantity,
-                                            item: item.expect("selected birth stack was installed"),
-                                        },
-                                        None => CarriedLootDecision::NotCarried,
-                                    });
-                                newborn.push(actor);
-                                PlacementDecision::Placed {
-                                    content: choice.content.clone(),
-                                    location,
-                                    entity: PopulationEntity::Actor {
-                                        id: actor,
-                                        carried_loot,
-                                    },
-                                }
-                            } else {
-                                PlacementDecision::Skipped {
-                                    content: choice.content.clone(),
-                                    reason: SkipReason::NoEligibleCell,
-                                }
-                            }
-                        }
-                    };
-                    attempts.push(decision);
-                }
+                let attempts = self.evaluate_population_attempts(
+                    id,
+                    &scope,
+                    &profile,
+                    stage,
+                    requested,
+                    &mut newborn,
+                    false,
+                )?;
                 StageResult::Evaluated {
                     requested,
                     attempts,
@@ -1861,6 +1822,204 @@ impl Game {
 }
 
 impl Game {
+    // Shared ordinary stage context; the room restriction is the sole placement variation.
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_population_attempts(
+        &mut self,
+        id: ActorId,
+        scope: &PreparedScope,
+        profile: &PopulationProfile,
+        stage: &PopulationStage,
+        requested: u16,
+        newborn: &mut Vec<ActorId>,
+        restrict_room: bool,
+    ) -> Result<Vec<PlacementDecision>, GameError> {
+        let plan = self
+            .floor_activation
+            .as_ref()
+            .ok_or_else(invalid)?
+            .plan
+            .clone();
+        let mut attempts = Vec::new();
+        for attempt in 0..requested {
+            let mut choice_rng = stream(
+                self.seed,
+                &scope.scope,
+                &scope.profile,
+                profile,
+                stage,
+                u64::from(attempt),
+                "content",
+            );
+            let mut placement_rng = stream(
+                self.seed,
+                &scope.scope,
+                &scope.profile,
+                profile,
+                stage,
+                u64::from(attempt),
+                "placement",
+            );
+            let mut cells = scope.cells.clone();
+            for i in (1..cells.len()).rev() {
+                let j = index(&mut placement_rng, i + 1);
+                cells.swap(i, j);
+            }
+            let occupied = |game: &Game, at: Location| {
+                scope.protected.contains(&at)
+                    || !game.world.walkable(at)
+                    || game
+                        .actors
+                        .at(&game.world, at)
+                        .keys()
+                        .any(|other| *other == id || game.actors[other].alive())
+            };
+            let decision = match &stage.population {
+                PopulationContent::RoomItems { .. } | PopulationContent::RoomCluster { .. } => {
+                    unreachable!("room stage evaluated separately")
+                }
+                PopulationContent::Items { bands } => {
+                    let choices = &eligible_band(bands, scope.depth).unwrap().choices;
+                    let choice = weighted_choice(&mut choice_rng, choices, |c| c.weight);
+                    let at = cells.into_iter().find(|at| {
+                        !occupied(self, *at)
+                            && self.items.at(ItemLocation::Ground(*at)).next().is_none()
+                    });
+                    if let Some(location) = at {
+                        let mut quantity_rng = stream(
+                            self.seed,
+                            &scope.scope,
+                            &scope.profile,
+                            profile,
+                            stage,
+                            u64::from(attempt),
+                            "quantity",
+                        );
+                        let quantity = choice
+                            .quantity
+                            .resolve(Some(scope.depth))?
+                            .sample(&mut quantity_rng)?;
+                        let item =
+                            self.spawn_item_stack(location, None, quantity, choice.spec.clone())?;
+                        PlacementDecision::Placed {
+                            content: choice.content.clone(),
+                            location,
+                            entity: PopulationEntity::Item { id: item, quantity },
+                        }
+                    } else {
+                        PlacementDecision::Skipped {
+                            content: choice.content.clone(),
+                            reason: SkipReason::NoEligibleCell,
+                        }
+                    }
+                }
+                PopulationContent::Actors {
+                    bands,
+                    avoid_protagonist_sight,
+                } => {
+                    let choices = &eligible_band(bands, scope.depth).unwrap().choices;
+                    let choice = weighted_choice(&mut choice_rng, choices, |c| c.weight);
+                    let body = choice.actor.body.clone().unwrap_or_default();
+                    let seen: BTreeSet<_> = if *avoid_protagonist_sight {
+                        self.scene(id)?
+                            .into_iter()
+                            .map(|cell| cell.location)
+                            .collect()
+                    } else {
+                        BTreeSet::new()
+                    };
+                    let at = cells.into_iter().find(|at| {
+                        !occupied(self, *at)
+                            && !seen.contains(at)
+                            && (!restrict_room
+                                || room_cluster::local_body_inside(
+                                    &scope.cells,
+                                    &scope.protected,
+                                    *at,
+                                    &body,
+                                ))
+                            && self.body_fits(ActorId(0), *at, 0, &body)
+                            && self.body_cells(*at, 0, &body).is_some_and(|cells| {
+                                cells.iter().all(|(at, _)| {
+                                    scope.members.contains(&at.region)
+                                        && (!restrict_room
+                                            || room_cluster::room_column_inside(
+                                                &scope.cells,
+                                                &scope.protected,
+                                                *at,
+                                            ))
+                                        && !occupied(self, *at)
+                                        && !seen.contains(at)
+                                })
+                            })
+                    });
+                    if let Some(location) = at {
+                        let seed = stream(
+                            self.seed,
+                            &scope.scope,
+                            &scope.profile,
+                            profile,
+                            stage,
+                            u64::from(attempt),
+                            "build",
+                        );
+                        let build = choice
+                            .actor
+                            .instantiate_build(
+                                self.content.clone(),
+                                seed,
+                                choice.depth_growth,
+                                scope.depth,
+                                &choice.advancement,
+                            )
+                            .map_err(GameError::from)?;
+                        let stock = BirthStockContext {
+                            seed: self.seed,
+                            scope: &scope.scope,
+                            profile_id: &scope.profile,
+                            profile,
+                            stage,
+                            ordinal: u64::from(attempt),
+                            depth: Some(scope.depth),
+                        }
+                        .select(choice, &plan.carried_item_pools)?;
+                        let (actor, item) = self.spawn_prepared_actor_in_candidate(
+                            &choice.actor,
+                            location,
+                            NonZeroU64::new(choice.turn_ticks).ok_or_else(invalid)?,
+                            build,
+                            stock.map(|stock| (stock.quantity, stock.spec)),
+                        )?;
+                        let carried_loot = choice.carried_loot.as_ref().map(|_| match stock {
+                            Some(stock) => CarriedLootDecision::Carried {
+                                content: stock.content.to_owned(),
+                                quantity: stock.quantity,
+                                item: item.expect("selected birth stack was installed"),
+                            },
+                            None => CarriedLootDecision::NotCarried,
+                        });
+                        newborn.push(actor);
+                        PlacementDecision::Placed {
+                            content: choice.content.clone(),
+                            location,
+                            entity: PopulationEntity::Actor {
+                                id: actor,
+                                carried_loot,
+                            },
+                        }
+                    } else {
+                        PlacementDecision::Skipped {
+                            content: choice.content.clone(),
+                            reason: SkipReason::NoEligibleCell,
+                        }
+                    }
+                }
+            };
+            attempts.push(decision);
+        }
+        Ok(attempts)
+    }
+
     fn evaluate_room_items(
         &mut self,
         entrant: ActorId,
@@ -2064,186 +2223,205 @@ impl Game {
                 StageResult::Skipped {
                     reason: SkipReason::NoEligibleContent,
                 } if !stage.population.eligible(depth) => {}
+                StageResult::RoomCluster { selection } if stage.population.eligible(depth) => {
+                    self.validate_room_cluster(record, profile, stage, depth, selection)?;
+                }
                 StageResult::RoomsEvaluated { rooms } if stage.population.eligible(depth) => {
                     self.validate_room_decisions(record, profile, stage, depth, rooms)?;
                 }
                 StageResult::Evaluated {
                     requested,
                     attempts,
-                } if !matches!(stage.population, PopulationContent::RoomItems { .. })
-                    && stage.population.eligible(depth)
+                } if !matches!(
+                    stage.population,
+                    PopulationContent::RoomItems { .. } | PopulationContent::RoomCluster { .. }
+                ) && stage.population.eligible(depth)
                     && (stage.count[0]..=stage.count[1]).contains(requested)
                     && attempts.len() == usize::from(*requested) =>
                 {
-                    let mut count_rng = stream(
-                        self.seed,
-                        &record.scope,
-                        &record.profile,
-                        profile,
-                        stage,
-                        0,
-                        "count",
-                    );
-                    let expected = stage.count[0]
-                        + index(
-                            &mut count_rng,
-                            usize::from(stage.count[1] - stage.count[0]) + 1,
-                        ) as u16;
-                    if *requested != expected {
-                        return Err(invalid());
-                    }
-                    for (ordinal, attempt) in attempts.iter().enumerate() {
-                        let content = match attempt {
-                            PlacementDecision::Placed {
-                                content,
-                                location,
-                                entity,
-                            } => {
-                                if location.region.0 == 0
-                                    || match (entity, &stage.population) {
-                                        (
-                                            PopulationEntity::Actor { id, .. },
-                                            PopulationContent::Actors { .. },
-                                        ) => id.0 == 0 || id.0 == u64::MAX,
-                                        (
-                                            PopulationEntity::Item { id, .. },
-                                            PopulationContent::Items { .. },
-                                        ) => id.0 == 0 || id.0 == u64::MAX,
-                                        _ => true,
-                                    }
-                                {
-                                    return Err(invalid());
-                                }
-                                content
-                            }
-                            PlacementDecision::Skipped {
-                                content,
-                                reason: SkipReason::NoEligibleCell,
-                            } => content,
-                            _ => return Err(invalid()),
-                        };
-                        let mut choice_rng = stream(
-                            self.seed,
-                            &record.scope,
-                            &record.profile,
-                            profile,
-                            stage,
-                            ordinal as u64,
-                            "content",
-                        );
-                        let expected = match &stage.population {
-                            PopulationContent::Actors { bands, .. } => {
-                                let choices = &eligible_band(bands, depth).unwrap().choices;
-                                let choice =
-                                    weighted_choice(&mut choice_rng, choices, |c| c.weight);
-                                if let PlacementDecision::Placed {
-                                    entity: PopulationEntity::Actor { carried_loot, .. },
-                                    ..
-                                } = attempt
-                                {
-                                    let stock = BirthStockContext {
-                                        seed: self.seed,
-                                        scope: &record.scope,
-                                        profile_id: &record.profile,
-                                        profile,
-                                        stage,
-                                        ordinal: ordinal as u64,
-                                        depth: Some(depth),
-                                    }
-                                    .select(choice, &state.plan.carried_item_pools)?;
-                                    let valid = match (&choice.carried_loot, stock, carried_loot) {
-                                        (None, None, None) => true,
-                                        (Some(_), None, Some(CarriedLootDecision::NotCarried)) => {
-                                            true
-                                        }
-                                        (
-                                            Some(_),
-                                            Some(expected),
-                                            Some(CarriedLootDecision::Carried {
-                                                content,
-                                                quantity,
-                                                item,
-                                            }),
-                                        ) => {
-                                            *content == expected.content
-                                                && *quantity == expected.quantity
-                                                && item.0 > 0
-                                                && item.0 < u64::MAX
-                                        }
-                                        _ => false,
-                                    };
-                                    if !valid {
-                                        return Err(invalid());
-                                    }
-                                }
-                                if choice.depth_growth != (DepthGrowth::Fixed {})
-                                    && matches!(attempt, PlacementDecision::Placed { .. })
-                                {
-                                    // A historical success must describe a possible exact birth,
-                                    // even after the actor died, drained or left retained state.
-                                    let seed = stream(
-                                        self.seed,
-                                        &record.scope,
-                                        &record.profile,
-                                        profile,
-                                        stage,
-                                        ordinal as u64,
-                                        "build",
-                                    );
-                                    choice
-                                        .actor
-                                        .instantiate_build(
-                                            self.content.clone(),
-                                            seed,
-                                            choice.depth_growth,
-                                            depth,
-                                            &choice.advancement,
-                                        )
-                                        .map_err(|_| invalid())?;
-                                }
-                                &choice.content
-                            }
-                            PopulationContent::Items { bands } => {
-                                let choices = &eligible_band(bands, depth).unwrap().choices;
-                                let choice =
-                                    weighted_choice(&mut choice_rng, choices, |c| c.weight);
-                                if let PlacementDecision::Placed {
-                                    entity: PopulationEntity::Item { quantity, .. },
-                                    ..
-                                } = attempt
-                                {
-                                    let mut quantity_rng = stream(
-                                        self.seed,
-                                        &record.scope,
-                                        &record.profile,
-                                        profile,
-                                        stage,
-                                        ordinal as u64,
-                                        "quantity",
-                                    );
-                                    if *quantity
-                                        != choice
-                                            .quantity
-                                            .resolve(Some(depth))?
-                                            .sample(&mut quantity_rng)?
-                                    {
-                                        return Err(invalid());
-                                    }
-                                }
-                                &choice.content
-                            }
-                            PopulationContent::RoomItems { .. } => return Err(invalid()),
-                        };
-                        if expected != content {
-                            return Err(invalid());
-                        }
-                    }
+                    self.validate_population_attempts(
+                        record, profile, stage, depth, *requested, attempts,
+                    )?;
                 }
                 _ => return Err(invalid()),
             }
         }
         Ok(())
     }
+    fn validate_population_attempts(
+        &self,
+        record: &FloorActivationRecord,
+        profile: &PopulationProfile,
+        stage: &PopulationStage,
+        depth: u32,
+        requested: u16,
+        attempts: &[PlacementDecision],
+    ) -> Result<(), GameError> {
+        let state = self.floor_activation.as_ref().ok_or_else(invalid)?;
+        let mut count_rng = stream(
+            self.seed,
+            &record.scope,
+            &record.profile,
+            profile,
+            stage,
+            0,
+            "count",
+        );
+        let expected = stage.count[0]
+            + index(
+                &mut count_rng,
+                usize::from(stage.count[1] - stage.count[0]) + 1,
+            ) as u16;
+        if requested != expected {
+            return Err(invalid());
+        }
+        for (ordinal, attempt) in attempts.iter().enumerate() {
+            let content = match attempt {
+                PlacementDecision::Placed {
+                    content,
+                    location,
+                    entity,
+                } => {
+                    if location.region.0 == 0
+                        || match (entity, &stage.population) {
+                            (
+                                PopulationEntity::Actor { id, .. },
+                                PopulationContent::Actors { .. },
+                            ) => id.0 == 0 || id.0 == u64::MAX,
+                            (
+                                PopulationEntity::Item { id, .. },
+                                PopulationContent::Items { .. },
+                            ) => id.0 == 0 || id.0 == u64::MAX,
+                            _ => true,
+                        }
+                    {
+                        return Err(invalid());
+                    }
+                    content
+                }
+                PlacementDecision::Skipped {
+                    content,
+                    reason: SkipReason::NoEligibleCell,
+                } => content,
+                _ => return Err(invalid()),
+            };
+            let mut choice_rng = stream(
+                self.seed,
+                &record.scope,
+                &record.profile,
+                profile,
+                stage,
+                ordinal as u64,
+                "content",
+            );
+            let expected = match &stage.population {
+                PopulationContent::Actors { bands, .. } => {
+                    let choices = &eligible_band(bands, depth).unwrap().choices;
+                    let choice = weighted_choice(&mut choice_rng, choices, |c| c.weight);
+                    if let PlacementDecision::Placed {
+                        entity: PopulationEntity::Actor { carried_loot, .. },
+                        ..
+                    } = attempt
+                    {
+                        let stock = BirthStockContext {
+                            seed: self.seed,
+                            scope: &record.scope,
+                            profile_id: &record.profile,
+                            profile,
+                            stage,
+                            ordinal: ordinal as u64,
+                            depth: Some(depth),
+                        }
+                        .select(choice, &state.plan.carried_item_pools)?;
+                        let valid = match (&choice.carried_loot, stock, carried_loot) {
+                            (None, None, None) => true,
+                            (Some(_), None, Some(CarriedLootDecision::NotCarried)) => true,
+                            (
+                                Some(_),
+                                Some(expected),
+                                Some(CarriedLootDecision::Carried {
+                                    content,
+                                    quantity,
+                                    item,
+                                }),
+                            ) => {
+                                *content == expected.content
+                                    && *quantity == expected.quantity
+                                    && item.0 > 0
+                                    && item.0 < u64::MAX
+                            }
+                            _ => false,
+                        };
+                        if !valid {
+                            return Err(invalid());
+                        }
+                    }
+                    if choice.depth_growth != (DepthGrowth::Fixed {})
+                        && matches!(attempt, PlacementDecision::Placed { .. })
+                    {
+                        // A historical success must describe a possible exact birth,
+                        // even after the actor died, drained or left retained state.
+                        let seed = stream(
+                            self.seed,
+                            &record.scope,
+                            &record.profile,
+                            profile,
+                            stage,
+                            ordinal as u64,
+                            "build",
+                        );
+                        choice
+                            .actor
+                            .instantiate_build(
+                                self.content.clone(),
+                                seed,
+                                choice.depth_growth,
+                                depth,
+                                &choice.advancement,
+                            )
+                            .map_err(|_| invalid())?;
+                    }
+                    &choice.content
+                }
+                PopulationContent::Items { bands } => {
+                    let choices = &eligible_band(bands, depth).unwrap().choices;
+                    let choice = weighted_choice(&mut choice_rng, choices, |c| c.weight);
+                    if let PlacementDecision::Placed {
+                        entity: PopulationEntity::Item { quantity, .. },
+                        ..
+                    } = attempt
+                    {
+                        let mut quantity_rng = stream(
+                            self.seed,
+                            &record.scope,
+                            &record.profile,
+                            profile,
+                            stage,
+                            ordinal as u64,
+                            "quantity",
+                        );
+                        if *quantity
+                            != choice
+                                .quantity
+                                .resolve(Some(depth))?
+                                .sample(&mut quantity_rng)?
+                        {
+                            return Err(invalid());
+                        }
+                    }
+                    &choice.content
+                }
+                PopulationContent::RoomItems { .. } | PopulationContent::RoomCluster { .. } => {
+                    return Err(invalid())
+                }
+            };
+            if expected != content {
+                return Err(invalid());
+            }
+        }
+        Ok(())
+    }
+
     /// Check high-water identities in an audit context that retains all branch
     /// allocation ceilings. Historical origin does not require live ownership.
     pub fn validate_activation_record_identity_bounds(
@@ -2383,6 +2561,7 @@ mod tests {
     include!("population_recipe_validation_tests.rs");
     include!("spawn_carried_loot_tests.rs");
     include!("gold_population_tests.rs");
+    include!("room_cluster_tests.rs");
 
     fn at(region: u64, x: i32, y: i32) -> Location {
         Location {
