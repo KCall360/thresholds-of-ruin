@@ -33,6 +33,7 @@ fn build() -> CreatureBuild {
 fn build_with_policy(policy: Value) -> CreatureBuild {
     let mut species = fixture::species();
     species.modifiers.push(Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Set {
             stat: Stat::HealthRecoveryPeriod,
@@ -1096,6 +1097,9 @@ fn population_checkpoint_pool_preserves_complete_nutrition_recipes() {
     let (snapshots, shared): (Vec<Snapshot>, SharedState) =
         serde_json::from_value(encoded).unwrap();
     let mut context = RestoreContext::new(&shared, required_game.content().clone());
+    context
+        .bind_spatial_roots(&snapshots.iter().collect::<Vec<_>>())
+        .unwrap();
     let mut restored: Vec<_> = snapshots
         .into_iter()
         .map(|snapshot| context.restore(snapshot).unwrap())
@@ -2075,6 +2079,7 @@ fn digestion_source(
         attack: None,
         weapon_profile: None,
         modifiers: vec![Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Add {
                 stat: Stat::NutritionRateThirtieths,

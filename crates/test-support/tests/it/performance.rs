@@ -3,16 +3,50 @@ use tor_protocol::{Action, Direction, DoorTarget, DoorView, StateView};
 use tor_test_support::performance::{Step, Trace, TraceAction};
 
 fn view() -> StateView {
-    serde_json::from_value(serde_json::json!({
+    let value: StateView = serde_json::from_value(serde_json::json!({
         "wizard_game":false,"revision":"4","observation":{
-            "linked_holds":[],"actor":"1","self_target":tor_protocol::ActorTarget::from_digest([1;32]),
+            "charts":[],"linked_holds":[],"actor":"1","self_target":tor_protocol::ActorTarget::from_digest([1;32]),
             "tick":"5","position":{"x":0,"y":0,"z":0},"places":[],
             "visible_cells":[
-                {"key":"origin","position":{"x":0,"y":0,"z":0},"wall":false,"trap":null,"stairs_up":false,"stairs_down":false,"lit":true,"place_hint":false},
-                {"key":"east","position":{"x":1,"y":0,"z":0},"wall":false,"trap":null,"stairs_up":false,"stairs_down":false,"lit":true,"place_hint":false}
+                {"key":"origin","position":{"x":0,"y":0,"z":0},"wall":false,"object_presentation":null,"trap":null,"stairs_up":false,"stairs_down":false,"lit":true,"place_hint":false},
+                {"key":"east","position":{"x":1,"y":0,"z":0},"wall":false,"object_presentation":null,"trap":null,"stairs_up":false,"stairs_down":false,"lit":true,"place_hint":false}
             ],"ground_items":[],"inventory":[],"visible_actors":[],"ready":true
         }
-    })).unwrap()
+    })).unwrap();
+    value
+        .validate()
+        .expect("shared performance trace fixture must be valid before mutation");
+    value
+}
+
+#[test]
+fn shared_trace_fixture_has_required_current_presentation_and_chart_fields() {
+    let valid = view();
+    assert!(valid.observation.charts.is_empty());
+    assert!(valid
+        .observation
+        .visible_cells
+        .iter()
+        .all(|cell| cell.object_presentation.is_none()));
+    let encoded = serde_json::to_value(&valid).unwrap();
+    assert_eq!(
+        serde_json::from_value::<StateView>(encoded.clone()).unwrap(),
+        valid
+    );
+    let mut missing_charts = encoded.clone();
+    missing_charts["observation"]
+        .as_object_mut()
+        .unwrap()
+        .remove("charts");
+    assert!(serde_json::from_value::<StateView>(missing_charts).is_err());
+    for index in 0..valid.observation.visible_cells.len() {
+        let mut missing_presentation = encoded.clone();
+        missing_presentation["observation"]["visible_cells"][index]
+            .as_object_mut()
+            .unwrap()
+            .remove("object_presentation");
+        assert!(serde_json::from_value::<StateView>(missing_presentation).is_err());
+    }
 }
 fn step(action: TraceAction, expected: &str) -> Step {
     Step {

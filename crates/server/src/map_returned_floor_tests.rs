@@ -77,6 +77,7 @@ fn returned_floor_rehydrates_unseen_walls_and_stairs_after_source_free_resume() 
             .unwrap();
     };
     let appearance = |cell: &CellView, position| RememberedMapCell {
+        object_presentation: cell.object_presentation.clone(),
         key: cell.key.clone(),
         position,
         wall: cell.wall,
@@ -311,6 +312,7 @@ fn returned_floor_rehydrates_unseen_walls_and_stairs_after_source_free_resume() 
                 "place_hint",
                 "stairs_up",
                 "stairs_down",
+                "object_presentation",
                 "trap",
                 "door",
                 "ground_items"
@@ -319,6 +321,7 @@ fn returned_floor_rehydrates_unseen_walls_and_stairs_after_source_free_resume() 
         assert!(
             appearance.trap.is_none()
                 && appearance.door.is_none()
+                && appearance.object_presentation.is_none()
                 && appearance.ground_items.is_empty()
         );
     }

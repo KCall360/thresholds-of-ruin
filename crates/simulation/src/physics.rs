@@ -972,11 +972,13 @@ impl Game {
                     .next_in(actor)
                     .into_iter()
                     .chain(actor.periodic_relocations.next_in(actor.alive()))
+                    .chain(crate::hallucination_clock::next_in(actor))
                     .chain(actor.awareness.next_in(actor))
                     .min()
                     .and_then(|interval| actor.active_since.checked_add(interval))
             })
             .chain(self.next_wandering_event_tick())
+            .chain(self.next_fuel_expiry())
             .min()
             .map_or(until, |deadline| until.min(deadline));
         if until <= self.tick {
@@ -986,173 +988,202 @@ impl Game {
         let moving = self.actors.values().any(|a| a.motion.velocity != [0; 3])
             || self.items.values().any(|i| i.motion.velocity != [0; 3]);
         if !self.world.has_gravity() && !moving {
-            self.tick = until;
-            self.settle_creature_time()?;
-            return Ok(until);
+            return self.with_deferred_body_returns(|game| {
+                game.burn_light_fuel(until - game.tick);
+                game.tick = until;
+                game.settle_creature_time()?;
+                game.refresh_light_boundary();
+                Ok(until)
+            });
         }
         for tick in self.tick + 1..=until {
-            self.tick = tick;
-            // Expiry, death and stochastic depletion are authoritative before
-            // same-tick physical effects can materialize a pure actor snapshot.
-            // The end pass below still settles consequences born during physics.
-            if self
-                .next_creature_event_tick()
-                .is_some_and(|deadline| deadline <= tick)
-            {
-                self.settle_creature_time()?;
-                if self.run_outcome().terminal {
-                    return Ok(tick);
-                }
-            }
-            let mut active = false;
-            let original_item_ceiling = self.next_item_id;
-            let ids: Vec<_> = self.actors.keys().copied().collect();
-            for id in ids {
-                let a = &self.actors[&id];
-                if !a.alive() || self.actor_frozen(id) {
-                    continue;
-                }
-                if !self.needs_integration(
-                    PhysicsEntity::Actor(id),
-                    a.location,
-                    a.orientation,
-                    &a.body,
-                    &a.motion,
-                ) {
-                    if a.motion.active_fall.is_some() {
-                        self.actors
-                            .get_mut(&id)
-                            .expect("scheduled actor")
-                            .motion
-                            .active_fall = None;
+            // Finish the existing entity cohort before any pending body return,
+            // regardless of residency. The guard cleans up on every early exit.
+            let decision = self.with_deferred_body_returns(|game| {
+                game.burn_light_fuel(1);
+                game.tick = tick;
+                // Expiry, death and stochastic depletion are authoritative before
+                // same-tick physical effects can materialize a pure actor snapshot.
+                // The end pass below still settles consequences born during physics.
+                if game
+                    .next_creature_event_tick()
+                    .is_some_and(|deadline| deadline <= tick)
+                {
+                    game.settle_creature_time()?;
+                    if game.run_outcome().terminal {
+                        return Ok(Some(true));
                     }
-                    continue;
                 }
-                active = true;
-                let a = a.clone();
-                let (at, frame, motion) = self.integrate(
-                    PhysicsEntity::Actor(id),
-                    a.location,
-                    a.orientation,
-                    &a.body,
-                    a.motion,
-                    tick,
-                )?;
-                if at != a.location || frame != a.orientation {
-                    self.physics.displaced.insert(id);
+                let mut active = false;
+                let original_item_ceiling = game.next_item_id;
+                let ids: Vec<_> = game.actors.keys().copied().collect();
+                for id in ids {
+                    let a = &game.actors[&id];
+                    if !a.alive() || game.actor_frozen(id) {
+                        continue;
+                    }
+                    if !game.needs_integration(
+                        PhysicsEntity::Actor(id),
+                        a.location,
+                        a.orientation,
+                        &a.body,
+                        &a.motion,
+                    ) {
+                        if a.motion.active_fall.is_some() {
+                            game.actors
+                                .get_mut(&id)
+                                .expect("scheduled actor")
+                                .motion
+                                .active_fall = None;
+                        }
+                        continue;
+                    }
+                    active = true;
+                    let a = a.clone();
+                    let (at, frame, motion) = game.integrate(
+                        PhysicsEntity::Actor(id),
+                        a.location,
+                        a.orientation,
+                        &a.body,
+                        a.motion,
+                        tick,
+                    )?;
+                    if at != a.location || frame != a.orientation {
+                        game.physics.displaced.insert(id);
+                    }
+                    let mut a = game.actors.get_mut(&id).expect("scheduled actor");
+                    a.location = at;
+                    a.orientation = frame;
+                    a.motion = motion;
+                    a.visited.insert(at.region);
+                    drop(a);
+                    // A sub-cell lift breaks ground contact even before the actor
+                    // crosses a cell boundary. Landing may therefore trigger anew.
+                    game.reconcile_trap_contacts(id, None)?;
+                    game.reconcile_holds_for_actor(id)?;
+                    game.reconcile_spatial_condition_anchors(id)?;
+                    // Falling into a frozen region freezes the actor there.
+                    game.sync_actor_lifecycle(id)?;
+                    if game.run_outcome().terminal && !game.region_transition_pending() {
+                        game.settle_creature_time()?;
+                        return Ok(Some(true));
+                    }
                 }
-                let mut a = self.actors.get_mut(&id).expect("scheduled actor");
-                a.location = at;
-                a.orientation = frame;
-                a.motion = motion;
-                a.visited.insert(at.region);
-                drop(a);
-                // A sub-cell lift breaks ground contact even before the actor
-                // crosses a cell boundary. Landing may therefore trigger anew.
-                self.reconcile_trap_contacts(id, None)?;
-                self.reconcile_holds_for_actor(id)?;
-                self.reconcile_spatial_condition_anchors(id)?;
-                // Falling into a frozen region freezes the actor there.
-                self.sync_actor_lifecycle(id)?;
-                if self.run_outcome().terminal && !self.region_transition_pending() {
-                    self.settle_creature_time()?;
-                    return Ok(tick);
-                }
-            }
-            let mut newborn_items = self.activation_item_births_at(tick);
-            newborn_items.extend(self.retrieval_placements_at(tick));
-            let ids: Vec<_> = self
-                .items
-                .iter()
-                .filter(|(id, _)| !newborn_items.contains(id))
-                // A host entry finishes the original tick cohort. A corpse
-                // created by a later collision is newborn too, even though it
-                // has no population receipt. Ordinary terminal behavior stays
-                // on its existing path when there is no pending entry.
-                .filter(|(id, _)| !self.region_transition_pending() || id.0 < original_item_ceiling)
-                .filter_map(|(id, i)| matches!(i.location, ItemLocation::Ground(_)).then_some(*id))
-                .collect();
-            for id in ids {
-                let i = &self.items[&id];
-                let ItemLocation::Ground(at) = i.location else {
-                    continue;
-                };
-                if self.region_frozen(at.region) {
-                    continue;
-                }
-                let body = BodySpec {
-                    cells: vec![[0; 3]],
-                    eye: [0; 3],
-                    mass: 1,
-                };
-                if !self.needs_integration(
-                    PhysicsEntity::Item(id),
-                    at,
-                    i.orientation,
-                    &body,
-                    &i.motion,
-                ) {
-                    continue;
-                }
-                active = true;
-                let original_at = at;
-                let (at, frame, motion) = self.integrate(
-                    PhysicsEntity::Item(id),
-                    at,
-                    i.orientation,
-                    &BodySpec {
+                let mut newborn_items = game.activation_item_births_at(tick);
+                newborn_items.extend(game.retrieval_placements_at(tick));
+                let ids: Vec<_> = game
+                    .items
+                    .iter()
+                    .filter(|(id, _)| !newborn_items.contains(id))
+                    // A host entry finishes the original tick cohort. A corpse
+                    // created by a later collision is newborn too, even though it
+                    // has no population receipt. Ordinary terminal behavior stays
+                    // on its existing path when there is no pending entry.
+                    .filter(|(id, _)| {
+                        !game.region_transition_pending() || id.0 < original_item_ceiling
+                    })
+                    .filter_map(|(id, i)| {
+                        matches!(i.location, ItemLocation::Ground(_)).then_some(*id)
+                    })
+                    .collect();
+                for id in ids {
+                    let i = &game.items[&id];
+                    let ItemLocation::Ground(at) = i.location else {
+                        continue;
+                    };
+                    if game.region_frozen(at.region) {
+                        continue;
+                    }
+                    let body = BodySpec {
                         cells: vec![[0; 3]],
                         eye: [0; 3],
                         mass: 1,
-                    },
-                    i.motion.clone(),
-                    tick,
-                )?;
-                if at != original_at {
-                    self.invalidate_item_claimants(id)?;
+                    };
+                    if !game.needs_integration(
+                        PhysicsEntity::Item(id),
+                        at,
+                        i.orientation,
+                        &body,
+                        &i.motion,
+                    ) {
+                        continue;
+                    }
+                    active = true;
+                    let original_at = at;
+                    let (at, frame, motion) = game.integrate(
+                        PhysicsEntity::Item(id),
+                        at,
+                        i.orientation,
+                        &BodySpec {
+                            cells: vec![[0; 3]],
+                            eye: [0; 3],
+                            mass: 1,
+                        },
+                        i.motion.clone(),
+                        tick,
+                    )?;
+                    if at != original_at {
+                        game.invalidate_item_claimants(id)?;
+                    }
+                    game.items
+                        .edit(id, |i| {
+                            i.location = ItemLocation::Ground(at);
+                            i.orientation = frame;
+                            i.motion = motion;
+                        })
+                        .expect("scheduled item");
                 }
-                self.items
-                    .edit(id, |i| {
-                        i.location = ItemLocation::Ground(at);
-                        i.orientation = frame;
-                        i.motion = motion;
-                    })
-                    .expect("scheduled item");
+                game.refresh_light_boundary();
+                if !active {
+                    if game.region_transition_pending() {
+                        game.settle_creature_time()?;
+                        return Ok(Some(true));
+                    }
+                    return Ok(Some(false));
+                }
+                // Due conditions and capacity changes precede work completion on
+                // moving ticks, just as they do on the stationary fast path.
+                game.settle_creature_time()?;
+                if game.run_outcome().terminal {
+                    return Ok(Some(true));
+                }
+                game.resolve_preparations()?;
+                game.check_run_policy()?;
+                if game.run_outcome().terminal {
+                    game.settle_creature_time()?;
+                    return Ok(Some(true));
+                }
+                // An accepted entry is immediate, but all existing entities and
+                // due work at this tick must finish before horizons are settled.
+                // A mid-tick return would silently skip the remaining entities.
+                if game.region_transition_pending() {
+                    return Ok(Some(true));
+                }
+                if game
+                    .next_actor()
+                    .is_some_and(|id| game.actors[&id].ready_at <= tick)
+                {
+                    game.settle_creature_time()?;
+                    return Ok(Some(true));
+                }
+                Ok(None)
+            })?;
+            if self.region_transition_pending() || decision == Some(true) {
+                return Ok(tick);
             }
-            if !active {
+            if decision == Some(false) {
                 break;
-            }
-            // Due conditions and capacity changes precede work completion on
-            // moving ticks, just as they do on the stationary fast path.
-            self.settle_creature_time()?;
-            if self.run_outcome().terminal {
-                return Ok(tick);
-            }
-            self.resolve_preparations()?;
-            self.check_run_policy()?;
-            if self.run_outcome().terminal {
-                self.settle_creature_time()?;
-                return Ok(tick);
-            }
-            // An accepted entry is immediate, but all existing entities and
-            // due work at this tick must finish before horizons are settled.
-            // A mid-tick return would silently skip the remaining entities.
-            if self.region_transition_pending() {
-                return Ok(tick);
-            }
-            if self
-                .next_actor()
-                .is_some_and(|id| self.actors[&id].ready_at <= tick)
-            {
-                self.settle_creature_time()?;
-                return Ok(tick);
             }
         }
         // Resting physics can stop early. Settle once at the requested boundary;
         // lifecycle changes already settled before switching active clocks.
-        self.tick = until;
-        self.settle_creature_time()?;
-        Ok(until)
+        self.with_deferred_body_returns(|game| {
+            game.burn_light_fuel(until - game.tick);
+            game.tick = until;
+            game.settle_creature_time()?;
+            game.refresh_light_boundary();
+            Ok(until)
+        })
     }
     fn needs_integration(
         &self,

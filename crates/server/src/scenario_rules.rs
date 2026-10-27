@@ -319,7 +319,7 @@ mod tests {
             .position(|ability| ability["strikes"]["kind"] == "authored")
             .unwrap();
         source["abilities"][index]["strikes"]["strikes"][0]["riders"] = json!([{
-            "trigger":"success", "condition":null, "check":null,
+            "cancellable":false, "trigger":"success", "condition":null, "check":null,
             "effects":[{"kind":"apply_persistent_condition","condition":"fixture_a"}], "descriptors":[]
         }]);
         let compiled = serde_json::from_value::<authoring::Document>(source.clone())
@@ -361,6 +361,7 @@ mod tests {
             (
                 format!("/abilities/{index}"),
                 vec![
+                    "cancellable",
                     "interaction",
                     "id",
                     "invocation",
@@ -377,6 +378,7 @@ mod tests {
                     "ai",
                 ],
                 vec![
+                    "cancellable",
                     "invocation",
                     "outgoing_edge_policy",
                     "cost",
@@ -387,6 +389,7 @@ mod tests {
             (
                 format!("/abilities/{index}/strikes/strikes/0"),
                 vec![
+                    "cancellable",
                     "offset",
                     "unlock",
                     "check",
@@ -395,12 +398,19 @@ mod tests {
                     "descriptors",
                     "riders",
                 ],
-                vec!["unlock", "check"],
+                vec!["cancellable", "unlock", "check"],
             ),
             (
                 format!("/abilities/{index}/strikes/strikes/0/riders/0"),
-                vec!["trigger", "condition", "check", "effects", "descriptors"],
-                vec!["condition", "check"],
+                vec![
+                    "cancellable",
+                    "trigger",
+                    "condition",
+                    "check",
+                    "effects",
+                    "descriptors",
+                ],
+                vec!["cancellable", "condition", "check"],
             ),
         ];
         for (path, fields, optional) in paths {
@@ -409,6 +419,22 @@ mod tests {
             for field in &fields {
                 assert!(object.contains_key(*field), "{path}/{field}");
                 if optional.contains(field) {
+                    if *field == "cancellable" {
+                        let mut missing = source.clone();
+                        missing
+                            .pointer_mut(&path)
+                            .unwrap()
+                            .as_object_mut()
+                            .unwrap()
+                            .remove(*field);
+                        let decoded =
+                            serde_json::from_value::<authoring::Document>(missing).unwrap();
+                        let canonical = serde_json::to_value(decoded.0).unwrap();
+                        assert_eq!(
+                            canonical.pointer(&format!("{path}/cancellable")),
+                            Some(&json!(false))
+                        );
+                    }
                     continue;
                 }
                 let mut missing = source.clone();
@@ -473,6 +499,7 @@ mod tests {
             json!({"kind":"natural_melee","additional_riders":[rider.clone()]});
         assert!(serde_json::from_value::<authoring::Document>(source.clone()).is_ok());
         source["abilities"][index]["strikes"]["additional_riders"][0] = json!([
+            rider["cancellable"],
             rider["trigger"],
             rider["condition"],
             rider["check"],
@@ -928,7 +955,7 @@ value = {{ id = "test_projectile", name = "Test projectile", tags = [], basic_at
     fn strike_source_domain_requires_named_records_for_every_variant() {
         use serde_json::json;
 
-        let strike = json!({"offset": 0, "unlock": null, "check": null,
+        let strike = json!({"cancellable": false, "offset": 0, "unlock": null, "check": null,
             "on_success": [], "on_failure": [], "descriptors": [], "riders": []});
         for (named, positional) in [
             (json!({"kind": "selected_melee"}), json!(["selected_melee"])),

@@ -25,6 +25,7 @@ fn scenario(suppressed: bool) -> crate::Scenario {
         .find(|condition| condition.id.as_str() == "braced")
         .unwrap()
         .modifiers = vec![Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Locomotion {
             value: tor_simulation::locomotion::LocomotionValue::Flying { enabled: true },
@@ -36,6 +37,7 @@ fn scenario(suppressed: bool) -> crate::Scenario {
         .find(|condition| condition.id.as_str() == "fear")
         .unwrap();
     suppression.modifiers = vec![Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Locomotion {
             value: tor_simulation::locomotion::LocomotionValue::Flying { enabled: false },

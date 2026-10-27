@@ -512,3 +512,6 @@ capacity = "reject"
         bytes
     );
 }
+
+#[path = "maximal_generated_scope_geometry_tests.rs"]
+mod maximal_geometry;

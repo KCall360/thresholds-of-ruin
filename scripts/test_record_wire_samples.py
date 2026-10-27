@@ -50,6 +50,7 @@ def recording_case(failure=None):
             self.artifact = copy.deepcopy(ESCAPE_SAMPLE)
             self.escape_sample = self.artifact
             self.server_samples = {"zz.amulet_escape": self.artifact}
+            self.recorded_client_samples = []
             step("body")
 
         def tearDown(self):
@@ -64,6 +65,74 @@ def recording_case(failure=None):
 
 
 class CompleteRecordingContracts(unittest.TestCase):
+    def test_polymorph_factories_reuse_two_actual_non_graphical_boundaries(self):
+        for factory, method in ((record_wire_samples.polymorph_recording_case,
+                "test_text_paid_self_polymorph_reopens_and_retries_without_source_or_private_ledger"),
+                (record_wire_samples.polymorph_diagnostic_recording_case,
+                 "test_polymorph_self_ability_privileged_capture_has_changed_only_effect")):
+            case = factory()
+            self.assertEqual(case.id(), "test_magic_items_process.MagicItemProcesses." + method)
+            self.assertFalse(is_graphical_test(case))
+
+    def test_polymorph_recording_preserves_real_envelopes_and_rejects_private_or_incomplete_variants(self):
+        ordinary = {"affordance": {"type": "snapshot", "request_id": "actual-snapshot",
+            "snapshot": {"state": {"wizard_game": False, "observation": {"interactions": {"inventory": [
+                {"item": "exact-item", "device_activation": "direction_or_self"}]}}}}},
+            "request": {"type": "request", "request_id": "actual-self-zap", "request": {"type": "command",
+                "context": {"epoch": "exact-epoch"}, "command": {"type": "act", "expected_revision": "7",
+                    "action": {"type": "zap", "item": "exact-item", "aim": {"kind": "self_target"}}}}}}
+        diagnostic = {"type": "combat_diagnostics", "report": {"enabled": True, "records": [
+            {"ability": {"id": "fixture.polymorph"}, "outcome": {"effects": [
+                {"type": "baleful_polymorph", "target": "1", "changed": True}]}}]}}
+
+        def case_for(attribute, artifact, failure=None):
+            case, trace = recording_case(failure)
+            original = type(case).runTest
+            def body(subject):
+                setattr(subject, attribute, copy.deepcopy(artifact))
+                original(subject)
+            type(case).runTest = body
+            return case, trace
+
+        def record(first, second, failure=None):
+            one, trace_one = case_for("polymorph_samples", first)
+            two, trace_two = case_for("polymorph_diagnostic_sample", second, failure)
+            recorder = record_wire_samples.Recorder()
+            recorder.recorded_client_samples = [{"existing": "unchanged"}]
+            samples = {"existing": {"type": "palette"}}
+            with patch("record_wire_samples.polymorph_recording_case", return_value=one), \
+                    patch("record_wire_samples.polymorph_diagnostic_recording_case", return_value=two):
+                try:
+                    recorder.record_polymorph(samples)
+                except AssertionError:
+                    self.assertEqual(samples, {"existing": {"type": "palette"}})
+                    self.assertEqual(recorder.recorded_client_samples, [{"existing": "unchanged"}])
+                    raise
+            return recorder, samples, trace_one, trace_two
+
+        recorder, samples, one, two = record(ordinary, diagnostic)
+        self.assertEqual(samples["zz.polymorph_affordance"], ordinary["affordance"])
+        self.assertEqual(samples["zz.polymorph_effect"], diagnostic)
+        self.assertEqual(recorder.recorded_client_samples[-1], ordinary["request"])
+        self.assertEqual((one[-1], two[-1]), ("class_cleanup", "class_cleanup"))
+        self.assertIsNot(recorder.recorded_client_samples[-1], ordinary["request"])
+        for failure in ("body", "cleanup", "class_cleanup"):
+            with self.subTest(failure=failure), self.assertRaises(AssertionError):
+                record(ordinary, diagnostic, failure)
+        for mutation in ("old_mode", "wrong_item", "form_leak", "unchanged"):
+            first, second = copy.deepcopy(ordinary), copy.deepcopy(diagnostic)
+            effect = second["report"]["records"][0]["outcome"]["effects"][0]
+            if mutation == "old_mode":
+                first["affordance"]["snapshot"]["state"]["observation"]["interactions"]["inventory"][0]["device_activation"] = "self_target"
+            elif mutation == "wrong_item":
+                first["request"]["request"]["command"]["action"]["item"] = "not-the-affordance"
+            elif mutation == "form_leak":
+                effect["form"] = "private.body.changed"
+            else:
+                effect["changed"] = False
+            with self.subTest(mutation=mutation), self.assertRaises((AssertionError, ValueError)):
+                record(first, second)
+
     def test_preview_request_fixture_echoes_a_complete_public_action(self):
         commands = [entry["request"]["command"] for entry in record_wire_samples.CLIENT
                     if entry["type"] == "request" and entry["request"]["type"] == "command"]
@@ -216,7 +285,8 @@ class CompleteRecordingContracts(unittest.TestCase):
             case.work_budget.before()
             predicates = []
 
-            def until(predicate, seconds):
+            def until(predicate, seconds, *, include_transcript):
+                self.assertFalse(include_transcript)
                 self.assertGreater(seconds, 0)
                 self.assertLessEqual(seconds, 10)
                 # Exercise the actual base ASCII -> overridden frame -> budget
@@ -297,6 +367,187 @@ class CompleteRecordingContracts(unittest.TestCase):
                     record_wire_samples.record_samples(output=output)
             self.assertEqual(output.read_text(encoding="utf-8"), "prior validated samples")
             self.assertEqual(list(Path(directory).iterdir()), [output])
+
+
+def detection_recording_inputs():
+    """Synthetic validator inputs only, never published as process artifacts."""
+    from test_detection_process_package import public_pages
+
+    def exchange(kind, count, suffix):
+        query, pages = public_pages(count, kind)
+        query["context"]["stream"] += suffix
+        query["chart"] += suffix
+        requests, replies, cursor = [], [], None
+        for index, page in enumerate(pages):
+            page["context"] = copy.deepcopy(query["context"])
+            page["chart"] = query["chart"]
+            current = {**copy.deepcopy(query), "cursor": cursor}
+            request_id = kind + suffix + str(index)
+            requests.append({"type": "request", "request_id": request_id,
+                             "request": {"type": "chart", "query": current}})
+            replies.append({"type": "chart_page", "request_id": request_id,
+                            "context": copy.deepcopy(query["context"]), "page": page})
+            cursor = page["next"]
+        return {"queries": requests, "pages": replies}
+
+    original, restored = exchange("magic", 1, "-original"), exchange("magic", 1, "-restored")
+    slots, roots = {}, []
+    for index, kind in enumerate(("food", "magic", "mapping")):
+        slots[kind] = {"latest": index, "attempt": {"attempted_at": 200,
+            "status": {"kind": "positive" if kind == "mapping" else "empty"}}}
+        roots.append({"kind": kind, "points": [{"mapping": {"kind": "wall_face"}
+                                                      if kind == "mapping" else None}]})
+    book = {"game": {"chart_history": 0}, "shared": {"chart_history": {
+        "owners": [[{"actor": 1, "slots": slots}]], "roots": roots}}}
+    samples = {"query": original["queries"][0], "page": original["pages"][0],
+               "restored_query": restored["queries"][0], "restored_page": restored["pages"][0],
+               "mapping": exchange("mapping", 1024, "-original"),
+               "restored_mapping": exchange("mapping", 1024, "-restored"),
+               "checkpoint_payload": b"unit-only-decoder-input-not-a-save"}
+    return samples, book
+
+
+def detection_case(samples, failure=None):
+    case, trace = recording_case(failure)
+    original = type(case).runTest
+
+    def run(subject):
+        subject.detection_samples = copy.deepcopy(samples)
+        original(subject)
+
+    type(case).runTest = run
+    return case, trace
+
+
+class DetectionRecordingContracts(unittest.TestCase):
+    def test_factory_selects_real_source_free_paid_history_case(self):
+        case = record_wire_samples.detection_recording_case()
+        self.assertEqual(case.id(), "test_magic_items_process.MagicItemProcesses."
+                         "test_imported_detection_history_empty_retention_source_free_spectator")
+        self.assertFalse(is_graphical_test(case))
+
+    def test_raw_queries_pages_and_writer_payload_publish_only_after_cleanup(self):
+        samples, book = detection_recording_inputs()
+        case, trace = detection_case(samples)
+        recorder = record_wire_samples.Recorder()
+        published = {"existing": {"type": "palette"}}
+        with patch("record_wire_samples.detection_recording_case", return_value=case), \
+                patch("checkpoint_payload.decode_checkpoint_payload", return_value=json.dumps(book)) as decoder:
+            recorder.record_detection(published)
+        decoder.assert_called_once_with(samples["checkpoint_payload"])
+        self.assertEqual(trace[-1], "class_cleanup")
+        self.assertEqual(published["chart_page"], samples["page"])
+        self.assertEqual(published["zz.detection_restored"], samples["restored_page"])
+        self.assertEqual(published["zz.mapping.000"], samples["mapping"]["pages"][0])
+        self.assertEqual(recorder.recorded_client_samples,
+                         [samples["query"], samples["restored_query"],
+                          *samples["mapping"]["queries"], *samples["restored_mapping"]["queries"]])
+        self.assertEqual(recorder.detection_checkpoint_payload, samples["checkpoint_payload"])
+        self.assertIsNot(published["chart_page"], case.detection_samples["page"])
+
+    def test_every_lifecycle_failure_blocks_all_detection_publication(self):
+        for failure in ("class_setup", "setup", "body", "teardown", "cleanup", "class_teardown", "class_cleanup"):
+            with self.subTest(failure=failure):
+                samples, _ = detection_recording_inputs()
+                case, _ = detection_case(samples, failure)
+                published = {"old": {"type": "palette"}}
+                recorder = record_wire_samples.Recorder()
+                recorder.recorded_client_samples = [{"old": "query"}]
+                with patch("record_wire_samples.detection_recording_case", return_value=case):
+                    with self.assertRaises(AssertionError):
+                        recorder.record_detection(published)
+                self.assertEqual(published, {"old": {"type": "palette"}})
+                self.assertEqual(recorder.recorded_client_samples, [{"old": "query"}])
+                self.assertFalse(hasattr(recorder, "detection_checkpoint_payload"))
+
+    def test_corrupt_pages_correlation_or_saved_book_never_partially_publish(self):
+        mutations = (
+            lambda s, b: s["page"].update(request_id="wrong"),
+            lambda s, b: s["restored_page"]["page"].update(acquired_at="101"),
+            lambda s, b: s["mapping"]["queries"][0]["request"]["query"].update(cursor="0"),
+            lambda s, b: s["mapping"]["pages"][0]["page"].update(next="381"),
+            lambda s, b: s["mapping"]["pages"].clear(),
+            lambda s, b: s["mapping"]["pages"][0]["page"]["records"][1]["mark"].update(fact={"kind": "wall_face", "normal": [0, 0, 1]}),
+            lambda s, b: s["restored_page"]["page"]["records"][1].update(item="private"),
+            lambda s, b: b["shared"]["chart_history"]["owners"][0][0]["slots"]["food"].update(latest=None),
+            lambda s, b: b["shared"]["chart_history"]["owners"][0][0]["slots"]["magic"]["attempt"].update(status={"kind": "positive"}),
+            lambda s, b: b["shared"]["chart_history"]["roots"][2]["points"][0].update(mapping=None),
+            lambda s, b: s.update(checkpoint_payload="not production bytes"),
+        )
+        for mutation in mutations:
+            with self.subTest(mutation=mutation):
+                samples, book = detection_recording_inputs()
+                mutation(samples, book)
+                case, _ = detection_case(samples)
+                recorder = record_wire_samples.Recorder()
+                published = {"old": {"type": "palette"}}
+                with patch("record_wire_samples.detection_recording_case", return_value=case), \
+                        patch("checkpoint_payload.decode_checkpoint_payload", return_value=json.dumps(book)):
+                    with self.assertRaises(AssertionError):
+                        recorder.record_detection(published)
+                self.assertEqual(published, {"old": {"type": "palette"}})
+                self.assertFalse(hasattr(recorder, "recorded_client_samples"))
+                self.assertFalse(hasattr(recorder, "detection_checkpoint_payload"))
+
+    def test_atomic_wire_publication_includes_actual_client_queries_unchanged(self):
+        samples, _ = detection_recording_inputs()
+        case, trace = recording_case()
+        original = type(case).runTest
+
+        def run(subject):
+            original(subject)
+            subject.recorded_client_samples = [copy.deepcopy(samples["query"])]
+
+        type(case).runTest = run
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "wire-unit-only.json"
+            with patch("record_wire_samples.Recorder", return_value=case), patch("builtins.print"):
+                record_wire_samples.record_samples(output=output)
+            document = json.loads(output.read_text())
+        self.assertEqual(trace[-1], "class_cleanup")
+        self.assertEqual(document["client"], [*record_wire_samples.CLIENT, samples["query"]])
+
+
+    def test_checkpoint_export_preserves_decoded_raw_and_hash_provenance_after_cleanup(self):
+        import hashlib
+        raw, decoded = b"unit-only-raw-envelope", b'{"unit":"decoded writer bytes"}'
+        case, trace = recording_case()
+        original = type(case).runTest
+
+        def run(subject):
+            original(subject)
+            subject.detection_checkpoint_payload = raw
+
+        type(case).runTest = run
+        with tempfile.TemporaryDirectory() as directory:
+            target, output = Path(directory) / "current-save.json", Path(directory) / "wire.json"
+            with patch("record_wire_samples.Recorder", return_value=case), patch("builtins.print"), \
+                    patch("checkpoint_payload.decode_checkpoint_payload", return_value=decoded) as decoder:
+                record_wire_samples.record_samples(output=output, detection_checkpoint=target)
+            decoder.assert_called_once_with(raw)
+            self.assertEqual(trace[-1], "class_cleanup")
+            self.assertEqual(target.read_bytes(), decoded)
+            self.assertEqual(Path(str(target) + ".torc").read_bytes(), raw)
+            provenance = json.loads(Path(str(target) + ".provenance.json").read_bytes())
+            self.assertEqual(provenance["raw_sha256"], hashlib.sha256(raw).hexdigest())
+            self.assertEqual(provenance["decoded_sha256"], hashlib.sha256(decoded).hexdigest())
+            self.assertEqual((provenance["raw_bytes"], provenance["decoded_bytes"]), (len(raw), len(decoded)))
+
+    def test_checkpoint_export_lifecycle_or_decode_failure_preserves_every_prior_file(self):
+        for failure in ("cleanup", "class_cleanup", "decode"):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
+                case, _ = recording_case(None if failure == "decode" else failure)
+                case.detection_checkpoint_payload = b"unit-only-raw-envelope"
+                target, output = Path(directory) / "current-save.json", Path(directory) / "wire.json"
+                outputs = [target, Path(str(target) + ".torc"), Path(str(target) + ".provenance.json"), output]
+                for path in outputs:
+                    path.write_bytes(b"prior validated artifact")
+                with patch("record_wire_samples.Recorder", return_value=case), \
+                        patch("checkpoint_payload.decode_checkpoint_payload", side_effect=ValueError("invalid actual envelope")):
+                    with self.assertRaises((AssertionError, ValueError)):
+                        record_wire_samples.record_samples(output=output, detection_checkpoint=target)
+                for path in outputs:
+                    self.assertEqual(path.read_bytes(), b"prior validated artifact")
 
 
 ANONYMOUS_SAMPLE = {
@@ -678,6 +929,448 @@ class DiscoveryRecordingContracts(unittest.TestCase):
                 with patch("record_wire_samples.discovery_recording_case", return_value=case):
                     with self.assertRaises(AssertionError):
                         record_wire_samples.Recorder().record_discovery(samples)
+                self.assertEqual(samples, {"existing": {"type": "palette"}})
+
+
+class SelfDeviceRecordingContracts(unittest.TestCase):
+    def case(self, failure=None):
+        source = {"type": "snapshot", "request_id": "exact-self-device", "snapshot": {
+            "state": {"wizard_game": False, "observation": {"interactions": {
+                "inventory": [{"item": "opaque-item", "device_activation": "self_target"}]}}}}}
+        case, trace = recording_case(failure)
+        original = type(case).runTest
+        def record(subject):
+            subject.self_device_sample = copy.deepcopy(source)
+            original(subject)
+        type(case).runTest = record
+        return case, trace, source
+
+    def test_factory_selects_existing_non_graphical_actual_text_case(self):
+        case = record_wire_samples.self_device_recording_case()
+        self.assertEqual(case.id(), "test_magic_items_process.MagicItemProcesses."
+                         "test_text_nothing_unknown_direction_and_identified_self_skip")
+        self.assertFalse(is_graphical_test(case))
+
+    def test_self_device_snapshot_is_preserved_only_after_cleanup(self):
+        case, trace, source = self.case()
+        samples = {}
+        with patch("record_wire_samples.self_device_recording_case", return_value=case):
+            record_wire_samples.Recorder().record_self_device(samples)
+        self.assertEqual(samples, {"zz.self_device": source})
+        self.assertEqual(trace[-1], "class_cleanup")
+        self.assertIsNot(samples["zz.self_device"], case.self_device_sample)
+
+    def test_self_device_failed_cleanup_does_not_publish_partial_sample(self):
+        for failure in ("cleanup", "class_cleanup"):
+            with self.subTest(failure=failure):
+                case, _, _ = self.case(failure)
+                samples = {"existing": {"type": "palette"}}
+                with patch("record_wire_samples.self_device_recording_case", return_value=case):
+                    with self.assertRaises(AssertionError):
+                        record_wire_samples.Recorder().record_self_device(samples)
+                self.assertEqual(samples, {"existing": {"type": "palette"}})
+
+
+class DrainRefusalRecordingContracts(unittest.TestCase):
+    def case(self, failure=None):
+        source = {"type": "snapshot", "request_id": "exact-drain-refusal", "snapshot": {
+            "state": {"wizard_game": False, "observation": {"interactions": {
+                "completed": [], "refused": [{"action": {"type": "zap", "item": "opaque-item", "aim": {"kind": "direction", "direction": "east"}}, "reason": "too_weak"}]}}}}}
+        case, trace = recording_case(failure)
+        original = type(case).runTest
+        def record(subject):
+            subject.drain_refusal_sample = copy.deepcopy(source)
+            original(subject)
+        type(case).runTest = record
+        return case, trace, source
+
+    def test_factory_selects_existing_non_graphical_actual_text_case(self):
+        case = record_wire_samples.drain_refusal_recording_case()
+        self.assertEqual(case.id(), "test_magic_items_process.MagicItemProcesses."
+                         "test_imported_drain_weak_text_attempt_spends_time_not_charge_or_identity")
+        self.assertFalse(is_graphical_test(case))
+
+    def test_drain_refusal_snapshot_is_preserved_only_after_cleanup(self):
+        case, trace, source = self.case()
+        samples = {}
+        with patch("record_wire_samples.drain_refusal_recording_case", return_value=case):
+            record_wire_samples.Recorder().record_drain_refusal(samples)
+        self.assertEqual(samples, {"zz.drain_refusal": source})
+        self.assertEqual(trace[-1], "class_cleanup")
+        self.assertIsNot(samples["zz.drain_refusal"], case.drain_refusal_sample)
+
+    def test_drain_refusal_failed_cleanup_does_not_publish_partial_sample(self):
+        for failure in ("cleanup", "class_cleanup"):
+            with self.subTest(failure=failure):
+                case, _, _ = self.case(failure)
+                samples = {"existing": {"type": "palette"}}
+                with patch("record_wire_samples.drain_refusal_recording_case", return_value=case):
+                    with self.assertRaises(AssertionError):
+                        record_wire_samples.Recorder().record_drain_refusal(samples)
+                self.assertEqual(samples, {"existing": {"type": "palette"}})
+
+
+class FirstContactRecordingContracts(unittest.TestCase):
+    def case(self, failure=None, malformed=None):
+        source = {"reach": {"type": "snapshot", "snapshot": {"state": {"observation": {
+            "combat": {"own_stats": {"abilities": [{"id": "rogue.wand_cancellation",
+            "reach": {"kind": "until_obstruction"}, "target_kind": "directional_ray",
+            "basic_attack": False, "weapon_selection": False}]}}}}}},
+            "effect": {"type": "combat_diagnostics", "report": {"records": [{"outcome": {
+                "effects": [{"type": "cancel_specials", "target": "2", "changed": True}]}}]}}}
+        if malformed == "reach":
+            source["reach"]["snapshot"]["state"]["observation"]["combat"]["own_stats"]["abilities"] = []
+        elif malformed == "effect":
+            source["effect"]["report"]["records"] = []
+        elif malformed == "discriminator":
+            effect = source["effect"]["report"]["records"][0]["outcome"]["effects"][0]
+            effect["kind"] = effect.pop("type")
+        case, trace = recording_case(failure)
+        original = type(case).runTest
+        def record(subject):
+            subject.first_contact_samples = copy.deepcopy(source)
+            original(subject)
+        type(case).runTest = record
+        return case, trace, source
+
+    def test_factory_selects_non_graphical_actual_paid_capture_case(self):
+        case = record_wire_samples.first_contact_recording_case()
+        self.assertEqual(case.id(), "test_magic_items_process.MagicItemProcesses."
+                         "test_imported_cancellation_privileged_capture_records_actual_reach_and_effect")
+        self.assertFalse(is_graphical_test(case))
+
+    def test_both_actual_artifacts_are_preserved_only_after_cleanup(self):
+        case, trace, source = self.case()
+        samples = {}
+        with patch("record_wire_samples.first_contact_recording_case", return_value=case):
+            record_wire_samples.Recorder().record_first_contact(samples)
+        self.assertEqual(samples, {"zz.first_contact_" + key: value for key, value in source.items()})
+        self.assertEqual(trace[-1], "class_cleanup")
+        self.assertIsNot(samples["zz.first_contact_reach"], case.first_contact_samples["reach"])
+
+    def test_failed_cleanup_or_missing_variants_never_publish_partial_samples(self):
+        for failure, malformed in (("cleanup", None), ("class_cleanup", None), (None, "reach"), (None, "effect"), (None, "discriminator")):
+            with self.subTest(failure=failure, malformed=malformed):
+                case, _, _ = self.case(failure, malformed)
+                samples = {"existing": {"type": "palette"}}
+                with patch("record_wire_samples.first_contact_recording_case", return_value=case):
+                    with self.assertRaises(AssertionError):
+                        record_wire_samples.Recorder().record_first_contact(samples)
+                self.assertEqual(samples, {"existing": {"type": "palette"}})
+
+
+class TorchRecordingContracts(unittest.TestCase):
+    def case(self, failure=None, malformed=False):
+        source = {name: {"type": "snapshot", "snapshot": {"state": {"wizard_game": False,
+            "observation": {"interactions": {"inventory": [{"portable_light": {
+                "remaining": remaining, "lit": lit, "ignitable": not lit, "extinguishable": lit}}]}}}}}
+            for name, lit, remaining in (("lit", True, "100000"), ("off", False, "99800"))}
+        if malformed:
+            source["off"]["snapshot"]["state"]["observation"]["interactions"]["inventory"][0]["portable_light"]["lit"] = True
+        case, trace = recording_case(failure)
+        original = type(case).runTest
+        def record(subject):
+            subject.torch_samples = copy.deepcopy(source)
+            original(subject)
+        type(case).runTest = record
+        return case, trace, source
+
+    def test_factory_selects_non_graphical_actual_adventure_source_free_case(self):
+        case = record_wire_samples.torch_recording_case()
+        self.assertEqual(case.id(), "test_magic_items_process.MagicItemProcesses."
+                         "test_imported_torch_text_explicit_control_fuel_drop_and_source_free_reopen")
+        self.assertFalse(is_graphical_test(case))
+        actions = [row["request"]["command"]["action"] for row in record_wire_samples.CLIENT
+                   if row["type"] == "request" and row["request"]["type"] == "command"
+                   and row["request"]["command"]["type"] == "act"]
+        self.assertEqual([row["type"] for row in actions if row["type"] in ("ignite", "extinguish")],
+                         ["ignite", "extinguish"])
+
+    def test_both_server_states_publish_after_successful_cleanup_only(self):
+        case, trace, source = self.case()
+        samples = {}
+        with patch("record_wire_samples.torch_recording_case", return_value=case):
+            record_wire_samples.Recorder().record_torch(samples)
+        self.assertEqual(samples, {"zz.torch_" + key: value for key, value in source.items()})
+        self.assertEqual(trace[-1], "class_cleanup")
+        self.assertIsNot(samples["zz.torch_lit"], case.torch_samples["lit"])
+
+    def test_failed_cleanup_or_invalid_off_state_never_partially_publishes(self):
+        for failure, malformed in (("cleanup", False), ("class_cleanup", False), (None, True)):
+            with self.subTest(failure=failure, malformed=malformed):
+                case, _, _ = self.case(failure, malformed)
+                samples = {"existing": {"type": "palette"}}
+                with patch("record_wire_samples.torch_recording_case", return_value=case):
+                    with self.assertRaises(AssertionError):
+                        record_wire_samples.Recorder().record_torch(samples)
+                self.assertEqual(samples, {"existing": {"type": "palette"}})
+
+
+
+
+class HasteRecordingContracts(unittest.TestCase):
+    def case(self, failure=None, malformed=False):
+        case, trace = recording_case(failure)
+        source = {branch: {"type": "combat_diagnostics", "report": {"enabled": True, "records": [
+            {"ability": {"id": "fixture.haste_dose", "name": "Haste dose witness"}, "outcome": {"effects": [{"type": "haste_dose", "target": "1",
+                "condition": {"id": "rogue.hasted", "name": "Hasted"},
+                "rest": {"id": "rogue.haste_exhaustion", "name": "Exhausted"},
+                "outcome": {"type": branch, "duration" if branch == "hasted" else "rest": ticks}}]}}]}}
+            for branch, ticks in (("hasted", "400"), ("overdose", "0"))}
+        if malformed:
+            source["overdose"]["report"]["records"][0]["outcome"]["effects"][0]["outcome"]["rest"] = "800"
+        original = type(case).runTest
+        def record(subject):
+            subject.haste_samples = copy.deepcopy(source)
+            original(subject)
+        type(case).runTest = record
+        return case, trace, source
+
+    def test_factory_selects_actual_non_graphical_privileged_paid_doses(self):
+        case = record_wire_samples.haste_recording_case()
+        self.assertEqual(case.id(), "test_magic_items_process.MagicItemProcesses."
+                         "test_haste_self_ability_privileged_capture_records_both_real_branches")
+        self.assertFalse(is_graphical_test(case))
+
+    def test_both_real_branches_publish_only_after_successful_cleanup(self):
+        case, trace, source = self.case()
+        samples = {}
+        with patch("record_wire_samples.haste_recording_case", return_value=case):
+            record_wire_samples.Recorder().record_haste(samples)
+        self.assertEqual(samples, {"zz.haste_" + key: value for key, value in source.items()})
+        self.assertEqual(trace[-1], "class_cleanup")
+        self.assertIsNot(samples["zz.haste_hasted"], case.haste_samples["hasted"])
+
+    def test_cleanup_or_invalid_branch_retains_prior_samples_atomically(self):
+        for failure, malformed in (("cleanup", False), ("class_cleanup", False), (None, True)):
+            with self.subTest(failure=failure, malformed=malformed):
+                case, _, _ = self.case(failure, malformed)
+                samples = {"existing": {"type": "palette"}}
+                with patch("record_wire_samples.haste_recording_case", return_value=case):
+                    with self.assertRaises(AssertionError):
+                        record_wire_samples.Recorder().record_haste(samples)
+                self.assertEqual(samples, {"existing": {"type": "palette"}})
+
+
+class GrowthRecordingContracts(unittest.TestCase):
+    def case(self, failure=None, malformed=False):
+        case, trace = recording_case(failure)
+        source = {kind: {"type": "combat_diagnostics", "report": {"enabled": True, "records": [
+            {"ability": {"id": "fixture." + kind, "name": "Growth diagnostic"}, "outcome": {"effects": [
+                {"type": kind, "target": "1", **payload}]}}]}}
+            for kind, payload in (("gain_strength", {"change": "acquired"}), ("raise_level", {"amount": "100"}))}
+        if malformed:
+            source["raise_level"]["report"]["records"][0]["outcome"]["effects"][0]["amount"] = 100
+        original = type(case).runTest
+        def record(subject):
+            subject.growth_samples = copy.deepcopy(source)
+            original(subject)
+        type(case).runTest = record
+        return case, trace, source
+
+    def test_factory_selects_actual_non_graphical_granted_ability_case(self):
+        case = record_wire_samples.growth_recording_case()
+        self.assertEqual(case.id(), "test_magic_items_process.MagicItemProcesses."
+                         "test_growth_self_abilities_privileged_capture_records_actual_acquisition_and_credit")
+        self.assertFalse(is_graphical_test(case))
+
+    def test_both_actual_results_publish_after_successful_cleanup(self):
+        case, trace, source = self.case()
+        samples = {}
+        with patch("record_wire_samples.growth_recording_case", return_value=case):
+            record_wire_samples.Recorder().record_growth(samples)
+        self.assertEqual(samples, {"zz.growth_" + key: value for key, value in source.items()})
+        self.assertEqual(trace[-1], "class_cleanup")
+        self.assertIsNot(samples["zz.growth_gain_strength"], case.growth_samples["gain_strength"])
+
+    def test_cleanup_or_invalid_result_keeps_existing_samples_atomically(self):
+        for failure, malformed in (("cleanup", False), ("class_cleanup", False), (None, True)):
+            with self.subTest(failure=failure, malformed=malformed):
+                case, _, _ = self.case(failure, malformed)
+                samples = {"existing": {"type": "palette"}}
+                with patch("record_wire_samples.growth_recording_case", return_value=case):
+                    with self.assertRaises(AssertionError):
+                        record_wire_samples.Recorder().record_growth(samples)
+                self.assertEqual(samples, {"existing": {"type": "palette"}})
+
+
+class HallucinationRecordingContracts(unittest.TestCase):
+    def case(self, failure=None, mutation=None):
+        case, trace = recording_case(failure)
+        # Pure validator/lifecycle inputs only: never presented as wire corpus
+        # recordings. Genuine corpus values come from the real process factory.
+        condition = {"condition": {"id": "rogue.hallucinating", "name": "Hallucinating"},
+                     "remaining_ticks": "80800"}
+        view = {"self_target": "a_self", "tick": "100",
+            "combat": {"own_stats": {"conditions": [condition]}},
+            "visible_actors": [{"id": "a_peer", "name": "emu", "asset": "creature.bird.emu", "description": "",
+                                "appearance_seed": "p_" + "00" * 32}],
+            "ground_items": [{"presentation": {"name": "smoky potion", "asset": "item.potion",
+                "kind": {"kind": "item", "class": "potion"}}, "item": {
+                    "class": "coin", "quantity": "7", "known_currency": "gold", "name": "object", "appearance": "object", "description": ""}}],
+            "visible_cells": [{"stairs_up": False, "stairs_down": False}]}
+        raw = {"type": "snapshot", "request_id": "exact-hallucination-request",
+               "snapshot": {"state": {"observation": view}, "context": {"stream": "unchanged-stream", "epoch": "1"}}}
+        source = {stage: copy.deepcopy(raw) for stage in ("visual", "extended", "cured")}
+        extended = source["extended"]["snapshot"]["state"]["observation"]
+        extended["tick"] = "200"
+        extended["combat"]["own_stats"]["conditions"][0]["remaining_ticks"] = "161500"
+        extended["visible_actors"][0].update(name="bat", asset="creature.bat")
+        extended["ground_items"][0]["presentation"] = {"name": "ivory ring", "asset": "item.ring",
+            "kind": {"kind": "item", "class": "ring"}}
+        cured = source["cured"]["snapshot"]["state"]["observation"]
+        cured["tick"] = "300"
+        cured["visible_actors"][0].update(name="actual visible peer", asset=None)
+        cured["combat"]["own_stats"]["conditions"] = []
+        cured["ground_items"][0]["presentation"] = None
+        cured["ground_items"][0]["item"]["name"] = "gold coin"
+        if mutation is not None:
+            mutation(source)
+        original = type(case).runTest
+        def record(subject):
+            subject.hallucination_samples = copy.deepcopy(source)
+            original(subject)
+        type(case).runTest = record
+        return case, trace, source
+
+    def test_factory_selects_actual_non_graphical_text_cadence_source_free_case(self):
+        case = record_wire_samples.hallucination_recording_case()
+        self.assertEqual(case.id(), "test_magic_items_process.MagicItemProcesses."
+                         "test_imported_hallucination_text_visual_cadence_and_source_free_reopen")
+        self.assertFalse(is_graphical_test(case))
+
+    def test_three_raw_snapshots_publish_only_after_all_lifecycle_hooks(self):
+        case, trace, source = self.case()
+        samples = {"existing": {"type": "palette"}}
+        with patch("record_wire_samples.hallucination_recording_case", return_value=case):
+            record_wire_samples.Recorder().record_hallucination(samples)
+        self.assertEqual(samples, {"existing": {"type": "palette"},
+            **{"zz.hallucination_" + stage: sample for stage, sample in source.items()}})
+        self.assertEqual(trace, ["class_setup", "setup", "body", "teardown", "cleanup",
+                                 "class_teardown", "class_cleanup"])
+        for stage in source:
+            self.assertIsNot(samples["zz.hallucination_" + stage], case.hallucination_samples[stage])
+            self.assertEqual(samples["zz.hallucination_" + stage]["request_id"], "exact-hallucination-request")
+
+    @staticmethod
+    def multicell_occurrences(source):
+        for sample in source.values():
+            rows = sample["snapshot"]["state"]["observation"]["visible_actors"]
+            rows[0]["position"] = {"x": 2, "y": 0, "z": 0}
+            upper = copy.deepcopy(rows[0])
+            upper["position"]["z"] = 1
+            rows.append(upper)
+
+    def test_two_lawful_body_occurrences_preserve_every_raw_row(self):
+        case, trace, source = self.case(mutation=self.multicell_occurrences)
+        samples = {}
+        with patch("record_wire_samples.hallucination_recording_case", return_value=case):
+            record_wire_samples.Recorder().record_hallucination(samples)
+        self.assertEqual(trace[-1], "class_cleanup")
+        self.assertEqual(samples, {"zz.hallucination_" + stage: sample for stage, sample in source.items()})
+        for sample in samples.values():
+            rows = sample["snapshot"]["state"]["observation"]["visible_actors"]
+            self.assertEqual(len(rows), 2)
+            self.assertEqual([row["position"]["z"] for row in rows], [0, 1])
+
+    def test_second_peer_or_contradictory_same_target_occurrence_rejects_atomically(self):
+        for stage in ("visual", "extended", "cured"):
+            for field, value in (("id", "a_second_peer"), ("name", "contradictory name"),
+                                 ("asset", "creature.wrong"), ("description", "true hidden description")):
+                with self.subTest(stage=stage, field=field):
+                    def mutate(source):
+                        self.multicell_occurrences(source)
+                        source[stage]["snapshot"]["state"]["observation"]["visible_actors"][1][field] = value
+                    case, _, _ = self.case(mutation=mutate)
+                    samples = {"existing": {"type": "palette"}}
+                    with patch("record_wire_samples.hallucination_recording_case", return_value=case):
+                        with self.assertRaises(AssertionError):
+                            record_wire_samples.Recorder().record_hallucination(samples)
+                    self.assertEqual(samples, {"existing": {"type": "palette"}})
+        for stage in ("visual", "extended"):
+            with self.subTest(stage=stage, field="appearance_seed"):
+                def mutate(source):
+                    self.multicell_occurrences(source)
+                    source[stage]["snapshot"]["state"]["observation"]["visible_actors"][1]["appearance_seed"] = "p_" + "01" * 32
+                case, _, _ = self.case(mutation=mutate)
+                samples = {"existing": {"type": "palette"}}
+                with patch("record_wire_samples.hallucination_recording_case", return_value=case):
+                    with self.assertRaises(AssertionError):
+                        record_wire_samples.Recorder().record_hallucination(samples)
+                self.assertEqual(samples, {"existing": {"type": "palette"}})
+
+    def test_shared_process_sample_helper_preserves_and_checks_every_body_occurrence(self):
+        from hallucination_package import assert_sample
+        _, _, source = self.case(mutation=self.multicell_occurrences)
+        for stage, phase in (("visual", 0), ("extended", 1)):
+            view = source[stage]["snapshot"]["state"]["observation"]
+            before = copy.deepcopy(view)
+            assert_sample(self, view, phase)
+            self.assertEqual(view, before, "shared helper must never deduplicate or normalize raw rows")
+            for field, value in (("id", "a_second_peer"), ("name", "contradictory name"),
+                                 ("asset", "creature.wrong"), ("description", "true hidden description"),
+                                 ("appearance_seed", "p_" + "01" * 32)):
+                with self.subTest(stage=stage, field=field):
+                    bad = copy.deepcopy(view)
+                    bad["visible_actors"][1][field] = value
+                    with self.assertRaises(AssertionError):
+                        assert_sample(self, bad, phase)
+
+    def test_both_inclusive_duration_endpoints_accept_only_exact_base_turn_extension(self):
+        for extension in (80800, 89200):
+            with self.subTest(extension=extension):
+                def mutate(source):
+                    visual = source["visual"]["snapshot"]["state"]["observation"]
+                    extended = source["extended"]["snapshot"]["state"]["observation"]
+                    first_remaining = int(visual["combat"]["own_stats"]["conditions"][0]["remaining_ticks"])
+                    remaining = first_remaining + extension + int(visual["tick"]) - int(extended["tick"])
+                    extended["combat"]["own_stats"]["conditions"][0]["remaining_ticks"] = str(remaining)
+                case, _, source = self.case(mutation=mutate)
+                samples = {}
+                with patch("record_wire_samples.hallucination_recording_case", return_value=case):
+                    record_wire_samples.Recorder().record_hallucination(samples)
+                self.assertEqual(samples, {"zz.hallucination_" + stage: sample for stage, sample in source.items()})
+
+    def test_any_lifecycle_failure_prevents_all_three_samples(self):
+        for failure in ("class_setup", "setup", "body", "teardown", "cleanup", "class_teardown", "class_cleanup"):
+            with self.subTest(failure=failure):
+                case, _, _ = self.case(failure)
+                samples = {"existing": {"type": "palette"}}
+                with patch("record_wire_samples.hallucination_recording_case", return_value=case):
+                    with self.assertRaises(AssertionError):
+                        record_wire_samples.Recorder().record_hallucination(samples)
+                self.assertEqual(samples, {"existing": {"type": "palette"}})
+
+    def test_invalid_visual_extension_cure_authority_or_private_clock_never_partially_publishes(self):
+        def view(samples, stage):
+            return samples[stage]["snapshot"]["state"]["observation"]
+        mutations = {
+            "wrong_visual_name": lambda s: view(s, "visual")["visible_actors"][0].update(name="actual peer"),
+            "true_sibling_leak": lambda s: view(s, "visual")["ground_items"][0]["item"].update(asset="item.coin"),
+            "fake_mechanical_class": lambda s: view(s, "visual")["ground_items"][0]["item"].update(**{"class": "weapon"}),
+            "wrong_sample": lambda s: view(s, "visual")["ground_items"][0]["presentation"].update(name="torch"),
+            "wrong_extended_peer": lambda s: view(s, "extended")["visible_actors"][0].update(name="emu"),
+            "wrong_extended_object": lambda s: view(s, "extended")["ground_items"][0]["presentation"].update(name="arrow"),
+            "extended_true_sibling_leak": lambda s: view(s, "extended")["ground_items"][0]["item"].update(asset="item.coin"),
+            "too_small_extension": lambda s: view(s, "extended")["combat"]["own_stats"]["conditions"][0].update(remaining_ticks="161400"),
+            "too_large_extension": lambda s: view(s, "extended")["combat"]["own_stats"]["conditions"][0].update(remaining_ticks="170000"),
+            "fractional_turn_extension": lambda s: view(s, "extended")["combat"]["own_stats"]["conditions"][0].update(remaining_ticks="161501"),
+            "extension_tick_ignored": lambda s: view(s, "extended").update(tick="201"),
+            "stale_cured_peer": lambda s: view(s, "cured")["visible_actors"][0].update(name="bat", asset="creature.bat"),
+            "zero_extension": lambda s: view(s, "extended")["combat"]["own_stats"]["conditions"][0].update(remaining_ticks="0"),
+            "missing_extension": lambda s: view(s, "extended")["combat"]["own_stats"].update(conditions=[]),
+            "uncured_marker": lambda s: view(s, "cured")["combat"]["own_stats"].update(conditions=copy.deepcopy(view(s, "visual")["combat"]["own_stats"]["conditions"])),
+            "stale_cured_art": lambda s: view(s, "cured")["ground_items"][0].update(presentation=copy.deepcopy(view(s, "visual")["ground_items"][0]["presentation"])),
+            "private_clock": lambda s: view(s, "visual").update(remaining_to_shift="100"),
+            "not_raw_snapshot": lambda s: s["visual"].update(type="state"),
+        }
+        for label, mutation in mutations.items():
+            with self.subTest(label=label):
+                case, _, _ = self.case(mutation=mutation)
+                samples = {"existing": {"type": "palette"}}
+                with patch("record_wire_samples.hallucination_recording_case", return_value=case):
+                    with self.assertRaises(AssertionError):
+                        record_wire_samples.Recorder().record_hallucination(samples)
                 self.assertEqual(samples, {"existing": {"type": "palette"}})
 
 

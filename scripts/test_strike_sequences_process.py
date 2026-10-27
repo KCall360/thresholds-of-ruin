@@ -4,7 +4,7 @@ import json
 import struct
 import threading
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from process_harness import ProcessTestCase, ROOT, SPECTATOR_TOKEN, underfoot
 from strike_sequence_package import sequence_package
@@ -118,7 +118,7 @@ class StrikeSequenceProcesses(ProcessTestCase):
         admitted = self.act(player, {"type": "use_ability", "id": "triple_strike", "invocation": {"aim": {"kind": "actor_target", "target": sentinel}, "weapon": {"kind": "default"}}})
         self.assertIsNone(admitted["error"])
         identity = admitted["intentions"][0]["intention"]
-        self.act(target, {"type": "wait"})
+        self.sequence_peer_wait(target)
         first = self.frame(player, prefix)
         self.assertEqual(combat(first)["sequence"]["total"], 3)
         self.assertEqual(first["intentions"][0]["phase"], "started")
@@ -188,7 +188,7 @@ class StrikeSequenceProcesses(ProcessTestCase):
         self.sequence_peer_wait(target)
         second = self.frame(player, lambda frame: event(frame, 1) is not None)
         self.assertEqual(second["intentions"][0]["phase"], "started")
-        self.act(target, {"type": "wait"})
+        self.sequence_peer_wait(target)
         finished = self.frame(player, lambda frame: combat(frame)["sequence"] is None
                               and not frame["intentions"])
         self.assertIsNone(finished["error"])
@@ -222,7 +222,7 @@ class StrikeSequenceProcesses(ProcessTestCase):
             "invocation": {"aim": {"kind": "actor_target", "target": sentinel}, "weapon": {"kind": "default"}}})
         self.assertIsNone(admitted["error"])
         identity = admitted["intentions"][0]["intention"]
-        self.act(target, {"type": "wait"})
+        self.sequence_peer_wait(target)
         boundary = self.frame(player, prefix)
         self.assertEqual(stock(boundary), 1, "first resolution spends one finite charge")
         self.assertEqual(u64(combat(self.request(target, {"type": "snapshot"}))["hp"]),
@@ -248,7 +248,7 @@ class StrikeSequenceProcesses(ProcessTestCase):
         self.assertEqual(combat(watched)["sequence"], combat(restored)["sequence"])
         self.resume_with_peer_wait(player, target, identity)
         self.frame(player, lambda frame: event(frame, 1) is not None)
-        self.act(target, {"type": "wait"})
+        self.sequence_peer_wait(target)
         finished = self.frame(player, lambda frame: combat(frame)["sequence"] is None and not frame["intentions"])
         self.assertEqual(stock(finished), 1, "resumed riders and strikes do not repay the finite cost")
         self.assertEqual(u64(combat(self.request(target, {"type": "snapshot"}))["hp"]),
@@ -262,7 +262,7 @@ class StrikeSequenceProcesses(ProcessTestCase):
         sentinel = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"]
                         if actor["name"] == "Sequence sentinel")
         self.act(player, {"type": "use_ability", "id": "triple_strike", "invocation": {"aim": {"kind": "actor_target", "target": sentinel}, "weapon": {"kind": "default"}}})
-        self.act(target, {"type": "wait"})
+        self.sequence_peer_wait(target)
         self.frame(player, prefix)
         old = self.request(player, {"type": "snapshot"})
         identity = old["intentions"][0]["intention"]
@@ -286,7 +286,7 @@ class StrikeSequenceProcesses(ProcessTestCase):
         sentinel = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"]
                         if actor["name"] == "Sequence sentinel")
         self.act(player, {"type": "use_ability", "id": "triple_strike", "invocation": {"aim": {"kind": "actor_target", "target": sentinel}, "weapon": {"kind": "default"}}})
-        self.act(target, {"type": "wait"})
+        self.sequence_peer_wait(target)
         self.frame(player, prefix)
         self.request(player, {"type": "release_control"})
         text, welcome = self.adventure()
@@ -337,6 +337,89 @@ class NativeStrikeSequenceProcesses(ProcessTestCase):
         authoritative = self.request(observer, {"type": "snapshot"})
         self.assertEqual(u64(combat(authoritative)["hp"]), hp)
         self.assertFalse(authoritative["state"]["wizard_game"])
+
+
+class InitialSequencePeerTests(unittest.TestCase):
+    METHODS = (
+        "test_headless_saved_prefix_reconnect_resume_and_spectator_disclosure",
+        "test_natural_source_saved_prefix_resumes_only_unpaid_strikes",
+        "test_rewind_clears_client_prefix_and_rejects_old_escape_context",
+        "test_real_text_presents_prefix_debt_and_executes_explicit_escape",
+    )
+
+    class PrefixReached(Exception):
+        """Stop the pure driver witness before save/reconnect or UI work."""
+
+    def harness(self, method, *, wait_error=None):
+        owner = StrikeSequenceProcesses(method)
+        initial = {"state": {"observation": {
+            "visible_actors": [{"name": "Sequence sentinel", "id": "sentinel"}],
+            "inventory": [{"quantity": "2", "known_supply": {"id": "bandage"}}]}}}
+        owner.server = Mock()
+        owner.client = Mock(side_effect=[("player", initial), ("peer", {})])
+        state = {"started": False, "fresh": False, "wait_accepted": False}
+        calls = []
+
+        def request(client, value):
+            self.assertEqual((client, value), ("peer", {"type": "snapshot"}))
+            self.assertTrue(state["started"])
+            state["fresh"] = True
+            calls.append("peer snapshot")
+            return {"error": None, "state": {"observation": {"ready": True}},
+                    "readiness": {"admission": True}}
+
+        def act(client, action):
+            if client == "player":
+                self.assertEqual(action, {"type": "use_ability", "id": "triple_strike",
+                    "invocation": {"aim": {"kind": "actor_target", "target": "sentinel"},
+                                   "weapon": {"kind": "default"}}})
+                self.assertFalse(state["started"])
+                state["started"] = True
+                calls.append("owner started")
+                return {"error": None, "intentions": [{"intention": "original", "phase": "started"}]}
+            self.assertEqual((client, action), ("peer", {"type": "wait"}))
+            self.assertTrue(state["started"])
+            calls.append("peer Wait")
+            error = wait_error if state["fresh"] else "StaleRevision: peer observation is stale"
+            state["wait_accepted"] = error is None
+            return {"error": error}
+
+        def frame(client, predicate, seconds=15):
+            self.assertEqual((client, seconds), ("player", 15))
+            self.assertTrue(state["wait_accepted"],
+                            "Peer Wait was not admitted before waiting for the prefix")
+            self.assertTrue(predicate({"state": {"observation": {
+                "combat": {"sequence": {"completed": 1}}}}}))
+            calls.append("owner prefix")
+            raise self.PrefixReached
+
+        owner.request = Mock(side_effect=request)
+        owner.act = Mock(side_effect=act)
+        owner.frame = Mock(side_effect=frame)
+        return owner, calls
+
+    def test_every_initial_prefix_refreshes_peer_then_submits_exactly_one_checked_wait(self):
+        for method in self.METHODS:
+            with self.subTest(method=method):
+                owner, calls = self.harness(method)
+                with patch(f"{type(owner).__module__}.sequence_package", return_value="fixture"):
+                    with self.assertRaises(self.PrefixReached):
+                        getattr(owner, method)()
+                self.assertEqual(calls, ["owner started", "peer snapshot", "peer Wait", "owner prefix"])
+                owner.request.assert_called_once_with("peer", {"type": "snapshot"})
+                self.assertEqual(owner.act.call_count, 2)
+                owner.frame.assert_called_once()
+
+    def test_every_initial_prefix_refuses_rejected_peer_wait_without_retry_or_prefix_wait(self):
+        for method in self.METHODS:
+            with self.subTest(method=method):
+                owner, calls = self.harness(method, wait_error="StaleRevision: Wait rejected")
+                with patch(f"{type(owner).__module__}.sequence_package", return_value="fixture"):
+                    with self.assertRaisesRegex(AssertionError, "StaleRevision"):
+                        getattr(owner, method)()
+                self.assertEqual(calls, ["owner started", "peer snapshot", "peer Wait"])
+                self.assertEqual(owner.act.call_count, 2)
+                owner.frame.assert_not_called()
 
 
 class ResumedSequencePeerTests(unittest.TestCase):

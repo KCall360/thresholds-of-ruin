@@ -615,6 +615,7 @@ mod potency_tests {
             weapon_profile: None,
             modifiers: vec![],
             potency_modifiers: vec![Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Add {
                     stat: Stat::AttackDamageRollBonus,

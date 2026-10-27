@@ -926,6 +926,35 @@ class NativeKeyNames(unittest.TestCase):
                             1 | (scan << 16) | 0x01000000 | (0 if down else 0xC0000000))
 
 
+    def test_windows_torch_keys_send_explicit_nonextended_press_and_release(self):
+        import ctypes
+        harness = ProcessTestCase()
+        user32 = Mock()
+        user32.PostMessageW.return_value = 1
+        # Independent Windows VK_X/VK_V and MapVirtualKey return witnesses;
+        # never derive expected values from the harness mapping under test.
+        user32.MapVirtualKeyW.side_effect = lambda vk, mode: {0x58: 0x2D, 0x56: 0x2F}[vk]
+        with patch.object(harness, "_native_window", return_value=42), \
+                patch("process_harness.os.name", "nt"), \
+                patch.object(ctypes, "WinDLL", return_value=user32, create=True):
+            native = harness.native_keys(object())
+            for name, vk, scan in (("x", 0x58, 0x2D), ("v", 0x56, 0x2F)):
+                for down in (True, False):
+                    with self.subTest(name=name, down=down):
+                        user32.reset_mock()
+                        native(name, down)
+                        user32.MapVirtualKeyW.assert_called_once_with(vk, 0)
+                        user32.PostMessageW.assert_called_once_with(
+                            42, 0x100 if down else 0x101, vk,
+                            1 | (scan << 16) | (0 if down else 0xC0000000))
+            # The narrow added names must not become a generic input fallback.
+            user32.reset_mock()
+            with self.assertRaises(KeyError):
+                native("not-a-key", True)
+            user32.MapVirtualKeyW.assert_not_called()
+            user32.PostMessageW.assert_not_called()
+
+
 class NativeKeyPresses(unittest.TestCase):
     def test_repeated_native_key_waits_for_fresh_release_before_next_press(self):
         harness = ProcessTestCase()

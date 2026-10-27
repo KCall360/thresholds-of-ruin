@@ -245,6 +245,8 @@ impl MapTrapAppearance {
     }
 }
 record!(MapItemAppearance {
+    #[serde(deserialize_with = "required_option")]
+    presentation: Option<crate::ObjectPresentation>,
     #[serde(deserialize_with = "item_class")]
     class: ItemClass,
     #[serde(deserialize_with = "text::<_,MAX_MAP_PAGE_BYTES>")]
@@ -263,6 +265,13 @@ impl MapItemAppearance {
     pub fn validate(&self) -> Result<(), &'static str> {
         if label(&self.name, 80)
             && label(&self.appearance, 80)
+            && self.presentation.as_ref().is_none_or(|p| {
+                p.validate().is_ok()
+                    && self.name == "object"
+                    && self.appearance == "object"
+                    && self.description.is_empty()
+                    && self.asset.is_none()
+            })
             && self.quantity > 0
             && self.description.len() <= MAX_MAP_PAGE_BYTES
             && valid_asset(&self.asset)
@@ -274,6 +283,8 @@ impl MapItemAppearance {
     }
 }
 record!(RememberedMapCell {
+    #[serde(deserialize_with = "required_option")]
+    object_presentation: Option<crate::ObjectPresentation>,
     #[serde(deserialize_with = "text::<_,128>")]
     key: String,
     #[serde(deserialize_with = "position")]
@@ -298,6 +309,9 @@ impl RememberedMapCell {
         if !label(&self.key, 128)
             || self.material.len() > MAX_MAP_PAGE_BYTES
             || !valid_asset(&self.asset)
+            || self.object_presentation.as_ref().is_some_and(|p| {
+                p.validate().is_err() || self.wall || !(self.stairs_up || self.stairs_down)
+            })
             || self.ground_items.len() > MAX_MAP_CELL_ITEMS
         {
             return Err("invalid remembered map cell");

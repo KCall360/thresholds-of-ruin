@@ -142,6 +142,7 @@ fn immunity_does_not_interrupt_a_later_attack() {
     let mut hero = subject(100, 60, DamageType::Impact, 4);
     hero.id = SpeciesId::new(format!("{}_immune", hero.id)).unwrap();
     hero.modifiers.push(Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Immunity {
             selector: Selector::Category {
@@ -419,6 +420,7 @@ fn a_resisted_blow_is_no_injury_and_a_landed_one_wounds() {
     let mut hero = subject(100, 60, DamageType::Impact, 4);
     hero.id = SpeciesId::new(format!("{}_immune", hero.id)).unwrap();
     hero.modifiers.push(Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Immunity {
             selector: Selector::Category {

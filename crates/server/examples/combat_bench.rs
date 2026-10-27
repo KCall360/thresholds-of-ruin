@@ -38,6 +38,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 });
                 hero.modifiers
                     .push(tor_server::creature_authoring::Modifier {
+                        cancellable: false,
                         scope: tor_server::creature_authoring::Scope::Always,
                         op: tor_server::creature_authoring::Op::Add {
                             stat: tor_server::creature_authoring::Stat::Health,
@@ -80,6 +81,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 enemy_species
                     .modifiers
                     .push(tor_server::creature_authoring::Modifier {
+                        cancellable: false,
                         scope: tor_server::creature_authoring::Scope::Always,
                         op: tor_server::creature_authoring::Op::Add {
                             stat: tor_server::creature_authoring::Stat::Health,

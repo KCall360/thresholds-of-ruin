@@ -40,6 +40,7 @@ fn fixture_with(
                     descriptor: None,
                 }];
                 strike.riders = vec![RiderDef {
+                    cancellable: false,
                     trigger: RiderTrigger::Success,
                     condition: None,
                     check: None,
@@ -51,6 +52,7 @@ fn fixture_with(
         },
         |rules, species| {
             species.modifiers.push(Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Flag {
                     flag: policy().sustaining,
@@ -61,6 +63,7 @@ fn fixture_with(
                 (AbilityStat::CheckBonus, if reliable { 100 } else { 0 }),
             ] {
                 species.modifiers.push(Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Add {
                         stat: Stat::Ability {
@@ -208,6 +211,7 @@ fn hold_damage_initial_creation_has_no_damage_even_with_positive_shared_edge() {
         |_| {},
         |_, species| {
             species.modifiers.push(Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Add {
                     stat: Stat::Edge,
@@ -329,6 +333,7 @@ fn hold_damage_same_strike_creation_then_push_keeps_retired_receipt_and_never_re
         |ability| {
             let first = &mut primary_strikes(ability)[0];
             first.riders.push(RiderDef {
+                cancellable: false,
                 trigger: RiderTrigger::Success,
                 condition: None,
                 check: None,
@@ -406,6 +411,7 @@ fn hold_damage_paid_scalar_survives_current_effective_grant_expiration() {
             condition.id = grant.clone();
             condition.lifecycle = ConditionLifecycle::Timed;
             condition.modifiers = vec![Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Add {
                     stat: Stat::Ability {
@@ -640,4 +646,29 @@ fn hold_damage_cannot_be_admitted_as_non_hostile_or_healing_care() {
     assert!(rules
         .validate_planned_interaction(Interaction::NonHostile, frozen.iter())
         .is_err());
+}
+
+#[test]
+fn cancellation_reconciles_only_holds_whose_tagged_sustaining_authority_is_lost() {
+    for tagged in [false, true] {
+        let mut game = fixture_with(
+            true,
+            |_| {},
+            |_, species| {
+                let source = species.modifiers.iter_mut().find(|modifier|
+                matches!(&modifier.op, ModifierOp::Flag { flag } if flag == &policy().sustaining)
+            ).unwrap();
+                source.cancellable = tagged;
+            },
+        );
+        resolve_at(&mut game, 10);
+        assert!(primary_success(&game));
+        assert_eq!(game.linked_holds(ActorId(2)).len(), 1);
+        let hold = game.linked_holds(ActorId(2))[0].id;
+        let rng = game.rules_rng;
+        game.apply_effects(ActorId(1), &[Effect::CancelSpecials])
+            .unwrap();
+        assert_eq!(game.rules_rng, rng);
+        assert_eq!(game.linked_hold(ActorId(2), hold).is_none(), tagged);
+    }
 }

@@ -21,6 +21,8 @@ fn defensive_ai_admission_replays_the_same_paid_plan_then_stops_reapplying() {
     let mut document = fixture::ruleset().document().clone();
     let condition = ConditionId::new("integration_ward").unwrap();
     document.conditions.push(ConditionDef {
+        detecting_monsters: false,
+        hallucinating: false,
         id: condition.clone(),
         family: ConditionFamilyId::new("integration_ward").unwrap(),
         lifecycle: ConditionLifecycle::Timed,
@@ -29,6 +31,7 @@ fn defensive_ai_admission_replays_the_same_paid_plan_then_stops_reapplying() {
         preparation: tor_simulation::rules::ConditionPreparation::Preserve,
         name: "Integration Ward".into(),
         modifiers: vec![Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::TalentReduction {
                 category: tor_simulation::combat::DamageType::Impact,
@@ -53,6 +56,7 @@ fn defensive_ai_admission_replays_the_same_paid_plan_then_stops_reapplying() {
     })).unwrap());
     let mut species = fixture::species();
     species.modifiers.push(Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::GrantAbility {
             ability: ability.clone(),

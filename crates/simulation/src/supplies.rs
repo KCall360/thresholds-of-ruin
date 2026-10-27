@@ -223,7 +223,11 @@ impl Plan {
             | Self::Zap { item, .. }
             | Self::Drink { item, .. }
             | Self::Eat { item, .. } => ItemContract::ExactUnit { item: *item },
-            Self::Escape(_) | Self::Equip { .. } | Self::Unequip { .. } => ItemContract::None,
+            Self::Escape(_)
+            | Self::Equip { .. }
+            | Self::Unequip { .. }
+            | Self::Ignite { .. }
+            | Self::Extinguish { .. } => ItemContract::None,
         }
     }
     fn supply_selection(&self) -> Option<&SupplySelection> {
@@ -373,13 +377,13 @@ impl Game {
                         }),
                         Plan::Zap {
                             charges,
-                            ray,
+                            delivery,
                             discovery,
                             ..
                         } => {
                             item.charges == Some(*charges)
                                 && item.spec.device.as_ref().is_some_and(|d| {
-                                    d.ability == ray.ability && d.discovery == *discovery
+                                    &d.ability == delivery.ability() && d.discovery == *discovery
                                 })
                         }
                         Plan::Eat { .. } => item.spec.edible.is_some(),

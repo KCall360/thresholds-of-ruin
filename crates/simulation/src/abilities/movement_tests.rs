@@ -112,6 +112,7 @@ pub(super) fn guarded_step_game_with(
             .unwrap();
     let mut species = crate::test_creatures::species();
     species.modifiers.push(Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Set {
             stat: Stat::ResourceMax {
@@ -523,6 +524,7 @@ fn push_content(
         species.melee =
             crate::test_creatures::natural_melee(100, 60, crate::combat::DamageType::Impact, 4);
         species.modifiers.push(Modifier {
+            cancellable: false,
             scope: Scope::Always,
             op: ModifierOp::Set {
                 stat: Stat::ResourceMax {

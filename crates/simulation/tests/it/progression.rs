@@ -1,7 +1,9 @@
 use super::creature_fixture::{self as fixture, ruleset};
 use tor_simulation::content_ids::{ClassId, TypeId};
 use tor_simulation::creatures::{record::BuildRecord, CreatureBuild};
-use tor_simulation::progression::{HdError, HdLedger, HdSource, HealthContribution, HitDie};
+use tor_simulation::progression::{
+    HdError, HdLedger, HdSource, HealthContribution, HealthRollPolicy, HitDie,
+};
 
 fn health(die: u16, health: u32) -> HealthContribution {
     HealthContribution { die, health }
@@ -138,9 +140,10 @@ fn latest_removal_preserves_retained_health_randomness_and_exposes_zero_hd() {
     .unwrap();
     assert_eq!(
         ledger.remove_latest(),
-        Some(HitDie::new(
+        Some(HitDie::with_health_policy(
             HdSource::Class(ClassId::new("warrior").unwrap()),
-            42
+            42,
+            HealthRollPolicy::Seeded
         ))
     );
     assert_eq!(
@@ -151,7 +154,11 @@ fn latest_removal_preserves_retained_health_randomness_and_exposes_zero_hd() {
     );
     assert_eq!(
         ledger.remove_latest(),
-        Some(HitDie::new(HdSource::Racial, 0))
+        Some(HitDie::with_health_policy(
+            HdSource::Racial,
+            0,
+            HealthRollPolicy::Maximized
+        ))
     );
     assert_eq!(ledger.total_hd().get(), 0);
     assert_eq!(
@@ -420,12 +427,16 @@ fn recorded_only_builds_allow_explicit_manual_growth_without_claiming_a_health_r
         {
             "source": {"kind": "racial"},
             "health_seed": 42,
+            "health_policy": "maximized",
+            "owner": null,
             "health_origin": {"templates": [], "kind": "humanoid", "die": 8},
             "health_improvement": 0,
         },
         {
             "source": {"kind": "racial"},
             "health_seed": other.entries()[1].health_seed(),
+            "health_policy": "seeded",
+            "owner": null,
             "health_origin": {"templates": [], "kind": "humanoid", "die": 8},
             "health_improvement": 0,
         },

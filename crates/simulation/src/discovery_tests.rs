@@ -669,6 +669,7 @@ fn imposed_floor_contact_sleep_pauses_paid_search_and_preserves_its_reservation(
             "preparation":"pause", "modifiers":[],"stacking":{"kind":"extend"},"source_scoped":false,"descriptors":[],"capacity":"reject"
         })).unwrap());
         owner.modifiers.push(crate::rules::Modifier {
+            cancellable: false,
             scope: crate::rules::Scope::Always,
             op: crate::rules::ModifierOp::Locomotion {
                 value: crate::locomotion::LocomotionValue::Flying { enabled: true },
@@ -779,6 +780,7 @@ fn paid_search_obeys_normal_haste_and_slow_preparation_and_recovery() {
     ] {
         let mut game = fixture_with(&[], &[guise()], |_, owner, _| {
             owner.modifiers.push(crate::rules::Modifier {
+                cancellable: false,
                 scope: crate::rules::Scope::Always,
                 op: crate::rules::ModifierOp::ActionDuration { value: duration },
             });
@@ -811,6 +813,7 @@ fn periodic_search_during_paid_preparation_never_borrows_or_spends_its_token() {
         &[],
         |_, owner, _| {
             owner.modifiers.push(crate::rules::Modifier {
+                cancellable: false,
                 scope: crate::rules::Scope::Always,
                 op: crate::rules::ModifierOp::ActionDuration {
                     value: crate::action_duration::ActionDuration::Slow,

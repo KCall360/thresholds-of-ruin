@@ -371,6 +371,13 @@ impl World {
             .keys()
             .all(|(from, _)| !self.is_wall(*from))
     }
+    /// Full structural proof for an immutable historical World, which never
+    /// installs or advances the current Game's door allocator. Every invariant
+    /// of ordinary restoration remains, except its current next-ID comparison.
+    /// Door ID zero/MAX remain impossible; MAX cannot be allocated with a next ID.
+    pub fn historical_checkpoint_valid(&self) -> bool {
+        self.checkpoint_valid(u64::MAX)
+    }
     /// Structural validation for backend checkpoint restoration.
     pub fn checkpoint_valid(&self, next_door_id: u64) -> bool {
         let mut ids = BTreeSet::new();
@@ -892,11 +899,73 @@ impl World {
         };
         self.contains(to).then_some((to, 0))
     }
+    /// Physical geometry only, independent of source/door opacity. Transport
+    /// stairs remain nonphysical: vertical fallback stays in this region.
+    /// Construction-face certification uses this, not movement availability.
+    pub fn physical_geometry_neighbor(
+        &self,
+        from: Location,
+        direction: Direction,
+    ) -> Option<(Location, u8)> {
+        if direction.components().is_some() || !self.contains(from) {
+            return None;
+        }
+        if !matches!(direction, Direction::Up | Direction::Down)
+            || self.physical_vertical.contains(&(from, direction))
+        {
+            return self.geometry_step(from, direction);
+        }
+        let to = Location {
+            position: direction.offset(from.position)?,
+            ..from
+        };
+        self.contains(to).then_some((to, 0))
+    }
     pub fn is_stair(&self, from: Location, direction: Direction) -> bool {
         matches!(direction, Direction::Up | Direction::Down)
             && (self.passage(from, direction).is_some()
                 || self.named_stairs.contains_key(&(from, direction)))
             && !self.physical_vertical.contains(&(from, direction))
+    }
+
+    /// Immutable sparse topology only, without destination or navigation lookup.
+    pub fn stair_candidates_in_region(
+        &self,
+        region: RegionId,
+    ) -> impl Iterator<Item = (Location, bool)> + '_ {
+        let first = Location {
+            region,
+            position: Position {
+                x: i32::MIN,
+                y: i32::MIN,
+                z: i32::MIN,
+            },
+        };
+        self.named_stairs
+            .range((first, Direction::North)..)
+            .take_while(move |((at, _), _)| at.region == region)
+            .map(|((at, _), _)| (*at, true))
+            .chain(
+                self.passages
+                    .range((first, Direction::North)..)
+                    .take_while(move |((at, _), _)| at.region == region)
+                    .map(|((at, direction), _)| (*at, self.is_stair(*at, *direction))),
+            )
+    }
+    /// Sparse physical doorway positions, independent of concealment knowledge.
+    pub fn doors_in_region(&self, region: RegionId) -> impl Iterator<Item = Location> + '_ {
+        let first = Location {
+            region,
+            position: Position {
+                x: i32::MIN,
+                y: i32::MIN,
+                z: i32::MIN,
+            },
+        };
+        self.doors
+            .range(first..)
+            .take_while(move |(at, _)| at.region == region)
+            .map(|(at, _)| *at)
     }
 
     /// Known owner of a stair landing, even before its coordinates exist.
@@ -1364,3 +1433,50 @@ mod gravity_sharing_tests {
 #[path = "concealed.rs"]
 mod concealed;
 pub use concealed::{ConcealedFeatureId, Concealment, Trap, TrapFamily, TrapKind};
+
+#[cfg(test)]
+mod historical_structure_tests {
+    use super::*;
+    fn fixture() -> World {
+        World::new(
+            vec![Region {
+                id: RegionId(1),
+                name: "history".into(),
+                bounds: Extent::new(3, 3, 2).unwrap(),
+            }],
+            vec![],
+        )
+        .unwrap()
+    }
+    fn at(x: i32) -> Location {
+        Location {
+            region: RegionId(1),
+            position: Position { x, y: 1, z: 0 },
+        }
+    }
+    #[test]
+    fn historical_structure_ignores_only_current_allocator_bound() {
+        let mut world = fixture();
+        world.place_door(at(1), 42, true, 1).unwrap();
+        assert!(!world.checkpoint_valid(1));
+        assert!(world.historical_checkpoint_valid());
+        world.doors.insert(
+            at(0),
+            Door {
+                id: 42,
+                open: true,
+                height: 1,
+            },
+        );
+        assert!(!world.historical_checkpoint_valid());
+    }
+    #[test]
+    fn lawful_terrain_and_gravity_edits_are_structural_not_initial_source_equality() {
+        let mut world = fixture();
+        world.set_wall(at(1), true).unwrap();
+        world.set_gravity(RegionId(1), [0, 0, 1]).unwrap();
+        assert!(world.historical_checkpoint_valid());
+        world.region_gravity.insert(RegionId(999), [0, 0, -1]);
+        assert!(!world.historical_checkpoint_valid());
+    }
+}

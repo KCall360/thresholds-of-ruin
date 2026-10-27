@@ -727,6 +727,7 @@ mod tests {
         assert!(!world.is_stair(from, Direction::Down));
         assert!(!world.is_stair(to, Direction::Up));
         assert!(world.checkpoint_valid(1));
+        assert!(world.historical_checkpoint_valid());
         let original = world.clone();
         let source = world.detach_region(from.region).unwrap();
         let target = world.detach_region(to.region).unwrap();
@@ -735,6 +736,7 @@ mod tests {
         world.attach_region(source).unwrap();
         assert_eq!(world, original);
         assert!(world.checkpoint_valid(1));
+        assert!(world.historical_checkpoint_valid());
     }
     #[test]
     fn trapdoor_does_not_mutate_until_exact_resident_clear_ceiling_is_ready() {

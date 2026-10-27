@@ -31,6 +31,32 @@ class ControllerError(ValueError):
     """An invalid disclosure, checkpoint or policy invocation; never survival."""
 
 
+def route_hd_counts(summary):
+    """Validate disclosed source counts without confusing a class with racial HD."""
+    counts = {(row["source_kind"], row["source"]["id"]): u64(row["count"])
+              for row in summary["sources"]}
+    if (len(counts) != len(summary["sources"]) or any(count == 0 for count in counts.values())
+            or sum(counts.values()) != u64(summary["total"])):
+        raise ControllerError("Inconsistent disclosed hit-die source counts")
+    return counts
+
+
+def starting_body_hd(summary, character):
+    """Only the two declared PC starts: historical class1, or body1 + class1.
+
+    Public source counts do not establish arbitrary ownership. The saved-history
+    audit independently checks owned body/personal provenance at the milestone.
+    This bounded adapter does not treat a different form's racial HD as growth.
+    """
+    counts = route_hd_counts(summary)
+    expected = {("class", CHARACTERS[character][1]): 1}
+    if counts == expected:
+        return 0
+    if counts == {**expected, ("racial", "racial"): 1}:
+        return 1
+    raise ControllerError("Initial ordinary observation requires class1 or body racial1 + class1")
+
+
 @dataclass(frozen=True)
 class Decision:
     action: dict | None = None
@@ -38,12 +64,19 @@ class Decision:
     outcome: str | None = None
 
 
-def first_purchase(character):
-    """The sole permitted preview; the adapter separately confirms it once."""
+def first_purchase(character, *, body_hd=0):
+    """First personal-class purchase; body_hd is the validated declared baseline.
+
+    Zero preserves historical unowned class-only comparators; one is the current
+    locked racial-body row. No arbitrary form offsets or HD inference are allowed.
+    """
     if character not in CHARACTERS or isinstance(character, bool):
         raise ControllerError("Only actual Warrior actor 1 and Mage actor 2 are planned")
-    return ("purchase 1 advancement talent rattling_blow" if character == 1 else
-            "purchase 1 advancement talent evocation_initiate form spark_lance_cold")
+    if type(body_hd) is not int or body_hd not in (0, 1):
+        raise ControllerError("Only class1 or body1+class1 first-purchase layouts are supported")
+    ordinal = body_hd + 1
+    return (f"purchase {ordinal} advancement talent rattling_blow" if character == 1 else
+            f"purchase {ordinal} advancement talent evocation_initiate form spark_lance_cold")
 
 
 def fixed_cohort():
@@ -282,28 +315,27 @@ class Controller:
         growth = self._advancement["growth"]
         summary = combat["own_stats"]["hit_dice"]
         total = u64(summary["total"])
-        source_counts = [(row, u64(row["count"])) for row in summary["sources"]]
-        if any(count == 0 for _, count in source_counts) or sum(count for _, count in source_counts) != total:
-            raise ControllerError("Inconsistent disclosed hit-die source counts")
+        source_counts = route_hd_counts(summary)
         expected = CHARACTERS[self.character][1]
-        if not self.growth_history and (total != 1 or len(summary["sources"]) != 1
-                or summary["sources"][0]["source_kind"] != "class"
-                or summary["sources"][0]["source"]["id"] != expected
-                or u64(summary["sources"][0]["count"]) != 1):
-            raise ControllerError("Initial ordinary observation must be the actual authored class HD one")
+        if not self.growth_history:
+            starting_body_hd(summary, self.character)
         witness = {"hit_dice": deepcopy(summary), "growth": deepcopy(growth),
                    "commands": self.commands, "tick": view["tick"]}
         if not self.growth_history or any(self.growth_history[-1][field] != witness[field]
                                          for field in ("hit_dice", "growth")):
             self.growth_history.append(witness)
-        class_hd = sum(count for row, count in source_counts
-                       if row["source_kind"] == "class" and row["source"]["id"] == expected)
+        class_hd = source_counts.get(("class", expected), 0)
+        racial_hd = source_counts.get(("racial", "racial"), 0)
         baseline = self.growth_history[0]
-        if (len(self.growth_history) >= 2 and total >= 2 and class_hd == total
+        baseline_body_hd = starting_body_hd(baseline["hit_dice"], self.character)
+        if (len(self.growth_history) >= 2 and class_hd >= 2
+                and racial_hd == baseline_body_hd and total == class_hd + racial_hd
                 and u64(baseline["growth"]["earned_xp"]) == 0
                 and u64(baseline["growth"]["spent_xp"]) == 0
                 and u64(growth["earned_xp"]) > 0 and u64(growth["spent_xp"]) > 0
-                and u64(growth["highest_earned_tier"]) >= 2 and u64(growth["highest_applied_tier"]) >= 2):
+                and u64(growth["highest_earned_tier"]) >= 2 and u64(growth["highest_applied_tier"]) >= 2
+                and u64(growth["highest_earned_tier"]) > u64(baseline["growth"]["highest_earned_tier"])
+                and u64(growth["highest_applied_tier"]) > u64(baseline["growth"]["highest_applied_tier"])):
             self.earned_hd2 = True
         self._dead = bool(combat["dead"] or u64(combat["hp"]) == 0)
         if combat["terminal"] or _foes(view) or not _deficient(view):

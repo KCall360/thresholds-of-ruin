@@ -13,6 +13,7 @@ use std::collections::BTreeSet;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct IntellectChoiceWitness {
     pub owner: crate::HdIndex,
+    pub ownership: Option<super::composition::HdOwner>,
     pub source: HdSource,
     pub health_seed: u64,
     pub choices: HdChoices,
@@ -58,10 +59,16 @@ enum SelectionKey<'a> {
 }
 type ChoiceKey<'a> = (
     crate::HdIndex,
+    Option<&'a super::composition::HdOwner>,
     Option<&'a crate::content_ids::ClassId>,
     u64,
     Option<crate::attributes::Attribute>,
-    Vec<(&'a crate::content_ids::PointPoolId, SelectionKey<'a>)>,
+    u64,
+    Vec<(
+        Option<&'a super::composition::PurchaseId>,
+        &'a crate::content_ids::PointPoolId,
+        SelectionKey<'a>,
+    )>,
 );
 impl IntellectChoiceWitness {
     fn key(&self) -> ChoiceKey<'_> {
@@ -82,20 +89,40 @@ impl IntellectChoiceWitness {
                         SelectionKey::Form(talent, form)
                     }
                 };
-                (&purchase.pool, selection)
+                (purchase.id.as_ref(), &purchase.pool, selection)
             })
             .collect();
         (
             self.owner,
+            self.ownership.as_ref(),
             class,
             self.health_seed,
             self.choices.attribute,
+            self.choices.purchase_highwater,
             purchases,
         )
     }
 }
 
 impl IntellectLearning {
+    // Birth is fresh admission, unlike a later snapshot that can reunite
+    // retained receipts following loss and a lawful intervening purchase.
+    fn validate_birth_attributes(
+        attributes: crate::attributes::Attributes,
+        sources: &IntellectSources,
+        ordinary_cap: u16,
+    ) -> Result<(), BuildError> {
+        for attribute in crate::attributes::Attribute::ALL {
+            let ordinary = attributes
+                .get(attribute)
+                .checked_add(*sources.attribute_increases.get(attribute))
+                .ok_or(BuildError::Arithmetic)?;
+            if ordinary > ordinary_cap {
+                return Err(BuildError::AttributeCap);
+            }
+        }
+        Ok(())
+    }
     pub fn new(
         build: &CreatureBuild,
         sources: IntellectSources,
@@ -104,6 +131,11 @@ impl IntellectLearning {
         if capacity > crate::limits::DERIVED_ATTRIBUTE {
             return Err(BuildError::DerivedLimit);
         }
+        Self::validate_birth_attributes(
+            build.initial_attributes(),
+            &sources,
+            build.ruleset().constants().attribute_cap,
+        )?;
         let history = Self::capture_choices(build)?;
         let choices = (0..history.len())
             .map(|index| u16::try_from(index).map_err(|_| BuildError::Arithmetic))
@@ -127,6 +159,9 @@ impl IntellectLearning {
         })
     }
     fn capture_choices(build: &CreatureBuild) -> Result<Vec<IntellectChoiceWitness>, BuildError> {
+        if let Some(projected) = build.intellect_build()? {
+            return Self::capture_choices(&projected);
+        }
         build
             .ledger()
             .entries()
@@ -136,6 +171,7 @@ impl IntellectLearning {
             .map(|(owner, (die, choices))| {
                 Ok(IntellectChoiceWitness {
                     owner: crate::HdIndex::from_usize(owner).map_err(BuildError::from)?,
+                    ownership: die.owner().cloned(),
                     source: die.source(),
                     health_seed: die.health_seed(),
                     choices: choices.clone(),
@@ -245,15 +281,24 @@ impl IntellectLearning {
             .point_grants(&witness.source)
             .ok_or(BuildError::UnknownClass)?;
         let choices = &witness.choices;
+        choices.validate_purchase_ids(witness.ownership.as_ref())?;
         if choices.purchases.len() > crate::limits::POINTS_PER_HIT_DIE {
             return Err(BuildError::NoAdvancementPoint);
         }
-        if choices.attribute.is_some()
-            && !(witness.owner.get() + 1).is_multiple_of(u64::from(
+        if choices.attribute.is_some() {
+            let ordinal = if let Some(body) = &build.body_build {
+                (witness.owner.get() + 1)
+                    .checked_sub(body.base.advancement.len() as u64)
+                    .filter(|ordinal| *ordinal > 0)
+                    .ok_or(BuildError::NoAttributeOpportunity)?
+            } else {
+                witness.owner.get() + 1
+            };
+            if !ordinal.is_multiple_of(u64::from(
                 build.ruleset().constants().attribute_opportunity_interval,
-            ))
-        {
-            return Err(BuildError::NoAttributeOpportunity);
+            )) {
+                return Err(BuildError::NoAttributeOpportunity);
+            }
         }
         let mut spent = std::collections::BTreeMap::new();
         for purchase in &choices.purchases {
@@ -283,7 +328,9 @@ impl IntellectLearning {
         rows: &[u16],
         witness: &IntellectSources,
     ) -> Result<u16, BuildError> {
-        if rows.len() > crate::limits::HIT_DICE {
+        if rows.len() > crate::limits::HIT_DICE
+            || witness.strength_acquired > build.strength_acquired()
+        {
             return Err(BuildError::InvalidOwnership);
         }
         let choices = rows
@@ -297,11 +344,11 @@ impl IntellectLearning {
                 if row.owner.get() != owner as u64 {
                     return Err(BuildError::InvalidOwnership);
                 }
-                Ok((&row.source, &row.choices))
+                Ok((&row.source, &row.choices, row.ownership.as_ref()))
             })
             .collect::<Result<Vec<_>, BuildError>>()?;
         let mut paid = BTreeSet::new();
-        for (_, choice) in &choices {
+        for (_, choice, _) in &choices {
             for id in choice
                 .purchases
                 .iter()
@@ -312,25 +359,40 @@ impl IntellectLearning {
                 }
             }
         }
-        if let Some(root) = build.ledger().health_root_seed() {
-            let expected = crate::progression::HdLedger::seeded(
-                choices
-                    .iter()
-                    .map(|(source, _)| (*source).clone())
-                    .collect(),
-                root,
-            )
-            .map_err(BuildError::from)?;
-            if rows.iter().zip(expected.entries()).any(|(index, die)| {
-                self.history[usize::from(*index)].health_seed != die.health_seed()
-            }) {
-                return Err(BuildError::InvalidHealthRoot);
+        if let Some(root) = build.personal_health_root_seed() {
+            for index in rows {
+                let row = &self.history[usize::from(*index)];
+                let ordinal = match (&build.body_build, &row.ownership) {
+                    (_, None) => row.owner.get(),
+                    (Some(body), Some(super::composition::HdOwner::Body { form, ordinal }))
+                        if form == &body.base.id
+                            && u64::from(*ordinal) == row.owner.get()
+                            && usize::from(*ordinal) < body.base.advancement.len() =>
+                    {
+                        u64::from(*ordinal)
+                    }
+                    (Some(body), Some(super::composition::HdOwner::Personal { id }))
+                        if body
+                            .acquisition_species
+                            .contains_key(row.ownership.as_ref().expect("matched owner"))
+                            && row.owner.get() >= body.base.advancement.len() as u64 =>
+                    {
+                        body.personal_seed_offset
+                            .checked_add(id.0.get() - 1)
+                            .ok_or(BuildError::Arithmetic)?
+                    }
+                    _ => return Err(BuildError::InvalidOwnership),
+                };
+                if row.health_seed != crate::dice::random_word_at(root, ordinal) {
+                    return Err(BuildError::InvalidHealthRoot);
+                }
             }
         }
         let actual = intellect::historical_sources_refs(
             build,
             self.birth.attributes,
             &self.birth.templates,
+            witness.strength_acquired,
             choices.iter().copied(),
         )?;
         if &actual != witness {
@@ -344,9 +406,23 @@ impl IntellectLearning {
         )
     }
     pub fn validate(&self, build: &CreatureBuild) -> Result<(), BuildError> {
-        if self.birth.attributes != build.initial_attributes() {
+        if let Some(projected) = build.intellect_build()? {
+            return self.validate(&projected);
+        }
+        let birth_attributes = build
+            .body_build
+            .as_ref()
+            .map_or(build.initial_attributes(), |body| {
+                body.base_initial_attributes
+            });
+        if self.birth.attributes != birth_attributes || self.birth.sources.strength_acquired != 0 {
             return Err(BuildError::InvalidOwnership);
         }
+        Self::validate_birth_attributes(
+            self.birth.attributes,
+            &self.birth.sources,
+            build.ruleset().constants().attribute_cap,
+        )?;
         if self.thresholds.len() > usize::from(crate::limits::DERIVED_ATTRIBUTE)
             || self.acquisitions.len() > usize::from(crate::limits::DERIVED_ATTRIBUTE)
             || self.history.len() > crate::limits::EXPERTISE_HISTORY_ROWS
@@ -371,7 +447,19 @@ impl IntellectLearning {
         {
             return Err(BuildError::InvalidOwnership);
         }
+        let mut prior_strength = 0;
         for (index, receipt) in self.acquisitions.iter().enumerate() {
+            let before_strength = receipt.before.strength_acquired;
+            let after_strength = receipt.after.strength_acquired;
+            if before_strength < prior_strength
+                || after_strength < before_strength
+                || (after_strength != before_strength
+                    && (before_strength.checked_add(1) != Some(after_strength)
+                        || receipt.before_choices != receipt.after_choices))
+            {
+                return Err(BuildError::InvalidOwnership);
+            }
+            prior_strength = after_strength;
             if receipt.after_choices.len() < receipt.before_choices.len()
                 || receipt.after_choices.len() > receipt.before_choices.len() + 1
             {
@@ -386,7 +474,10 @@ impl IntellectLearning {
                     .history
                     .get(usize::from(*after))
                     .ok_or(BuildError::InvalidOwnership)?;
-                if left.source != right.source || left.health_seed != right.health_seed {
+                if left.source != right.source
+                    || left.health_seed != right.health_seed
+                    || left.ownership != right.ownership
+                {
                     return Err(BuildError::InvalidOwnership);
                 }
             }

@@ -393,20 +393,25 @@ class CompactAdvancementFrames(unittest.TestCase):
         from unittest.mock import patch
         import test_rogue_techniques_process as techniques
         driver = techniques.RogueTechniquesProcesses()
+        # Current PC: the racial body row is not the personal purchase target.
         before = {"error": None, "state": {"observation": {"combat": {
-            "own_stats": {"abilities": []}}}}}
-        after = {"error": None, "state": {"observation": {"combat": {
-            "own_stats": {"abilities": [{"id": "learned"}]}}}}}
+            "own_stats": {"abilities": [], "hit_dice": {"total": "2", "sources": [
+                {"source_kind": "racial", "source": {"id": "racial"}, "count": "1"},
+                {"source_kind": "class", "source": {"id": "warrior"}, "count": "1"}]}}}}}}
+        after = copy.deepcopy(before)
+        after["state"]["observation"]["combat"]["own_stats"]["abilities"] = [{"id": "learned"}]
         queued = {"error": None, "intentions": [{"phase": "queued"}]}
         settled = {"error": None, "intentions": [{"phase": "resolved"}]}
         ledger = {"error": None, "advancement_page": {"entries": [{"value": {
             "points": {"earned": "1", "spent": "1", "unspent": "0"}}}]}}
         with patch.object(driver, "request", side_effect=[before, after]), \
-                patch.object(driver, "command", side_effect=[before, before, queued, ledger]), \
+                patch.object(driver, "command", side_effect=[before, before, queued, ledger]) as command, \
                 patch.object(driver, "frame", side_effect=self.wait_for_full_settlement(queued, settled)), \
                 patch.object(driver, "settled") as settle:
             self.assertIs(driver.buy_first(object(), "talent learned", "learned"), after)
             self.assertIs(settle.call_args.args[1], settled)
+            self.assertEqual(command.call_args_list[1].args[1],
+                             {"type": "advancement", "command": "purchase 2 advancement talent learned"})
 
 
 if __name__ == "__main__":

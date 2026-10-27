@@ -70,6 +70,7 @@ pub enum AbilityTargetKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum AbilityReach {
+    UntilObstruction,
     Melee,
     /// Range comes from the exact selected physical delivery profile.
     Projectile,
@@ -86,6 +87,7 @@ impl<'de> Deserialize<'de> for AbilityReach {
         #[derive(Deserialize)]
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
+            UntilObstruction {},
             Melee,
             Projectile {},
             Sight { range: u16 },
@@ -93,6 +95,7 @@ impl<'de> Deserialize<'de> for AbilityReach {
             SelfOrAlly { range: AbilityAllyRange },
         }
         Ok(match crate::bounded::named_map(d)? {
+            Fields::UntilObstruction {} => Self::UntilObstruction,
             Fields::Melee => Self::Melee,
             Fields::Projectile {} => Self::Projectile,
             Fields::Sight { range } => Self::Sight { range },
@@ -203,6 +206,9 @@ impl AbilityView {
                 }
                 (AbilityReach::Melee, AbilityTargetKind::Actor) => true,
                 (AbilityReach::Projectile, AbilityTargetKind::DirectionalProjectile) => {
+                    !self.basic_attack && !self.weapon_selection
+                }
+                (AbilityReach::UntilObstruction, AbilityTargetKind::DirectionalRay) => {
                     !self.basic_attack && !self.weapon_selection
                 }
                 (AbilityReach::Sight { range }, AbilityTargetKind::DirectionalRay) => {

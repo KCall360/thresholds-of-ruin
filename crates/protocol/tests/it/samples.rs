@@ -40,6 +40,7 @@ fn request_kind(request: &Request) -> &'static str {
         Request::Snapshot => "snapshot",
         Request::Palette => "palette",
         Request::Map { .. } => "map",
+        Request::Chart { .. } => "chart",
         Request::Command { command, .. } => match command {
             Command::ProjectileChoices { .. } => "command.projectile_choices",
             Command::PreviewAbilityWeapon { .. } => "command.preview_ability_weapon",
@@ -62,6 +63,8 @@ fn request_kind(request: &Request) -> &'static str {
                 Action::Unequip { .. } => "act.unequip",
                 Action::Drink { .. } => "act.drink",
                 Action::Read { .. } => "act.read",
+                Action::Ignite { .. } => "act.ignite",
+                Action::Extinguish { .. } => "act.extinguish",
                 Action::Zap { .. } => "act.zap",
                 Action::Identify { .. } => "act.identify",
                 Action::ExamineTrap { .. } => "act.examine_trap",
@@ -92,6 +95,7 @@ const CLIENT_KINDS: &[&str] = &[
     "snapshot",
     "palette",
     "map",
+    "chart",
     "command.rename_place",
     "command.resume_intention",
     "command.cancel_intention",
@@ -104,6 +108,8 @@ const CLIENT_KINDS: &[&str] = &[
     "act.unequip",
     "act.drink",
     "act.read",
+    "act.ignite",
+    "act.extinguish",
     "act.zap",
     "act.identify",
     "act.examine_trap",
@@ -162,6 +168,7 @@ server_sample_kinds! {
     AbilityWeaponPreview => ("ability_weapon_preview", None),
     ProjectileChoices => ("projectile_choices", None),
     MapPage => ("map_page", None),
+    ChartPage => ("chart_page", None),
     CombatDiagnostics => ("combat_diagnostics", None),
     Error => ("error", None),
     Palette => ("palette", None),
@@ -199,6 +206,7 @@ fn server_kind(message: &ServerMessage) -> ServerSampleKind {
         ServerMessage::AbilityWeaponPreview { .. } => Kind::AbilityWeaponPreview,
         ServerMessage::AdvancementPage { .. } => Kind::AdvancementPage,
         ServerMessage::MapPage { .. } => Kind::MapPage,
+        ServerMessage::ChartPage { .. } => Kind::ChartPage,
         ServerMessage::CombatDiagnostics { .. } => Kind::CombatDiagnostics,
         ServerMessage::Error { .. } => Kind::Error,
         ServerMessage::Palette { .. } => Kind::Palette,
@@ -253,6 +261,7 @@ fn recorded_request_envelopes_preserve_payload_bytes_and_validation() {
             payload,
             Request::Attach { .. }
                 | Request::Map { .. }
+                | Request::Chart { .. }
                 | Request::Command { .. }
                 | Request::History { .. }
                 | Request::HistoryBranch { .. }
@@ -765,4 +774,59 @@ fn recorded_scare_crumble_keeps_exact_opaque_unit_loss_without_transfer() {
         witnessed,
         "record actual current-writer Scare crumble via its paid process witness"
     );
+}
+
+#[test]
+fn recorded_polymorph_has_dual_aim_and_changed_only_diagnostic() {
+    let book = samples();
+    let server = book["server"].as_array().unwrap();
+    let dual_items: BTreeSet<String> = server
+        .iter()
+        .filter(|message| message["type"] == "snapshot")
+        .flat_map(|message| {
+            message["snapshot"]["state"]["observation"]["interactions"]["inventory"]
+                .as_array()
+                .into_iter()
+                .flatten()
+        })
+        .filter(|row| row["device_activation"] == "direction_or_self")
+        .map(|row| row["item"].as_str().unwrap().to_owned())
+        .collect();
+    assert!(
+        !dual_items.is_empty(),
+        "record genuine known DirectionOrSelf affordance, not merely an old snapshot kind"
+    );
+    let effects: Vec<_> = server
+        .iter()
+        .filter(|message| message["type"] == "combat_diagnostics")
+        .flat_map(|message| message["report"]["records"].as_array().unwrap())
+        .flat_map(|record| record["outcome"]["effects"].as_array().unwrap())
+        .filter(|effect| effect["type"] == "baleful_polymorph")
+        .collect();
+    assert!(
+        !effects.is_empty(),
+        "record the real paid Polymorph diagnostic variant"
+    );
+    assert!(effects.iter().any(|effect| effect["changed"] == true));
+    for effect in effects {
+        assert_eq!(
+            effect
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from(["type", "target", "changed"])
+        );
+        assert!(effect["target"].is_string());
+        assert!(effect["changed"].is_boolean());
+    }
+    assert!(book["client"].as_array().unwrap().iter().any(|message| {
+        let action = &message["request"]["command"]["action"];
+        action["type"] == "zap"
+            && action["aim"]["kind"] == "self_target"
+            && action["item"]
+                .as_str()
+                .is_some_and(|item| dual_items.contains(item))
+    }));
 }

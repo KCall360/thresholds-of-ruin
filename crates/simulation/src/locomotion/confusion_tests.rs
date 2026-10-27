@@ -802,6 +802,7 @@ fn confused_held_simulation_move_rejects_before_rng_and_explicit_escape_stays_us
             }),
         }),
         crate::rules::Modifier {
+            cancellable: false,
             scope: crate::rules::Scope::Always,
             op: crate::rules::ModifierOp::Flag {
                 flag: sustaining.clone(),

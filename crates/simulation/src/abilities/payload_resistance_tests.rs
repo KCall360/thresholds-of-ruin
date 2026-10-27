@@ -29,6 +29,7 @@ fn fixture(dc: i32, immune: bool) -> Game {
         .unwrap();
         if immune {
             species.modifiers.push(Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::Immunity {
                     selector: Selector::Descriptor {
@@ -290,6 +291,7 @@ fn primary_damage_survives_resisted_or_immune_poison_rider() {
                         unreachable!()
                     };
                     strikes[0].riders.push(crate::rules::RiderDef {
+                        cancellable: false,
                         trigger: crate::rules::RiderTrigger::Success,
                         condition: None,
                         check: None,
@@ -316,6 +318,7 @@ fn primary_damage_survives_resisted_or_immune_poison_rider() {
                     .unwrap();
                     if immune {
                         species.modifiers.push(Modifier {
+                            cancellable: false,
                             scope: Scope::Always,
                             op: ModifierOp::Immunity {
                                 selector: Selector::Descriptor {
@@ -562,6 +565,7 @@ fn actual_ray_primary_claim_cannot_be_reused_by_secondary_resistance() {
             }];
             if immune {
                 species.modifiers.push(Modifier {
+                    cancellable: false,
                     scope: Scope::Always,
                     op: ModifierOp::Immunity {
                         selector: Selector::Descriptor {
@@ -693,6 +697,7 @@ fn resisted_source_payload_is_rejected_without_breaking_source_utilities() {
     ability.interaction = crate::rules::Interaction::NonHostile;
     ability.strikes = crate::rules::StrikeSource::Authored {
         strikes: vec![crate::rules::StrikeDef {
+            cancellable: false,
             offset: 0,
             unlock: None,
             check: None,
@@ -731,6 +736,7 @@ fn authored_and_additional_natural_riders_validate_their_own_resisted_recipient(
             .find(|ability| ability.basic_attack)
             .unwrap();
         let rider = RiderDef {
+            cancellable: false,
             trigger: RiderTrigger::Success,
             condition: None,
             check: None,
@@ -744,6 +750,7 @@ fn authored_and_additional_natural_riders_validate_their_own_resisted_recipient(
         } else {
             StrikeSource::Authored {
                 strikes: vec![StrikeDef {
+                    cancellable: false,
                     offset: 0,
                     unlock: None,
                     check: None,

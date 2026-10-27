@@ -12,10 +12,13 @@ def commands():
     """Keep configured repositories/trust and bound apt's own acquisition retry."""
     options = ['-o', 'Acquire::Retries=2', '-o', 'Acquire::http::Timeout=20',
                '-o', 'Acquire::https::Timeout=20']
+    # Downloads and dpkg configuration share this install budget. Slow but
+    # progressing official mirrors can exhaust three minutes; stalled requests
+    # still have the unchanged 20-second acquisition timeouts below.
     return [
         ['timeout', '--kill-after=10s', '2m', 'sudo', 'apt-get', *options,
          '-o', 'APT::Update::Error-Mode=any', 'update'],
-        ['timeout', '--kill-after=10s', '3m', 'sudo', 'apt-get', *options,
+        ['timeout', '--kill-after=10s', '10m', 'sudo', 'apt-get', *options,
          'install', '--no-install-recommends', '-y', 'pkg-config', 'libasound2-dev', 'libudev-dev'],
         ['timeout', '--kill-after=5s', '15s', 'pkg-config', '--print-errors', '--exists', 'alsa', 'libudev'],
     ]

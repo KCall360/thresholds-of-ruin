@@ -15,6 +15,7 @@ const HEALTH_ROOT: u64 = 42;
 
 fn purchase(selection: PurchaseSelection) -> AdvancementPurchase {
     AdvancementPurchase {
+        id: None,
         pool: PointPoolId::new("advancement").unwrap(),
         selection,
     }
@@ -249,6 +250,7 @@ fn authored_attribute_cap_banks_xp_until_retained_initial_attributes_allow_resto
             HdChoices::default(),
             HdChoices::default(),
             HdChoices {
+                purchase_highwater: 0,
                 attribute: Some(Attribute::Strength),
                 ..HdChoices::default()
             },
@@ -272,10 +274,12 @@ fn authored_rank_cap_banks_xp_until_the_conflicting_retained_rank_is_refunded() 
     let original = authored(
         vec![
             HdChoices {
+                purchase_highwater: 0,
                 purchases: vec![rank.clone(); 3],
                 attribute: None,
             },
             HdChoices {
+                purchase_highwater: 0,
                 purchases: vec![rank],
                 attribute: None,
             },
@@ -307,6 +311,7 @@ fn authored_duplicate_talent_banks_xp_until_the_retained_duplicate_is_refunded()
         vec![
             HdChoices::default(),
             HdChoices {
+                purchase_highwater: 0,
                 purchases: vec![purchase(PurchaseSelection::Talent(talent(0)))],
                 attribute: None,
             },
@@ -332,12 +337,14 @@ fn authored_talent_ownership_cap_banks_xp_until_a_retained_talent_is_refunded() 
     let original = authored(
         vec![
             HdChoices {
+                purchase_highwater: 0,
                 purchases: (0..255)
                     .map(|index| purchase(PurchaseSelection::Talent(talent(index))))
                     .collect(),
                 attribute: None,
             },
             HdChoices {
+                purchase_highwater: 0,
                 purchases: vec![purchase(PurchaseSelection::Talent(talent(255)))],
                 attribute: None,
             },

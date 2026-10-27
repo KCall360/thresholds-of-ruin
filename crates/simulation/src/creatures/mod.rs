@@ -1,12 +1,17 @@
 //! Shared catalog references, source-owned advancement and cached derivation.
 mod advancement;
+mod body;
 mod build_epoch;
+pub use body::BodyPackage;
 mod catalog;
+pub mod composition;
 mod derive;
 mod displacement;
 mod expertise_learning;
 #[cfg(test)]
 mod expertise_learning_tests;
+#[cfg(test)]
+mod growth_dose_tests;
 #[cfg(test)]
 mod growth_failure_tests;
 #[cfg(test)]
@@ -111,6 +116,8 @@ pub struct CreatureBuild {
     content: Arc<Content>,
     species: SpeciesId,
     initial_attributes: Attributes,
+    strength_acquired: u8,
+    body_build: Option<body::BodyBuild>,
     ledger: HdLedger,
     binding: ManaBinding,
     advancement: BuildAdvancement,
@@ -125,6 +132,8 @@ impl Clone for CreatureBuild {
             content: self.content.clone(),
             species: self.species.clone(),
             initial_attributes: self.initial_attributes,
+            strength_acquired: self.strength_acquired,
+            body_build: self.body_build.clone(),
             ledger: self.ledger.clone(),
             binding: self.binding,
             advancement: self.advancement.clone(),
@@ -180,6 +189,7 @@ impl CreatureBuild {
             binding,
             advancement,
             templates,
+            None,
         )?;
         let derived = build.derive()?;
         build.intellect_learning = Some(Arc::new(expertise_learning::IntellectLearning::new(
@@ -193,6 +203,8 @@ impl CreatureBuild {
     /// Resolve and validate recorded ownership before either creating birth
     /// learning or installing independently validated saved learning. Callers
     /// must derive the completed build before returning it to ordinary code.
+    // Mirrors the strict recorded fields; ownership is validated atomically here.
+    #[allow(clippy::too_many_arguments)]
     fn recorded_structure(
         content: Arc<Content>,
         species: SpeciesId,
@@ -201,6 +213,7 @@ impl CreatureBuild {
         binding: ManaBinding,
         advancement: BuildAdvancement,
         templates: Vec<TemplateId>,
+        body_build: Option<body::BodyBuild>,
     ) -> Result<Self, BuildError> {
         let species = content
             .catalog
@@ -224,6 +237,8 @@ impl CreatureBuild {
             content,
             species,
             initial_attributes,
+            strength_acquired: 0,
+            body_build,
             ledger,
             binding,
             advancement,
@@ -283,7 +298,20 @@ impl CreatureBuild {
             .chain(self.ledger.drained().map(|(_, entry)| entry))
         {
             let origin = entry.health_origin().ok_or(BuildError::InvalidDefinition)?;
-            if derive::kind_for_templates(self, &origin.templates)? != origin.kind {
+            let origin_kind = if let Some(body) = &self.body_build {
+                if !origin.templates.is_empty() {
+                    return Err(BuildError::InvalidDefinition);
+                }
+                let species = entry
+                    .owner()
+                    .and_then(|owner| body.acquisition_species.get(owner))
+                    .and_then(|species| self.content.catalog.species.get(species))
+                    .ok_or(BuildError::InvalidOwnership)?;
+                species.kind.clone()
+            } else {
+                derive::kind_for_templates(self, &origin.templates)?
+            };
+            if origin_kind != origin.kind {
                 return Err(BuildError::InvalidDefinition);
             }
         }
@@ -302,6 +330,8 @@ impl CreatureBuild {
         (Arc::ptr_eq(&self.content, &other.content) || self.content == other.content)
             && self.species == other.species
             && self.initial_attributes == other.initial_attributes
+            && self.strength_acquired == other.strength_acquired
+            && self.body_build == other.body_build
             && self.ledger == other.ledger
             && self.binding == other.binding
             && self.advancement.starting_skills == other.advancement.starting_skills
@@ -313,6 +343,27 @@ impl CreatureBuild {
                 _ => false,
             }
     }
+    /// Nonrefundable consumable contribution, separate from ordinary purchases.
+    pub fn strength_acquired(&self) -> u8 {
+        self.strength_acquired
+    }
+
+    pub(crate) fn acquire_strength(&mut self) -> Result<bool, BuildError> {
+        let (ordinary, _, _) = derive::advancement_facts(self, self.initial_attributes())?;
+        let natural = derive::effective_acquired_strength(self, ordinary, self.strength_acquired)?;
+        if natural.get(crate::attributes::Attribute::Strength) >= 7 {
+            return Ok(false);
+        }
+        self.edit_intellect_advancement(|candidate| {
+            candidate.strength_acquired = candidate
+                .strength_acquired
+                .checked_add(1)
+                .ok_or(BuildError::Arithmetic)?;
+            Ok(())
+        })?;
+        Ok(true)
+    }
+
     pub fn content(&self) -> &Arc<Content> {
         &self.content
     }
@@ -330,7 +381,7 @@ impl CreatureBuild {
                 return Err(BuildError::UnknownClass);
             }
             crate::earned_growth::FutureGrowth::Authored {}
-                if !matches!(self.restoration_policy(), RestorationPolicy::Authored(_)) =>
+                if !self.uses_authored_restoration() =>
             {
                 return Err(BuildError::NoAuthoredRestoration);
             }
@@ -487,18 +538,21 @@ impl CreatureBuild {
         if attributes == self.initial_attributes {
             return Ok(());
         }
-        if self.intellect_learning.as_ref().is_some_and(|learning| {
-            !learning.acquisitions.is_empty()
-                || learning
-                    .thresholds
-                    .iter()
-                    .any(|row| row.expertise.is_some())
-        }) {
+        if self.strength_acquired > 0
+            || self.intellect_learning.as_ref().is_some_and(|learning| {
+                !learning.acquisitions.is_empty()
+                    || learning
+                        .thresholds
+                        .iter()
+                        .any(|row| row.expertise.is_some())
+            })
+        {
             // Privileged baseline rewrites cannot rewrite already learned history.
             return Err(BuildError::InvalidOwnership);
         }
         let (mut candidate, _) = self.preview_edit(|build| {
             build.initial_attributes = attributes;
+            build.validate_initial_attribute_admission()?;
             Ok(())
         })?;
         let templates = self.intellect_learning.as_ref().map_or_else(
@@ -514,13 +568,48 @@ impl CreatureBuild {
         *self = candidate;
         Ok(())
     }
+    /// Admission of a new receipt is stricter than projecting retained receipts.
+    pub(crate) fn validate_new_attribute(
+        &self,
+        attribute: crate::attributes::Attribute,
+    ) -> Result<(), BuildError> {
+        let (raw, _, _) = derive::advancement_facts(self, self.initial_attributes())?;
+        let ordinary = derive::effective_ordinary_attributes(self, raw)?;
+        if ordinary.get(attribute) >= self.ruleset().constants().attribute_cap
+            || (attribute == crate::attributes::Attribute::Strength
+                && self.strength_acquired > 0
+                && derive::effective_acquired_strength(self, raw, self.strength_acquired)?
+                    .get(attribute)
+                    >= 7)
+        {
+            return Err(BuildError::AttributeCap);
+        }
+        Ok(())
+    }
+
+    /// Fresh authored allocations cannot use retained-form projection to hide
+    /// invalid purchases. Never use this for restoration of existing receipts.
+    pub(crate) fn validate_initial_attribute_admission(&self) -> Result<(), BuildError> {
+        let (raw, _, _) = derive::advancement_facts(self, self.initial_attributes())?;
+        if crate::attributes::Attribute::ALL
+            .into_iter()
+            .any(|attribute| raw.0.get(attribute) > self.ruleset().constants().attribute_cap)
+        {
+            return Err(BuildError::AttributeCap);
+        }
+        derive::with_acquired_strength(raw.0, self.strength_acquired)?;
+        Ok(())
+    }
+
     pub fn increase_attribute(
         &mut self,
         owner: crate::HdIndex,
         attribute: Attribute,
     ) -> Result<(), BuildError> {
-        let ordinal = owner.ordinal().map_err(BuildError::from)?.get();
         let owner = owner.to_usize().map_err(BuildError::from)?;
+        let ordinal = self
+            .personal_attribute_ordinal(owner)
+            .ok_or(BuildError::NoAttributeOpportunity)?;
         self.edit_intellect_advancement(|build| {
             let interval = u64::from(build.ruleset().constants().attribute_opportunity_interval);
             let choice = build
@@ -534,7 +623,8 @@ impl CreatureBuild {
             if choice.attribute.is_some() {
                 return Err(BuildError::OccupiedSlot);
             }
-            choice.attribute = Some(attribute);
+            build.validate_new_attribute(attribute)?;
+            build.advancement.choices[owner].attribute = Some(attribute);
             Ok(())
         })
         .map(|_| ())
@@ -585,6 +675,9 @@ impl CreatureBuild {
         .map(|_| ())
     }
     pub fn add_hit_die(&mut self, source: HdSource, root_seed: u64) -> Result<(), BuildError> {
+        if self.body_build.is_some() {
+            return self.add_personal_hit_die(source, root_seed);
+        }
         if let RestorationPolicy::Authored(plan) = self.restoration_policy() {
             if let Some(intended) = plan.get(self.choices().len()) {
                 if intended.source != source {
@@ -604,6 +697,9 @@ impl CreatureBuild {
         .map(|_| ())
     }
     pub fn remove_latest(&mut self) -> Option<RemovedAdvancement> {
+        if self.body_build.is_some() {
+            return self.remove_owned_hit_die();
+        }
         let hit_die = self.ledger.remove_latest()?;
         let choices = self
             .advancement
@@ -614,5 +710,7 @@ impl CreatureBuild {
     }
 }
 
+#[cfg(test)]
+mod body_tests;
 #[cfg(test)]
 mod healing_improvement_tests;

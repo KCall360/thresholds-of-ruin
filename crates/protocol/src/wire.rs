@@ -5,7 +5,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-pub const PROTOCOL_VERSION: u32 = 60;
+pub const PROTOCOL_VERSION: u32 = 63;
 /// The maximum disclosed primary strike ordinal plus one.
 pub const MAX_SEQUENCE_STRIKES: u16 = 16;
 
@@ -80,6 +80,7 @@ impl AccessRole {
                     | Request::Snapshot
                     | Request::Palette
                     | Request::Map { .. }
+                    | Request::Chart { .. }
                     | Request::History { .. }
                     | Request::HistoryBranch { .. }
             )
@@ -224,6 +225,39 @@ pub enum Direction {
     Down,
 }
 
+/// Permitted public input mode, not the hidden device effect.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeviceActivation {
+    Direction,
+    SelfTarget,
+    DirectionOrSelf,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum DeviceAim {
+    Direction { direction: Direction },
+    SelfTarget {},
+}
+impl<'de> Deserialize<'de> for DeviceAim {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            Direction {
+                #[serde(deserialize_with = "read_direction_token")]
+                direction: Direction,
+            },
+            SelfTarget {},
+        }
+        Ok(match crate::bounded::named_map(d)? {
+            Fields::Direction { direction } => Self::Direction { direction },
+            Fields::SelfTarget {} => Self::SelfTarget {},
+        })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Action {
@@ -268,9 +302,15 @@ pub enum Action {
     Read {
         item: ItemTarget,
     },
+    Ignite {
+        item: ItemTarget,
+    },
+    Extinguish {
+        item: ItemTarget,
+    },
     Zap {
         item: ItemTarget,
-        direction: Direction,
+        aim: DeviceAim,
     },
     Identify {
         choice: IntentionId,
@@ -344,10 +384,15 @@ impl<'de> Deserialize<'de> for Action {
             Read {
                 item: ItemTarget,
             },
+            Ignite {
+                item: ItemTarget,
+            },
+            Extinguish {
+                item: ItemTarget,
+            },
             Zap {
                 item: ItemTarget,
-                #[serde(deserialize_with = "read_direction_token")]
-                direction: Direction,
+                aim: DeviceAim,
             },
             Identify {
                 choice: IntentionId,
@@ -415,7 +460,9 @@ impl<'de> Deserialize<'de> for Action {
             Fields::Drink { item } => Self::Drink { item },
             Fields::Eat { item } => Self::Eat { item },
             Fields::Read { item } => Self::Read { item },
-            Fields::Zap { item, direction } => Self::Zap { item, direction },
+            Fields::Ignite { item } => Self::Ignite { item },
+            Fields::Extinguish { item } => Self::Extinguish { item },
+            Fields::Zap { item, aim } => Self::Zap { item, aim },
             Fields::Identify { choice, item } => Self::Identify { choice, item },
             Fields::ExamineTrap { trap } => Self::ExamineTrap { trap },
             Fields::SetDoor { door, open } => Self::SetDoor { door, open },
@@ -544,11 +591,25 @@ impl<'de> Deserialize<'de> for ItemView {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct GroundItemView {
+    /// Cosmetic only; never changes the enclosed item's capabilities.
+    pub presentation: Option<crate::ObjectPresentation>,
     pub reachable: bool,
     /// Server-owned known-supply touch affordance, separate from pickup reach.
     pub supply_reachable: bool,
     pub item: ItemView,
     pub position: Position,
+}
+impl GroundItemView {
+    pub(crate) fn valid_presentation(&self) -> bool {
+        self.presentation.as_ref().is_none_or(|p| {
+            p.validate().is_ok()
+                && self.item.name == "object"
+                && self.item.appearance == "object"
+                && self.item.description.is_empty()
+                && self.item.asset.is_none()
+                && self.item.corpse.is_none()
+        })
+    }
 }
 impl<'de> Deserialize<'de> for GroundItemView {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
@@ -557,6 +618,8 @@ impl<'de> Deserialize<'de> for GroundItemView {
         struct Fields {
             reachable: bool,
             supply_reachable: bool,
+            #[serde(deserialize_with = "required_option")]
+            presentation: Option<crate::ObjectPresentation>,
             item: ItemView,
             position: Position,
         }
@@ -566,12 +629,19 @@ impl<'de> Deserialize<'de> for GroundItemView {
                 "ground supply reach without a known supply",
             ));
         }
-        Ok(Self {
+        let value = Self {
             reachable: f.reachable,
             supply_reachable: f.supply_reachable,
+            presentation: f.presentation,
             item: f.item,
             position: f.position,
-        })
+        };
+        if !value.valid_presentation() {
+            return Err(serde::de::Error::custom(
+                "invalid ground object presentation",
+            ));
+        }
+        Ok(value)
     }
 }
 
@@ -627,6 +697,9 @@ pub struct MotionView {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Observation {
+    /// Read-only chart catalog; never sight, ordinary map memory or action offers.
+    #[serde(deserialize_with = "crate::chart_pages::read_summaries")]
+    pub charts: Vec<crate::chart_pages::ChartSummary>,
     /// Own appearance is disclosed even when the body is outside the eye scene.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub self_appearance: Option<CreatureAppearance>,
@@ -744,6 +817,48 @@ impl<'de> Deserialize<'de> for ProjectileBonusView {
         Ok(value)
     }
 }
+/// Disclosed physical fuel state and current authoritative action eligibility.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PortableLightView {
+    #[serde(with = "crate::integers::unsigned")]
+    pub remaining: u64,
+    pub lit: bool,
+    pub ignitable: bool,
+    pub extinguishable: bool,
+}
+impl PortableLightView {
+    pub fn valid(&self) -> bool {
+        self.remaining <= 1_000_000
+            && (!self.lit || self.remaining > 0)
+            && (!self.ignitable || (!self.lit && self.remaining > 0))
+            && (!self.extinguishable || self.lit)
+    }
+}
+impl<'de> Deserialize<'de> for PortableLightView {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            #[serde(with = "crate::integers::unsigned")]
+            remaining: u64,
+            lit: bool,
+            ignitable: bool,
+            extinguishable: bool,
+        }
+        let f: Fields = crate::bounded::named_map(d)?;
+        let value = Self {
+            remaining: f.remaining,
+            lit: f.lit,
+            ignitable: f.ignitable,
+            extinguishable: f.extinguishable,
+        };
+        if !value.valid() {
+            return Err(serde::de::Error::custom("invalid portable light"));
+        }
+        Ok(value)
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ItemInteractionView {
@@ -758,6 +873,8 @@ pub struct ItemInteractionView {
     pub edible: bool,
     pub readable: bool,
     pub zappable: bool,
+    pub device_activation: Option<DeviceActivation>,
+    pub portable_light: Option<PortableLightView>,
     pub charges: Option<u16>,
 }
 impl<'de> Deserialize<'de> for ItemInteractionView {
@@ -780,6 +897,10 @@ impl<'de> Deserialize<'de> for ItemInteractionView {
             readable: bool,
             zappable: bool,
             #[serde(deserialize_with = "required_nullable")]
+            device_activation: Option<DeviceActivation>,
+            #[serde(deserialize_with = "required_nullable")]
+            portable_light: Option<PortableLightView>,
+            #[serde(deserialize_with = "required_nullable")]
             charges: Option<u16>,
         }
         let fields: Fields = crate::bounded::named_map(d)?;
@@ -795,6 +916,8 @@ impl<'de> Deserialize<'de> for ItemInteractionView {
             edible: fields.edible,
             readable: fields.readable,
             zappable: fields.zappable,
+            device_activation: fields.device_activation,
+            portable_light: fields.portable_light,
             charges: fields.charges,
         })
     }
@@ -876,6 +999,44 @@ pub struct PreparationView {
     pub remaining: u64,
     pub active: bool,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ItemRefusalReason {
+    TooWeak,
+}
+impl<'de> Deserialize<'de> for ItemRefusalReason {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        match String::deserialize(deserializer)?.as_str() {
+            "too_weak" => Ok(Self::TooWeak),
+            _ => Err(serde::de::Error::custom("unknown item refusal reason")),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ItemRefusalView {
+    pub action: Action,
+    pub reason: ItemRefusalReason,
+}
+impl<'de> Deserialize<'de> for ItemRefusalView {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            action: Action,
+            reason: ItemRefusalReason,
+        }
+        let fields: Fields = crate::bounded::named_map(deserializer)?;
+        if !matches!(fields.action, Action::Zap { .. }) {
+            return Err(serde::de::Error::custom("refusal requires a zap action"));
+        }
+        Ok(Self {
+            action: fields.action,
+            reason: fields.reason,
+        })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InteractionView {
@@ -883,6 +1044,8 @@ pub struct InteractionView {
     pub identification: Option<IdentificationChoiceView>,
     /// This observer's completed item actions, including consumed final units.
     pub completed: Vec<Action>,
+    /// Paid completed attempts that refused their effect, never successful completion.
+    pub refused: Vec<ItemRefusalView>,
     pub curse_blocked: Vec<ItemTarget>,
     pub slots: Vec<EquipmentSlot>,
     pub preparation: Option<PreparationView>,
@@ -1105,13 +1268,14 @@ fn read_anonymous_ability<'de, D: serde::Deserializer<'de>>(
     Ok((fields.caster, fields.target, outcome))
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct CellView {
+    /// Sampled object art; stair flags remain authoritative.
+    pub object_presentation: Option<crate::ObjectPresentation>,
     /// Current server illumination, independent of sight or body awareness.
     pub lit: bool,
     pub door: Option<DoorView>,
     /// Discovered physical presence only; family stays absent until examined or witnessed.
-    #[serde(deserialize_with = "required_option")]
     pub trap: Option<TrapView>,
     /// Cosmetic material of a solid cell, not a physical interaction rule.
     /// Floors and ceilings are ordinary seen solid cells; clients derive them.
@@ -1129,6 +1293,57 @@ pub struct CellView {
     /// scenario names none; clients then fall back to their own look.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub asset: Option<String>,
+}
+
+impl CellView {
+    pub(crate) fn valid_presentation(&self) -> bool {
+        self.object_presentation.as_ref().is_none_or(|p| {
+            p.validate().is_ok() && !self.wall && (self.stairs_up || self.stairs_down)
+        })
+    }
+}
+impl<'de> Deserialize<'de> for CellView {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            #[serde(deserialize_with = "required_option")]
+            object_presentation: Option<crate::ObjectPresentation>,
+            lit: bool,
+            door: Option<DoorView>,
+            #[serde(deserialize_with = "required_option")]
+            trap: Option<TrapView>,
+            #[serde(default)]
+            material: String,
+            key: String,
+            stairs_up: bool,
+            stairs_down: bool,
+            position: Position,
+            wall: bool,
+            place_hint: bool,
+            #[serde(default)]
+            asset: Option<String>,
+        }
+        let f: Fields = crate::bounded::named_map(d)?;
+        let value = Self {
+            object_presentation: f.object_presentation,
+            lit: f.lit,
+            door: f.door,
+            trap: f.trap,
+            material: f.material,
+            key: f.key,
+            stairs_up: f.stairs_up,
+            stairs_down: f.stairs_down,
+            position: f.position,
+            wall: f.wall,
+            place_hint: f.place_hint,
+            asset: f.asset,
+        };
+        if !value.valid_presentation() {
+            return Err(serde::de::Error::custom("invalid cell object presentation"));
+        }
+        Ok(value)
+    }
 }
 
 /// A disclosed trap family; no effect operands or discovery difficulty cross the wire.
@@ -1514,6 +1729,10 @@ pub enum Request {
     Map {
         query: crate::MapQuery,
     },
+    /// Read-only immutable chart pages owned by the attached view, never actions.
+    Chart {
+        query: crate::chart_pages::ChartQuery,
+    },
     /// The whole current palette, as after attaching.
     Palette,
     Command {
@@ -1713,6 +1932,12 @@ pub enum ServerMessage {
         request_id: String,
         page: Box<crate::MapPage>,
     },
+    #[serde(deserialize_with = "crate::chart_pages::read_page_reply")]
+    ChartPage {
+        context: ReplyContext,
+        request_id: String,
+        page: Box<crate::chart_pages::ChartPage>,
+    },
     #[serde(deserialize_with = "crate::creature_catalog::read_reply")]
     CreatureCatalog {
         context: ReplyContext,
@@ -1794,6 +2019,7 @@ impl ServerMessage {
             Self::ProjectileChoices { context, .. }
             | Self::AbilityWeaponPreview { context, .. }
             | Self::MapPage { context, .. }
+            | Self::ChartPage { context, .. }
             | Self::CreatureCatalog { context, .. }
             | Self::AdvancementPage { context, .. }
             | Self::Ack { context, .. }

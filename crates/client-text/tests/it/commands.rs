@@ -10,6 +10,7 @@ fn equipment_and_drink_commands_use_disclosed_affordances_and_distinct_slots() {
     item.name = "silver ring".into();
     s.observation.inventory = vec![item.clone()];
     s.observation.interactions = Some(InteractionView {
+        refused: vec![],
         curse_blocked: vec![],
         identification: None,
         completed: Vec::new(),
@@ -30,6 +31,8 @@ fn equipment_and_drink_commands_use_disclosed_affordances_and_distinct_slots() {
             edible: false,
             readable: false,
             zappable: false,
+            portable_light: None,
+            device_activation: None,
             charges: None,
         }],
     });
@@ -57,6 +60,7 @@ fn equip_commands_support_multiple_custom_attack_sockets() {
     let slot = equipment_slot("fixture_wing", "fastened to a wing", true);
     state.observation.inventory = vec![first.clone(), second.clone()];
     state.observation.interactions = Some(InteractionView {
+        refused: vec![],
         curse_blocked: vec![],
         identification: None,
         completed: vec![],
@@ -75,6 +79,8 @@ fn equip_commands_support_multiple_custom_attack_sockets() {
                 edible: false,
                 readable: false,
                 zappable: false,
+                portable_light: None,
+                device_activation: None,
                 charges: None,
             },
             ItemInteractionView {
@@ -89,6 +95,8 @@ fn equip_commands_support_multiple_custom_attack_sockets() {
                 edible: false,
                 readable: false,
                 zappable: false,
+                portable_light: None,
+                device_activation: None,
                 charges: None,
             },
         ],
@@ -220,11 +228,11 @@ fn state() -> StateView {
         "wizard_game":false,"revision": "7", "observation": {
             "actor": "1", "self_target":super::actor_target(1),"tick": "100", "position": {"x":1,"y":1,"z":0},
 
-            "places":[],"visible_cells": (0..5).flat_map(|x| (0..3).map(move |y| serde_json::json!({"key":format!("{x}:{y}"),"trap":null,"stairs_up":false,"stairs_down":false,"position":{"x":x,"y":y,"z":0},"wall":false,"lit":true,"place_hint":false}))).collect::<Vec<_>>(),
+            "places":[],"visible_cells": (0..5).flat_map(|x| (0..3).map(move |y| serde_json::json!({"key":format!("{x}:{y}"),"trap":null,"object_presentation":null,"stairs_up":false,"stairs_down":false,"position":{"x":x,"y":y,"z":0},"wall":false,"lit":true,"place_hint":false}))).collect::<Vec<_>>(),
             "ground_items":[
-                {"supply_reachable":false,"reachable":true,"item":{"known_currency":null,"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(10),"name":"copper token"},"position":{"x":1,"y":1,"z":0}},
-                {"supply_reachable":false,"reachable":false,"item":{"known_currency":null,"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(11),"name":"silver token"},"position":{"x":2,"y":1,"z":0}}
-            ], "inventory":[], "linked_holds":[],"visible_actors":[], "exits":[],  "ready":true
+                {"presentation":null,"supply_reachable":false,"reachable":true,"item":{"known_currency":null,"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(10),"name":"copper token"},"position":{"x":1,"y":1,"z":0}},
+                {"presentation":null,"supply_reachable":false,"reachable":false,"item":{"known_currency":null,"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(11),"name":"silver token"},"position":{"x":2,"y":1,"z":0}}
+            ], "inventory":[], "charts":[],"linked_holds":[],"visible_actors":[], "exits":[],  "ready":true
         }
     }))
     .unwrap()
@@ -339,6 +347,7 @@ fn eat_command_uses_the_exact_carried_item_and_never_infers_edibility() {
     item.name = "fixture meal".into();
     s.observation.inventory = vec![item.clone()];
     s.observation.interactions = Some(InteractionView {
+        refused: vec![],
         curse_blocked: vec![],
         identification: None,
         completed: vec![],
@@ -356,6 +365,8 @@ fn eat_command_uses_the_exact_carried_item_and_never_infers_edibility() {
             edible: false,
             readable: false,
             zappable: false,
+            portable_light: None,
+            device_activation: None,
             charges: None,
         }],
     });
@@ -426,6 +437,7 @@ fn magic_state() -> StateView {
     wand.identified = false;
     view.observation.inventory = vec![scroll.clone(), wand.clone()];
     view.observation.interactions = Some(InteractionView {
+        refused: vec![],
         curse_blocked: vec![],
         identification: None,
         completed: vec![],
@@ -444,6 +456,8 @@ fn magic_state() -> StateView {
                 edible: false,
                 readable: true,
                 zappable: false,
+                portable_light: None,
+                device_activation: None,
                 charges: None,
             },
             ItemInteractionView {
@@ -458,6 +472,8 @@ fn magic_state() -> StateView {
                 edible: false,
                 readable: false,
                 zappable: true,
+                portable_light: None,
+                device_activation: Some(tor_protocol::DeviceActivation::Direction),
                 charges: None,
             },
         ],
@@ -480,14 +496,18 @@ fn ordinary_magic_commands_select_one_disclosed_item_and_direction() {
             "zap the ivory wand northeast".to_owned(),
             Action::Zap {
                 item: wand,
-                direction: Direction::NorthEast,
+                aim: DeviceAim::Direction {
+                    direction: Direction::NorthEast,
+                },
             },
         ),
         (
             format!("zap #{wand} down"),
             Action::Zap {
                 item: wand,
-                direction: Direction::Down,
+                aim: DeviceAim::Direction {
+                    direction: Direction::Down,
+                },
             },
         ),
     ] {
@@ -652,4 +672,94 @@ fn projectile_commands_open_source_picker_without_actor_ray_or_step_fallback() {
         );
     }
     assert_eq!(state, before);
+}
+
+#[test]
+fn identified_self_device_command_needs_no_direction() {
+    let mut view = magic_state();
+    view.observation.ground_items.clear();
+    view.observation.inventory[1].identified = true;
+    view.observation.interactions.as_mut().unwrap().inventory[1].device_activation =
+        Some(DeviceActivation::SelfTarget);
+    assert!(
+        view.validate().is_ok(),
+        "valid disclosed self device premise"
+    );
+    let item = view.observation.inventory[1].id;
+    assert_eq!(
+        parse(&format!("zap #{item}"), &view).unwrap(),
+        Input::Command(Command::Act {
+            expected_revision: view.revision,
+            action: Action::Zap {
+                item,
+                aim: DeviceAim::SelfTarget {}
+            }
+        })
+    );
+}
+
+#[test]
+fn portable_light_raw_commands_emit_explicit_actions_and_show_current_fuel() {
+    let mut s = state();
+    s.observation = tor_client_common::test_support::portable_light_observation(false);
+    let item = s.observation.inventory[0].id;
+    for command in [
+        "ignite torch".to_owned(),
+        "light torch".to_owned(),
+        format!("ignite #{item}"),
+    ] {
+        assert!(
+            matches!(parse(&command, &s).unwrap(), Input::Command(Command::Act { action: Action::Ignite { item: actual }, .. }) if actual == item)
+        );
+    }
+    assert!(parse("extinguish torch", &s).is_err());
+    assert!(tor_client_text::inventory(&s).contains("unlit; fuel: 100000 ticks"));
+    s.observation = tor_client_common::test_support::portable_light_observation(true);
+    assert!(
+        matches!(parse("extinguish torch", &s).unwrap(), Input::Command(Command::Act { action: Action::Extinguish { item: actual }, .. }) if actual == item)
+    );
+    assert!(parse("ignite torch", &s).is_err());
+    let offer = &mut s.observation.interactions.as_mut().unwrap().inventory[0];
+    offer.equipped_slot = None;
+    offer.portable_light = Some(PortableLightView {
+        remaining: 100_000,
+        lit: false,
+        ignitable: false,
+        extinguishable: false,
+    });
+    assert!(
+        parse("ignite torch", &s).is_err(),
+        "lighting never auto-equips"
+    );
+}
+
+#[test]
+fn known_dual_device_requires_explicit_self_or_direction() {
+    let mut view = magic_state();
+    view.observation.ground_items.clear();
+    view.observation.inventory[1].identified = true;
+    view.observation.interactions.as_mut().unwrap().inventory[1].device_activation =
+        Some(DeviceActivation::DirectionOrSelf);
+    assert!(view.validate().is_ok());
+    let item = view.observation.inventory[1].id;
+    assert!(parse(&format!("zap #{item}"), &view)
+        .unwrap_err()
+        .contains("yourself"));
+    for suffix in ["self", "at self", "yourself", "to yourself"] {
+        assert_eq!(
+            parse(&format!("zap #{item} {suffix}"), &view).unwrap(),
+            Input::Command(Command::Act {
+                expected_revision: view.revision,
+                action: Action::Zap {
+                    item,
+                    aim: DeviceAim::SelfTarget {}
+                }
+            })
+        );
+    }
+    assert!(parse(&format!("zap #{item} east"), &view).is_ok());
+    view.observation.inventory[1].identified = false;
+    view.observation.interactions.as_mut().unwrap().inventory[1].device_activation =
+        Some(DeviceActivation::Direction);
+    assert!(parse(&format!("zap #{item} self"), &view).is_err());
 }

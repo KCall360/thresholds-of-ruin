@@ -120,7 +120,7 @@ class UtilityWandsServiceContracts(UtilityServiceHarness):
                                      "Snapshots, updates, history and denied previews must keep the source private")
 
     def zap(self, identity):
-        return self.act(1, {"type": "zap", "item": identity, "direction": "east"})
+        return self.act(1, {"type": "zap", "item": identity, "aim": {"kind": "direction", "direction": "east"}})
 
     def test_source_wands_keep_single_persistent_status_cancel_to_neutral_and_stop_at_first_contact(self):
         ids = initial_items(self, self.snapshot())

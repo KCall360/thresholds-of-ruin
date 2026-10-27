@@ -45,6 +45,7 @@ pub(crate) fn ambush() -> PerceptionValue {
 
 fn modifier(value: PerceptionValue) -> Modifier {
     Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Perception { value },
     }
@@ -161,6 +162,7 @@ pub(crate) fn fixture_with_height(
             "fixture_paid_melee",
         ] {
             species.modifiers.push(Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::GrantAbility { ability: id(name) },
             });

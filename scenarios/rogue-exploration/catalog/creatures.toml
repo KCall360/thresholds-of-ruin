@@ -2,6 +2,7 @@
 namespace = "rogue"
 
 [creatures.species."rogue.human"]
+detection_appearance = { name = "human", asset = "creature.humanoid.human" }
 behavior = { disposition = "passive", idle = "explore", memory_ticks = 1000, doors = true, care = true, equipment = true, loot = true, flee_percent = 25 }
 kind = "humanoid"
 attributes = { strength = 2, speed = 2, intellect = 2, willpower = 2, awareness = 1, presence = 1 }
@@ -9,6 +10,7 @@ displacement = { size = "medium", anchored = false }
 melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, strikes = [{ offset = 0, check = { actor = "user", skill = { kind = "selected_weapon" }, against = { kind = "defense", defense = "physical" } }, on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "impact", amount = { kind = "rolled", dice = { count = 1, sides = 4, bonus = 0 } } }] } }], on_failure = [], descriptors = [], riders = [] }] }
 
 [creatures.species."rogue.emu"]
+detection_appearance = { name = "emu", asset = "creature.bird.emu" }
 behavior = { disposition = "mean", idle = "explore", memory_ticks = 1000, doors = false, care = false, equipment = false, loot = false, flee_percent = 25 }
 kind = "animal"
 attributes = { strength = 1, speed = 1, intellect = 0, willpower = 0, awareness = 1, presence = 0 }
@@ -17,6 +19,7 @@ displacement = { size = "medium", anchored = false }
 melee = { skill = "light_weaponry", bonus = 0, wind_up = 100, recovery = 100, strikes = [{ offset = 0, check = { actor = "user", skill = { kind = "selected_weapon" }, against = { kind = "defense", defense = "physical" } }, on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "impact", amount = { kind = "rolled", dice = { count = 1, sides = 2, bonus = 0 } } }] } }], on_failure = [], descriptors = [], riders = [] }] }
 
 [creatures.species."rogue.snake"]
+detection_appearance = { name = "snake", asset = "creature.serpent.snake" }
 behavior = { disposition = "mean", idle = "explore", memory_ticks = 1000, doors = false, care = false, equipment = false, loot = false, flee_percent = 25 }
 kind = "animal"
 subtypes = ["reptilian"]
@@ -28,6 +31,7 @@ melee = { skill = "light_weaponry", bonus = 0, wind_up = 100, recovery = 100, st
 # Venomous is eligibility only. VN1 owns the separate checked poison rider;
 # the unmodified natural bite has no poison descriptor. Other snake values are provisional.
 [creatures.species."rogue.rattlesnake"]
+detection_appearance = { name = "rattlesnake", asset = "creature.serpent.rattlesnake" }
 behavior = { disposition = "mean", idle = "explore", memory_ticks = 1000, doors = false, care = false, equipment = false, loot = false, flee_percent = 25 }
 kind = "animal"
 subtypes = ["reptilian"]
@@ -42,6 +46,7 @@ melee = { skill = "light_weaponry", bonus = 0, wind_up = 100, recovery = 100, st
 # Damage dice and purchase ordinals follow the accepted roster. Other numbers
 # are provisional inputs for paired arena tuning, not an AC or XP conversion.
 [creatures.species."rogue.hobgoblin"]
+detection_appearance = { name = "hobgoblin", asset = "creature.goblin.hobgoblin" }
 # Authored tool use includes reachable doors; Rogue still forbids NPC stairs.
 behavior = { disposition = "mean", idle = "explore", memory_ticks = 1000, doors = true, care = true, equipment = true, loot = true, flee_percent = 25 }
 kind = "humanoid"
@@ -65,6 +70,7 @@ descriptors = []
 riders = []
 
 [creatures.species."rogue.zombie"]
+detection_appearance = { name = "zombie", asset = "creature.undead.zombie" }
 behavior = { disposition = "mean", idle = "explore", memory_ticks = 1000, doors = false, care = false, equipment = false, loot = false, flee_percent = 25 }
 kind = "undead"
 attributes = { strength = 1, speed = 0, intellect = 0, willpower = 0, awareness = 0, presence = 0 }
@@ -86,6 +92,7 @@ descriptors = []
 riders = []
 
 [creatures.species."rogue.quagga"]
+detection_appearance = { name = "quagga", asset = "creature.equine.quagga" }
 behavior = { disposition = "mean", idle = "explore", memory_ticks = 1000, doors = false, care = false, equipment = false, loot = false, flee_percent = 25 }
 kind = "animal"
 attributes = { strength = 1, speed = 1, intellect = 0, willpower = 0, awareness = 1, presence = 0 }
@@ -117,6 +124,7 @@ descriptors = []
 riders = []
 
 [creatures.species."rogue.centaur"]
+detection_appearance = { name = "centaur", asset = "creature.centaur" }
 behavior = { disposition = "passive", idle = "explore", memory_ticks = 1000, doors = true, care = true, equipment = true, loot = true, flee_percent = 25 }
 kind = "monstrous_humanoid"
 attributes = { strength = 2, speed = 1, intellect = 1, willpower = 1, awareness = 1, presence = 1 }
@@ -156,6 +164,7 @@ descriptors = []
 riders = []
 
 [creatures.species."rogue.yeti"]
+detection_appearance = { name = "yeti", asset = "creature.ape.yeti" }
 behavior = { disposition = "passive", idle = "explore", memory_ticks = 1000, doors = false, care = true, equipment = false, loot = true, flee_percent = 25 }
 kind = "giant"
 subtypes = ["cold"]
@@ -189,6 +198,7 @@ riders = []
 # T: purchased RG1/NA1/NA2; flags only provide eligibility. Attributes, defense,
 # body and timing are provisional TOR inputs, not a calibrated AC/XP conversion.
 [creatures.species."rogue.troll"]
+detection_appearance = { name = "troll", asset = "creature.troll" }
 behavior = { disposition = "mean", idle = "explore", memory_ticks = 1000, doors = true, care = true, equipment = true, loot = true, flee_percent = 25 }
 kind = "giant"
 attributes = { strength = 2, speed = 1, intellect = 0, willpower = 1, awareness = 1, presence = 0 }
@@ -228,6 +238,7 @@ descriptors = []
 riders = []
 
 [creatures.species."rogue.black_unicorn"]
+detection_appearance = { name = "black unicorn", asset = "creature.equine.unicorn.black" }
 behavior = { disposition = "mean", idle = "explore", memory_ticks = 1000, doors = false, care = false, equipment = false, loot = false, flee_percent = 25 }
 kind = "magical_beast"
 attributes = { strength = 2, speed = 2, intellect = 0, willpower = 1, awareness = 1, presence = 1 }
@@ -272,6 +283,7 @@ riders = []
 # a fake damage effect; purchased CH1 supplies its separate signature ability.
 # Attributes, defense mapping and action timings remain provisional TOR tuning.
 [creatures.species."rogue.ice_monster"]
+detection_appearance = { name = "ice monster", asset = "creature.elemental.ice" }
 behavior = { disposition = "passive", idle = "wait", memory_ticks = 1000, doors = false, care = false, equipment = false, loot = false, flee_percent = 25 }
 kind = "elemental"
 subtypes = ["cold"]
@@ -283,10 +295,11 @@ melee = { skill = "light_weaponry", bonus = 0, wind_up = 100, recovery = 100, st
 # V: accepted 1d10 natural strike; DR1/RG1 are purchased on actual racial rows.
 # All other values are provisional TOR inputs, not a reference AC/XP conversion.
 [creatures.species."rogue.vampire"]
+detection_appearance = { name = "vampire", asset = "creature.undead.vampire" }
 behavior = { disposition = "mean", idle = "explore", memory_ticks = 1000, doors = true, care = true, equipment = true, loot = true, flee_percent = 25 }
 kind = "undead"
 attributes = { strength = 2, speed = 2, intellect = 1, willpower = 2, awareness = 1, presence = 1 }
-anatomy = { slots = ["weapon", "shield", "body_armor", "head_armor", "hands_armor", "feet_armor", "cloak", "ring", "ring", "amulet", "weapon"], capacities = { grip = 2 }, primary_attack_socket = { kind = "socket", slot = 0 } }
+anatomy = { slots = ["weapon", "shield", "body_armor", "head_armor", "hands_armor", "feet_armor", "cloak", "ring", "ring", "amulet", "weapon", "held_light"], capacities = { grip = 2 }, primary_attack_socket = { kind = "socket", slot = 0 } }
 displacement = { size = "medium", anchored = false }
 modifiers = [{ scope = "always", op = { kind = "flag", flag = "regenerative" } }, { scope = "always", op = { kind = "add", stat = { kind = "defense", defense = "physical" }, value = 7 } }]
 
@@ -307,10 +320,11 @@ riders = []
 # W: five undead HD; DR2 is paid at HD1 with no prerequisite parent.
 # Body/attributes/defense/timing are provisional TOR inputs, not AC/XP conversion.
 [creatures.species."rogue.wraith"]
+detection_appearance = { name = "wraith", asset = "creature.undead.wraith" }
 behavior = { disposition = "passive", idle = "explore", memory_ticks = 1000, doors = false, care = false, equipment = false, loot = false, flee_percent = 25 }
 kind = "undead"
 attributes = { strength = 2, speed = 2, intellect = 1, willpower = 2, awareness = 1, presence = 1 }
-anatomy = { slots = ["weapon", "shield", "body_armor", "head_armor", "hands_armor", "feet_armor", "cloak", "ring", "ring", "amulet", "weapon"], capacities = { grip = 2 }, primary_attack_socket = { kind = "socket", slot = 0 } }
+anatomy = { slots = ["weapon", "shield", "body_armor", "head_armor", "hands_armor", "feet_armor", "cloak", "ring", "ring", "amulet", "weapon", "held_light"], capacities = { grip = 2 }, primary_attack_socket = { kind = "socket", slot = 0 } }
 displacement = { size = "medium", anchored = false }
 modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "defense", defense = "physical" }, value = 3 } }]
 
@@ -332,6 +346,7 @@ riders = []
 # the pinned roster; keen category, attributes, defense, body and timing are
 # provisional TOR tuning, not an original Rogue AC/XP or damage-type conversion.
 [creatures.species."rogue.jabberwock"]
+detection_appearance = { name = "jabberwock", asset = "creature.jabberwock" }
 behavior = { disposition = "passive", idle = "explore", memory_ticks = 1000, doors = false, care = false, equipment = false, loot = false, flee_percent = 25 }
 kind = "aberration"
 attributes = { strength = 2, speed = 1, intellect = 0, willpower = 1, awareness = 1, presence = 0 }
@@ -365,6 +380,7 @@ riders = []
 # remain provisional TOR inputs, not a source AC or XP conversion.
 
 [creatures.species."rogue.bat"]
+detection_appearance = { name = "bat", asset = "creature.bat" }
 behavior = { disposition = "passive", idle = "explore", memory_ticks = 1000, doors = false, care = false, equipment = false, loot = false, flee_percent = 25 }
 kind = "animal"
 attributes = { strength = 0, speed = 2, intellect = 0, willpower = 0, awareness = 1, presence = 0 }
@@ -374,6 +390,7 @@ modifiers = [{ scope = "always", op = { kind = "locomotion", value = { kind = "f
 melee = { skill = "light_weaponry", bonus = 0, wind_up = 100, recovery = 100, strikes = [{ offset = 0, check = { actor = "user", skill = { kind = "natural_attack" }, against = { kind = "defense", defense = "physical" } }, on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "keen", amount = { kind = "rolled", dice = { count = 1, sides = 2, bonus = 0 } } }] } }], on_failure = [], descriptors = [], riders = [] }] }
 
 [creatures.species."rogue.kestrel"]
+detection_appearance = { name = "kestrel", asset = "creature.bird.kestrel" }
 behavior = { disposition = "mean", idle = "explore", memory_ticks = 1000, doors = false, care = false, equipment = false, loot = false, flee_percent = 25 }
 kind = "animal"
 attributes = { strength = 0, speed = 2, intellect = 0, willpower = 0, awareness = 1, presence = 0 }
@@ -383,15 +400,17 @@ modifiers = [{ scope = "always", op = { kind = "locomotion", value = { kind = "f
 melee = { skill = "light_weaponry", bonus = 0, wind_up = 100, recovery = 100, strikes = [{ offset = 0, check = { actor = "user", skill = { kind = "natural_attack" }, against = { kind = "defense", defense = "physical" } }, on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "keen", amount = { kind = "rolled", dice = { count = 1, sides = 4, bonus = 0 } } }] } }], on_failure = [], descriptors = [], riders = [] }] }
 
 [creatures.species."rogue.venus_flytrap"]
+detection_appearance = { name = "venus flytrap", asset = "creature.plant.venus.flytrap" }
 behavior = { disposition = "mean", idle = "wait", memory_ticks = 1000, doors = false, care = false, equipment = false, loot = false, flee_percent = 25 }
 kind = "plant"
 attributes = { strength = 2, speed = 0, intellect = 0, willpower = 1, awareness = 1, presence = 0 }
 anatomy = { slots = [], capacities = {}, primary_attack_socket = { kind = "none" } }
 displacement = { size = "medium", anchored = false }
-modifiers = [{ scope = "always", op = { kind = "locomotion", value = { kind = "stationary", enabled = true } } }, { scope = "always", op = { kind = "flag", flag = "grasping" } }]
-melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 100, recovery = 100, strikes = [{ offset = 0, check = { actor = "user", skill = { kind = "natural_attack" }, against = { kind = "defense", defense = "physical" } }, on_success = [{ kind = "hold_damage", category = "impact" }], on_failure = [], descriptors = [], riders = [] }] }
+modifiers = [{ scope = "always", op = { kind = "locomotion", value = { kind = "stationary", enabled = true } } }, { cancellable = true, scope = "always", op = { kind = "flag", flag = "grasping" } }]
+melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 100, recovery = 100, strikes = [{ cancellable = true, offset = 0, check = { actor = "user", skill = { kind = "natural_attack" }, against = { kind = "defense", defense = "physical" } }, on_success = [{ kind = "hold_damage", category = "impact" }], on_failure = [], descriptors = [], riders = [] }] }
 
 [creatures.species."rogue.griffin"]
+detection_appearance = { name = "griffin", asset = "creature.griffin" }
 behavior = { disposition = "mean", idle = "explore", memory_ticks = 1000, doors = false, care = false, equipment = false, loot = false, flee_percent = 25 }
 kind = "magical_beast"
 attributes = { strength = 3, speed = 2, intellect = 0, willpower = 1, awareness = 2, presence = 0 }
@@ -402,6 +421,7 @@ melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 100, recovery = 100, st
 
 # Shared trickster/gold policies; physical tuning remains provisional.
 [creatures.species."rogue.leprechaun"]
+detection_appearance = { name = "leprechaun", asset = "creature.fey.leprechaun" }
 behavior = { disposition = "passive", idle = "explore", memory_ticks = 1000, doors = true, care = false, equipment = false, loot = false, gold = true, flee_percent = 25 }
 kind = "fey"
 attributes = { strength = 0, speed = 3, intellect = 2, willpower = 1, awareness = 2, presence = 1 }
@@ -421,6 +441,7 @@ riders = []
 
 # Shared trickster/gold policies; physical tuning remains provisional.
 [creatures.species."rogue.nymph"]
+detection_appearance = { name = "nymph", asset = "creature.fey.nymph" }
 behavior = { disposition = "passive", idle = "explore", memory_ticks = 1000, doors = true, care = false, equipment = false, loot = false, gold = false, flee_percent = 25 }
 kind = "fey"
 attributes = { strength = 0, speed = 2, intellect = 2, willpower = 2, awareness = 1, presence = 2 }
@@ -440,6 +461,7 @@ riders = []
 
 # Shared trickster/gold policies; physical tuning remains provisional.
 [creatures.species."rogue.orc"]
+detection_appearance = { name = "orc", asset = "creature.humanoid.orc" }
 behavior = { disposition = "passive", idle = "explore", memory_ticks = 1000, doors = true, care = true, equipment = true, loot = true, gold = true, flee_percent = 25 }
 kind = "humanoid"
 attributes = { strength = 2, speed = 1, intellect = 1, willpower = 1, awareness = 1, presence = 0 }
@@ -462,11 +484,12 @@ riders = []
 # Incorporeal/shapechanger labels grant no immunity, wall passing or re-hiding.
 
 [creatures.species."rogue.medusa"]
+detection_appearance = { name = "medusa", asset = "creature.medusa" }
 behavior = { disposition = "mean", idle = "explore", memory_ticks = 1000, doors = true, care = true, equipment = true, loot = true, flee_percent = 25 }
 kind = "monstrous_humanoid"
 subtypes = ["reptilian"]
 attributes = { strength = 2, speed = 1, intellect = 1, willpower = 2, awareness = 1, presence = 2 }
-anatomy = { slots = ["weapon", "shield", "body_armor", "head_armor", "hands_armor", "feet_armor", "cloak", "ring", "ring", "amulet", "weapon"], capacities = { grip = 2 }, primary_attack_socket = { kind = "socket", slot = 0 } }
+anatomy = { slots = ["weapon", "shield", "body_armor", "head_armor", "hands_armor", "feet_armor", "cloak", "ring", "ring", "amulet", "weapon", "held_light"], capacities = { grip = 2 }, primary_attack_socket = { kind = "socket", slot = 0 } }
 displacement = { size = "medium", anchored = false }
 modifiers = [{ scope = "always", op = { kind = "flag", flag = "gaze_capable" } }, { scope = "always", op = { kind = "flag", flag = "natural_sequence" } }]
 [creatures.species."rogue.medusa".melee]
@@ -499,13 +522,14 @@ descriptors = []
 riders = []
 
 [creatures.species."rogue.phantom"]
+detection_appearance = { name = "phantom", asset = "creature.undead.phantom" }
 behavior = { disposition = "passive", idle = "explore", memory_ticks = 1000, doors = false, care = false, equipment = false, loot = false, flee_percent = 25 }
 kind = "undead"
 subtypes = ["incorporeal"]
 attributes = { strength = 2, speed = 2, intellect = 0, willpower = 1, awareness = 1, presence = 0 }
 anatomy = { slots = [], capacities = {}, primary_attack_socket = { kind = "none" } }
 displacement = { size = "medium", anchored = false }
-modifiers = [{ scope = "always", op = { kind = "perception", value = { kind = "invisible", enabled = true } } }, { scope = "always", op = { kind = "locomotion", value = { kind = "erratic", chance = { numerator = 1, denominator = 5 } } } }]
+modifiers = [{ cancellable = true, scope = "always", op = { kind = "perception", value = { kind = "invisible", enabled = true } } }, { scope = "always", op = { kind = "locomotion", value = { kind = "erratic", chance = { numerator = 1, denominator = 5 } } } }]
 [creatures.species."rogue.phantom".melee]
 skill = "heavy_weaponry"
 bonus = 0
@@ -520,6 +544,7 @@ descriptors = []
 riders = []
 
 [creatures.species."rogue.xeroc"]
+detection_appearance = { name = "xeroc", asset = "creature.xeroc" }
 behavior = { disposition = "passive", idle = "wait", memory_ticks = 1000, doors = false, care = false, equipment = false, loot = false, flee_percent = 25 }
 kind = "aberration"
 subtypes = ["shapechanger"]
@@ -543,6 +568,7 @@ riders = []
 # A: one admitted zero-damage contact; the purchased CO1 owns corrosion.
 # Body, attributes and timing are provisional TOR inputs.
 [creatures.species."rogue.aquator"]
+detection_appearance = { name = "aquator", asset = "creature.aquator" }
 behavior = { disposition = "mean", idle = "explore", memory_ticks = 1000, doors = false, care = false, equipment = false, loot = false, flee_percent = 25 }
 kind = "aberration"
 subtypes = ["aquatic"]
@@ -567,6 +593,7 @@ riders = []
 # baseline plus owned HD4/8 choices reaches the approved starting value 3.
 # Remaining attributes, body and timing are provisional TOR tuning inputs.
 [creatures.species."rogue.dragon"]
+detection_appearance = { name = "dragon", asset = "creature.dragon" }
 behavior = { disposition = "mean", idle = "explore", memory_ticks = 1000, doors = false, care = false, equipment = false, loot = false, flee_percent = 25 }
 kind = "dragon"
 subtypes = ["fire"]

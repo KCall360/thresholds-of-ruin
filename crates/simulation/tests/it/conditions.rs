@@ -5,6 +5,8 @@ use tor_simulation::ActorId;
 
 fn definition(stacking: Stacking) -> ConditionDef {
     ConditionDef {
+        detecting_monsters: false,
+        hallucinating: false,
         id: ConditionId::new("marked").unwrap(),
         family: tor_simulation::content_ids::ConditionFamilyId::new("marked").unwrap(),
         lifecycle: tor_simulation::rules::ConditionLifecycle::Timed,

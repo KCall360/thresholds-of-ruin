@@ -86,6 +86,7 @@ pub fn seen(client: &ClientState) -> Seen {
             doors.insert(cell.position, door.clone());
         }
         scenery.observation.visible_cells.push(CellView {
+            object_presentation: cell.object_presentation.clone(),
             lit: false,
             // Stale door appearance is stored separately; no DoorView or target
             // can be recovered from it. The geometry alone has no action handle.

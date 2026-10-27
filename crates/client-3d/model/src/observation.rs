@@ -1,5 +1,5 @@
 //! A renderer-independent projection of disclosed client state.
-use crate::{actor_model, creature_model, item_model, CreatureModel, ItemModel};
+use crate::{actor_model, creature_model, item_model, object_model, CreatureModel, ItemModel};
 use tor_client_common::{ClientState, Palette};
 use tor_protocol::*;
 
@@ -25,6 +25,8 @@ pub struct View {
     pub branch: BranchId,
     pub feet: Position,
     pub visible: Vec<CellView>,
+    /// Palette-resolved sampled cell art; never used for navigation or collision.
+    pub object_models: std::collections::BTreeMap<Position, ItemModel>,
     /// Remembered cells aligned to this frame that are not currently seen.
     pub memory: Vec<RememberedMapCell>,
     pub actors: Vec<Actor>,
@@ -87,6 +89,7 @@ pub struct Carried {
     pub equipped: Option<String>,
     pub can_equip: bool,
     pub drinkable: bool,
+    pub portable_light: Option<PortableLightView>,
     pub edible: bool,
 }
 
@@ -149,36 +152,67 @@ pub fn view(state: &ClientState, palette: &Palette) -> View {
     }
     let seen: std::collections::HashSet<Position> =
         o.visible_cells.iter().map(|c| c.position).collect();
+    let memory: Vec<_> = state
+        .map_memory()
+        .filter(|c| !seen.contains(&c.position))
+        .map(|c| c.appearance())
+        .collect();
+    let object_models = o
+        .visible_cells
+        .iter()
+        .filter_map(|cell| {
+            cell.object_presentation
+                .as_ref()
+                .map(|p| (cell.position, object_model(palette, p)))
+        })
+        .chain(memory.iter().filter_map(|cell| {
+            cell.object_presentation
+                .as_ref()
+                .map(|p| (cell.position, object_model(palette, p)))
+        }))
+        .collect();
     View {
+        object_models,
         shown: state.reply_context(),
         context: state.context().clone(),
         branch: state.branch().clone(),
         feet: o.position,
         visible: o.visible_cells.clone(),
-        memory: state
-            .map_memory()
-            .filter(|c| !seen.contains(&c.position))
-            .map(|c| c.appearance())
-            .collect(),
+        memory,
         actors,
         items: o
             .ground_items
             .iter()
             .map(|g| GroundItem {
-                corpse_seed: g.item.corpse.as_ref().map(|appearance| appearance.seed),
-                model: item_model(palette, &g.item),
-                corpse_model: creature_model(
-                    palette,
-                    g.item
-                        .corpse
-                        .as_ref()
-                        .and_then(|appearance| appearance.asset.as_deref()),
+                corpse_seed: g
+                    .presentation
+                    .is_none()
+                    .then(|| g.item.corpse.as_ref().map(|appearance| appearance.seed))
+                    .flatten(),
+                model: g.presentation.as_ref().map_or_else(
+                    || item_model(palette, &g.item),
+                    |p| object_model(palette, p),
                 ),
+                corpse_model: if g.presentation.is_some() {
+                    CreatureModel::Placeholder
+                } else {
+                    creature_model(
+                        palette,
+                        g.item
+                            .corpse
+                            .as_ref()
+                            .and_then(|appearance| appearance.asset.as_deref()),
+                    )
+                },
                 id: g.item.id,
-                name: g.item.name.clone(),
+                name: tor_client_common::items::ground_name(g).to_owned(),
                 class: g.item.class,
                 quantity: g.item.quantity,
-                description: g.item.description.clone(),
+                description: if g.presentation.is_some() {
+                    String::new()
+                } else {
+                    g.item.description.clone()
+                },
                 position: g.position,
                 reachable: g.reachable,
             })
@@ -206,6 +240,7 @@ pub fn view(state: &ClientState, palette: &Palette) -> View {
                         .is_some_and(|a| a.slot.is_some() && a.equipped_slot.is_none()),
                     equipped,
                     drinkable: affordance.is_some_and(|a| a.drinkable),
+                    portable_light: affordance.and_then(|a| a.portable_light.clone()),
                     edible: affordance.is_some_and(|a| a.edible),
                 }
             })
@@ -294,6 +329,8 @@ pub fn observed_harm(before: &View, after: &View) -> Vec<ActorTarget> {
 /// A terrain appearance for drawing and exploration. This carries no entity
 /// targets, door affordances or occupants. Remembered terrain is always dim.
 pub struct Terrain<'a> {
+    pub object_presentation: Option<&'a ObjectPresentation>,
+    pub object_model: Option<ItemModel>,
     pub key: &'a str,
     pub position: Position,
     pub wall: bool,
@@ -308,6 +345,8 @@ impl View {
         self.visible
             .iter()
             .map(|c| Terrain {
+                object_presentation: c.object_presentation.as_ref(),
+                object_model: self.object_models.get(&c.position).copied(),
                 key: &c.key,
                 position: c.position,
                 wall: c.wall,
@@ -318,6 +357,8 @@ impl View {
                 lit: c.lit,
             })
             .chain(self.memory.iter().map(|c| Terrain {
+                object_presentation: c.object_presentation.as_ref(),
+                object_model: self.object_models.get(&c.position).copied(),
                 key: &c.key,
                 position: c.position,
                 wall: c.wall,

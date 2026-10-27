@@ -386,6 +386,47 @@ pub enum ResolvedEffect {
         mode: super::MovementMode,
         result: super::MovementResult,
     },
+    RoomLight {
+        changed: bool,
+    },
+    DetectMonsters {
+        id: ConditionId,
+        duration: u64,
+        changed: bool,
+    },
+    DetectFood {
+        changed: bool,
+    },
+    MapTopology {
+        changed: bool,
+    },
+    DetectMagic {
+        changed: bool,
+    },
+    DrainLife {
+        changed: bool,
+    },
+    CancelSpecials {
+        changed: bool,
+    },
+    BalefulPolymorph {
+        form: Option<crate::content_ids::BodyFormId>,
+        changed: bool,
+    },
+    GainStrength {
+        change: super::StrengthGain,
+    },
+    RaiseLevel {
+        amount: u64,
+    },
+    HasteDose {
+        id: ConditionId,
+        rest: ConditionId,
+        outcome: super::HasteDoseOutcome,
+    },
+    DirectHealthLoss {
+        amount: u64,
+    },
     ArrestDescent,
     Damage {
         amount: u32,
@@ -472,7 +513,13 @@ fn read_health_improvements<'de, D: serde::Deserializer<'de>>(
 impl ResolvedEffect {
     pub(crate) fn recipient(&self) -> EffectRecipient {
         match self {
-            Self::AlterEquipment { .. }
+            Self::RoomLight { .. }
+            | Self::DetectMonsters { .. }
+            | Self::DetectFood { .. }
+            | Self::MapTopology { .. }
+            | Self::DetectMagic { .. }
+            | Self::DrainLife { .. }
+            | Self::AlterEquipment { .. }
             | Self::SearchAdjacentGuises { .. }
             | Self::ObservePublicPlan { .. }
             | Self::ApplyQualifiedConditionToSource { .. } => EffectRecipient::Source,
@@ -488,6 +535,18 @@ impl ResolvedEffect {
             }
             Self::Theft { quantity, .. } => *quantity > 0,
             Self::Translate { result, .. } | Self::Relocate { result, .. } => result.changed(),
+            Self::RoomLight { changed }
+            | Self::DetectMonsters { changed, .. }
+            | Self::DetectFood { changed }
+            | Self::MapTopology { changed }
+            | Self::DetectMagic { changed }
+            | Self::DrainLife { changed }
+            | Self::CancelSpecials { changed }
+            | Self::BalefulPolymorph { changed, .. } => *changed,
+            Self::GainStrength { change } => *change != super::StrengthGain::Unchanged,
+            Self::RaiseLevel { amount } => *amount > 0,
+            Self::HasteDose { .. } => true,
+            Self::DirectHealthLoss { amount } => *amount > 0,
             Self::ArrestDescent => false,
             Self::CorrodeArmor { amount, .. }
             | Self::Damage { amount }
@@ -527,6 +586,65 @@ impl ResolvedEffect {
             | Self::ApplyLinkedHold { .. }
             | Self::CorrodeArmor { .. }
             | Self::AlterEquipment { .. } => self.clone(),
+            Self::RoomLight { .. }
+            | Self::DrainLife { .. }
+            | Self::DetectMonsters { .. }
+            | Self::DetectFood { .. }
+            | Self::MapTopology { .. }
+            | Self::DetectMagic { .. }
+            | Self::BalefulPolymorph { .. } => self.clone(),
+            Self::CancelSpecials { .. } => Self::CancelSpecials {
+                changed: creature.cancel_specials()?,
+            },
+            Self::GainStrength { .. } => {
+                let change = if let Some(context) = state.recovery_context {
+                    creature
+                        .with_recovery_context(context, |creature| creature.stage_gain_strength())?
+                } else {
+                    creature.stage_gain_strength()?
+                };
+                Self::GainStrength { change }
+            }
+            Self::RaiseLevel { .. } => Self::RaiseLevel {
+                amount: creature.stage_raise_level()?,
+            },
+            Self::HasteDose { id, rest, outcome } => {
+                if !outcome.valid()
+                    || !creature
+                        .build()
+                        .ruleset()
+                        .condition(id)
+                        .zip(creature.build().ruleset().condition(rest))
+                        .is_some_and(|(haste, rest)| {
+                            super::haste_dose_conditions_valid(haste, rest)
+                        })
+                {
+                    return Err(crate::conditions::ConditionError::InvalidDuration.into());
+                }
+                let mut candidate = creature.clone();
+                let apply = |creature: &mut crate::creatures::CreatureState| -> Result<(), crate::conditions::ConditionError> {
+                    match outcome {
+                        super::HasteDoseOutcome::Hasted { duration } => {
+                            creature.apply_condition(id, source, *duration)?;
+                        }
+                        super::HasteDoseOutcome::Overdose { rest: duration } => {
+                            creature.remove_condition(id)?;
+                            if *duration > 0 { creature.apply_condition(rest, source, *duration)?; }
+                        }
+                    }
+                    Ok(())
+                };
+                if let Some(context) = state.recovery_context {
+                    candidate.with_recovery_context(context, apply)?;
+                } else {
+                    apply(&mut candidate)?;
+                }
+                *creature = candidate;
+                self.clone()
+            }
+            Self::DirectHealthLoss { amount } => Self::DirectHealthLoss {
+                amount: creature.direct_loss_without_reset(*amount),
+            },
             Self::ArrestDescent => {
                 if !creature.derived().locomotion.levitating {
                     return Ok(None);
@@ -842,14 +960,18 @@ impl StrikeBudget {
         }
     }
     pub(super) fn ray(ray: &super::RayPlan) -> Self {
-        let debit = ray.effect_edge.clamp(
+        let super::contact_policy::RayResolution::Opposed { effect_edge, .. } = &ray.resolution
+        else {
+            return Self::effects();
+        };
+        let debit = (*effect_edge).clamp(
             -i64::from(CHECK_EDGE_CAPACITY),
             i64::from(CHECK_EDGE_CAPACITY),
         );
         Self {
             check_debit: debit,
             owner: None,
-            remaining: edge(ray.effect_edge - debit),
+            remaining: edge(*effect_edge - debit),
         }
     }
     pub(super) fn effects() -> Self {
@@ -866,18 +988,26 @@ pub(super) fn resolve_ray_launch(
     rng: &mut u64,
     observer: &mut dyn ResolutionObserver,
 ) -> i64 {
-    let mut remaining = edge(ray.source_edge);
+    let super::contact_policy::RayResolution::Opposed {
+        source_edge,
+        source_bonus,
+        ..
+    } = &ray.resolution
+    else {
+        unreachable!("only opposed policy invokes launch resolution");
+    };
+    let mut remaining = edge(*source_edge);
     let allocated = remaining.take(CHECK_EDGE_CAPACITY);
     let before = *rng;
     let rolled = roll_check(rng, allocated);
-    let total = i64::from(rolled.kept) + ray.source_bonus;
+    let total = i64::from(rolled.kept) + *source_bonus;
     observer.record(ResolutionStep {
         id: "ray_launch_check",
         fields: &[
             dice("rolled", rolled.rolled()),
             dice("retained", rolled.retained()),
-            signed("bonus", ray.source_bonus),
-            signed("input_edge", ray.source_edge),
+            signed("bonus", *source_bonus),
+            signed("input_edge", *source_edge),
             signed("edge", allocated.balance()),
             signed("total", total),
             unsigned("rng_before", before),
@@ -979,6 +1109,40 @@ pub(crate) struct BatchResolution {
     pub selected_branch: Option<crate::rules::RiderTrigger>,
 }
 
+/// Select once after resistance succeeds. Geometry is deliberately absent:
+/// an unfit draw remains that paid failed draw, never a second selection.
+pub(super) fn select_baleful_form(
+    creature: &crate::creatures::CreatureState,
+    forms: &[crate::content_ids::BodyFormId],
+    rng: &mut u64,
+) -> Result<Option<crate::content_ids::BodyFormId>, EffectApplicationError> {
+    if !crate::rules::valid_body_forms(forms)
+        || forms.iter().any(|id| {
+            creature
+                .build()
+                .content()
+                .polymorph_body_package(id)
+                .is_none()
+        })
+    {
+        return Err(EffectApplicationError::InvalidDefinition);
+    }
+    let Some(current) = creature.build().active_body_package() else {
+        return Ok(None);
+    };
+    let eligible: Vec<_> = forms.iter().filter(|id| **id != current.id).collect();
+    if eligible.is_empty() {
+        return Ok(None);
+    }
+    let index = crate::quantity::QuantityRange {
+        minimum: 1,
+        maximum: eligible.len() as u64,
+    }
+    .sample(rng)
+    .map_err(|_| EffectApplicationError::RandomnessExhausted)?
+        - 1;
+    Ok(Some(eligible[index as usize].clone()))
+}
 /// Resolve one payload through the shared pure kernel, preserving the caller's
 /// RNG on every hard failure. Ordinary condition rejection remains soft.
 pub fn resolve<'a>(
@@ -1288,6 +1452,55 @@ pub(super) fn resolve_batch<'a>(
                 });
                 ResolvedEffect::Relocate { mode, result }
             }
+            PlannedEffect::RoomLight => ResolvedEffect::RoomLight { changed: false },
+            PlannedEffect::DetectMonsters { id, turn_ticks } => ResolvedEffect::DetectMonsters {
+                id: id.clone(),
+                duration: crate::detection_lifecycle::duration(*turn_ticks)
+                    .ok_or(crate::conditions::ConditionError::InvalidDuration)?,
+                changed: false,
+            },
+            PlannedEffect::DetectFood => ResolvedEffect::DetectFood { changed: false },
+            PlannedEffect::MapTopology => ResolvedEffect::MapTopology { changed: false },
+            PlannedEffect::DetectMagic => ResolvedEffect::DetectMagic { changed: false },
+            PlannedEffect::DrainLife => ResolvedEffect::DrainLife { changed: false },
+            PlannedEffect::CancelSpecials => ResolvedEffect::CancelSpecials { changed: false },
+            PlannedEffect::BalefulPolymorph { forms } => ResolvedEffect::BalefulPolymorph {
+                form: select_baleful_form(&application.creature, forms, rng)?,
+                changed: false,
+            },
+            PlannedEffect::GainStrength => ResolvedEffect::GainStrength {
+                change: super::StrengthGain::Unchanged,
+            },
+            PlannedEffect::RaiseLevel => ResolvedEffect::RaiseLevel { amount: 0 },
+            PlannedEffect::HasteDose {
+                id,
+                rest,
+                turn_ticks,
+            } => {
+                if !super::valid_haste_turn_ticks(*turn_ticks) {
+                    return Err(crate::conditions::ConditionError::InvalidDuration.into());
+                }
+                let overdose = application.creature.conditions().has_active(id);
+                let dice = if overdose {
+                    crate::dice::DicePool::new(1, 8, -1)
+                } else {
+                    crate::dice::DicePool::new(1, 4, 3)
+                }
+                .expect("fixed Haste dose pool");
+                let ticks = u64::from(dice.roll(rng, Edge::default()).total)
+                    .checked_mul(*turn_ticks)
+                    .ok_or(crate::conditions::ConditionError::InvalidDuration)?;
+                let outcome = if overdose {
+                    super::HasteDoseOutcome::Overdose { rest: ticks }
+                } else {
+                    super::HasteDoseOutcome::Hasted { duration: ticks }
+                };
+                ResolvedEffect::HasteDose {
+                    id: id.clone(),
+                    rest: rest.clone(),
+                    outcome,
+                }
+            }
             PlannedEffect::ArrestDescent => {
                 // A rejected extension must not turn a failed paid drink into
                 // an emergency brake. Checked item resolution rejects it atomically.
@@ -1588,6 +1801,48 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
                 mode: super::MovementMode,
                 result: super::MovementResult,
             },
+            RoomLight {
+                changed: bool,
+            },
+            DetectMonsters {
+                id: ConditionId,
+                duration: u64,
+                changed: bool,
+            },
+            DetectFood {
+                changed: bool,
+            },
+            MapTopology {
+                changed: bool,
+            },
+            DetectMagic {
+                changed: bool,
+            },
+            DrainLife {
+                changed: bool,
+            },
+            CancelSpecials {
+                changed: bool,
+            },
+            BalefulPolymorph {
+                #[serde(deserialize_with = "crate::bounded::required_option")]
+                form: Option<crate::content_ids::BodyFormId>,
+                changed: bool,
+            },
+            GainStrength {
+                change: super::StrengthGain,
+            },
+            RaiseLevel {
+                amount: u64,
+            },
+            HasteDose {
+                id: ConditionId,
+                rest: ConditionId,
+                outcome: super::HasteDoseOutcome,
+            },
+            DirectHealthLoss {
+                amount: u64,
+            },
             ArrestDescent {},
             Damage {
                 amount: u32,
@@ -1663,6 +1918,33 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
             Fields::ApplyLinkedHold { policy } => Self::ApplyLinkedHold { policy },
             Fields::Translate { mode, result } => Self::Translate { mode, result },
             Fields::Relocate { mode, result } => Self::Relocate { mode, result },
+            Fields::RoomLight { changed } => Self::RoomLight { changed },
+            Fields::DetectMonsters {
+                id,
+                duration,
+                changed,
+            } => Self::DetectMonsters {
+                id,
+                duration,
+                changed,
+            },
+            Fields::DetectFood { changed } => Self::DetectFood { changed },
+            Fields::MapTopology { changed } => Self::MapTopology { changed },
+            Fields::DetectMagic { changed } => Self::DetectMagic { changed },
+            Fields::DrainLife { changed } => Self::DrainLife { changed },
+            Fields::CancelSpecials { changed } => Self::CancelSpecials { changed },
+            Fields::BalefulPolymorph { form, changed } => {
+                if changed && form.is_none() {
+                    return Err(serde::de::Error::custom(
+                        "changed Polymorph requires a body",
+                    ));
+                }
+                Self::BalefulPolymorph { form, changed }
+            }
+            Fields::GainStrength { change } => Self::GainStrength { change },
+            Fields::RaiseLevel { amount } => Self::RaiseLevel { amount },
+            Fields::HasteDose { id, rest, outcome } => Self::HasteDose { id, rest, outcome },
+            Fields::DirectHealthLoss { amount } => Self::DirectHealthLoss { amount },
             Fields::ArrestDescent {} => Self::ArrestDescent,
             Fields::Damage { amount } => Self::Damage { amount },
             Fields::Heal { amount } => Self::Heal { amount },
@@ -1702,6 +1984,16 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
                 qualification,
             },
         };
+        if matches!(&effect, Self::DetectMonsters { duration, .. } if !crate::detection_lifecycle::valid_resolved_duration(*duration))
+        {
+            return Err(serde::de::Error::custom(
+                "invalid monster detection duration",
+            ));
+        }
+        if matches!(&effect, Self::HasteDose { id, rest, outcome } if id == rest || !outcome.valid())
+        {
+            return Err(serde::de::Error::custom("invalid Haste dose operands"));
+        }
         let valid_amount = match effect {
             Self::SearchAdjacentGuises { roll } => roll.valid(),
             Self::Theft { quantity, .. } => quantity > 0,

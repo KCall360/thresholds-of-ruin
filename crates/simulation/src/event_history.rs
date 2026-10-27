@@ -91,6 +91,7 @@ impl EventKey {
             CombatEvent::RespecCompleted { actor, .. } => (EventKind::Respec, *actor, *actor, true),
             CombatEvent::SequenceEnded { actor, .. } => (EventKind::Sequence, *actor, *actor, true),
             CombatEvent::ItemCurseBlocked { actor, .. }
+            | CombatEvent::ItemRefused { actor, .. }
             | CombatEvent::ItemCompleted { actor, .. } => (EventKind::Item, *actor, *actor, true),
             CombatEvent::Interrupted { actor, .. } => {
                 (EventKind::Interrupted, *actor, *actor, true)

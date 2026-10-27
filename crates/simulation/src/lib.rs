@@ -9,22 +9,35 @@ mod actions;
 mod actor_creatures;
 mod actor_record;
 mod actor_store;
+pub mod appearance_catalog;
+pub mod appearance_state;
 pub mod arena;
 mod awareness;
+pub mod chart;
+pub mod chart_history;
 pub mod content_ids;
 pub mod control_scrolls;
 mod creature_melee;
 mod creature_time;
+pub mod detection;
+mod detection_lifecycle;
+mod detection_magic;
 pub mod equipment_capacity;
 pub mod equipment_capture;
 pub mod expertise;
+mod hallucination;
+mod hallucination_clock;
 mod hazard_checks;
 mod lifecycle;
 pub mod linked_hold;
+mod mapping_chart;
+mod mapping_history;
 pub mod projectile_profiles;
+pub mod scope_projection;
 mod search_clock;
+pub mod spatial_scope;
 mod traps;
-pub use traps::{trap_kind_valid, TrapRegionBoundary};
+pub use traps::{trap_kind_valid, TrapRegionBoundary, TrapRegionPhase};
 pub mod weapon_profiles;
 pub use linked_hold::HoldId;
 pub mod escape;
@@ -75,7 +88,9 @@ pub use intention::{
 pub mod locomotion;
 pub mod perception;
 mod physics;
+mod polymorph;
 pub use physics::{BodySpec, Impact, MotionState, PhysicsEntity};
+pub use polymorph::BodyTransitionResult;
 mod armor;
 mod item_store;
 pub use armor::{ArmorMaterial, ArmorSpec};
@@ -90,12 +105,14 @@ mod equipment_knowledge;
 mod magic_items;
 pub use items::{CurrencyKind, ItemClass, ItemSpec};
 pub use magic_items::{
-    ChargeRange, DeviceSpec, IdentificationChoiceView, ItemDiscovery, ReadableSpec,
+    ChargeRange, DeviceActivation, DeviceAim, DeviceSpec, IdentificationChoiceView, ItemDiscovery,
+    ReadableSpec,
 };
 mod interactions;
 pub use interactions::{
     AnatomySpec, ConsumableSpec, EdibleSpec, EquipmentSlot, EquipmentSlotId, EquipmentSlotView,
-    EquipmentSpec, InteractionView, ItemInteractionView, PreparationView, Work,
+    EquipmentSpec, InteractionView, ItemInteractionView, ItemRefusal, ItemRefusalView,
+    PreparationView, Work,
 };
 pub mod checkpoint;
 pub use checkpoint::PersistError;
@@ -112,6 +129,7 @@ mod navigation_map;
 mod observation;
 mod periodic_relocation;
 mod places;
+mod portable_light;
 pub mod progression;
 pub mod public_plan;
 pub mod quantity;
@@ -123,6 +141,9 @@ pub mod survival_diagnostics;
 pub mod theft;
 pub use periodic_relocation::PeriodicRelocation;
 pub use places::{NameOrigin, PlaceName};
+pub use portable_light::{
+    HeldLightSpec, LightOpticalWitness, LightRegionBoundary, PortableLightView,
+};
 mod streaming;
 pub use streaming::{
     MemoryRecords, PinWork, RecordId, RecordStore, ReferencePoint, ReferencePointId,
@@ -187,6 +208,12 @@ pub enum Action {
     Unequip {
         item: ItemId,
     },
+    Ignite {
+        item: ItemId,
+    },
+    Extinguish {
+        item: ItemId,
+    },
     Drink {
         item: ItemId,
     },
@@ -195,7 +222,7 @@ pub enum Action {
     },
     Zap {
         item: ItemId,
-        direction: abilities::StepDirection,
+        aim: DeviceAim,
     },
     Identify {
         choice: IntentionId,
@@ -272,6 +299,12 @@ impl<'de> serde::Deserialize<'de> for Action {
             Unequip {
                 item: ItemId,
             },
+            Ignite {
+                item: ItemId,
+            },
+            Extinguish {
+                item: ItemId,
+            },
             Drink {
                 item: ItemId,
             },
@@ -280,7 +313,7 @@ impl<'de> serde::Deserialize<'de> for Action {
             },
             Zap {
                 item: ItemId,
-                direction: abilities::StepDirection,
+                aim: DeviceAim,
             },
             Identify {
                 choice: IntentionId,
@@ -338,9 +371,11 @@ impl<'de> serde::Deserialize<'de> for Action {
             Fields::Purchase { basis, purchase } => Self::Purchase { basis, purchase },
             Fields::Equip { item, slot } => Self::Equip { item, slot },
             Fields::Unequip { item } => Self::Unequip { item },
+            Fields::Ignite { item } => Self::Ignite { item },
+            Fields::Extinguish { item } => Self::Extinguish { item },
             Fields::Drink { item } => Self::Drink { item },
             Fields::Read { item } => Self::Read { item },
-            Fields::Zap { item, direction } => Self::Zap { item, direction },
+            Fields::Zap { item, aim } => Self::Zap { item, aim },
             Fields::Identify { choice, item } => Self::Identify { choice, item },
             Fields::Eat { item } => Self::Eat { item },
             Fields::UseAbility {
@@ -482,6 +517,7 @@ pub struct ActionOutcome {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Actor {
+    hallucination: Option<hallucination_clock::HallucinationCadence>,
     guise: perception::GuiseState,
     readied_ambush: readied_ambush::ReadiedAmbush,
     holds: linked_hold::HoldBook,
@@ -531,6 +567,8 @@ struct Item {
     charges: Option<u16>,
     #[serde(deserialize_with = "crate::bounded::required_option")]
     relocation_elapsed: Option<u64>,
+    #[serde(deserialize_with = "crate::bounded::required_option")]
+    fuel: Option<portable_light::FuelState>,
     motion: MotionState,
     orientation: u8,
     spec: Shared<ItemSpec>,
@@ -551,6 +589,8 @@ impl<'de> serde::Deserialize<'de> for Item {
             charges: Option<u16>,
             #[serde(deserialize_with = "crate::bounded::required_option")]
             relocation_elapsed: Option<u64>,
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            fuel: Option<portable_light::FuelState>,
             motion: MotionState,
             orientation: u8,
             spec: Shared<ItemSpec>,
@@ -565,6 +605,7 @@ impl<'de> serde::Deserialize<'de> for Item {
             condition: fields.condition,
             charges: fields.charges,
             relocation_elapsed: fields.relocation_elapsed,
+            fuel: fields.fuel,
             motion: fields.motion,
             orientation: fields.orientation,
             spec: fields.spec,
@@ -592,7 +633,9 @@ pub struct Game {
     physics: physics::Physics,
     navigation: BTreeMap<ActorId, Shared<travel::Navigation>>,
     explored_maps: BTreeMap<ActorId, Shared<explored_map::ExploredMap>>,
+    chart_history: Shared<BTreeMap<ActorId, chart_history::Owner>>,
     map_validation: explored_map::MapValidationCache,
+    spatial_registry: Shared<spatial_scope::registry::Registry>,
     world: Shared<World>,
     seed: u64,
     tick: u64,
@@ -614,7 +657,10 @@ pub struct Game {
     population_entry_boundary: Option<u64>,
     preparation_region_boundary: Option<theft::PreparationRegionBoundary>,
     trap_region_boundary: Option<traps::TrapRegionBoundary>,
+    light_region_boundary: Option<portable_light::LightRegionBoundary>,
+    light_settled_witness: Option<portable_light::LightOpticalWitness>,
     trap_resolution: Option<traps::TrapResolution>,
+    body_return_finalization: polymorph::BodyReturnFinalization,
     host_region_continuation: bool,
 }
 impl Clone for Game {
@@ -632,7 +678,9 @@ impl Clone for Game {
             physics: self.physics.clone(),
             navigation: self.navigation.clone(),
             explored_maps: self.explored_maps.clone(),
+            chart_history: self.chart_history.clone(),
             map_validation: self.map_validation.clone(),
+            spatial_registry: self.spatial_registry.clone(),
             world: self.world.clone(),
             seed: self.seed,
             tick: self.tick,
@@ -650,7 +698,10 @@ impl Clone for Game {
             population_entry_boundary: self.population_entry_boundary,
             preparation_region_boundary: self.preparation_region_boundary.clone(),
             trap_region_boundary: self.trap_region_boundary.clone(),
+            light_region_boundary: self.light_region_boundary.clone(),
+            light_settled_witness: self.light_settled_witness.clone(),
             trap_resolution: self.trap_resolution.clone(),
+            body_return_finalization: self.body_return_finalization.clone(),
             host_region_continuation: self.host_region_continuation,
         }
     }
@@ -804,7 +855,9 @@ impl Game {
             physics: physics::Physics::default(),
             navigation: BTreeMap::new(),
             explored_maps: BTreeMap::new(),
+            chart_history: Shared::new(BTreeMap::new()),
             map_validation: Default::default(),
+            spatial_registry: Shared::new(Default::default()),
             world: Shared::new(world),
             seed,
             tick: 0,
@@ -822,7 +875,10 @@ impl Game {
             population_entry_boundary: None,
             preparation_region_boundary: None,
             trap_region_boundary: None,
+            light_region_boundary: None,
+            light_settled_witness: None,
             trap_resolution: None,
+            body_return_finalization: Default::default(),
             host_region_continuation: false,
         }
     }
@@ -848,6 +904,7 @@ impl Game {
         self.actors.insert(
             id,
             Actor {
+                hallucination: None,
                 guise: perception::GuiseState::default(),
                 readied_ambush: readied_ambush::ReadiedAmbush::default(),
                 holds: linked_hold::HoldBook::default(),
@@ -901,6 +958,7 @@ impl Game {
                 condition: crate::armor::ItemCondition::default(),
                 charges: None,
                 relocation_elapsed: None,
+                fuel: None,
                 corpse: None,
                 holds: vec![],
                 motion: MotionState::default(),
@@ -1017,9 +1075,10 @@ impl Game {
             || population_entry
             || changes_lifecycle
             || prepared.emits_events()
-            || prepared
-                .creature()
-                .is_some_and(|creature| creature.derived().contextual_health_recovery());
+            || prepared.creature().is_some_and(|creature| {
+                creature.derived().contextual_health_recovery()
+                    || creature.polymorph_return_pending()
+            });
         self.with_recovery_transition(requires_candidate, |candidate| {
             if !candidate.host_region_continuation {
                 candidate.begin_retrieval_transaction();

@@ -7,7 +7,7 @@ import unittest
 
 from arena_matrix import toml_source
 from process_harness import ProcessTestCase, ROOT, SPECTATOR_TOKEN, explore_to_stairs, settle_rogue_action, underfoot
-from rogue_roster_package import unrelated_fallback
+from rogue_roster_package import encounter_sources, unrelated_fallback
 
 
 def view(frame):
@@ -21,6 +21,13 @@ class SpawnCarriedLootProcesses(ProcessTestCase):
         shutil.copy2(ROOT / "scenarios/rogue-exploration/rules.toml", package / "rules.toml")
         source = tomllib.loads((ROOT / "scenarios/tests/generated-filler/scenario.toml").read_text(encoding="utf-8"))
         manifest = {key: copy.deepcopy(source[key]) for key in ("format", "version", "ruleset", "creatures")}
+        # Current Rogue rules include an opt-in Polymorph roster. Register its
+        # immutable definition closure, without enrolling either synthetic actor
+        # or changing their one-HD recipes, identities, or birth-stock stream.
+        production = encounter_sources()
+        self.assertFalse(set(manifest["creatures"]["species"]) & set(production["species"]))
+        manifest["creatures"]["species"].update(copy.deepcopy(production["species"]))
+        manifest["creatures"]["body_packages"] = copy.deepcopy(production["body_packages"])
         character = copy.deepcopy(source["characters"][0])
         character.pop("asset", None)
         character["anchor"] = "dungeon/1/start"

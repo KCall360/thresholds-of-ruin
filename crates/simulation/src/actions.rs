@@ -607,6 +607,8 @@ impl Game {
             | Action::UseAbility { .. }
             | Action::Equip { .. }
             | Action::Unequip { .. }
+            | Action::Ignite { .. }
+            | Action::Extinguish { .. }
             | Action::Read { .. }
             | Action::Zap { .. }
             | Action::Drink { .. }
@@ -633,9 +635,11 @@ impl Game {
                     },
                     Action::Equip { item, slot } => crate::Work::Equip { item, slot },
                     Action::Unequip { item } => crate::Work::Unequip { item },
+                    Action::Ignite { item } => crate::Work::Ignite { item },
+                    Action::Extinguish { item } => crate::Work::Extinguish { item },
                     Action::Drink { item } => crate::Work::Drink { item },
                     Action::Read { item } => crate::Work::Read { item },
-                    Action::Zap { item, direction } => crate::Work::Zap { item, direction },
+                    Action::Zap { item, aim } => crate::Work::Zap { item, aim },
                     Action::Eat { item } => crate::Work::Eat { item },
                     _ => return Err(GameError::Schedule(crate::ScheduleError::InvalidIntention)),
                 };
@@ -936,6 +940,7 @@ impl Game {
             | OutcomeKind::Crumbled { .. } => {}
             OutcomeKind::Waited => {}
         }
+        self.refresh_light_boundary();
         for subject in &prepared.touches {
             self.touch_readied_ambush(*subject, id)?;
         }

@@ -22,6 +22,7 @@ fn app() -> App {
         .unwrap()
         .abilities = vec![ability];
     view.ground_items.push(GroundItemView {
+        presentation: None,
         reachable: false,
         supply_reachable: true,
         position: Position { x: 1, y: 0, z: 0 },
@@ -270,10 +271,13 @@ fn with_weapons(mut app: App, permitted: bool) -> App {
             edible: false,
             readable: false,
             zappable: false,
+            portable_light: None,
+            device_activation: None,
             charges: None,
         });
     }
     view.interactions = Some(InteractionView {
+        refused: vec![],
         curse_blocked: vec![],
         identification: None,
         completed: vec![],

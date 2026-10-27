@@ -42,6 +42,7 @@ pub(crate) fn talent(id: &str, modifiers: Vec<Modifier>) -> tor_simulation::rule
 #[allow(dead_code)]
 pub(crate) fn add(stat: Stat, value: i64) -> Modifier {
     Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Add { stat, value },
     }
@@ -135,6 +136,7 @@ pub(crate) fn species() -> Species {
     let mut species = unmodified_species("unit_subject");
     species.melee = natural_melee(2, 60, DamageType::Impact, 4);
     species.modifiers.push(Modifier {
+        cancellable: false,
         scope: Scope::Always,
         op: ModifierOp::Add {
             stat: Stat::Health,

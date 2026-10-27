@@ -68,6 +68,8 @@ fn every_actor_applies_effects_before_recovery_and_uses_the_same_scheduler() {
                 | Action::Escape { .. }
                 | Action::Equip { .. }
                 | Action::Unequip { .. }
+                | Action::Ignite { .. }
+                | Action::Extinguish { .. }
                 | Action::Read { .. }
                 | Action::Zap { .. }
                 | Action::Drink { .. }

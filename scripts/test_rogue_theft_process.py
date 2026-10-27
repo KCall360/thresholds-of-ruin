@@ -64,8 +64,9 @@ def theft_package(test, species):
             "kind": "attribute", "attribute": attribute}, "value": value}}
           for attribute, value in (("strength", 20), ("speed", 10))],
         {"scope": "always", "op": {"kind": "add", "stat": {"kind": "health"}, "value": 500}},
-        # Mundane mace minimum 2d4+32 = 34 exceeds unchanged L/N <=18 and O=12
-        # Health. A flat modifier cannot create effects in the empty unarmed
+        # Mundane mace minimum 2d4+32 =34 exceeds L/N native Health and
+        # the approved Orc racial-body+Warrior Health. A flat modifier cannot
+        # create effects in the empty unarmed
         # branch; the ordinary selected-weapon check still must succeed.
         {"scope": "always", "op": {"kind": "add", "stat": {
             "kind": "ability", "ability": "basic_melee", "stat": "flat_bonus"}, "value": 32}},
@@ -74,6 +75,10 @@ def theft_package(test, species):
           for defense in ("physical", "cognitive")]]
     manifest["creatures"] = {"species": {"fixture.theft_witness": victim}}
     character = copy.deepcopy(source["manifest"]["characters"][0])
+    body = copy.deepcopy(source["body_packages"][character["creature"]["body_package"]])
+    body["species"] = "fixture.theft_witness"
+    manifest["creatures"]["body_packages"] = {"fixture.theft_witness.body": body}
+    character["creature"]["body_package"] = "fixture.theft_witness.body"
     character.update(anchor="dungeon/1/start", known_identities=[GOLD, MUNDANE_MACE, "rogue.ring_mail"],
                      loadout=[{"archetype": MUNDANE_MACE, "quantity": 1},
                               {"archetype": "rogue.ring_mail", "quantity": 1},
@@ -289,6 +294,93 @@ class RogueTheftProcesses(ProcessTestCase):
             current = self.execute(player, {"type": "wait"})
         self.fail("Passive Orc did not acquire the ordinarily dropped, visible seven gold")
 
+    def assert_newborn_ownership(self, creature, species):
+        source = encounter_sources()
+        recipe = source["actors"]["rogue." + species]["creature"]
+        build = creature["build"]
+        body_count, personal_count, health_kind, racial_die, threat = {
+            "leprechaun": (3, 0, "fey", 6, 3),
+            "nymph": (3, 0, "fey", 6, 3),
+            "orc": (1, 1, "humanoid", 8, 2),
+        }[species]
+        form = "rogue.body." + species
+        self.assertEqual(recipe["body_package"], form)
+        body_recipe = source["body_packages"][form]
+        self.assertEqual(len(body_recipe["hit_dice"]), body_count)
+        self.assertEqual(body_recipe["hit_dice"], recipe["hit_dice"][:body_count])
+        self.assertEqual(len(recipe["hit_dice"]), body_count + personal_count)
+        self.assertEqual(recipe.get("personal_body_grants", []), [])
+        self.assertEqual(build["species"], "rogue." + species)
+        self.assertEqual(len(build["hd"]), body_count + personal_count)
+        sources = ([{"kind": "racial"}] * body_count +
+                   [{"kind": "class", "id": "warrior"}] * personal_count)
+        self.assertEqual([row["source"] for row in recipe["hit_dice"]],
+                         ["racial"] * body_count + ["warrior"] * personal_count)
+        owners = ([{"kind": "body", "form": form, "ordinal": ordinal}
+                   for ordinal in range(body_count)] +
+                  [{"kind": "personal", "id": ordinal + 1} for ordinal in range(personal_count)])
+        expected_choices = [{
+            "purchase_highwater": len(row["purchases"]),
+            "purchases": [dict(purchase, id={"owner": owners[ordinal], "serial": serial})
+                          for serial, purchase in enumerate(row["purchases"], 1)],
+            "attribute": row.get("attribute"),
+        } for ordinal, row in enumerate(recipe["hit_dice"])]
+        self.assertEqual(build["choices"], expected_choices)
+        self.assertEqual(build["restoration"], {"kind": "choose_again"})
+        self.assertIsNone(build["health_root_seed"])
+        self.assertEqual(build["drained_hd"], [])
+        body = build["body_build"]
+        self.assertEqual(body["base"], body["active"])
+        self.assertEqual(body["base"]["id"], form)
+        self.assertEqual(body["base"]["species"], recipe["species"])
+        self.assertEqual(body["base"]["body"], body_recipe["body"])
+        self.assertEqual(body["base"]["advancement"], [{
+            "source": {"kind": "racial"}, "choices": {
+                "purchase_highwater": 0,
+                "purchases": [dict(purchase, id=None) for purchase in row["purchases"]],
+                "attribute": row.get("attribute"),
+            }} for row in body_recipe["hit_dice"]])
+        self.assertEqual(body["personal_seed_offset"], body_count)
+        self.assertEqual(body["birth_personal_count"], personal_count)
+        self.assertEqual(body["next_personal_id"], personal_count + 1)
+        self.assertEqual(body["personal_restoration"], {"kind": "authored", "entries": [
+            {"id": ordinal + 1, "source": sources[body_count + ordinal],
+             "choices": expected_choices[body_count + ordinal]} for ordinal in range(personal_count)]})
+        self.assertEqual(body["personal_body_grants"], [])
+        self.assertEqual(body["inactive"], [])
+        self.assertEqual(body["drained"], [])
+        self.assertEqual(body["acquisition_species"],
+                         [{"owner": owner, "species": recipe["species"]} for owner in owners])
+        root_seed = body["health_root"]
+        self.assertIs(type(root_seed), int)
+        self.assertGreaterEqual(root_seed, 0)
+        self.assertLess(root_seed, 1 << 64)
+        # L/N retain3 racial d6 body rows. Orc keeps the approved racial
+        # d8 body plus1 personal Warrior d10 row; only its body is maximized.
+        # Theft, finite stock and the original recovery budget stay unchanged.
+        mask = (1 << 64) - 1
+        expected_rows = []
+        for ordinal, owner in enumerate(owners):
+            word = (root_seed + 0x9e3779b97f4a7c15 * (ordinal + 1)) & mask
+            word = ((word ^ (word >> 30)) * 0xbf58476d1ce4e5b9) & mask
+            word = ((word ^ (word >> 27)) * 0x94d049bb133111eb) & mask
+            expected_rows.append({
+                "source": sources[ordinal], "owner": owner,
+                "health_seed": word ^ (word >> 31),
+                "health_policy": "maximized" if ordinal == 0 else "seeded",
+                "health_origin": {"templates": [], "kind": health_kind,
+                                  "die": racial_die if ordinal < body_count else 10},
+                "health_improvement": 0,
+            })
+        self.assertEqual(build["hd"], expected_rows)
+        # Personal tiers are0 for L/N and1 for Orc. Threat is independent:
+        # L/N each260points->tier3; Orc190points (including class)->tier2.
+        self.assertEqual(creature["earned_progress"], {
+            "authored_baseline": personal_count, "highest_applied_tier": personal_count,
+            "highest_earned_tier": personal_count,
+            "peak_threat": threat, "earned_xp": 0, "spent_xp": 0, "held_xp": 0,
+        })
+
     def test_fixed_generated_l_n_o_keep_finite_loot_recoverable_after_source_free_restore(self):
         fallback = unrelated_fallback(self)
         for species, signature in (("leprechaun", "filch_gold"), ("nymph", "filch_charm"), ("orc", "measured_cut")):
@@ -318,14 +410,10 @@ class RogueTheftProcesses(ProcessTestCase):
                 actor = born["entity"]["id"]
                 current = self.execute(player, {"type": "wait"})
                 initial = checkpoint(self, player)
-                recipe = encounter_sources()["actors"]["rogue." + species]["creature"]
                 creature = actor_creature(initial, actor)
                 self.assertEqual(creature["injury"], 0)
                 self.assertFalse(creature["dead"])
-                self.assertEqual(creature["build"]["species"], "rogue." + species)
-                self.assertEqual(len(creature["build"]["hd"]), len(recipe["hit_dice"]))
-                self.assertEqual(creature["build"]["choices"], [
-                    {"purchases": row["purchases"], "attribute": row.get("attribute")} for row in recipe["hit_dice"]])
+                self.assert_newborn_ownership(creature, species)
                 self.assertIsNone(initial["actors"][str(actor)]["behavior"]["engagement"])
                 hp = combat(current)["hp"]
                 birth = quantity(initial, actor, GOLD)
@@ -357,6 +445,8 @@ class RogueTheftProcesses(ProcessTestCase):
                 self.assertEqual(actor_creature(transferred, actor)["injury"], creature["injury"],
                                  "Empty natural provocation must stay harmless despite the fixture flat bonus")
                 self.assertFalse(actor_creature(transferred, actor)["dead"])
+                self.assertEqual(actor_creature(transferred, actor)["build"], creature["build"],
+                                 "Theft preserves original body/class ownership and Health stream")
                 self.assertEqual(transferred["actors"][str(actor)]["location"]["region"], 1)
                 if species == "orc":
                     identity, expected = GOLD, 7
@@ -399,6 +489,8 @@ class RogueTheftProcesses(ProcessTestCase):
                     self.fail("Ordinary equipped recovery did not defeat the thief within twelve attacks")
                 killed = checkpoint(self, player)
                 self.assertTrue(actor_creature(killed, actor)["dead"])
+                self.assertEqual(actor_creature(killed, actor)["build"], creature["build"],
+                                 "Ordinary death does not reconstruct or duplicate ownership")
                 for key, item in retained.items():
                     self.assertIn("Ground", killed["items"][key]["location"])
                     self.assertEqual(killed["items"][key]["quantity"], item["quantity"])

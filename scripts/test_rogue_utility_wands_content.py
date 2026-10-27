@@ -48,14 +48,14 @@ class RogueUtilityWandsContent(unittest.TestCase):
                 "id": identity, "family": identity, "lifecycle": "timed", "name": name,
                 "modifiers": [{"scope": "always", "op": op}], "stacking": {"kind": "keep"},
                 "source_scoped": False, "descriptors": [], "capacity": "reject",
-                "timing": {"kind": "until_removed"}, "restrictions": [], "preparation": "preserve"})
+                "timing": {"kind": "actor_active_or_until_removed" if kind == "haste" else "until_removed"}, "restrictions": [], "preparation": "preserve"})
 
     def test_appearance_and_stock_pools_keep_distinctness_and_one_device_attempt(self):
         catalog = source("catalog/items.toml")
         identities = {identity for identity, item in catalog["items"].items()
                       if item.get("appearance_pool") == "rogue.wands"}
         self.assertEqual(identities, {"rogue.wand_" + kind for kind in
-                                     ("fire", "cold", "lightning", "invisibility", "haste", "slow", "teleport_away", "teleport_to")})
+                                     ("fire", "cold", "lightning", "invisibility", "haste", "slow", "teleport_away", "teleport_to", "nothing", "light", "drain_life", "cancellation", "magic_missile", "polymorph")})
         appearances = catalog["appearance_pools"]["rogue.wands"]["appearances"]
         self.assertEqual(len(appearances), len(set(appearances)))
         self.assertEqual(len(appearances), len(identities))

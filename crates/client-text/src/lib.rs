@@ -8,10 +8,11 @@ pub mod narrative;
 pub mod parser;
 pub mod projectiles;
 
-pub const HELP: &str = "Commands: advancement (overview, ledger, balances, skills, talents, expertises, intellect-expertises, intellect-expertise, purchase, remove, replace, details, next, previous, supplies, confirm, resume, cancel), attack <actor> [with <equipped weapon>], <disclosed ability name> <actor> [with <equipped weapon>] [using <supplies>], places, name <place number> <new name>, look (l), inventory (i), stats, north/east/south/west/ne/se/sw/nw/up/down (n/e/s/w/ne/se/sw/nw/u/d), go <direction>, take/drop [quantity] <name or #id>, equip/remove/drink/eat/read <name or #id>, zap <name or #id> <direction>, identify <name or #id>, identify cancel, wait (.), control, release, resume, cancel [direction], escape [hold <number|#token|name>], escape <direction>, sync, save, history [before-id], note <text>, bookmark <text>, quit (q), branch-history <branch> [before-id].\nExplicit weapon and projectile choices preview exact cost, time to next strike and recovery, then require yes/no. For projectile abilities, enter the ability name, select a numbered server source (next/previous pages, cancel), ammunition if launching, then a direction. Other default choices act immediately.\nWizard credential: wizard <server developer command>; wizard creature list discovers named spawn recipes. After creature inspection, strikes natural, strikes selected, strikes ability <id>, strikes next, strikes previous.\nNotes/bookmarks are private user notes on the current state.\nannotate <user|frontend> <private|actor> <note|bookmark|explanation> <here|state:N|entry:ID> <text>";
+pub const HELP: &str = "Commands: charts, chart monsters|food|magic|mapping, chart next|previous|cancel, advancement (overview, ledger, balances, skills, talents, expertises, intellect-expertises, intellect-expertise, purchase, remove, replace, details, next, previous, supplies, confirm, resume, cancel), attack <actor> [with <equipped weapon>], <disclosed ability name> <actor> [with <equipped weapon>] [using <supplies>], places, name <place number> <new name>, look (l), inventory (i), stats, north/east/south/west/ne/se/sw/nw/up/down (n/e/s/w/ne/se/sw/nw/u/d), go <direction>, take/drop [quantity] <name or #id>, equip/remove/drink/eat/read <name or #id>, zap <name or #id> <direction>, identify <name or #id>, identify cancel, wait (.), control, release, resume, cancel [direction], escape [hold <number|#token|name>], escape <direction>, sync, save, history [before-id], note <text>, bookmark <text>, quit (q), branch-history <branch> [before-id].\nExplicit weapon and projectile choices preview exact cost, time to next strike and recovery, then require yes/no. For projectile abilities, enter the ability name, select a numbered server source (next/previous pages, cancel), ammunition if launching, then a direction. Other default choices act immediately.\nWizard credential: wizard <server developer command>; wizard creature list discovers named spawn recipes. After creature inspection, strikes natural, strikes selected, strikes ability <id>, strikes next, strikes previous.\nNotes/bookmarks are private user notes on the current state.\nannotate <user|frontend> <private|actor> <note|bookmark|explanation> <here|state:N|entry:ID> <text>";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Input {
+    Chart(tor_client_common::charts::ChartInput),
     Projectile(String),
     Advancement(tor_client_common::advancement::AdvancementInput),
     Look,
@@ -31,6 +32,13 @@ pub enum Input {
     },
     Request(Request),
     Command(Command),
+}
+
+/// Charts are explicit read-only tools, never scenery nouns or actions.
+pub fn chart_input(line: &str) -> Option<Result<Input, String>> {
+    let (verb, rest) = word(line.trim());
+    matches!(verb.to_ascii_lowercase().as_str(), "chart" | "charts")
+        .then(|| tor_client_common::charts::parse(rest).map(Input::Chart))
 }
 
 /// Ordinary owner-only controls; these do not enter the wizard parser.
@@ -148,16 +156,38 @@ pub fn magic_input(line: &str, state: &StateView) -> Option<Result<Input, String
                 })
             });
         }
-        let (noun, direction) = if verb == "zap" {
-            let (noun, direction) = rest
+        // Resolve a complete disclosed noun before interpreting its last word
+        // as a direction: a device may itself have a directional name.
+        let whole = rest.to_ascii_lowercase();
+        let whole = whole
+            .strip_prefix("the ")
+            .or_else(|| whole.strip_prefix("my "))
+            .unwrap_or(&whole);
+        let full_noun = view.inventory.iter().any(|item| item_matches(whole, item));
+        let explicit_self = if verb == "zap" && !full_noun {
+            rest.rsplit_once(char::is_whitespace)
+                .filter(|(_, tail)| {
+                    tail.eq_ignore_ascii_case("self") || tail.eq_ignore_ascii_case("yourself")
+                })
+                .map(|(noun, _)| noun.trim_end_matches(" at").trim_end_matches(" to"))
+        } else {
+            None
+        };
+        let (noun, direction) = if let Some(noun) = explicit_self {
+            (noun, None)
+        } else if verb == "zap" && !full_noun {
+            match rest
                 .rsplit_once(char::is_whitespace)
-                .ok_or("Use zap <item> <direction>.")?;
-            let direction = parser::lexicon::parse_direction(&direction.to_ascii_lowercase())
-                .ok_or("Choose a direction to zap.")?;
-            (
-                noun.trim_end_matches(" toward").trim_end_matches(" to"),
-                Some(direction),
-            )
+                .and_then(|(noun, tail)| {
+                    parser::lexicon::parse_direction(&tail.to_ascii_lowercase())
+                        .map(|direction| (noun, direction))
+                }) {
+                Some((noun, direction)) => (
+                    noun.trim_end_matches(" toward").trim_end_matches(" to"),
+                    Some(direction),
+                ),
+                None => (rest, None),
+            }
         } else {
             (rest, None)
         };
@@ -195,6 +225,14 @@ pub fn magic_input(line: &str, state: &StateView) -> Option<Result<Input, String
         };
         let action = match direction {
             Some(direction) => tor_client_common::items::zap_action(view, item, direction)?,
+            None if explicit_self.is_some() => {
+                tor_client_common::items::zap_self_action(view, item)?
+            }
+            None if verb == "zap" => tor_client_common::items::item_action(
+                view,
+                item,
+                tor_client_common::items::ItemOperation::Zap,
+            )?,
             None => tor_client_common::items::identification_action(view, Some(item))?,
         };
         Ok(Input::Command(Command::Act {
@@ -206,6 +244,9 @@ pub fn magic_input(line: &str, state: &StateView) -> Option<Result<Input, String
 
 pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
     if let Some(input) = magic_input(line, state) {
+        return input;
+    }
+    if let Some(input) = chart_input(line) {
         return input;
     }
     if let Some(input) = advancement_input(line) {
@@ -310,7 +351,8 @@ pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
     }
     match (verb.as_str(), rest) {
         (
-            "equip" | "wear" | "wield" | "remove" | "unequip" | "drink" | "quaff" | "eat" | "read",
+            "equip" | "wear" | "wield" | "remove" | "unequip" | "drink" | "quaff" | "eat" | "read"
+            | "ignite" | "light" | "extinguish",
             noun,
         ) if !noun.is_empty() => {
             let operation = match verb.as_str() {
@@ -318,6 +360,8 @@ pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
                 "drink" | "quaff" => tor_client_common::items::ItemOperation::Drink,
                 "eat" => tor_client_common::items::ItemOperation::Eat,
                 "read" => tor_client_common::items::ItemOperation::Read,
+                "ignite" | "light" => tor_client_common::items::ItemOperation::Ignite,
+                "extinguish" => tor_client_common::items::ItemOperation::Extinguish,
                 _ => tor_client_common::items::ItemOperation::Equip,
             };
             let noun = noun.to_lowercase();
@@ -479,18 +523,24 @@ pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
             let noun = noun.to_lowercase();
             let noun = noun.strip_prefix("the ").unwrap_or(&noun);
             let items: Vec<_> = if verb == "drop" {
-                state.observation.inventory.iter().collect()
+                state
+                    .observation
+                    .inventory
+                    .iter()
+                    .map(|item| (item, item.name.as_str()))
+                    .collect()
             } else {
                 state
                     .observation
                     .ground_items
                     .iter()
-                    .map(|i| &i.item)
+                    .map(|i| (&i.item, tor_client_common::items::ground_name(i)))
                     .collect()
             };
             let mut matches: Vec<_> = items
                 .into_iter()
-                .filter(|item| item_matches(noun, item))
+                .filter(|(item, name)| item_name_matches(noun, item.id, name))
+                .map(|(item, _)| item)
                 .collect();
             matches.sort_by_key(|item| item.id);
             matches.dedup_by_key(|item| item.id);
@@ -668,7 +718,7 @@ pub fn describe(state: &StateView) -> String {
         lines.push(format!(
             "You see {} x {} (#{}), at offset ({}, {}, {}).{}",
             item.item.quantity,
-            safe(&item.item.name),
+            safe(tor_client_common::items::ground_name(item)),
             item.item.id,
             item.position.x,
             item.position.y,
@@ -695,7 +745,15 @@ pub fn describe(state: &StateView) -> String {
                 if door.reachable { " Within reach." } else { "" }
             ));
         }
-        if cell.stairs_up || cell.stairs_down {
+        if let Some(presentation) = &cell.object_presentation {
+            lines.push(format!(
+                "You see {} at offset ({}, {}, {}).",
+                safe(tor_client_common::items::object_name(presentation)),
+                cell.position.x,
+                cell.position.y,
+                cell.position.z
+            ));
+        } else if cell.stairs_up || cell.stairs_down {
             lines.push(format!(
                 "Stairs {} at offset ({}, {}, {}).",
                 if cell.stairs_up && cell.stairs_down {
@@ -739,10 +797,14 @@ pub fn item_quantity(noun: &str) -> Result<(Option<u64>, &str), String> {
 }
 
 pub fn item_matches(noun: &str, item: &tor_protocol::ItemView) -> bool {
+    item_name_matches(noun, item.id, &item.name)
+}
+
+fn item_name_matches(noun: &str, target: ItemTarget, name: &str) -> bool {
     if let Some(id) = noun.strip_prefix('#') {
-        return id.parse::<ItemTarget>() == Ok(item.id);
+        return id.parse::<ItemTarget>() == Ok(target);
     }
-    let name = item.name.to_lowercase();
+    let name = name.to_lowercase();
     let noun = noun.strip_prefix("the ").unwrap_or(noun);
     !noun.is_empty()
         && (name == noun

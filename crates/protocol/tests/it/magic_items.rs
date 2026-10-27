@@ -7,7 +7,7 @@ fn item() -> ItemTarget {
 fn magic_commands_round_trip_only_current_named_opaque_operands() {
     for value in [
         json!({"type":"read","item":item()}),
-        json!({"type":"zap","item":item(),"direction":"north_east"}),
+        json!({"type":"zap","item":item(),"aim":{"kind":"direction","direction":"north_east"}}),
         json!({"type":"identify","choice":"opaque-choice","item":item()}),
         json!({"type":"identify","choice":"opaque-choice","item":null}),
     ] {
@@ -37,7 +37,7 @@ fn magic_commands_round_trip_only_current_named_opaque_operands() {
     assert!(serde_json::from_str::<Action>(&raw).is_err());
 }
 fn affordance() -> Value {
-    json!({"item":item(),"slot":null,"equipped_slot":null,"known_equipment":null,"known_projectile_bonus":null,"known_cursed":null,"known_protected":null,"drinkable":false,"edible":false,"readable":false,"zappable":true,"charges":null})
+    json!({"item":item(),"slot":null,"equipped_slot":null,"known_equipment":null,"known_projectile_bonus":null,"known_cursed":null,"known_protected":null,"drinkable":false,"edible":false,"readable":false,"zappable":true,"device_activation":"direction","portable_light":null,"charges":null})
 }
 #[test]
 fn magic_affordances_require_explicit_flags_and_instance_count_and_reject_private_fields() {
@@ -50,6 +50,8 @@ fn magic_affordances_require_explicit_flags_and_instance_count_and_reject_privat
     for field in [
         "readable",
         "zappable",
+        "device_activation",
+        "portable_light",
         "charges",
         "known_cursed",
         "known_protected",
@@ -164,5 +166,98 @@ fn crumbled_event_uses_only_opaque_source_and_exact_requested_quantity() {
         json!({"type":"crumbled","item":item(),"quantity":"2","cursed":true}),
     ] {
         assert!(serde_json::from_value::<Event>(malformed).is_err());
+    }
+}
+
+#[test]
+fn device_aim_is_closed_named_and_rejects_legacy_or_foreign_operands() {
+    for value in [
+        json!({"kind":"self_target"}),
+        json!({"kind":"direction","direction":"east"}),
+    ] {
+        let decoded: DeviceAim = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(serde_json::to_value(decoded).unwrap(), value);
+    }
+    for value in [
+        json!({"kind":"self_target","target":"forged"}),
+        json!({"kind":"self_target","direction":"east"}),
+        json!({"kind":"direction"}),
+        json!({"kind":"direction","direction":{"east":null}}),
+        json!(["self_target"]),
+    ] {
+        assert!(
+            serde_json::from_value::<DeviceAim>(value.clone()).is_err(),
+            "{value}"
+        );
+    }
+    assert!(serde_json::from_value::<Action>(
+        json!({"type":"zap","item":item(),"direction":"east"})
+    )
+    .is_err());
+}
+
+#[test]
+fn paid_refusal_is_required_closed_and_preserves_captured_zap() {
+    let refusal = json!({"action":{"type":"zap","item":item(),"aim":{"kind":"direction","direction":"east"}},"reason":"too_weak"});
+    let valid = json!({"identification":null,"completed":[],"refused":[refusal.clone()],"curse_blocked":[],"slots":[],"preparation":null,"inventory":[]});
+    let parsed: InteractionView = serde_json::from_value(valid.clone()).unwrap();
+    assert_eq!(serde_json::to_value(parsed).unwrap(), valid);
+    let mut empty = valid.clone();
+    empty["refused"] = json!([]);
+    assert!(serde_json::from_value::<InteractionView>(empty).is_ok());
+    let mut missing = valid;
+    missing.as_object_mut().unwrap().remove("refused");
+    assert!(serde_json::from_value::<InteractionView>(missing).is_err());
+    for bad in [
+        json!({"action":{"type":"wait"},"reason":"too_weak"}),
+        json!({"action":refusal["action"],"reason":"no_targets"}),
+        json!({"action":refusal["action"],"reason":{"too_weak":null}}),
+        json!({"action":refusal["action"],"reason":"too_weak","health":1}),
+        json!([refusal["action"], "too_weak"]),
+        json!({"action":refusal["action"]}),
+    ] {
+        assert!(serde_json::from_value::<ItemRefusalView>(bad).is_err());
+    }
+}
+
+#[test]
+fn portable_light_is_required_nullable_named_and_physically_consistent() {
+    for light in [
+        json!({"remaining":"100000","lit":false,"ignitable":true,"extinguishable":false}),
+        json!({"remaining":"25","lit":true,"ignitable":false,"extinguishable":true}),
+        json!({"remaining":"0","lit":false,"ignitable":false,"extinguishable":false}),
+    ] {
+        let decoded: PortableLightView = serde_json::from_value(light.clone()).unwrap();
+        assert!(decoded.valid());
+        assert_eq!(serde_json::to_value(decoded).unwrap(), light);
+        for field in ["remaining", "lit", "ignitable", "extinguishable"] {
+            let mut missing = light.clone();
+            missing.as_object_mut().unwrap().remove(field);
+            assert!(serde_json::from_value::<PortableLightView>(missing).is_err());
+        }
+    }
+    for bad in [
+        json!(["100", false, true, false]),
+        json!({"remaining":100,"lit":false,"ignitable":true,"extinguishable":false}),
+        json!({"remaining":"1000001","lit":false,"ignitable":true,"extinguishable":false}),
+        json!({"remaining":"0","lit":true,"ignitable":false,"extinguishable":true}),
+        json!({"remaining":"0","lit":false,"ignitable":true,"extinguishable":false}),
+        json!({"remaining":"10","lit":true,"ignitable":true,"extinguishable":true}),
+        json!({"remaining":"10","lit":false,"ignitable":false,"extinguishable":true}),
+        json!({"remaining":"10","lit":false,"ignitable":true,"extinguishable":false,"radius":4}),
+    ] {
+        assert!(serde_json::from_value::<PortableLightView>(bad).is_err());
+    }
+    for kind in ["ignite", "extinguish"] {
+        let valid = json!({"type":kind,"item":item()});
+        let action: Action = serde_json::from_value(valid.clone()).unwrap();
+        assert_eq!(serde_json::to_value(action).unwrap(), valid);
+        for invalid in [
+            json!([kind, item()]),
+            json!({"type":kind}),
+            json!({"type":kind,"item":item(),"fuel":100}),
+        ] {
+            assert!(serde_json::from_value::<Action>(invalid).is_err());
+        }
     }
 }

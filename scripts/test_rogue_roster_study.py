@@ -34,7 +34,7 @@ class RogueRosterStudyTests(unittest.TestCase):
             for arm, family in (("baseline", "warrior_mixed"), ("candidate", "mage_mixed")):
                 manifest, region = study_encounter(case, arm, "forward", source)
                 self.assertEqual(manifest["characters"][0]["creature"], recipe(family, case["reference_hd"])[0])
-                self.assertEqual(manifest["modules"], ["catalog/creatures.toml", "catalog/actors.toml"])
+                self.assertEqual(manifest["modules"], ["catalog/creatures.toml", "catalog/actors.toml", "catalog/bodies.toml"])
                 self.assertEqual(set(manifest["creatures"]["species"]), {"subject"})
                 self.assertNotIn("archetypes", manifest)
                 self.assertEqual(region["actors"], [{"id": 2, "at": [7, 2, 0],

@@ -30,6 +30,7 @@ fn environmental_checks_spend_only_available_incoming_tokens_after_an_actual_che
                 let mut game = super::ray_tests::fixture_with(|_, _, species| {
                     if immune {
                         species.modifiers.push(crate::rules::Modifier {
+                            cancellable: false,
                             scope: crate::rules::Scope::Always,
                             op: crate::rules::ModifierOp::Immunity {
                                 selector: crate::rules::Selector::Descriptor {

@@ -35,7 +35,21 @@ impl NaturalAttack {
                     .into_iter()
                     .chain(strike.riders.iter().map(|rider| &rider.effects))
                     .flatten()
-                    .any(Effect::spatial)
+                    .any(|effect| {
+                        effect.spatial()
+                            || matches!(
+                                effect,
+                                Effect::RoomLight
+                                    | Effect::DetectMonsters { .. }
+                                    | Effect::DetectFood
+                                    | Effect::MapTopology
+                                    | Effect::DetectMagic
+                                    | Effect::DrainLife
+                                    | Effect::CancelSpecials
+                                    | Effect::BalefulPolymorph { .. }
+                                    | Effect::HasteDose { .. }
+                            )
+                    })
             })
         {
             return Err(AttackError::InvalidDefinition);
@@ -143,6 +157,7 @@ impl NaturalAttack {
             attack.wind_up(),
             attack.recovery(),
             vec![StrikeDef {
+                cancellable: false,
                 offset: 0,
                 unlock: None,
                 check: Some(CheckDef {

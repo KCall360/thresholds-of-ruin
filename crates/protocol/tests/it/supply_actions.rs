@@ -66,7 +66,7 @@ fn phase5_container_ground_item_requires_a_named_object() {
 
 #[test]
 fn phase5_container_ground_item_rejects_unknown_fields() {
-    let value = serde_json::json!({"reachable":false,"supply_reachable":true,
+    let value = serde_json::json!({"reachable":false,"presentation":null,"supply_reachable":true,
         "item":disclosed_item(),"position":{"x":1,"y":0,"z":0},"claimant":"private"});
     assert!(serde_json::from_value::<GroundItemView>(value).is_err());
 }
@@ -202,7 +202,7 @@ fn phase5_known_supply_is_explicit_and_unknown_items_cannot_expose_it() {
 #[test]
 fn phase5_ground_supply_touch_is_explicit_and_does_not_change_pickup() {
     let item = serde_json::json!({"id":ItemTarget::from_digest([1;32]),"class":"misc","quantity":"1","appearance":"bandage","identified":true,"description":"","name":"Bandage","known_currency":null,"known_supply":{"id":"bandage","name":"Bandage"}});
-    let value = serde_json::json!({"reachable":false,"supply_reachable":true,"item":item,"position":{"x":1,"y":0,"z":0}});
+    let value = serde_json::json!({"reachable":false,"presentation":null,"supply_reachable":true,"item":item,"position":{"x":1,"y":0,"z":0}});
     let decoded: GroundItemView = serde_json::from_value(value.clone()).unwrap();
     assert_eq!(serde_json::to_value(decoded).unwrap(), value);
     let mut missing = value.clone();
@@ -274,7 +274,7 @@ fn recorded_care_request() -> serde_json::Value {
     let samples: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/wire-v60.json"
+            "/tests/fixtures/wire-v63.json"
         ))
         .expect("regenerate current wire samples"),
     )
@@ -323,7 +323,7 @@ fn recorded_ability_response(id: &str) -> (serde_json::Value, usize) {
     let samples: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/wire-v60.json"
+            "/tests/fixtures/wire-v63.json"
         ))
         .expect("regenerate current wire samples"),
     )

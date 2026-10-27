@@ -53,7 +53,8 @@ fn effect_fields(effect: &s::rules::Effect) -> usize {
         s::rules::Effect::ApplyPersistentCondition { cancels, .. } => {
             1 + usize::from(cancels.is_some())
         }
-        s::rules::Effect::RemoveCondition { .. }
+        s::rules::Effect::DetectMonsters { .. }
+        | s::rules::Effect::RemoveCondition { .. }
         | s::rules::Effect::Heal { .. }
         | s::rules::Effect::Nourish { .. }
         | s::rules::Effect::LoseMaximumHealth { .. }
@@ -65,8 +66,16 @@ fn effect_fields(effect: &s::rules::Effect) -> usize {
         | s::rules::Effect::TeleportToRayOrigin
         | s::rules::Effect::ArrestDescent
         | s::rules::Effect::DrainLatestHitDie
-        | s::rules::Effect::RestoreHitDie => 0,
-        s::rules::Effect::PushTargetOneCell { .. } => 1,
+        | s::rules::Effect::RestoreHitDie
+        | s::rules::Effect::GainStrength
+        | s::rules::Effect::RaiseLevel
+        | s::rules::Effect::RoomLight
+        | s::rules::Effect::DetectFood
+        | s::rules::Effect::DetectMagic
+        | s::rules::Effect::MapTopology
+        | s::rules::Effect::DrainLife
+        | s::rules::Effect::CancelSpecials => 0,
+        s::rules::Effect::BalefulPolymorph { .. } | s::rules::Effect::PushTargetOneCell { .. } => 1,
         s::rules::Effect::ApplyQualifiedConditionToSource { .. } => 3,
         _ => 2,
     }
@@ -202,6 +211,15 @@ impl Entry<'_> {
                             return Err(invalid());
                         }
                     }
+                    s::rules::Effect::HasteDose { condition, rest } => {
+                        for id in [condition, rest] {
+                            if !rules.condition(id).is_some_and(|definition| {
+                                reference_valid(definition.id.as_str(), &definition.name)
+                            }) {
+                                return Err(invalid());
+                            }
+                        }
+                    }
                     s::rules::Effect::ApplyPersistentCondition { condition, cancels } => {
                         for id in std::iter::once(condition).chain(cancels.iter()) {
                             if !rules.condition(id).is_some_and(|definition| {
@@ -211,7 +229,8 @@ impl Entry<'_> {
                             }
                         }
                     }
-                    s::rules::Effect::ApplyCondition { condition, .. }
+                    s::rules::Effect::DetectMonsters { condition }
+                    | s::rules::Effect::ApplyCondition { condition, .. }
                     | s::rules::Effect::ApplyConditionForTurns { condition, .. }
                     | s::rules::Effect::RemoveCondition { condition }
                         if !rules
@@ -902,6 +921,17 @@ mod persistent_effect_budget_tests {
             document.conditions.push(definition);
         }
         let rules = s::rules::Ruleset::validate(document).unwrap();
+        let dose = s::rules::Effect::HasteDose {
+            condition: incoming.clone(),
+            rest: opposite.clone(),
+        };
+        assert_eq!(effect_fields(&dose), 2);
+        let entry = Entry::Effect(0, None, 0, true, &dose);
+        assert_eq!(entry.preflight(&rules).unwrap(), 2);
+        let projected = entry.project(&rules);
+        assert!(projected.valid());
+        assert_eq!(projected.fields(), 2);
+        assert_eq!(effect_view(&dose, &rules).id, "haste_dose");
         for cancels in [None, Some(opposite.clone())] {
             let expected = 1 + usize::from(cancels.is_some());
             let effect = s::rules::Effect::ApplyPersistentCondition {
@@ -932,11 +962,68 @@ mod persistent_effect_budget_tests {
             }
         }
         let missing = s::content_ids::ConditionId::new("missing").unwrap();
+        for (condition, rest) in [
+            (missing.clone(), opposite.clone()),
+            (incoming.clone(), missing.clone()),
+        ] {
+            let effect = s::rules::Effect::HasteDose { condition, rest };
+            assert!(Entry::Effect(0, None, 0, true, &effect)
+                .preflight(&rules)
+                .is_err());
+        }
         for (condition, cancels) in [(missing.clone(), None), (incoming, Some(missing))] {
             let effect = s::rules::Effect::ApplyPersistentCondition { condition, cancels };
             assert!(Entry::Effect(0, None, 0, true, &effect)
                 .preflight(&rules)
                 .is_err());
         }
+    }
+}
+
+#[cfg(test)]
+mod detection_source_inspection_tests {
+    use super::*;
+    #[test]
+    fn detection_source_fields_match_exact_paging_precharge_without_runtime_results() {
+        let rules =
+            s::rules::Ruleset::validate(toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap())
+                .unwrap();
+        for (source, count) in [
+            (
+                serde_json::json!({"kind":"detect_monsters","condition":"braced"}),
+                1,
+            ),
+            (serde_json::json!({"kind":"detect_food"}), 0),
+            (serde_json::json!({"kind":"detect_magic"}), 0),
+        ] {
+            let effect: s::rules::Effect = serde_json::from_value(source.clone()).unwrap();
+            let view = effect_view(&effect, &rules);
+            assert_eq!(view.id, source["kind"].as_str().unwrap());
+            assert_eq!(effect_fields(&effect), count);
+            assert_eq!(
+                Entry::Effect(0, None, 0, true, &effect)
+                    .preflight(&rules)
+                    .unwrap(),
+                count
+            );
+            assert_eq!(view.fields.len(), count);
+            if count == 1 {
+                assert_eq!(view.fields[0].id, "condition");
+                let p::DiagnosticValue::Content { value } = &view.fields[0].value else {
+                    panic!("content operand")
+                };
+                assert_eq!(value.id, "braced");
+            }
+            let encoded = serde_json::to_string(&view).unwrap();
+            for forbidden in ["changed", "duration", "turn_ticks", "target", "chart"] {
+                assert!(!encoded.contains(&format!("\"{forbidden}\"")));
+            }
+        }
+        let missing: s::rules::Effect = serde_json::from_value(serde_json::json!({
+            "kind":"detect_monsters","condition":"missing"}))
+        .unwrap();
+        assert!(Entry::Effect(0, None, 0, true, &missing)
+            .preflight(&rules)
+            .is_err());
     }
 }

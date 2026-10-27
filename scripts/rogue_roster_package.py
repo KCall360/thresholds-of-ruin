@@ -25,6 +25,7 @@ def encounter_sources():
     return {"manifest": read("scenario.toml"),
             "actors": read("catalog/actors.toml")["actors"],
             "species": read("catalog/creatures.toml")["creatures"]["species"],
+            "body_packages": read("catalog/bodies.toml")["creatures"]["body_packages"],
             "items": read("catalog/items.toml")["items"]}
 
 

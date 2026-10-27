@@ -104,6 +104,9 @@ impl DepthGrowth {
         }
         if let Self::RacialAfter { .. } = self {
             let build = build.ok_or(BuildError::InvalidDefinition)?;
+            // Owned birth recipes cannot be shortened or silently rewritten;
+            // their authored receipts are stable-owner keyed, not positional.
+            build.body_birth_package()?;
             if let RestorationPolicy::Authored(plan) = build.restoration_policy() {
                 if plan.len() != build.ledger().entries().len() {
                     return Err(BuildError::InvalidOwnership);
@@ -246,6 +249,126 @@ impl CreatureBuild {
         schedule: &[OrdinalAdvancement],
     ) -> Result<Self, PreparedSpawnError> {
         use crate::progression::{HdLedger, HdSource};
+        if let Some(package) = self
+            .body_birth_package()
+            .map_err(PreparedSpawnError::Build)?
+        {
+            let base = self.ledger().total_hd().get();
+            validate_ordinals(base, schedule).map_err(PreparedSpawnError::Build)?;
+            // A birth schedule is an unowned declaration. Stable owner/serial
+            // IDs are assigned only when its personal rows are materialized.
+            if schedule.iter().any(|entry| {
+                entry.choices.purchase_highwater != 0
+                    || entry
+                        .choices
+                        .purchases
+                        .iter()
+                        .any(|purchase| purchase.id.is_some())
+            }) {
+                return Err(PreparedSpawnError::Build(BuildError::InvalidOwnership));
+            }
+            let requested = self
+                .ledger()
+                .total_hd()
+                .get()
+                .checked_add(additional)
+                .ok_or(PreparedSpawnError::Capacity(PopulationCapacity::Arithmetic))?;
+            if requested > crate::limits::HIT_DICE as u64 {
+                return Err(PreparedSpawnError::Capacity(PopulationCapacity::HitDice {
+                    requested,
+                    maximum: crate::limits::HIT_DICE as u64,
+                }));
+            }
+            let materialize = |count: usize,
+                               applied: &[OrdinalAdvancement]|
+             -> Result<Self, PreparedSpawnError> {
+                let mut sources: Vec<_> = self
+                    .ledger()
+                    .entries()
+                    .iter()
+                    .map(|row| row.source())
+                    .collect();
+                sources.resize(count, HdSource::Racial);
+                let mut advancement = self.advancement().clone();
+                for choices in &mut advancement.choices {
+                    choices.purchase_highwater = 0;
+                    for purchase in &mut choices.purchases {
+                        purchase.id = None;
+                    }
+                }
+                advancement.choices.resize(count, HdChoices::default());
+                for entry in applied
+                    .iter()
+                    .take_while(|entry| entry.ordinal.get() <= count as u64)
+                {
+                    advancement.choices[entry.ordinal.get() as usize - 1] = entry.choices.clone();
+                }
+                let personal_body_grants = self.body_birth_personal_grants();
+                for (&ordinal, grant) in &personal_body_grants {
+                    let native = advancement
+                        .choices
+                        .get_mut(usize::from(ordinal))
+                        .ok_or(PreparedSpawnError::Build(BuildError::InvalidOwnership))?;
+                    if native.attribute.is_some() {
+                        return Err(PreparedSpawnError::Build(BuildError::InvalidOwnership));
+                    }
+                    native.attribute = grant.attribute;
+                    native.purchases.extend(grant.purchases.clone());
+                }
+                if self.body_birth_uses_authored_restoration() {
+                    advancement.restoration = crate::creatures::RestorationPolicy::Authored(
+                        sources
+                            .iter()
+                            .cloned()
+                            .zip(advancement.choices.iter().cloned())
+                            .map(|(source, choices)| crate::creatures::PlannedAdvancement {
+                                source,
+                                choices,
+                            })
+                            .collect(),
+                    );
+                }
+                let ledger = HdLedger::seeded(sources, seed)
+                    .map_err(|error| PreparedSpawnError::Build(BuildError::from(error)))?;
+                let mut born = Self::from_recorded_body_package_personal_grants(
+                    self.content().clone(),
+                    package.clone(),
+                    self.initial_attributes(),
+                    ledger,
+                    self.binding(),
+                    advancement,
+                    seed,
+                    personal_body_grants,
+                )
+                .map_err(PreparedSpawnError::Build)?;
+                born.set_future_growth(self.future_growth().clone())
+                    .map_err(PreparedSpawnError::Build)?;
+                Ok(born)
+            };
+            // Evaluate each new purchase at its actual total-HD acquisition
+            // ordinal, with earlier authored choices already present. Package
+            // rows remain immutable; all scheduled owners are appended personal HD.
+            for (index, entry) in schedule
+                .iter()
+                .enumerate()
+                .take_while(|(_, entry)| entry.ordinal.get() <= requested)
+            {
+                let mut eligible = materialize(entry.ordinal.get() as usize, &schedule[..index])?;
+                let owner = crate::HdIndex::from_ordinal(entry.ordinal)
+                    .ok_or(PreparedSpawnError::Build(BuildError::InvalidOwnership))?;
+                if let Some(attribute) = entry.choices.attribute {
+                    eligible
+                        .increase_attribute(owner, attribute)
+                        .map_err(PreparedSpawnError::Build)?;
+                }
+                for purchase in &entry.choices.purchases {
+                    eligible
+                        .purchase(owner, purchase.pool.clone(), purchase.selection.clone())
+                        .map_err(PreparedSpawnError::Build)?;
+                }
+            }
+            return materialize(requested as usize, schedule);
+        }
         let base = u64::try_from(self.ledger().entries().len())
             .map_err(|_| PreparedSpawnError::Capacity(PopulationCapacity::Allocation))?;
         validate_ordinals(base, schedule).map_err(PreparedSpawnError::Build)?;
@@ -650,6 +773,169 @@ mod capacity_tests {
             BuildError::InvalidInteraction
         );
     }
+    #[test]
+    fn scheduled_owned_personal_row_regrows_for_personal_price_with_exact_authored_receipt() {
+        use crate::attributes::Skill;
+        use crate::creatures::{
+            AdvancementPurchase, BodyPackage, BuildAdvancement, CreatureState, PurchaseSelection,
+        };
+        use crate::progression::{HdLedger, HdSource};
+        let seed = crate::test_creatures::build(crate::test_creatures::species());
+        let native = vec![
+            PlannedAdvancement {
+                source: HdSource::Racial,
+                choices: HdChoices::default(),
+            };
+            10
+        ];
+        let package = std::sync::Arc::new(BodyPackage {
+            id: crate::content_ids::BodyFormId::new("scheduled_body").unwrap(),
+            species: seed.species_id().clone(),
+            body: BodySpec::default(),
+            advancement: native.clone(),
+        });
+        let mut base = CreatureBuild::from_recorded_body_package(
+            seed.content().clone(),
+            package,
+            seed.initial_attributes(),
+            HdLedger::seeded(vec![HdSource::Racial; 10], 42).unwrap(),
+            seed.binding(),
+            BuildAdvancement {
+                starting_skills: [Skill::Deception, Skill::Persuasion],
+                choices: vec![HdChoices::default(); 10],
+                restoration: RestorationPolicy::Authored(native),
+            },
+            42,
+        )
+        .unwrap();
+        base.set_future_growth(crate::earned_growth::FutureGrowth::Authored {})
+            .unwrap();
+        let scheduled = OrdinalAdvancement {
+            ordinal: crate::HdCount(15),
+            choices: HdChoices {
+                purchase_highwater: 0,
+                attribute: None,
+                purchases: vec![AdvancementPurchase {
+                    id: None,
+                    pool: crate::content_ids::PointPoolId::new("advancement").unwrap(),
+                    selection: PurchaseSelection::SkillRank(Skill::Lore),
+                }],
+            },
+        };
+        let grown = base
+            .instantiate_seeded_racial_with_advancement(73, 5, &[scheduled])
+            .unwrap();
+        assert_eq!(grown.personal_hd_count(), crate::HdCount(5));
+        assert_eq!(grown.ledger().total_hd(), crate::HdCount(15));
+        assert_eq!(grown.unspent_points(), 4);
+        let original = grown.ledger().entries()[14].clone();
+        let receipt = grown.choices()[14].clone();
+        assert_eq!(receipt.purchase_highwater, 1);
+        assert_eq!(receipt.purchases[0].id.as_ref().unwrap().serial.get(), 1);
+        let mut state = CreatureState::new(grown.clone()).unwrap();
+        assert_eq!(state.drain_latest_hit_die().unwrap().applied, 1);
+        state.award_xp(499).unwrap();
+        assert_eq!(state.build().personal_hd_count(), crate::HdCount(4));
+        assert_eq!(state.earned_progress().spent_xp(), 0);
+        state.award_xp(1).unwrap();
+        assert_eq!(state.earned_progress().spent_xp(), 500);
+        assert_eq!(state.earned_progress().held_xp(), 0);
+        assert_eq!(state.build().ledger().entries()[14], original);
+        assert_eq!(state.build().choices()[14], receipt);
+        assert_eq!(state.build(), &grown);
+        assert_eq!(state.build().unspent_points(), 4);
+    }
+
+    #[test]
+    fn owned_fresh_and_scheduled_attributes_cannot_mint_hidden_overcap_gains() {
+        use crate::attributes::{Attribute, Attributes};
+        use crate::creatures::{BodyPackage, BuildAdvancement};
+        use crate::progression::{HdLedger, HdSource};
+        let seed = crate::test_creatures::build(crate::test_creatures::species());
+        let package = std::sync::Arc::new(BodyPackage {
+            id: crate::content_ids::BodyFormId::new("attribute_birth_body").unwrap(),
+            species: seed.species_id().clone(),
+            body: BodySpec::default(),
+            advancement: vec![PlannedAdvancement {
+                source: HdSource::Racial,
+                choices: HdChoices::default(),
+            }],
+        });
+        for attribute in [Attribute::Strength, Attribute::Speed] {
+            let birth = |initial: u16, with_gain: bool| {
+                let mut values = seed.initial_attributes().values();
+                match attribute {
+                    Attribute::Strength => values.strength = initial,
+                    Attribute::Speed => values.speed = initial,
+                    _ => unreachable!(),
+                }
+                let count = if with_gain { 5 } else { 1 };
+                let mut choices = vec![HdChoices::default(); count];
+                if with_gain {
+                    choices[4].attribute = Some(attribute);
+                }
+                let restoration = RestorationPolicy::Authored(
+                    choices
+                        .iter()
+                        .cloned()
+                        .map(|choices| PlannedAdvancement {
+                            source: HdSource::Racial,
+                            choices,
+                        })
+                        .collect(),
+                );
+                CreatureBuild::from_recorded_body_package(
+                    seed.content().clone(),
+                    package.clone(),
+                    Attributes::new(values).unwrap(),
+                    HdLedger::seeded(vec![HdSource::Racial; count], 42).unwrap(),
+                    seed.binding(),
+                    BuildAdvancement {
+                        starting_skills: *seed.starting_skills(),
+                        choices,
+                        restoration,
+                    },
+                    42,
+                )
+            };
+            let lawful = birth(4, true).unwrap();
+            assert_eq!(lawful.choices()[4].attribute, Some(attribute));
+            assert_eq!(lawful.personal_hd_count(), crate::HdCount(4));
+            // Birth reseeding remains the exact original-body domain: no
+            // swaps/inactive snapshots, acquired magic, drained rows or later
+            // earned HD. It is fresh admission, not transformed-record restore.
+            let reseeded = lawful.instantiate_seeded(73).unwrap();
+            assert_eq!(reseeded.choices(), lawful.choices());
+            assert_eq!(reseeded.personal_health_root_seed(), Some(73));
+            assert_eq!(
+                birth(5, true),
+                Err(BuildError::AttributeCap),
+                "fresh raw authored gain must not be clipped into admission"
+            );
+            let schedule = [OrdinalAdvancement {
+                ordinal: crate::HdCount(5),
+                choices: HdChoices {
+                    attribute: Some(attribute),
+                    ..HdChoices::default()
+                },
+            }];
+            let base = birth(5, false).unwrap();
+            let before = base.clone();
+            assert_eq!(
+                base.instantiate_seeded_racial_with_advancement(73, 4, &schedule),
+                Err(PreparedSpawnError::Build(BuildError::AttributeCap))
+            );
+            assert_eq!(base, before);
+            let legal_base = birth(4, false).unwrap();
+            let grown = legal_base
+                .instantiate_seeded_racial_with_advancement(73, 4, &schedule)
+                .unwrap();
+            assert_eq!(grown.choices()[4].attribute, Some(attribute));
+            let empty = base.instantiate_seeded_racial(73, 4).unwrap();
+            assert!(empty.choices().iter().all(|row| row.attribute.is_none()));
+        }
+    }
+
     #[test]
     fn racial_birth_arithmetic_refusal_keeps_the_prototype_exact() {
         let base = crate::test_creatures::build(crate::test_creatures::species());

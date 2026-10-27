@@ -58,6 +58,7 @@ struct ItemDefinition {
     readable: Option<ReadableSpec>,
     ground_scare: Option<tor_simulation::control_scrolls::ScareSpec>,
     device: Option<DeviceSpec>,
+    held_light: Option<HeldLightSpec>,
     edible: Option<EdibleSpec>,
     supply: Option<String>,
     #[serde(default)]
@@ -118,6 +119,7 @@ fn normalize_catalog_views(
                     readable: item.readable,
                     ground_scare: item.ground_scare,
                     device: item.device,
+                    held_light: item.held_light,
                     edible: item.edible,
                     supply: item.supply,
                     magical: item.magical,
@@ -283,6 +285,9 @@ pub(super) fn catalog_context(
     let (field, label) = match kind {
         crate::creature_authoring::CatalogKind::Species => ("creatures.species", "species"),
         crate::creature_authoring::CatalogKind::Template => ("creatures.templates", "template"),
+        crate::creature_authoring::CatalogKind::BodyPackage => {
+            ("creatures.body_packages", "body package")
+        }
     };
     in_declaration(
         failure,
@@ -335,6 +340,10 @@ pub fn resolve_source(root: &Path) -> Result<ResolvedSource, Failure> {
         (
             "creatures.templates",
             manifest.creatures.templates.keys().collect(),
+        ),
+        (
+            "creatures.body_packages",
+            manifest.creatures.body_packages.keys().collect(),
         ),
         ("archetypes", manifest.archetypes.keys().collect()),
         (
@@ -403,6 +412,14 @@ pub fn resolve_source(root: &Path) -> Result<ResolvedSource, Failure> {
             &mut manifest.creatures.templates,
             module.creatures.templates,
             "creatures.templates",
+            scope,
+            file,
+            &mut provenance,
+        )?;
+        merge(
+            &mut manifest.creatures.body_packages,
+            module.creatures.body_packages,
+            "creatures.body_packages",
             scope,
             file,
             &mut provenance,

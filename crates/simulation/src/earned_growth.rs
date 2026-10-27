@@ -257,19 +257,65 @@ impl EarnedProgress {
         }
         Ok(projected)
     }
+    pub(crate) fn next_unfunded_credit(
+        &self,
+        current: HdCount,
+        policy: &GrowthPolicy,
+    ) -> Result<u64, GrowthError> {
+        let lost = self
+            .highest_applied_tier
+            .checked_sub(current)
+            .ok_or(GrowthError::InvalidRecord)?
+            .get();
+        let price = self.next_threshold(policy)?;
+        if price == 0 {
+            return Err(GrowthError::InvalidRecord);
+        }
+        if self.held_xp / price < lost {
+            // Earlier funded regrowth ordinals all have this same current price.
+            return Ok(price - self.held_xp % price);
+        }
+        let regrowth = lost.checked_mul(price).ok_or(GrowthError::Arithmetic)?;
+        let forward_xp = self
+            .held_xp
+            .checked_sub(regrowth)
+            .ok_or(GrowthError::InvalidRecord)?;
+        let funded = self.projected_tier(current, policy)?;
+        funded.checked_add(1).ok_or(GrowthError::Arithmetic)?;
+        let forward_cost = policy
+            .threshold_sum(self.highest_applied_tier, funded)
+            .ok_or(GrowthError::Arithmetic)?;
+        let residual = forward_xp
+            .checked_sub(forward_cost)
+            .ok_or(GrowthError::InvalidRecord)?;
+        let next = policy.threshold(funded).ok_or(GrowthError::Arithmetic)?;
+        next.checked_sub(residual)
+            .filter(|credit| *credit > 0)
+            .ok_or(GrowthError::InvalidRecord)
+    }
+
     pub(crate) fn award(
         &mut self,
         amount: u32,
         current: HdCount,
         policy: &GrowthPolicy,
     ) -> Result<(), GrowthError> {
+        self.award_wide(u64::from(amount), current, policy)
+    }
+
+    pub(crate) fn award_wide(
+        &mut self,
+        amount: u64,
+        current: HdCount,
+        policy: &GrowthPolicy,
+    ) -> Result<(), GrowthError> {
         let earned = self
             .earned_xp
-            .checked_add(u64::from(amount))
+            .checked_add(amount)
             .ok_or(GrowthError::Arithmetic)?;
         let held = self
             .held_xp
-            .checked_add(u64::from(amount))
+            .checked_add(amount)
             .ok_or(GrowthError::Arithmetic)?;
         let mut candidate = self.clone();
         candidate.earned_xp = earned;
@@ -280,13 +326,15 @@ impl EarnedProgress {
         *self = candidate;
         Ok(())
     }
-    pub(crate) fn reconcile_build(
+    pub(crate) fn reconcile_personal_build(
         &mut self,
         current: HdCount,
         threat: u64,
         policy: &GrowthPolicy,
     ) -> Result<(), GrowthError> {
-        // General-purpose source/wizard additions establish an authored baseline;
+        // Both inputs belong to personal advancement, not active combat composition.
+        // The caller supplies the canonical original-body reward assessment.
+        // General-purpose personal additions establish an authored baseline;
         // ordinary growth records its paid tier before invoking this boundary.
         let mut candidate = self.clone();
         if current > candidate.highest_applied_tier {
@@ -490,6 +538,58 @@ mod tests {
     }
 
     #[test]
+    fn raise_funding_covers_partial_regrowth_then_successive_forward_obligations() {
+        let policy = crate::test_creatures::ruleset().document().growth.clone();
+        let applied = HdCount(4);
+        let current = HdCount(2);
+        assert_eq!(policy.threshold(applied), Some(400));
+        for (held, expected) in [
+            (0, 400),
+            (399, 1),
+            (400, 400),
+            (799, 1),
+            (800, 400),
+            (1199, 1),
+            (1200, 500),
+            (1707, 593),
+        ] {
+            let mut account = EarnedProgress::new(applied, 1);
+            account.award_wide(held, current, &policy).unwrap();
+            account.validate(current, &policy).unwrap();
+            assert_eq!(account.next_unfunded_credit(current, &policy), Ok(expected));
+            account.award_wide(expected, current, &policy).unwrap();
+            account.validate(current, &policy).unwrap();
+            assert_eq!(account.held_xp(), held + expected);
+            assert_eq!(account.spent_xp(), 0);
+        }
+    }
+
+    #[test]
+    fn raise_funding_is_full_width_and_account_overflow_is_atomic() {
+        let policy = crate::test_creatures::ruleset().document().growth.clone();
+        let current = HdCount(1);
+        let funded = HdCount(50_000_000);
+        let held = policy.threshold_sum(current, funded).unwrap();
+        let mut account = EarnedProgress::new(current, 1);
+        account.award_wide(held, current, &policy).unwrap();
+        account.validate(current, &policy).unwrap();
+        let credit = account.next_unfunded_credit(current, &policy).unwrap();
+        assert_eq!(credit, 5_000_000_000);
+        assert!(credit > u64::from(u32::MAX));
+        account.award_wide(credit, current, &policy).unwrap();
+        assert_eq!(
+            account.highest_earned_tier(),
+            funded.checked_add(1).unwrap()
+        );
+        let before = account.clone();
+        assert_eq!(
+            account.award_wide(u64::MAX, current, &policy),
+            Err(GrowthError::Arithmetic)
+        );
+        assert_eq!(account, before);
+    }
+
+    #[test]
     fn wide_scalar_analytical_projection_and_sums_match_the_iterative_oracle_exhaustively() {
         let mut policy = crate::test_creatures::ruleset().document().growth.clone();
         for base in 1..=4 {
@@ -674,6 +774,7 @@ mod tests {
             .unwrap()
             .modifiers
             .push(Modifier {
+                cancellable: false,
                 scope: Scope::Always,
                 op: ModifierOp::GrantAbility {
                     ability: ability_id,
@@ -699,6 +800,21 @@ mod tests {
             .unwrap();
         let mut state = CreatureState::new(build).unwrap();
         state.lose_attribute(Attribute::Speed, 1).unwrap();
+        // The same genuinely valid temporary fold obstruction also retains
+        // successive Raise Level obligations, without bypassing the fold.
+        let mut potion = state.clone();
+        assert_eq!(potion.stage_raise_level().unwrap(), 100);
+        potion.rebuild(potion.build().clone()).unwrap();
+        assert_eq!(potion.build().ledger().total_hd().get(), 1);
+        assert_eq!(potion.earned_progress().held_xp(), 100);
+        assert_eq!(potion.stage_raise_level().unwrap(), 200);
+        potion.rebuild(potion.build().clone()).unwrap();
+        assert_eq!(potion.build().ledger().total_hd().get(), 1);
+        assert_eq!(potion.earned_progress().held_xp(), 300);
+        potion.restore_attribute(Attribute::Speed, 1).unwrap();
+        potion.rebuild(potion.build().clone()).unwrap();
+        assert_eq!(potion.build().ledger().total_hd().get(), 3);
+        assert_eq!(potion.earned_progress().held_xp(), 0);
         state.award_xp(100).unwrap();
         assert_eq!(state.build().ledger().total_hd().get(), 1);
         assert_eq!(state.earned_progress().held_xp(), 100);
@@ -1033,6 +1149,155 @@ mod tests {
         );
     }
     #[test]
+    fn body_package_rebuild_does_not_promote_combat_hd_into_personal_advancement() {
+        use crate::content_ids::BodyFormId;
+        use crate::creatures::{BodyPackage, HdChoices, PlannedAdvancement};
+        use std::sync::Arc;
+        let original = creature(2, false);
+        let package = |id: &str, count: usize| {
+            Arc::new(BodyPackage {
+                id: BodyFormId::new(id).unwrap(),
+                species: original.build().species_id().clone(),
+                body: crate::BodySpec::default(),
+                advancement: (0..count)
+                    .map(|_| PlannedAdvancement {
+                        source: HdSource::Racial,
+                        choices: HdChoices::default(),
+                    })
+                    .collect(),
+            })
+        };
+        let base = package("personal_growth_base", 1);
+        let large = package("personal_growth_large", 5);
+        let build = original
+            .build()
+            .with_body_package(base.clone(), 42)
+            .unwrap();
+        let mut state = CreatureState::new(build).unwrap();
+        assert_eq!(state.build().ledger().total_hd(), HdCount(2));
+        assert_eq!(state.earned_progress().highest_applied_tier(), HdCount(1));
+        state.award_xp(1).unwrap();
+        let before = state.earned_progress().clone();
+        let transformed = state.build().replace_body_package(large).unwrap();
+        state.rebuild(transformed).unwrap();
+        assert_eq!(state.build().ledger().total_hd(), HdCount(6));
+        assert_eq!(state.build().personal_hd_count(), HdCount(1));
+        assert_eq!(state.earned_progress(), &before);
+        assert_eq!(state.restorable_hit_dice(), HdCount::ZERO);
+        let returned = state.build().replace_body_package(base).unwrap();
+        state.rebuild(returned).unwrap();
+        assert_eq!(state.earned_progress(), &before);
+        assert_eq!(state.build().ledger().total_hd(), HdCount(2));
+    }
+
+    #[test]
+    fn owned_drain_preserves_zero_personal_life_and_restores_package_before_personal() {
+        use crate::content_ids::BodyFormId;
+        use crate::creatures::{BodyPackage, HdChoices, PlannedAdvancement};
+        use std::sync::Arc;
+        let original = creature(3, false);
+        let base = Arc::new(BodyPackage {
+            id: BodyFormId::new("owned_drain_base").unwrap(),
+            species: original.build().species_id().clone(),
+            body: crate::BodySpec::default(),
+            advancement: vec![
+                PlannedAdvancement {
+                    source: HdSource::Racial,
+                    choices: HdChoices::default(),
+                };
+                2
+            ],
+        });
+        let mut state =
+            CreatureState::new(original.build().with_body_package(base, 42).unwrap()).unwrap();
+        let owned = state.build().ledger().entries().to_vec();
+        state.drain_latest_hit_die().unwrap();
+        assert_eq!(state.build().personal_hd_count(), HdCount::ZERO);
+        assert_eq!(state.build().ledger().total_hd(), HdCount(2));
+        assert!(!state.health().dead());
+        assert_eq!(state.restorable_hit_dice(), HdCount(1));
+        state.drain_latest_hit_die().unwrap();
+        assert_eq!(state.build().ledger().total_hd(), HdCount(1));
+        assert_eq!(state.restorable_hit_dice(), HdCount(2));
+        assert!(!state.health().dead());
+        assert_eq!(state.hit_die_restoration_blocker(), None);
+        state.restore_hit_die().unwrap();
+        assert_eq!(state.build().personal_hd_count(), HdCount::ZERO);
+        assert_eq!(state.build().ledger().entries(), &owned[..2]);
+        // Exact package restoration needs no career selection. ChooseAgain
+        // personal restoration still requires an explicitly selected source.
+        assert_eq!(
+            state.hit_die_restoration_blocker(),
+            Some(crate::creatures::HitDieRestorationBlocker::MissingSource)
+        );
+        let before = state.clone();
+        assert_eq!(
+            state.restore_hit_die(),
+            Err(CreatureStateError::HitDieRestoration(
+                crate::creatures::HitDieRestorationBlocker::MissingSource
+            ))
+        );
+        assert_eq!(state, before);
+        let mut selected = state.build().clone();
+        selected
+            .set_future_growth(FutureGrowth::Selected {
+                source: GrowthSource::Racial {},
+            })
+            .unwrap();
+        state.rebuild(selected).unwrap();
+        assert_eq!(state.hit_die_restoration_blocker(), None);
+        state.restore_hit_die().unwrap();
+        assert_eq!(state.build().ledger().entries(), owned.as_slice());
+        assert_eq!(state.restorable_hit_dice(), HdCount::ZERO);
+        assert_eq!(state.earned_progress().highest_applied_tier(), HdCount(1));
+    }
+
+    #[test]
+    fn composition_reconciliation_preserves_personal_price_watermarks_and_reward_basis() {
+        let policy = crate::test_support::test_ruleset()
+            .document()
+            .growth
+            .clone();
+        let mut progress = EarnedProgress::new(HdCount(1), 3);
+        let price = progress.next_threshold(&policy).unwrap();
+        progress.award_wide(price / 2, HdCount(1), &policy).unwrap();
+        let before = progress.clone();
+        // A package change supplies the same personal count and the same
+        // original-body reward assessment, regardless of active combat HD.
+        progress
+            .reconcile_personal_build(HdCount(1), 3, &policy)
+            .unwrap();
+        assert_eq!(progress, before);
+        assert_eq!(progress.next_threshold(&policy).unwrap(), price);
+        progress
+            .reconcile_personal_build(HdCount(2), 4, &policy)
+            .unwrap();
+        assert_eq!(progress.highest_applied_tier(), HdCount(2));
+        assert_eq!(progress.highest_earned_tier(), HdCount(2));
+        assert_eq!(progress.peak_threat(), 4);
+    }
+
+    #[test]
+    fn zero_personal_tier_is_valid_and_can_fund_a_first_personal_hit_die() {
+        let policy = crate::test_support::test_ruleset()
+            .document()
+            .growth
+            .clone();
+        let mut progress = EarnedProgress::new(HdCount::ZERO, 2);
+        progress.validate(HdCount::ZERO, &policy).unwrap();
+        let price = progress.next_threshold(&policy).unwrap();
+        progress.award_wide(price, HdCount::ZERO, &policy).unwrap();
+        assert_eq!(progress.highest_earned_tier(), HdCount(1));
+        progress.spend(HdCount(1), &policy).unwrap();
+        progress
+            .reconcile_personal_build(HdCount(1), 2, &policy)
+            .unwrap();
+        assert_eq!(progress.highest_applied_tier(), HdCount(1));
+        assert_eq!(progress.held_xp(), 0);
+        assert_eq!(progress.spent_xp(), price);
+    }
+
+    #[test]
     fn strict_progress_records_reject_missing_unknown_and_inconsistent_accounting() {
         let state = creature(1, false);
         let value = serde_json::to_value(state.earned_progress()).unwrap();
@@ -1069,6 +1334,7 @@ mod source_tests {
             choice
                 .purchases
                 .push(crate::creatures::AdvancementPurchase {
+                    id: None,
                     pool: crate::content_ids::PointPoolId::new("advancement").unwrap(),
                     selection: PurchaseSelection::SkillRank(crate::attributes::Skill::Athletics),
                 });
@@ -1234,6 +1500,7 @@ mod source_tests {
                 socket: crate::EquipmentSlotId(0),
                 attack: None,
                 modifiers: vec![crate::rules::Modifier {
+                    cancellable: false,
                     scope: crate::rules::Scope::Always,
                     op: crate::rules::ModifierOp::Add {
                         stat: crate::rules::Stat::Health,

@@ -10,7 +10,7 @@ import sqlite3
 import unittest
 from unittest.mock import Mock, patch
 
-from process_harness import ProcessTestCase, non_graphical, resource
+from process_harness import ProcessTestCase, non_graphical, resource, hit_die_counts
 from projectile_package import projectile_package
 from rogue_roster_package import unrelated_fallback
 from stream_relay import StreamRelay
@@ -111,8 +111,10 @@ class ProjectileProcesses(ProcessTestCase):
         return preview
 
     def learn_knife(self, text):
+        self.assertEqual(hit_die_counts(view(self.snapshot())["combat"]["own_stats"]["hit_dice"]),
+                         {("racial", "racial"): 1, ("class", "warrior"): 1})
         self.assertIn("Starting skills", text.command("advancement"))
-        preview = text.command("advancement purchase 1 advancement expertise rogue.knife")
+        preview = text.command("advancement purchase 2 advancement expertise rogue.knife")
         self.assertIn("expertise rogue.knife", preview)
         self.assertIn("Confirm", preview)
         self.assertNotIn("Server error", text.command("advancement confirm"))

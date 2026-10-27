@@ -24,6 +24,7 @@ pub(crate) fn inputs(
             .entry(item.location)
             .or_default()
             .push(s::MapItemAppearance {
+                presentation: item.presentation.clone(),
                 class: item.class,
                 description: item.description.clone(),
                 name: item.name.clone(),
@@ -53,6 +54,7 @@ pub(crate) fn inputs(
             s::MapCellInput {
                 location,
                 appearance: s::MapAppearance {
+                    object_presentation: cell.object_presentation.clone(),
                     wall: cell.wall,
                     material: cell.material.into(),
                     asset: if cell.wall { wall } else { floor },
@@ -82,6 +84,10 @@ pub(crate) fn wire_cell(
 ) -> p::RememberedMapCell {
     let a = &cell.appearance;
     p::RememberedMapCell {
+        object_presentation: a
+            .object_presentation
+            .as_ref()
+            .map(crate::adapt::object_presentation),
         key: crate::adapt::cell_key(salt, actor.0, cell.location),
         position: p::Position {
             x: cell.position.x,
@@ -107,6 +113,10 @@ pub(crate) fn wire_cell(
             .ground_items
             .iter()
             .map(|i| p::MapItemAppearance {
+                presentation: i
+                    .presentation
+                    .as_ref()
+                    .map(crate::adapt::object_presentation),
                 class: crate::adapt::item_class(i.class),
                 description: i.description.clone(),
                 name: i.name.clone(),

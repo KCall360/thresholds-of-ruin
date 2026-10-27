@@ -23,8 +23,8 @@ import time
 from arena_evaluation import digest, files, write_json
 from checkpoint_payload import decode_checkpoint_payload
 from scalar_wire import u64
-from process_harness import ProcessTestCase, ROOT, SUFFIX, binaries, hit_die_counts, settle_rogue_action
-from rogue_earned_route import POLICY_REVISION, CHECKPOINT_DEPTHS
+from process_harness import ProcessTestCase, ROOT, SUFFIX, binaries, settle_rogue_action
+from rogue_earned_route import POLICY_REVISION, CHECKPOINT_DEPTHS, starting_body_hd, ControllerError
 from ruleset_sources import resolve_with_dependencies
 from process_work_budget import ProcessBudgetExceeded, ProcessOutputBudget
 
@@ -156,10 +156,29 @@ def verify_earned_history(evidence, selected, overview):
         raise EvidenceError('Milestone lacks saved selected-actor provenance')
     dice = creature['build']['hd']
     progress = creature['earned_progress']
-    if (len(dice) != 2 or any(die['source'] != {'kind': 'class', 'id': source} for die in dice)
-            or int(progress['earned_xp']) <= 0 or int(progress['spent_xp']) <= 0
+    build = creature['build']
+    body = build.get('body_build')
+    class_source = {'kind': 'class', 'id': source}
+    if body is None:
+        supported = len(dice) >= 2 and all(die['source'] == class_source and die.get('owner') is None for die in dice)
+    else:
+        # A current PC earns its second PERSONAL class HD while retaining the
+        # exact one-row birth package. Other forms/compositions are unsupported
+        # evidence, not inferred advancement or a compatibility conversion.
+        personal = dice[1:]
+        owners = [die.get('owner') for die in personal]
+        supported = (len(dice) >= 3 and body['active'] == body['base']
+                     and body['birth_personal_count'] == 1
+                     and len(body['base']['advancement']) == 1
+                     and dice[0]['source'] == {'kind': 'racial'}
+                     and dice[0].get('owner') == {'kind': 'body', 'form': body['base']['id'], 'ordinal': 0}
+                     and all(die['source'] == class_source for die in personal)
+                     and all(isinstance(owner, dict) and owner.get('kind') == 'personal'
+                             and type(owner.get('id')) is int and owner['id'] > 0 for owner in owners)
+                     and len({owner['id'] for owner in owners}) == len(personal))
+    if (not supported or progress['authored_baseline'] != 1 or int(progress['earned_xp']) <= 0 or int(progress['spent_xp']) <= 0
             or progress['highest_earned_tier'] < 2 or progress['highest_applied_tier'] < 2):
-        raise EvidenceError('Saved two-HD history is not an actual earned second HD')
+        raise EvidenceError('Saved history is not an actual earned second personal class HD')
     for field in ('earned_xp', 'spent_xp', 'highest_earned_tier', 'highest_applied_tier'):
         if int(progress[field]) != u64(overview['growth'][field]):
             raise EvidenceError('Owner advancement and saved earned progression disagree')
@@ -759,12 +778,15 @@ class RouteExecution:
         view = self.current['state']['observation']
         stats = view['combat']['own_stats']
         source = 'warrior' if self.actor == 1 else 'mage'
+        try:
+            starting_body_hd(stats['hit_dice'], self.actor)
+        except ControllerError as error:
+            raise EvidenceError('Unsupported ordinary PC starting composition') from error
         if (self.current['state']['wizard_game'] or view['combat']['terminal']
-                or hit_die_counts(stats['hit_dice']) != {('class', source): 1}
                 or self.overview['points'] != {'earned': "1", 'spent': "0", 'unspent': "1"}
                 or self.overview['growth']['future'] != {'kind': 'selected', 'source': {'kind': 'class', 'class': source}}
                 or int(self.overview['growth']['earned_xp']) != 0):
-            raise EvidenceError('Unexpected authored HD-one ordinary starting state')
+            raise EvidenceError('Unexpected authored personal-class-HD-one ordinary starting state')
         if {row['name']: int(row['quantity']) for row in view['inventory']} != {
                 'mace': 1, 'ring mail': 1, 'clean bandage': 3, 'food ration': 1}:
             raise EvidenceError('Actual finite starting kit changed')
@@ -785,7 +807,8 @@ class RouteExecution:
         self.owner_overview(); self.assert_start()
         self.controller.observe(self.current['state'], self.overview)
         before = copy.deepcopy(self.current['state'])
-        self.issue({'type': 'advancement', 'command': first_purchase(self.actor)})
+        body_hd = starting_body_hd(before['observation']['combat']['own_stats']['hit_dice'], self.actor)
+        self.issue({'type': 'advancement', 'command': first_purchase(self.actor, body_hd=body_hd)})
         if self.current['state'] != before:
             raise EvidenceError('First-purchase preview mutated ordinary state')
         if self.controller.first_commands >= self.controller.first_limit:

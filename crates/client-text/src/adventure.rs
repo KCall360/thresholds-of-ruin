@@ -203,7 +203,12 @@ fn exits_from(
                 destination: Some(c.key.clone()),
                 label: item.map_or_else(
                     || format!("an open place {toward}"),
-                    |i| format!("the place by the {}", safe(&i.item.name)),
+                    |i| {
+                        format!(
+                            "the place by the {}",
+                            safe(tor_client_common::items::ground_name(i))
+                        )
+                    },
                 ),
                 closed: false,
             }
@@ -266,7 +271,10 @@ pub(crate) fn sights(state: &dyn ScenicView) -> Vec<(String, String, String)> {
     for item in &o.ground_items {
         seen.push((
             format!("item:{}", item.item.id),
-            prose::counted(item.item.quantity, &safe(&item.item.name)),
+            prose::counted(
+                item.item.quantity,
+                &safe(tor_client_common::items::ground_name(item)),
+            ),
             whereabouts(item.position),
         ));
     }
@@ -536,7 +544,11 @@ fn things_sentences(state: &dyn ScenicView, place: &Place) -> Vec<String> {
             } else {
                 whereabouts(item.position)
             };
-            (place, safe(&item.item.name), item.item.quantity)
+            (
+                place,
+                safe(tor_client_common::items::ground_name(item)),
+                item.item.quantity,
+            )
         })
         .collect();
     let mut told: BTreeSet<String> = BTreeSet::new();
