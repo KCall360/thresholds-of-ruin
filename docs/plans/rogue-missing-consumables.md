@@ -1960,9 +1960,10 @@ a universal linear-work guarantee or a formal before/after speedup claim. Raw
 samples remain local; no published benchmark headline or ledger entry is implied.
 
 All graphical deferrals are the maintainer's explicit local-only authorization,
-never native passes or hosted-CI waivers. The normal local pre-push gate or an
-explicit task-scoped exception, and the canonical exact-head required hosted
-platform gates, remain publication/merge requirements. Source identities,
+never native passes or hosted-CI waivers. The
+[risk-based local checkpoint](../development/testing.md#broader-checkpoints) and
+canonical exact-head required hosted platform gates remain the authoritative
+publication/merge policy. Source identities,
 unchanged-input bridges, failed attempts and recovered stage receipts remain
 separate; neither cache recovery nor a documentation-only outcome update changes
 what each tested artifact actually qualifies.
