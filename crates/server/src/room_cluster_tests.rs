@@ -478,6 +478,7 @@ fn room_cluster_item_actor_and_carried_roots_require_spatial_scope() {
     let mut item = base.manifest.archetypes["rogue.wand_nothing"].clone();
     item.identity = Some("fixture.room_light".into());
     item.appearance_pool = None;
+    item.forms.clear();
     item.device.as_mut().unwrap().ability = "fixture.room_light".into();
     item.device.as_ref().unwrap().compile(&rules).unwrap();
     base.manifest

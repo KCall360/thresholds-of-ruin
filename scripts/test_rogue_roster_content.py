@@ -336,7 +336,8 @@ class RogueRosterContent(unittest.TestCase):
         self.assertEqual([row for row in source("rules.toml")["overrides"] if row["path"][0] == "growth"], [{
             "op": "set", "path": ["growth", "threat", "overrides"], "value": [
                 {"source": {"kind": "expertise", "id": "rogue.knife"}, "points": 10},
-                {"source": {"kind": "expertise", "id": "rogue.shortbow"}, "points": 10}]}])
+                {"source": {"kind": "expertise", "id": "rogue.shortbow"}, "points": 10},
+                {"source": {"kind": "expertise", "id": "rogue.spear"}, "points": 10}]}])
         # Neither E nor W owns equipment expertise; their threat stays unchanged.
         # E: 70 HD + 10 two ranks + 10 species + 10 type = tier 1.
         # W: 350 HD + 10 ranks + 10 species + 10 type + 10 DR2 = tier 4.

@@ -312,7 +312,14 @@ impl crate::ItemSpec {
             + usize::from(self.edible.is_some())
             + usize::from(self.readable.is_some())
             + usize::from(self.device.is_some());
-        exclusive <= 1
+        let physical_device = self.device.is_some()
+            && self.projectile.is_none()
+            && self.ground_scare.is_none()
+            && self
+                .equipment
+                .as_ref()
+                .is_some_and(|equipment| equipment.supports_device(self.class));
+        (exclusive <= 1 || (exclusive == 2 && physical_device))
             && self
                 .ground_scare
                 .as_ref()

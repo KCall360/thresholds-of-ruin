@@ -324,6 +324,48 @@ of the other new direct-mutation/checkpoint witnesses is a bounded setup review,
 not an additional runtime pass. Other profile executions are outside these two
 inspected-job counts.
 
+## Spear and magical-form development, 27 October 2026
+
+This bounded local window covers the first linked affected-contract checkpoint
+and its five actual-process checks, before publication. **No production defect
+was established.** It found **1 stale-test root / 1 distinct method / 1 failed
+execution**, plus **2 new-test harness-premise roots / 2 distinct methods /
+2 failed executions**. These categories do not overlap. Deliberate feature
+first-red witnesses and source-reviewed corrections made before runtime are
+excluded from those counts.
+
+- Stale schema owner: `scenario_package::tests::phase5_container_archetype_rejects_positional_fields`
+  still enumerated 23 fields after the approved named `forms` field made 24.
+  Add `forms` in declaration order; retain the positive named roundtrip, exact
+  field-count equality and rejection of the complete positional representation.
+- New ordinary-actor fixture: `abilities::magic_item_tests::physical_devices::ordinary_actor_can_hold_physical_device_without_gaining_creature_only_zap`
+  tried to equip into a nonexistent socket: `spawn_actor` intentionally starts
+  with empty anatomy. Configure normal rules anatomy without creature statistics;
+  retain the equipment, forbidden Zap, charge, hold and checkpoint assertions.
+  This setup rejection is not evidence of a physical-device production failure.
+- New Adventure fixture: `test_rogue_staves_process.RogueStavesProcesses.test_text_staff_physical_hit_charge_exhaustion_and_pending_source_free_reopen`
+  expected `examine wand` to resolve uniquely while carrying both a wand and a
+  scroll whose disclosed name includes “wand”. Preserve the ordinary ambiguity
+  prompt, choose the disclosed wand through clarification, then keep the exact
+  wand/staff noun and unchanged-checkpoint assertions. Earlier physics, charges,
+  exhaustion and source-free pending-work assertions passed in the failed method;
+  that does not make the whole method a pass.
+
+A separate local evidence-driver failure expected exactly one Rust summary line,
+although a passing simulation integration method launches a nested test process.
+The integration binary itself passed all 815 registered methods; this was
+**1 harness root / 0 failed test methods / 1 aborted evidence-collection stage**,
+not another gameplay defect or failed method execution. Preserve its complete
+output and distinguish the outer summary when collecting evidence. Remaining
+selected simulation-library owners were then run separately rather than repeating
+already completed integration targets.
+
+The two Rust fixture corrections passed the no-link server/simulation preflight;
+their corrected runtime checks remain required in exact-head hosted CI. The
+corrected staff process then passed its exact local rerun, including ordinary
+clarification and unchanged simulation state. This is risk-based local evidence,
+not a full-suite or hosted qualification claim.
+
 ## Add the next useful finding
 
 One compact row or paragraph per diagnosed cause is enough:

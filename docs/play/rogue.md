@@ -203,6 +203,14 @@ the old rate and leaves the target at normal speed until a later application.
 These effects do not change the Speed attribute. Utility use does not identify
 the wand. Status screens show these persistent effects as “until removed”.
 
+## Spear throwing
+
+A spear can be thrown after purchasing **Spear** equipment expertise through
+ordinary advancement. Select the carried or wielded spear in Throw; it deals
+1d6 Keen instead of its 2d3 melee payload and remains recoverable after a hit.
+Its range is 20/60 feet. Curses, occupied grips, paid preparation and floor landing
+rules still apply; this adds neither free expertise nor extra starter stock.
+
 ## Opt-in fruit, throwing weapons and treasure rooms
 
 Scenario authors can select fruit, darts and shuriken from the existing catalog.
@@ -220,6 +228,17 @@ actor context. It is not enabled automatically. Its independent bounded counts
 and illustrative bands are authored TOR policy, not a new production balance pass.
 See [items](../reference/items.md) and the
 [population schema](../reference/scenario-packages.md#first-entry-population).
+
+## Magical staves and wands
+
+Each magical effect chooses one physical form for the run: a metal-looking wand
+or a wood-looking staff. The same appearance keeps the same effect within that
+run; identification reveals its name. Both use the usual **Zap** action and
+charges. Wield either for ordinary physical attacks: staves deal 2d3 Impact,
+wands fixed 1 Impact, with no charge cost—even when empty. They occupy one grip
+and cannot be thrown. Cursed wielded implements obey the same removal restrictions
+as other equipment. The inventory category “wands and staves” and identify-wand
+scroll include both; magical effects and live loot weights are unchanged.
 
 ## Opt-in Nothing, Light and Drain Life wands
 

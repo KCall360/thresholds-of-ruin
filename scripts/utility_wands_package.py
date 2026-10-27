@@ -43,9 +43,11 @@ def fixture():
 def initial_items(test, frame):
     inventory = observation(frame)["inventory"]
     test.assertEqual(len(inventory), 3)
-    haste = next(row for row in inventory if row["name"] == "wand of haste monster")
-    slow = next(row for row in inventory if row["name"] == "wand of slow monster")
+    # Independent fixed seed42 form vector: haste and slow are staves.
+    haste = next(row for row in inventory if row["name"] == "staff of haste monster")
+    slow = next(row for row in inventory if row["name"] == "staff of slow monster")
     invisible = next(row for row in inventory if not row["identified"])
+    test.assertEqual(invisible["name"], "yew staff")
     test.assertNotIn("invisibility", invisible["name"])
     return {"haste": haste["id"], "slow": slow["id"], "invisibility": invisible["id"]}
 
@@ -77,7 +79,7 @@ def assert_invisibility(test, caster, target, rear, invisible_id):
     # source ability/type must not reappear through history or another view.
     for frame in (caster, target, rear):
         public = json.dumps(frame, sort_keys=True)
-        for hidden in ("rogue.wand_invisibility", "Wand of Invisibility", "wand of invisibility"):
+        for hidden in ("rogue.wand_invisibility", "Wand of Invisibility", "wand of invisibility", "staff of invisibility"):
             test.assertNotIn(hidden, public)
 
 
@@ -109,6 +111,6 @@ def assert_anonymous_recipient_feedback(test, messages, recipient):
         test.assertIn(event["caster"], allowed_sources)
         test.assertEqual(event["outcome"], "applied")
         encoded = json.dumps(message, sort_keys=True)
-        for hidden in ("rogue.wand_invisibility", "Wand of Invisibility", "wand of invisibility"):
+        for hidden in ("rogue.wand_invisibility", "Wand of Invisibility", "wand of invisibility", "staff of invisibility"):
             test.assertNotIn(hidden, encoded)
     return found[0][0]

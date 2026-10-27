@@ -636,8 +636,9 @@ mod tests {
         item.device.as_mut().unwrap().ability = "fixture.room_light".into();
         item.device.as_ref().unwrap().compile(&rules).unwrap();
         // No appearance pool: this typed source-closure fixture is not adding
-        // an unlicensed tenth identity to the production cosmetic pool.
+        // an extra identity to the production cosmetic pools, including forms.
         item.appearance_pool = None;
+        item.forms.clear();
         package
             .manifest
             .archetypes
@@ -933,6 +934,7 @@ mod cancellation_source_tests {
         let mut item = package.manifest.archetypes["rogue.wand_invisibility"].clone();
         item.identity = Some("fixture.cancellation".into());
         item.appearance_pool = None;
+        item.forms.clear();
         item.device.as_mut().unwrap().ability = "fixture.cancellation".into();
         item.device.as_ref().unwrap().compile(&rules).unwrap();
         package

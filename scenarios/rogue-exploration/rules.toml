@@ -1,4 +1,4 @@
-import = "interactions-v55"
+import = "interactions-v56"
 
 # Equipment expertise is an ordinary HD-point or earned Intellect choice.
 # No preset, species, NPC or default talent receives a free expertise grant.
@@ -14,6 +14,11 @@ value = { id = "rogue.shortbow", name = "Shortbow", category = "equipment" }
 
 [[overrides]]
 op = "add"
+path = ["expertises", "rogue.spear"]
+value = { id = "rogue.spear", name = "Spear", category = "equipment" }
+
+[[overrides]]
+op = "add"
 path = ["ability_tags", "ranged"]
 value = { id = "ranged", name = "Ranged attack" }
 
@@ -22,7 +27,7 @@ value = { id = "ranged", name = "Ranged attack" }
 [[overrides]]
 op = "set"
 path = ["growth", "threat", "overrides"]
-value = [{ source = { kind = "expertise", id = "rogue.knife" }, points = 10 }, { source = { kind = "expertise", id = "rogue.shortbow" }, points = 10 }]
+value = [{ source = { kind = "expertise", id = "rogue.knife" }, points = 10 }, { source = { kind = "expertise", id = "rogue.shortbow" }, points = 10 }, { source = { kind = "expertise", id = "rogue.spear" }, points = 10 }]
 
 # These ordinary abilities capture selected-item timing and exact projectile
 # delivery. No added base resource or supply cost; shared secondary-weapon Focus

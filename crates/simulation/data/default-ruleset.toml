@@ -1,5 +1,5 @@
 # Canonical rules content; initial starter values remain provisional until paired evaluation.
-id = "interactions-v55"
+id = "interactions-v56"
 
 # Expertise identities are authored explicitly; this foundation adds no free grants.
 expertises = []
@@ -65,7 +65,7 @@ allowed = ["skill_rank", "talent", "expertise"]
 id = "weapon"
 name = "Weapon"
 equipped_phrase = "weapon in hand"
-compatible_classes = ["weapon"]
+compatible_classes = ["weapon", "wand"]
 requires_attack = true
 capacity = { kind = "shared", resource = "grip", units = 1 }
 equip_turns = 1

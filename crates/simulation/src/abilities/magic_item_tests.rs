@@ -1,4 +1,6 @@
 //! Item authority contracts; geometry/check arithmetic are owned by ray_tests.
+#[path = "physical_device_tests.rs"]
+mod physical_devices;
 use super::*;
 use crate::{
     Action, ActorId, ChargeRange, DeviceSpec, Game, GameError, IntentionOrigin, ItemClass,

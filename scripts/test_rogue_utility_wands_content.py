@@ -1,6 +1,8 @@
 """Exact persistent utility wand definitions and finite stock bindings."""
 import unittest
 
+from rogue_staves_package import expected_forms
+
 from test_rogue_utility_potions_content import source
 
 
@@ -15,6 +17,7 @@ class RogueUtilityWandsContent(unittest.TestCase):
                 self.assertEqual(catalog["items"][identity], {
                     "asset": "item.wand", "name": "wand of " + name, "identity": identity,
                     "magical": True, "class": "wand", "stackable": False, "appearance_pool": "rogue.wands",
+                    "forms": expected_forms(name),
                     "device": {"ability": identity, "initial_charges": {"minimum": 3, "maximum": 7},
                                "discovery": "never"}})
                 ability = overrides[("abilities", identity)]

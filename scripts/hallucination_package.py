@@ -55,10 +55,10 @@ def initial_items(test, frame):
 def assert_sample(test, observation, phase):
     # Frozen values independently evaluated from the documented selector recipe
     # and canonical production tuple roster: seed42, observer1, peer2/item40.
-    # Opt-in dart/fruit/shuriken entries make 84 object tuples, not 81;
+    # Metal wand and wood staff form pools make 98 object tuples;
     # no combat RNG or actor-HD operand participates in this selector.
-    expected = {0: ("emu", "creature.bird.emu", "scroll titled NEM AL", "item.scroll", "scroll"),
-                1: ("bat", "creature.bat", "scroll titled IV MEM", "item.scroll", "scroll")}[phase]
+    expected = {0: ("emu", "creature.bird.emu", "gold wand", "item.wand", "wand"),
+                1: ("bat", "creature.bat", "cedar staff", "item.wand", "wand")}[phase]
     name, asset, object_name, object_asset, cosmetic_class = expected
     peers = [row for row in observation["visible_actors"] if row["id"] != observation["self_target"]]
     # One creature may have several genuinely disclosed body-cell occurrences.

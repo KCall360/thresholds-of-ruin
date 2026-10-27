@@ -541,6 +541,33 @@ fn ordinary_magic_commands_select_one_disclosed_item_and_direction() {
 }
 
 #[test]
+fn staff_zap_names_retain_device_capability_and_aim_authority() {
+    for name in ["mahogany staff", "staff of fire"] {
+        let mut view = magic_state();
+        view.observation.inventory[1].name = name.into();
+        let item = view.observation.inventory[1].id;
+        for charges in [None, Some(0), Some(3)] {
+            view.observation.interactions.as_mut().unwrap().inventory[1].charges = charges;
+            assert_eq!(
+                parse(&format!("zap {name} east"), &view).unwrap(),
+                Input::Command(Command::Act {
+                    expected_revision: view.revision,
+                    action: Action::Zap {
+                        item,
+                        aim: DeviceAim::Direction {
+                            direction: Direction::East
+                        }
+                    }
+                })
+            );
+        }
+        assert!(parse(&format!("zap {name}"), &view).is_err());
+        view.observation.interactions.as_mut().unwrap().inventory[1].zappable = false;
+        assert!(parse(&format!("zap {name} east"), &view).is_err());
+    }
+}
+
+#[test]
 fn identification_commands_bind_current_choice_and_exact_category() {
     let mut view = magic_state();
     let wand = view.observation.inventory[1].id;

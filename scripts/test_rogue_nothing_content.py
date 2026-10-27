@@ -3,6 +3,8 @@ from pathlib import Path
 import tomllib
 import unittest
 
+from rogue_staves_package import METALS, expected_forms
+
 PRODUCTION = Path(__file__).resolve().parents[1] / "scenarios/rogue-exploration"
 
 
@@ -16,6 +18,7 @@ class RogueNothingContent(unittest.TestCase):
         self.assertEqual(catalog["items"]["rogue.wand_nothing"], {
             "asset": "item.wand", "name": "wand of nothing", "identity": "rogue.wand_nothing",
             "magical": True, "class": "wand", "stackable": False, "appearance_pool": "rogue.wands",
+            "forms": expected_forms("nothing"),
             "device": {"ability": "rogue.wand_nothing", "initial_charges": {"minimum": 3, "maximum": 7}, "discovery": "never"}})
         definitions = [row["value"] for row in source("rules.toml")["overrides"]
                        if row["path"] == ["abilities", "rogue.wand_nothing"]]
@@ -44,7 +47,6 @@ class RogueNothingContent(unittest.TestCase):
         self.assertEqual(identities, {"rogue.wand_" + kind for kind in
             ("fire", "cold", "lightning", "invisibility", "haste", "slow", "teleport_away", "teleport_to", "nothing", "light", "drain_life", "cancellation", "magic_missile", "polymorph")})
         appearances = catalog["appearance_pools"]["rogue.wands"]["appearances"]
-        self.assertEqual(appearances, ["ash wand", "copper wand", "ivory wand", "obsidian wand",
-                                     "oak wand", "glass wand", "willow wand", "iron wand", "elm wand", "birch wand", "cedar wand", "hazel wand", "yew wand", "maple wand"])
+        self.assertEqual(appearances, [metal + " wand" for metal in METALS])
         self.assertEqual(len(appearances), 14)
         self.assertEqual(len(set(appearances)), len(identities))
