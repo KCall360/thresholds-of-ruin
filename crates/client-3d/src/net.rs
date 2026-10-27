@@ -560,9 +560,12 @@ mod tests {
             .init_resource::<Time>()
             .add_event::<bevy::input::mouse::MouseWheel>()
             .add_systems(Update, crate::camera::input);
-        app.world_mut()
-            .resource_mut::<ButtonInput<KeyCode>>()
-            .press(KeyCode::KeyW);
+        // A tap pressed and released within one slow frame still counts.
+        {
+            let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            keys.press(KeyCode::KeyW);
+            keys.release(KeyCode::KeyW);
+        }
         app.update();
         let sent = commands.try_recv().expect("the aim is sent");
         assert!(
