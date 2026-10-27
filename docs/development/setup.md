@@ -101,8 +101,10 @@ Use the [player quick start](../../README.md) to create a fresh save and connect
 client. [CLI options](../reference/cli.md) define tokens, numeric loopback addresses,
 scenario paths and resume behavior. Keep credentials and saves outside Git.
 
-Run focused checks while editing, `quick` at cohesive checkpoints, and the default
-`push` tier before every push unless a successful unchanged `full` run covers it.
+Use the [risk-based local checkpoint](testing.md#broader-checkpoints): focused
+checks, batched fixes and valid evidence reuse are the default. Choose broader
+local tiers for a specific justified risk or maintainer request, not every push.
+The verifier's CLI default remains `push`; select the intended scope explicitly.
 The final commit must pass its canonical selected or exhaustive CI plan and both
 required platform aggregates; selected assurance is not a full-matrix claim.
 Separate workflow/Python/dependency lint jobs are listed in the

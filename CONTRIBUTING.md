@@ -21,13 +21,15 @@ Follow [setup](docs/development/setup.md), then the authoritative
 [testing workflow](docs/development/testing.md): focused tests while iterating
 (use [`scripts/feedback.py`](docs/development/testing.md#fast-local-rust-feedback)
 for repeated single-target Rust edits; it does not qualify a verification gate),
-`python scripts/verify.py quick` at stable checkpoints, and a passing default
-`push` tier (or `full`) before every push, except for
-[verified prose-only documentation changes](docs/development/testing.md#prose-only-documentation-changes),
-which require documentation/link and tooling checks locally and in CI.
-`push` tests what the change can reach; it is not full qualification. Run targeted
-release checks for performance/release-specific behavior; local full is required
-when CI cannot run or on request. The canonical
+then the [risk-based local checkpoint](docs/development/testing.md#broader-checkpoints)
+before publication. Expedited iteration is the default: batch fixes, reuse valid
+results and select affected contracts rather than repeatedly running broad local
+`quick`/`push`/`full` tiers. Broaden locally for a specific justified risk or a
+maintainer request, not merely because a push is due. Verified
+[prose-only documentation changes](docs/development/testing.md#prose-only-documentation-changes)
+retain their documentation/link and tooling checks. Run targeted release checks
+for performance/release-specific behavior. Required hosted CI provides final
+qualification; the canonical
 [risk-based CI plan](docs/development/testing.md#risk-based-ci-assurance) chooses
 prose-only, selected-contract, or exhaustive coverage. Both required platform
 aggregates must pass for the exact final head. Selected results deliberately
@@ -42,11 +44,13 @@ full matrix, or used to qualify another retained result.
 A scheduled-full failure is actionable evidence to fix and feed back into ownership,
 not permission to ignore the failing test or keep relying on a missed fast path.
 
-A full run covers the local push gate for unchanged inputs, toolchain and test
-configuration. Record the tested state, failures and checks not run; stale,
-incomplete or failed evidence does not satisfy a gate. The only standing local
-failure waiver is the exact native travel mouse test documented in the testing policy,
-reported as a waived failure and still required in CI. Never weaken tests or
+A full run covers narrower local checks only for unchanged inputs, toolchain and
+test configuration; it is not a prerequisite for focused work. Record the tested
+state, failures and checks not run; stale, incomplete or failed evidence does not
+satisfy a gate. Maintain the [test-effectiveness ledger](docs/development/test-effectiveness.md)
+with evidenced defects and stale-test failures, not inflated pass/fail totals.
+The only standing local failure waiver is the exact native travel mouse test
+documented in the testing policy, reported as a waived failure and still required in CI. Never weaken tests or
 infer new waivers from historical records.
 
 ## Architecture rules
@@ -98,8 +102,10 @@ Update the owning guide and status with a behavior change. Replace superseded
 statements; do not preserve rollout history beside current instructions. Keep one
 authoritative control/schema/policy table and link to it. Guides say “current”
 instead of repeating format numbers. Preserve useful rationale, negative results
-and measurement limitations with accessible immutable evidence; routine PR/test
-counts and local-only logs are not current reference material.
+and measurement limitations with accessible immutable evidence. The
+[test-effectiveness ledger](docs/development/test-effectiveness.md) retains bounded,
+classified failure evidence; routine pass listings and local-only logs are not
+current reference material.
 
 Every new page must be reachable from the docs index, including nested pages.
 Check links, anchors and executable examples after moves. Documentation tests
