@@ -297,6 +297,33 @@ Historical wire-format examples stay unchanged and valid. The previously
 corrected depth-four expired-history owner passed both inspected Linux Rust
 lanes; those lanes still failed overall on the cosmetic expectations above.
 
+### Second hosted content-batch checkpoint: private damage publication
+
+The [next PR #200 run](https://github.com/KCall360/thresholds-of-ruin/actions/runs/40466465054)
+at head `30ec322b0e5c3308a09c2f74e3b3d60ee99d0f5e` passed all 1,213 server
+library and 269 server integration methods in both inspected Linux Rust lanes,
+including the repaired cosmetic owners. Each lane then reported **2,154 passed /
+1 failed** in the simulation library. The failure was
+`floor_activation::tests::room_cluster_retains_birth_evidence_after_actor_death_and_rejects_duplicate_ids`.
+Its birth, duplicate-identity rejection and death checks succeeded, but final
+checkpoint restoration correctly rejected unsealed participant-event receipts
+as `RunState`.
+
+This is **1 additional new-harness root / 1 distinct method / 2 failed
+executions** in Linux debug/release jobs `122063447022` and `122063447005`, not a
+production restore defect or stale existing oracle. The test called private
+`apply_damage`, an inner-transaction effect, without completing the outer
+publication boundary before checkpointing. The correction follows the existing
+gold-population fixture: seal participant events, positively assert receipt
+validity, then retain all existing birth/death/identity checks and exact restored
+state equality. No production validator is relaxed and no events are discarded.
+
+The repair receives a narrow no-link preflight; **the corrected simulation
+method's runtime rerun remains required in exact-head hosted CI**. A source audit
+of the other new direct-mutation/checkpoint witnesses is a bounded setup review,
+not an additional runtime pass. Other profile executions are outside these two
+inspected-job counts.
+
 ## Add the next useful finding
 
 One compact row or paragraph per diagnosed cause is enough:

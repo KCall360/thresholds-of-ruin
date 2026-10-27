@@ -514,6 +514,10 @@ fn room_cluster_retains_birth_evidence_after_actor_death_and_rejects_duplicate_i
     )
     .unwrap();
     game.apply_damage(ActorId(2), &damage).unwrap();
+    // Private damage leaves publication to its caller; checkpoint a completed
+    // participant boundary, just as the ordinary effect transaction does.
+    game.seal_participant_events().unwrap();
+    assert!(game.event_receipts_valid());
     assert!(!game.alive(ActorId(2)));
     game.validate_activation_record(&record).unwrap();
     game.validate_activation_record_identity_bounds(&record)
