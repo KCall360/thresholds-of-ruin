@@ -149,32 +149,42 @@ fn fragment(
     discard_cutaway(wp, in.position.xy);
 
     let floor_w = smoothstep(0.55, 0.85, n.y);
-    // Walls: broad tone, strata, crevices and bright mineral flecks.
-    let broad = fbm(wp * 0.45);
-    let strata = sin(wp.y * 8.5 + fbm(wp * 0.7) * 6.0) * 0.5 + 0.5;
-    var wall = mix(cave.wall_a.rgb, cave.wall_b.rgb, smoothstep(0.3, 0.7, broad));
-    wall *= 0.8 + 0.28 * strata;
-    let crevice = smoothstep(0.45, 0.2, fbm(wp * 3.1 + vec3(5.0)));
-    wall *= 1.0 - 0.45 * crevice;
-    let fleck = smoothstep(0.9, 0.96, vnoise(wp * 17.0));
-    wall = mix(wall, cave.accent.rgb, fleck * 0.5 * (1.0 - floor_w));
+    // Most rock is pure wall or pure floor; each is shaded only where it shows.
+    var wall = vec3(0.0);
+    var fleck = 0.0;
+    if (floor_w < 1.0) {
+        // Walls: broad tone, strata, crevices and bright mineral flecks.
+        let broad = fbm(wp * 0.45);
+        let strata = sin(wp.y * 8.5 + fbm(wp * 0.7) * 6.0) * 0.5 + 0.5;
+        wall = mix(cave.wall_a.rgb, cave.wall_b.rgb, smoothstep(0.3, 0.7, broad));
+        wall *= 0.8 + 0.28 * strata;
+        let crevice = smoothstep(0.45, 0.2, fbm(wp * 3.1 + vec3(5.0)));
+        wall *= 1.0 - 0.45 * crevice;
+        fleck = smoothstep(0.9, 0.96, vnoise(wp * 17.0));
+        wall = mix(wall, cave.accent.rgb, fleck * 0.5 * (1.0 - floor_w));
+    }
 
-    // Floors: packed earth, gravel, damp hollows and moss.
-    var ground = mix(cave.floor_a.rgb, cave.floor_b.rgb, fbm(wp * 1.7));
-    // Sparse gravel only where the ground is loose, and dark cracks between
-    // packed plates.
-    let loose = smoothstep(0.45, 0.65, fbm(wp * 0.9 + vec3(3.0, 0.0, 8.0)));
-    let gravel = smoothstep(0.8, 0.86, vnoise(wp * 9.0)) * loose;
-    ground = mix(ground, ground * 1.35 + vec3(0.03), gravel * 0.45);
-    let plates = abs(fbm(wp * vec3(1.1, 0.0, 1.1) + vec3(0.0, 2.0, 0.0)) - 0.5);
-    let crack = smoothstep(0.016, 0.0, plates) * (1.0 - loose)
-        * smoothstep(0.35, 0.6, vnoise(wp * 0.7 + vec3(4.0)));
-    ground *= 1.0 - 0.45 * crack;
-    ground *= 0.85 + 0.3 * fbm(wp * 0.3 + vec3(11.0));
-    let moss = smoothstep(0.56, 0.68, fbm(wp * 0.8 + vec3(7.3, 1.1, 4.2)));
-    ground = mix(ground, cave.moss.rgb * (0.8 + 0.4 * vnoise(wp * 9.0)), moss);
-    let wet = smoothstep(0.6, 0.68, fbm(wp * 0.55 + vec3(31.0, 2.0, 9.0))) * (1.0 - moss);
-    ground *= 1.0 - 0.38 * wet;
+    var ground = vec3(0.0);
+    var moss = 0.0;
+    var wet = 0.0;
+    if (floor_w > 0.0) {
+        // Floors: packed earth, gravel, damp hollows and moss.
+        ground = mix(cave.floor_a.rgb, cave.floor_b.rgb, fbm(wp * 1.7));
+        // Sparse gravel only where the ground is loose, and dark cracks between
+        // packed plates.
+        let loose = smoothstep(0.45, 0.65, fbm(wp * 0.9 + vec3(3.0, 0.0, 8.0)));
+        let gravel = smoothstep(0.8, 0.86, vnoise(wp * 9.0)) * loose;
+        ground = mix(ground, ground * 1.35 + vec3(0.03), gravel * 0.45);
+        let plates = abs(fbm(wp * vec3(1.1, 0.0, 1.1) + vec3(0.0, 2.0, 0.0)) - 0.5);
+        let crack = smoothstep(0.016, 0.0, plates) * (1.0 - loose)
+            * smoothstep(0.35, 0.6, vnoise(wp * 0.7 + vec3(4.0)));
+        ground *= 1.0 - 0.45 * crack;
+        ground *= 0.85 + 0.3 * fbm(wp * 0.3 + vec3(11.0));
+        moss = smoothstep(0.56, 0.68, fbm(wp * 0.8 + vec3(7.3, 1.1, 4.2)));
+        ground = mix(ground, cave.moss.rgb * (0.8 + 0.4 * vnoise(wp * 9.0)), moss);
+        wet = smoothstep(0.6, 0.68, fbm(wp * 0.55 + vec3(31.0, 2.0, 9.0))) * (1.0 - moss);
+        ground *= 1.0 - 0.38 * wet;
+    }
 
     var color = mix(wall, ground, floor_w);
     // Tops of walls cut off above the body read as dark cross-sections.

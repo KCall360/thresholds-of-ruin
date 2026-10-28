@@ -11,6 +11,7 @@ use bevy::{
         Render, RenderApp, RenderPlugin, RenderSet,
     },
 };
+use std::path::{Path, PathBuf};
 use wgpu_types::{Backend, DeviceType};
 
 pub(super) fn plugins() -> PluginGroupBuilder {
@@ -93,21 +94,60 @@ fn adjacent_shader_compiler(
     // Compiler discovery must not depend on the launcher's working directory.
     // A distribution without the optional pair retains the built-in compiler.
     settings.dx12_shader_compiler = Dx12Compiler::Fxc;
-    let Ok(executable) = std::env::current_exe() else {
-        return settings;
-    };
-    let Some(directory) = executable.parent() else {
-        return settings;
-    };
-    let compiler = directory.join("dxcompiler.dll");
-    let validator = directory.join("dxil.dll");
-    if compiler.is_file() && validator.is_file() {
+    // FXC compiles the shadowed PBR shader into code several times slower on
+    // the GPU (a crowd's opaque pass took 10 ms rather than 2), so a pair
+    // shipped beside the executable wins, then the newest installed Windows
+    // SDK's; FXC remains only where neither exists.
+    let mut directories: Vec<PathBuf> = std::env::current_exe()
+        .ok()
+        .and_then(|executable| executable.parent().map(Path::to_path_buf))
+        .into_iter()
+        .collect();
+    if let Some(programs) = std::env::var_os("ProgramFiles(x86)") {
+        directories.extend(sdk_compiler_directories(
+            &Path::new(&programs).join(r"Windows Kits\10\bin"),
+        ));
+    }
+    if let Some((compiler, validator)) = compiler_pair(&directories) {
         settings.dx12_shader_compiler = Dx12Compiler::DynamicDxc {
             dxc_path: compiler.to_string_lossy().into_owned(),
             dxil_path: validator.to_string_lossy().into_owned(),
         };
     }
     settings
+}
+
+/// The x64 tool directories of a Windows SDK `bin` directory, newest first.
+fn sdk_compiler_directories(bin: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(bin) else {
+        return Vec::new();
+    };
+    let mut versions: Vec<(Vec<u32>, PathBuf)> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().into_string().ok()?;
+            let version = name
+                .split('.')
+                .map(str::parse)
+                .collect::<Result<Vec<u32>, _>>()
+                .ok()?;
+            Some((version, entry.path().join("x64")))
+        })
+        .collect();
+    versions.sort_by(|a, b| b.0.cmp(&a.0));
+    versions
+        .into_iter()
+        .map(|(_, directory)| directory)
+        .collect()
+}
+
+/// The first directory holding both DXC libraries, as compiler and validator.
+fn compiler_pair(directories: &[PathBuf]) -> Option<(PathBuf, PathBuf)> {
+    directories.iter().find_map(|directory| {
+        let compiler = directory.join("dxcompiler.dll");
+        let validator = directory.join("dxil.dll");
+        (compiler.is_file() && validator.is_file()).then_some((compiler, validator))
+    })
 }
 
 /// Shared silhouette and contact shading for live play and both previews.
@@ -179,6 +219,51 @@ mod tests {
             world.get::<Fxaa>(camera).unwrap().enabled,
             "silhouettes still need anti-aliasing after tone mapping"
         );
+    }
+
+    #[test]
+    fn the_first_complete_dxc_pair_is_chosen_from_the_newest_sdk() {
+        let root = std::env::current_dir()
+            .unwrap()
+            .join("target/test-dxc-discovery");
+        let _ = std::fs::remove_dir_all(&root);
+        let bin = root.join("bin");
+        for (version, files) in [
+            ("10.0.17134.0", &["dxcompiler.dll", "dxil.dll"][..]),
+            ("10.0.26100.0", &["dxcompiler.dll", "dxil.dll"][..]),
+            // Newest, but only half a pair.
+            ("10.0.30000.0", &["dxcompiler.dll"][..]),
+        ] {
+            let directory = bin.join(version).join("x64");
+            std::fs::create_dir_all(&directory).unwrap();
+            for file in files {
+                std::fs::write(directory.join(file), b"").unwrap();
+            }
+        }
+        std::fs::create_dir_all(bin.join("x64")).unwrap();
+        let directories = sdk_compiler_directories(&bin);
+        assert_eq!(
+            directories,
+            ["10.0.30000.0", "10.0.26100.0", "10.0.17134.0"].map(|v| bin.join(v).join("x64")),
+            "unversioned tool directories are not SDK versions"
+        );
+        let (compiler, validator) = compiler_pair(&directories).unwrap();
+        assert_eq!(compiler, bin.join("10.0.26100.0/x64/dxcompiler.dll"));
+        assert_eq!(validator, bin.join("10.0.26100.0/x64/dxil.dll"));
+        let beside = root.join("beside");
+        std::fs::create_dir_all(&beside).unwrap();
+        for file in ["dxcompiler.dll", "dxil.dll"] {
+            std::fs::write(beside.join(file), b"").unwrap();
+        }
+        let mut preferred = vec![beside.clone()];
+        preferred.extend(directories);
+        assert_eq!(
+            compiler_pair(&preferred).unwrap().0,
+            beside.join("dxcompiler.dll")
+        );
+        assert!(compiler_pair(&[root.join("missing")]).is_none());
+        assert!(sdk_compiler_directories(&root.join("missing")).is_empty());
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

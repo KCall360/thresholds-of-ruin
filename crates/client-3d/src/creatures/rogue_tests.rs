@@ -3464,3 +3464,54 @@ fn crossed_belts_follow_their_fitted_torso_through_a_jump() {
         }
     }
 }
+
+/// Cloth and hair that deform keep generous culling boxes; picking must know
+/// them as such, or a figure's swinging box claims the cursor cells away.
+#[test]
+fn every_culling_sized_box_is_marked_loose_and_no_body_box_is() {
+    let woman = |model| {
+        Look::with_choice(
+            model,
+            7,
+            Some(Variant {
+                woman: true,
+                bust_lean: 1,
+                ..default()
+            }),
+        )
+    };
+    let haired = woman(CreatureModel::Human).dressed(Wardrobe::Leotard);
+    let cloaked = woman(CreatureModel::Human).dressed(Wardrobe::Paladin);
+    let robed = woman(CreatureModel::Mage);
+    for (name, look) in [("hair", haired), ("cloak", cloaked), ("robe", robed)] {
+        let (mut world, rig, ..) = spawn_one(&look);
+        let covered = match name {
+            "hair" => rig.hair.is_some(),
+            "cloak" => !rig.cloaks.is_empty(),
+            _ => rig.robe.is_some(),
+        };
+        assert!(covered, "the {name} fixture must wear its drape");
+        let mut boxes = world.query::<(
+            &bevy::render::primitives::Aabb,
+            Has<crate::picking::LooseBounds>,
+        )>();
+        let (mut loose, mut tight) = (0, 0);
+        for (bounds, marked) in boxes.iter(&world) {
+            let culling = bounds.half_extents.max_element() >= 1.0;
+            assert_eq!(
+                culling, marked,
+                "{name}: a box of {:?} must be loose exactly when it only culls",
+                bounds.half_extents
+            );
+            if marked {
+                loose += 1
+            } else {
+                tight += 1
+            }
+        }
+        assert!(
+            loose > 0,
+            "{name}: its drape's culling box is marked ({tight} tight boxes)"
+        );
+    }
+}

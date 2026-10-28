@@ -153,6 +153,7 @@ class DocumentationTests(unittest.TestCase):
                          "Bundled rules document must agree with the server import identity")
         manifests = sorted((ROOT / "scenarios").rglob("scenario.toml"))
         manifests.append(ROOT / "crates/client-3d/scenarios/menagerie/scenario.toml")
+        manifests.append(ROOT / "crates/client-3d/scenarios/crowd/scenario.toml")
         for path in manifests:
             with self.subTest(package=str(path.relative_to(ROOT))):
                 manifest = tomllib.loads(path.read_text(encoding="utf-8"))

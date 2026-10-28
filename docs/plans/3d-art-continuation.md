@@ -502,7 +502,10 @@ not implemented APIs or approval for a new format or implementation milestone.
   waist perimeter, and a hand joint does not fully specify a weapon grip.
 - [Garment geometry](../../crates/client-3d/src/creatures/geometry.rs) combines
   body measurements, local recipe constants and fitted surfaces. `NecklineCut`
-  derives openings from anatomy; torso/pelvis queries locate actual surfaces.
+  ([cloth](../../crates/client-3d/src/creatures/geometry/cloth.rs)) derives
+  openings from anatomy; [torso](../../crates/client-3d/src/creatures/geometry/fitting.rs)
+  and [pelvis](../../crates/client-3d/src/creatures/geometry/torso.rs) queries
+  locate actual surfaces.
   Other heights, offsets and trim paths still live inside individual generators.
   There is no universal request such as “resolve right-hand grip” that all
   species and equipment currently implement.

@@ -31,12 +31,17 @@ its exact requested position at that timestamp, with no extra movement step:
 - `action`: `name` is `jump`, `strike`, `thrust`, `heavy`, `focus`, `gesture`, or
   `cancel`. A named action starts/restarts at phase zero at its timestamp;
   the following interval advances it. Action starts require tick 1 or later;
-  tick zero is the generated rest pose.
+  tick zero is the generated rest pose. That pose does not yet present the
+  actor's authored `yaw` (the manifest still records it), so capture turned
+  actors at tick 1 or later.
 - `velocity`: `value` is a world-space vector in units per second. It persists
   until changed; use `[0, 0, 0]` to stop. Root displacement drives the usual gait.
 - `teleport`: `position` and `yaw` place the actor and reset animation state.
   Existing velocity is retained.
 - `dress`: `outfit` selects a wardrobe while retaining explicit equipment.
+  A capture after a `dress` or `equipment` change waits only until every mesh the
+  scene now draws has reached the renderer; meshes the old outfit owned, such as
+  a cloak, are released and not awaited.
 - `equipment`: `items` replaces the explicit loadout while retaining wardrobe.
   Supported pieces are `helm`, `boots`, `cloak`, and one body armour:
   `leather`, `studded-leather`, `ring-mail`, `scale-mail`, `chain-mail`,

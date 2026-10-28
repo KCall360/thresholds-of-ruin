@@ -1683,6 +1683,7 @@ pub(super) fn spawn(
                 center: bevy::math::Vec3A::new(0.0, -0.4, 0.0),
                 half_extents: bevy::math::Vec3A::new(1.2, 0.7, 1.2),
             },
+            crate::picking::LooseBounds,
         ))
         .id();
     commands.entity(hips).add_child(entity);
