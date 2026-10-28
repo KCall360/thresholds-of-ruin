@@ -366,6 +366,31 @@ corrected staff process then passed its exact local rerun, including ordinary
 clarification and unchanged simulation state. This is risk-based local evidence,
 not a full-suite or hosted qualification claim.
 
+## 3D crowd performance PR, 28 October 2026
+
+Hosted [Windows debug 3D run](https://github.com/KCall360/thresholds-of-ruin/actions/runs/40618173786/job/122585477848)
+on PR #202 head `9fc7d8a4`: **1 production-defect root / 1 distinct method /
+1 failed execution**, caught in published `main` code by a PR run; the PR's own
+changes did not cause it.
+
+- `test_client_process.Native3DProcesses.test_mouse_picks_the_presented_item_and_inventory_keys_do_not_exit_early`
+  hovered the relic under the player, then on the frame the left button went
+  down the hover reported a zombie two cells away. The press selected it, and
+  the relic never reached the inventory before the output deadline. Hover
+  picking intersected the deliberately oversized culling boxes of deforming hair
+  (a 3 m cube), cloaks and robes, so a distant figure's animated box could cross
+  the cursor ray. The software renderer's roughly 7 s debug frames only made the
+  window easier to land in; local software-adapter runs showed this branch's
+  frames are no slower than FXC's.
+- Fix: those meshes carry `picking::LooseBounds` and picking ignores them,
+  finding the wearer by its body. Intended red:
+  `picking::tests::culling_only_bounds_never_capture_the_cursor` failed at its
+  loose-box assertion with the positive control passing; it passes with the fix,
+  as does `creatures::rogue_tests::every_culling_sized_box_is_marked_loose_and_no_body_box_is`.
+- The native mouse methods could not run locally (another window covered the
+  client: a harness/environment limit, not a result). Exact-head hosted CI
+  remains their qualification.
+
 ## Add the next useful finding
 
 One compact row or paragraph per diagnosed cause is enough:

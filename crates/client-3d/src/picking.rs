@@ -49,7 +49,16 @@ pub(super) fn floor_cell(
 #[derive(Component, Clone, Copy)]
 pub(super) struct Pick(pub Focus);
 
+/// A mesh whose bounds only keep deforming cloth or hair from being culled:
+/// a generous box around its whole reach, not its shape. Picking ignores it
+/// and finds its wearer by the body instead, or a figure several cells away
+/// would claim the cursor whenever its swinging box crossed the ray.
+#[derive(Component, Clone, Copy, Default)]
+pub(crate) struct LooseBounds;
+
 type Decorations = Or<(With<crate::Glint>, With<crate::HostileRing>)>;
+/// Meshes whose bounds describe their shape.
+type Shaped = (With<Mesh3d>, Without<LooseBounds>);
 
 #[derive(bevy::ecs::system::SystemParam)]
 pub(super) struct Models<'w, 's> {
@@ -62,7 +71,7 @@ pub(super) struct Models<'w, 's> {
             &'static GlobalTransform,
             &'static InheritedVisibility,
         ),
-        With<Mesh3d>,
+        Shaped,
     >,
     parents: Query<'w, 's, &'static ChildOf>,
     targets: Query<'w, 's, &'static Pick>,
@@ -164,6 +173,49 @@ mod tests {
         let view = crate::test_support::view(0);
         let ray = Ray3d::new(Vec3::new(3.0, 5.0, 0.0), Dir3::NEG_Y);
         assert!(floor_cell(ray, &view, IVec3::ZERO, true).is_none());
+    }
+
+    #[test]
+    fn culling_only_bounds_never_capture_the_cursor() {
+        use bevy::ecs::system::SystemState;
+        let at = Position { x: 5, y: 0, z: 0 };
+        let mut view = crate::test_support::view(0);
+        view.visible = vec![cell(at, true)];
+        // The ray passes 1 m from the mesh's origin: inside its 1.5 m box only.
+        let ray = Ray3d::new(Vec3::new(2.0, 10.0, 0.0), Dir3::NEG_Y);
+        let pick = |loose: bool| {
+            let mut world = World::new();
+            let owner = world
+                .spawn((
+                    Pick(Focus::Cell(at)),
+                    Transform::default(),
+                    GlobalTransform::default(),
+                ))
+                .id();
+            let mut mesh = world.spawn((
+                Mesh3d(Handle::default()),
+                Aabb {
+                    center: Vec3::ZERO.into(),
+                    half_extents: Vec3::splat(1.5).into(),
+                },
+                GlobalTransform::from_xyz(3.0, 0.0, 0.0),
+                InheritedVisibility::VISIBLE,
+                ChildOf(owner),
+            ));
+            if loose {
+                mesh.insert(LooseBounds);
+            }
+            let mut state = SystemState::<Models>::new(&mut world);
+            state.get(&world).select(ray, &view, IVec3::ZERO, true)
+        };
+        assert!(
+            matches!(pick(false), Some(Focus::Cell(cell)) if cell == at),
+            "a mesh's own bounds are pickable"
+        );
+        assert!(
+            pick(true).is_none(),
+            "a culling box is not the figure's shape"
+        );
     }
 
     #[test]

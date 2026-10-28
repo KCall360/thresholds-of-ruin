@@ -325,6 +325,7 @@ pub(super) fn spawn(
                     center: bevy::math::Vec3A::ZERO,
                     half_extents: bevy::math::Vec3A::splat(1.5),
                 },
+                crate::picking::LooseBounds,
             ))
             .id();
         commands.entity(entity).add_child(child);
