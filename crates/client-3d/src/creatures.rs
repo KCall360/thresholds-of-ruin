@@ -1450,6 +1450,7 @@ mod corpse;
 mod deformation;
 mod effects;
 mod geometry;
+mod hair_budget;
 mod hair_contact;
 mod outfit;
 #[cfg(test)]
@@ -1467,6 +1468,7 @@ pub(crate) use animation::{refresh_pose, PoseRefresh};
 pub use corpse::{snuff, spawn_corpse, Snuffed};
 pub use effects::{effects, stage, Bolt, Fade};
 pub use geometry::spawn;
+pub(crate) use hair_budget::HairSolving;
 pub(crate) use outfit::Equipment;
 pub use outfit::Wardrobe;
 

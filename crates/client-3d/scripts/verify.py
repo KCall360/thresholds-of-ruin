@@ -69,6 +69,8 @@ def steps(profile):
                            "--bin", "tor-client-headless", "--locked", *optimized]),
         ("scenario-check", [str(TARGET / profile / ("tor-scenario.exe" if os.name == "nt" else "tor-scenario")),
                             "check", str(CLIENT / "scenarios/menagerie")]),
+        ("crowd-scenario-check", [str(TARGET / profile / ("tor-scenario.exe" if os.name == "nt" else "tor-scenario")),
+                                  "check", str(CLIENT / "scenarios/crowd")]),
         ("client-binary", ["cargo", "build", *cargo, "--bin", "tor-client-3d", "--example", "model_bench", "--locked", *optimized]),
         ("process-tests", [sys.executable, "-m", "unittest", "discover", "-s", str(CLIENT / "scripts"), "-p", "test_*process.py"]),
     ]

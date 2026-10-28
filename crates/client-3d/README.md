@@ -22,13 +22,17 @@ environment variable can select another backend explicitly. Capture diagnostics
 identify the actual adapter, backend and driver; verification receipts also
 record renderer and compiler configuration without session credentials.
 
-For Windows wardrobe review, place a matching `dxcompiler.dll` and `dxil.dll`
-pair beside the actual client executable. The Windows SDK supplies both in its
-versioned `bin/<version>/x64` directory. DXC also avoids the position-dependent
-black speckles observed on skinned models with FXC and depth prepasses on the
-Windows review host; the native pixel regression covers the first Ranger. The client
-selects that pair by absolute path, independently of the launcher's working
-directory. Without the pair it uses the built-in FXC compiler. Explicit
+On Windows the client compiles shaders with DXC whenever it can find a
+`dxcompiler.dll` and `dxil.dll` pair: first beside the actual client executable,
+then in the newest installed Windows SDK's `bin/<version>/x64` directory (the
+SDK that Rust's MSVC toolchain already requires). FXC compiles the shadowed
+lighting shader into much slower GPU code: on an RTX 2060, a 25-creature crowd's
+opaque pass took about 10 ms with FXC and 2 ms with DXC. DXC also avoids the
+position-dependent black speckles observed on skinned models with FXC and depth
+prepasses on the Windows review host; the native pixel regression covers the first
+Ranger. The client selects the pair by absolute path, independently of the
+launcher's working directory. Only without any pair does it fall back to the
+built-in FXC compiler. Explicit
 `WGPU_DX12_COMPILER` choices remain authoritative; `WGPU_DX12_COMPILER=fxc`
 selects FXC even when the pair is present. Startup logs report the requested
 compiler and selected paths. `RUST_LOG=info,wgpu_hal::dx12::instance=debug`
@@ -154,6 +158,25 @@ and stops it on exit. Other options:
 - `scenarios/menagerie` (in this crate) is a lit hall holding its supported
   creature recipes, wandering at peace except an emu and a snake that fight, with
   items on the floor: `--scenario crates/client-3d/scenarios/menagerie`
+- `scenarios/crowd` (in this crate) is the rendering benchmark: 24 creatures
+  wander one compact lit chamber at peace, all in view of the character, so
+  25 are drawn at once. Its creatures and palette are the menagerie's:
+  `--scenario crates/client-3d/scenarios/crowd`
+- `--frame-stats SECS` (1 to 600) times live play. Once the world appears it
+  waits until five seconds pass without a frame over 250 ms, noting the longest
+  frame meanwhile (`worst_settling_ms`, where creature construction stalls show),
+  then times every frame for SECS with presentation unsynchronized, prints one
+  `3d_frame_stats` JSON line and exits. The report gives the mean, nearest-rank
+  p50/p95/p99 and maximum frame times; what was drawn (creatures, mesh entities,
+  skinned meshes, point and shadowed lights, posed rigs); per-frame animation work
+  on the main thread (pose, robes, drapes, hair) and hair's own stages; and each
+  render pass's recent GPU and CPU time where the device can time passes.
+  For example, `--scenario crates/client-3d/scenarios/crowd --seed 7 --frame-stats 10`.
+- In live play, fitting loose hair against the body runs on background threads:
+  each wearer's hair keeps its last fitted shape between solves, and free workers
+  go to the wearers that have waited longest, sooner the nearer they are to the
+  camera. Offline reviews, tests and benchmarks fit hair inline every frame, so
+  their results stay exact and deterministic.
 - `TOR_3D_CURSORS=DIR` saves the cursor icons, enlarged, for inspection
 - `TOR_3D_PROFILE_BUILD=1` enables local startup timings for model cache misses
   and scene construction phases, plus live/idle model-cache payload and evictions;

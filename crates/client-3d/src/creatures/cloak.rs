@@ -6,6 +6,7 @@ use bevy::render::{
     mesh::{Indices, PrimitiveTopology, VertexAttributeValues},
     primitives::Aabb,
 };
+use bevy::tasks::ParallelSliceMut;
 
 const ROWS: usize = 20;
 const COLUMNS: usize = 48;
@@ -276,13 +277,23 @@ pub(super) fn place(cloak: &mut CloakRig, rotation: Quat, meshes: &mut Assets<Me
     // at the shoulder and introduce it gradually down the private rest grid.
     // Two fixed rows form a supported yoke, rather than a hinge-shaped gap.
     let inverse = rotation.inverse();
-    for row in 0..=ROWS {
-        for column in 0..=COLUMNS {
+    let CloakRig {
+        points,
+        bindings,
+        rest,
+        support,
+        ..
+    } = cloak;
+    // Each point traces the back on its own, and tracing dominates a worn
+    // cloak's motion, so rows are placed side by side on the compute threads.
+    let pool = bevy::tasks::ComputeTaskPool::get_or_init(bevy::tasks::TaskPool::default);
+    points.par_chunk_map_mut(pool, COLUMNS + 1, |row, points| {
+        for (column, point) in points.iter_mut().enumerate() {
             let i = index(row, column);
-            cloak.points[i] = cloak.bindings[row]
-                .evaluate(|&give| inverse * Quat::IDENTITY.slerp(rotation, give) * cloak.rest[i]);
-            if let Some(support) = cloak.support.as_ref().filter(|_| row > 1) {
-                let mut at = rotation * cloak.points[i] + Vec3::new(0.0, 0.53, -0.15);
+            *point = bindings[row]
+                .evaluate(|&give| inverse * Quat::IDENTITY.slerp(rotation, give) * rest[i]);
+            if let Some(support) = support.as_ref().filter(|_| row > 1) {
+                let mut at = rotation * *point + Vec3::new(0.0, 0.53, -0.15);
                 let query = at / anatomy::HIP_SCALE;
                 if query.y >= 0.075 {
                     if let Some(back) =
@@ -290,12 +301,12 @@ pub(super) fn place(cloak: &mut CloakRig, rotation: Quat, meshes: &mut Assets<Me
                     {
                         // Reserve both faces of the lining after rotation.
                         at.z = at.z.min(back.z * anatomy::HIP_SCALE.z - LAYER_GAP);
-                        cloak.points[i] = inverse * (at - Vec3::new(0.0, 0.53, -0.15));
+                        *point = inverse * (at - Vec3::new(0.0, 0.53, -0.15));
                     }
                 }
             }
         }
-    }
+    });
     surface_normals(&cloak.points, &mut cloak.normals);
     if let Some(mesh) = meshes.get_mut(&cloak.mesh) {
         write(mesh, &cloak.points, &cloak.normals);

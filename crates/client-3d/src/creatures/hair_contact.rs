@@ -6,8 +6,100 @@ use super::deformation::{ControlCurve, SupportSide, SurfaceBinding};
 use bevy::asset::RenderAssetUsages;
 use bevy::render::{mesh::VertexAttributeValues, primitives::Aabb};
 
+/// A wearer's loose hair. Its solver state normally lives here; while a
+/// background solve runs, that state is away on a worker thread, and
+/// contacts or resets meanwhile wait for its return.
 pub(super) struct HairRig {
     pub entity: Entity,
+    state: Option<Box<HairState>>,
+    away: Option<bevy::tasks::Task<Returned>>,
+    contacts_while_away: Option<Vec<super::visual_contact::Cylinder>>,
+    reset_while_away: bool,
+    /// Seconds of motion since its last contact solve began.
+    pub(super) wait: f32,
+}
+
+/// A background solve's return: the state it took, and what to write.
+struct Returned {
+    state: Box<HairState>,
+    solved: Option<HairSolve>,
+}
+
+impl std::ops::Deref for HairRig {
+    type Target = HairState;
+    fn deref(&self) -> &HairState {
+        self.state
+            .as_deref()
+            .expect("hair state is home, not away solving")
+    }
+}
+
+impl std::ops::DerefMut for HairRig {
+    fn deref_mut(&mut self) -> &mut HairState {
+        self.state
+            .as_deref_mut()
+            .expect("hair state is home, not away solving")
+    }
+}
+
+impl HairRig {
+    pub(super) fn reset_presentation(&mut self) {
+        match self.state.as_deref_mut() {
+            Some(state) => state.reset_presentation(),
+            None => self.reset_while_away = true,
+        }
+    }
+
+    pub(super) fn set_contacts(&mut self, contacts: Vec<super::visual_contact::Cylinder>) {
+        match self.state.as_deref_mut() {
+            Some(state) => state.set_contacts(contacts),
+            None => self.contacts_while_away = Some(contacts),
+        }
+    }
+
+    /// Whether a background solve is running.
+    pub(super) fn is_away(&self) -> bool {
+        self.away.is_some()
+    }
+
+    /// Start a contact solve on a background thread, sending the state with it.
+    pub(super) fn send(&mut self, frame: Affine3A, dt: f32, timing: bool) {
+        let mut state = self.state.take().expect("one solve at a time");
+        let pool = bevy::tasks::AsyncComputeTaskPool::get_or_init(bevy::tasks::TaskPool::default);
+        self.away = Some(pool.spawn(async move {
+            let solved = solve(&mut state, frame, dt, timing);
+            Returned { state, solved }
+        }));
+        self.wait = 0.0;
+    }
+
+    /// Take back a finished background solve, if there is one: its state
+    /// comes home and its result is returned for writing. With `block`,
+    /// waits for a running solve to finish.
+    pub(super) fn receive(&mut self, block: bool) -> Option<Option<HairSolve>> {
+        let returned = if block {
+            bevy::tasks::block_on(self.away.take()?)
+        } else {
+            let returned = bevy::tasks::block_on(bevy::tasks::futures_lite::future::poll_once(
+                self.away.as_mut()?,
+            ))?;
+            self.away = None;
+            returned
+        };
+        let mut state = returned.state;
+        if let Some(contacts) = self.contacts_while_away.take() {
+            state.set_contacts(contacts);
+        }
+        if std::mem::take(&mut self.reset_while_away) {
+            state.reset_presentation();
+        }
+        self.state = Some(state);
+        Some(returned.solved)
+    }
+}
+
+/// What a contact solve works on, owned so it can travel to a worker.
+pub(super) struct HairState {
     meshes: Vec<ContactMesh>,
     support: super::visual_contact::Scene,
     scale: Vec3,
@@ -18,7 +110,7 @@ pub(super) struct HairRig {
     fitted: Vec<Vec<Vec3>>,
     fitted_rest: Vec<Vec<Vec3>>,
 }
-impl HairRig {
+impl HairState {
     pub(super) fn reset_presentation(&mut self) {
         self.last_frame = None;
         self.settled = false;
@@ -136,8 +228,7 @@ pub(super) fn spawn(
         assert!(curve.points.len() >= 2);
         assert_eq!(curve.points.len(), curve.attached.len());
     }
-    let mut hair = HairRig {
-        entity,
+    let mut hair = HairState {
         meshes: Vec::new(),
         support: super::visual_contact::Scene::new(support, contacts),
         scale,
@@ -249,6 +340,14 @@ pub(super) fn spawn(
             influence,
         });
     }
+    let mut hair = HairRig {
+        entity,
+        state: Some(Box::new(hair)),
+        away: None,
+        contacts_while_away: None,
+        reset_while_away: false,
+        wait: 0.0,
+    };
     place(&mut hair, frame, 0.0, meshes);
     hair
 }
@@ -276,13 +375,65 @@ pub(super) fn place_profiled(
     meshes: &mut Assets<Mesh>,
     mut profile: Option<&mut [std::time::Duration; 4]>,
 ) {
+    // A solve placed now supersedes one still running in the background.
+    if let Some(Some(earlier)) = hair.receive(true) {
+        apply(earlier, meshes);
+    }
+    let Some(solved) = solve(hair, frame, dt, profile.is_some()) else {
+        return;
+    };
+    if let Some(profile) = profile.as_deref_mut() {
+        for (total, stage) in profile.iter_mut().zip(solved.stages) {
+            *total += stage;
+        }
+    }
+    let started = profile.as_ref().map(|_| std::time::Instant::now());
+    apply(solved, meshes);
+    record_stage(&mut profile, 3, started);
+}
+
+/// One contact solve's result: the new positions of each deforming hair
+/// mesh, and the time its stages took when asked.
+pub(super) struct HairSolve {
+    writes: Vec<(Handle<Mesh>, Vec<[f32; 3]>)>,
+    stages: [std::time::Duration; 4],
+}
+
+impl HairSolve {
+    pub(super) fn stages(&self) -> [std::time::Duration; 4] {
+        self.stages
+    }
+}
+
+/// Write a solve's positions into its meshes and smooth their normals.
+pub(super) fn apply(solved: HairSolve, meshes: &mut Assets<Mesh>) {
+    for (handle, points) in solved.writes {
+        if let Some(mesh) = meshes.get_mut(&handle) {
+            mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, points);
+            mesh.compute_smooth_normals();
+        }
+    }
+}
+
+/// Fit the hair to its head `frame` and body contacts, without touching any
+/// asset, so solves for many wearers can run side by side. None when there
+/// is nothing new to show: a paused clock, or a still and settled head.
+pub(super) fn solve(
+    hair: &mut HairState,
+    frame: Affine3A,
+    dt: f32,
+    timing: bool,
+) -> Option<HairSolve> {
     assert!(dt.is_finite() && dt >= 0.0);
     // Construction fits once even at zero time. Existing presentation state
     // must hold while capture readback or an explicit pause stops the clock.
     if (dt == 0.0 && hair.rest_frame.is_some()) || (hair.last_frame == Some(frame) && hair.settled)
     {
-        return;
+        return None;
     }
+    let mut stages = [std::time::Duration::ZERO; 4];
+    let mut writes = Vec::new();
+    let mut profile = timing.then_some(&mut stages);
     let started = profile.as_ref().map(|_| std::time::Instant::now());
     let inverse = frame.inverse();
     let controls: Vec<Vec<Vec3>> = hair
@@ -399,10 +550,7 @@ pub(super) fn place_profiled(
             .into_iter()
             .map(|p| (inverse.transform_point3(p * anatomy::HIP_SCALE) / hair.scale).to_array())
             .collect();
-        if let Some(mesh) = meshes.get_mut(&part.handle) {
-            mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, points);
-            mesh.compute_smooth_normals();
-        }
+        writes.push((part.handle.clone(), points));
         record_stage(&mut profile, 3, started);
     }
     // A stationary attachment is not enough to cache a still-recovering chain.
@@ -421,6 +569,7 @@ pub(super) fn place_profiled(
         hair.fitted_rest = fitted.clone();
     }
     hair.fitted = fitted;
+    Some(HairSolve { writes, stages })
 }
 
 /// Resolve face/edge contact on shared vertices after the lock-volume fit.
@@ -594,6 +743,81 @@ pub(super) fn authored_points(hair: &HairRig) -> Vec<Vec3> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn long_haired_woman() -> Look {
+        Look::with_choice(
+            CreatureModel::Human,
+            7,
+            Some(Variant {
+                woman: true,
+                bust_lean: 1,
+                ..default()
+            }),
+        )
+        .dressed(Wardrobe::Leotard)
+    }
+
+    fn positions(hair: &HairRig, meshes: &Assets<Mesh>) -> Vec<Vec<[f32; 3]>> {
+        hair.meshes
+            .iter()
+            .filter(|part| part.deforming)
+            .map(|part| {
+                match meshes
+                    .get(&part.handle)
+                    .unwrap()
+                    .attribute(Mesh::ATTRIBUTE_POSITION)
+                {
+                    Some(VertexAttributeValues::Float32x3(points)) => points.clone(),
+                    _ => panic!("hair positions"),
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_background_solve_fits_exactly_as_the_same_solve_inline() {
+        let look = long_haired_woman();
+        let (_, mut inline_rig, _, mut inline_meshes) = super::super::rogue_tests::spawn_one(&look);
+        let (_, mut away_rig, _, mut away_meshes) = super::super::rogue_tests::spawn_one(&look);
+        let inline = inline_rig.hair.as_mut().expect("loose hair fixture");
+        let away = away_rig.hair.as_mut().expect("loose hair fixture");
+        // The head tips forward and to one side from where it was fitted.
+        let tipped = inline.rest_frame.unwrap()
+            * Affine3A::from_rotation_x(0.25)
+            * Affine3A::from_rotation_z(0.15);
+        place(inline, tipped, 0.1, &mut inline_meshes);
+        away.send(tipped, 0.1, false);
+        assert!(away.is_away());
+        let solved = away
+            .receive(true)
+            .expect("a solve was running")
+            .expect("the head moved");
+        apply(solved, &mut away_meshes);
+        assert!(!away.is_away());
+        assert_eq!(away.fitted, inline.fitted);
+        assert_eq!(
+            positions(away, &away_meshes),
+            positions(inline, &inline_meshes)
+        );
+        assert_ne!(
+            away.fitted, away.fitted_rest,
+            "the tipped head moved the hair"
+        );
+    }
+
+    #[test]
+    fn a_reset_asked_while_away_applies_when_the_state_returns() {
+        let (_, mut rig, _, _) = super::super::rogue_tests::spawn_one(&long_haired_woman());
+        let hair = rig.hair.as_mut().expect("loose hair fixture");
+        let frame = hair.rest_frame.unwrap() * Affine3A::from_rotation_x(0.2);
+        hair.send(frame, 0.1, false);
+        hair.reset_presentation();
+        assert!(hair.receive(true).is_some());
+        assert!(hair.rest_frame.is_none() && hair.fitted.is_empty());
+        // Nothing is away any more, so there is nothing more to receive.
+        assert!(hair.receive(false).is_none());
+    }
+
     #[test]
     fn independent_locks_do_not_share_deforming_triangles() {
         let look = Look::with_choice(

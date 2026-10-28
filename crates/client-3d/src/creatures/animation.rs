@@ -76,6 +76,13 @@ fn record_phase(
     }
 }
 
+/// Where hair solves run, and the camera that orders them.
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct HairScheduling<'w, 's> {
+    camera: Query<'w, 's, &'static GlobalTransform, With<Camera3d>>,
+    solving: Option<Res<'w, super::hair_budget::HairSolving>>,
+}
+
 /// Advance timers and pose every creature.
 pub fn animate(
     time: Res<Time>,
@@ -84,7 +91,11 @@ pub fn animate(
     mut rigs: Query<(&mut Rig, &mut Anim, &Transform)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut joints: Query<&mut Transform, Without<Rig>>,
+    scheduling: HairScheduling,
 ) {
+    let background = scheduling
+        .solving
+        .is_some_and(|s| *s == super::hair_budget::HairSolving::Background);
     if let Some(profile) = profile.as_deref_mut() {
         *profile = MotionProfile::default();
     }
@@ -97,6 +108,14 @@ pub fn animate(
 
     // Left alone for a minute, everyone starts to amuse themselves.
     let fun = bored.map_or(0.0, |b| ease((b.0 - BORED_AFTER) / 3.0));
+    let eye = scheduling
+        .camera
+        .iter()
+        .next()
+        .map(GlobalTransform::translation);
+    // Wearers whose hair awaits a contact solve, with their head frames and
+    // distance from the camera; solved together once every pose is set.
+    let mut wearers = Vec::new();
     for (mut rig, mut anim, root) in &mut rigs {
         // Actor roots are unparented. Their current Transform already includes
         // this Update's interpolation; GlobalTransform still describes last frame.
@@ -168,7 +187,7 @@ pub fn animate(
             anim.fallen = (anim.fallen - dt / 0.8).max(0.0);
         }
         let moving = step > dt * 0.04 * rig.scale.max(0.2);
-        present_pose(
+        let hair = present_pose(
             &mut rig,
             &mut anim,
             fun,
@@ -178,8 +197,73 @@ pub fn animate(
             &mut meshes,
             &mut joints,
             profile.as_deref_mut(),
+            if background {
+                HairWork::Defer
+            } else {
+                HairWork::Now
+            },
         );
+        if let Some(frame) = hair {
+            let distance = eye.map_or(0.0, |eye| eye.distance(root.translation));
+            wearers.push((rig, frame, distance));
+        }
     }
+    solve_hair(wearers, dt, &mut meshes, profile.as_deref_mut());
+}
+
+/// Whether a pose fits its hair at once or leaves it to the frame's budget.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum HairWork {
+    Now,
+    Defer,
+}
+
+/// Background hair: write the solves that have finished, then send the
+/// wearers that waited longest to the free workers (see `hair_budget`).
+fn solve_hair(
+    mut wearers: Vec<(Mut<Rig>, Affine3A, f32)>,
+    dt: f32,
+    meshes: &mut Assets<Mesh>,
+    mut profile: Option<&mut MotionProfile>,
+) {
+    if wearers.is_empty() {
+        return;
+    }
+    let started = profile.as_ref().map(|_| std::time::Instant::now());
+    let mut busy = 0;
+    let waiting: Vec<_> = wearers
+        .iter_mut()
+        .map(|(rig, _, distance)| {
+            let hair = rig.hair.as_mut().expect("only wearers of hair wait");
+            if let Some(Some(solved)) = hair.receive(false) {
+                if let Some(profile) = profile.as_deref_mut() {
+                    for (total, stage) in profile.hair_phases.iter_mut().zip(solved.stages()) {
+                        *total += stage;
+                    }
+                }
+                super::hair_contact::apply(solved, meshes);
+            }
+            hair.wait += dt;
+            busy += usize::from(hair.is_away());
+            let wait = if hair.is_away() { 0.0 } else { hair.wait };
+            super::hair_budget::Waiting {
+                wait,
+                distance: *distance,
+            }
+        })
+        .collect();
+    let workers =
+        bevy::tasks::AsyncComputeTaskPool::get_or_init(bevy::tasks::TaskPool::default).thread_num();
+    let timing = profile.is_some();
+    for index in super::hair_budget::choose(&waiting, workers.saturating_sub(busy)) {
+        let (rig, frame, _) = &mut wearers[index];
+        let hair = rig.hair.as_mut().expect("chosen wearers have hair");
+        // A solve covers all the motion since the last one; the chain's
+        // recovery is exponential in time, so it catches up.
+        let step = hair.wait.min(super::hair_budget::MAX_STEP);
+        hair.send(*frame, step, timing);
+    }
+    record_phase(&mut profile, 3, started);
 }
 
 /// An explicit state/composition change needs a pose at the current timestamp.
@@ -211,6 +295,7 @@ pub(crate) fn refresh_pose(
             &mut meshes,
             &mut joints,
             None,
+            HairWork::Now,
         );
         commands.entity(entity).remove::<PoseRefresh>();
     }
@@ -227,7 +312,8 @@ fn present_pose(
     meshes: &mut Assets<Mesh>,
     joints: &mut Query<&mut Transform, Without<Rig>>,
     mut profile: Option<&mut MotionProfile>,
-) {
+    hair_work: HairWork,
+) -> Option<Affine3A> {
     if let Some(profile) = profile.as_deref_mut() {
         profile.rigs += 1;
     }
@@ -278,19 +364,25 @@ fn present_pose(
     } else {
         Vec::new()
     };
+    let mut deferred = None;
     if let (Some(head), Some(hair)) = (head, &mut rig.hair) {
         hair.set_contacts(contacts);
         if let Ok(drape) = joints.get(hair.entity) {
-            super::hair_contact::place_profiled(
-                hair,
-                head * drape.compute_affine(),
-                dt,
-                meshes,
-                profile.as_deref_mut().map(|p| &mut p.hair_phases),
-            );
+            let frame = head * drape.compute_affine();
+            match hair_work {
+                HairWork::Now => super::hair_contact::place_profiled(
+                    hair,
+                    frame,
+                    dt,
+                    meshes,
+                    profile.as_deref_mut().map(|p| &mut p.hair_phases),
+                ),
+                HairWork::Defer => deferred = Some(frame),
+            }
         }
     }
     record_phase(&mut profile, 3, started);
+    deferred
 }
 
 /// Hanging cloth and hair follow their wearer with a little lag: a cloak

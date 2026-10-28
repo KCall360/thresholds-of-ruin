@@ -12,6 +12,7 @@ mod cave;
 mod creatures;
 mod cursor;
 mod diagnostics;
+mod frame_stats;
 mod gallery;
 mod graphics;
 mod interact;
@@ -122,6 +123,13 @@ pub fn run() -> Result<(), Error> {
                 diagnostics.review_step_hz = Some(hz);
             }
             "--capture-every" => diagnostics.capture_every = Some(value()?.parse()?),
+            "--frame-stats" => {
+                let seconds: f32 = value()?.parse()?;
+                if !seconds.is_finite() || !(1.0..=600.0).contains(&seconds) {
+                    return Err("--frame-stats must be between 1 and 600 seconds".into());
+                }
+                diagnostics.frame_stats = Some(seconds);
+            }
             "--distance" => diagnostics.distance = Some(value()?.parse()?),
             "--azimuth" => {
                 let degrees: f32 = value()?.parse()?;
@@ -319,6 +327,12 @@ pub fn run() -> Result<(), Error> {
         primary_window: Some(Window {
             title: "Thresholds of Ruin — 3D prototype".into(),
             resolution: WindowResolution::new(1440., 900.),
+            // Timing frames measures headroom, so it lifts the display cap.
+            present_mode: if diagnostics.frame_stats.is_some() {
+                bevy::window::PresentMode::AutoNoVsync
+            } else {
+                bevy::window::PresentMode::default()
+            },
             ..default()
         }),
         ..default()
@@ -340,6 +354,11 @@ pub fn run() -> Result<(), Error> {
     } else {
         0.0
     }))
+    .insert_resource(frame_stats::FrameStats::new(
+        diagnostics.frame_stats.unwrap_or(0.0),
+    ))
+    // Live play fits loose hair on background threads, keeping frames free of it.
+    .insert_resource(creatures::HairSolving::Background)
     .insert_resource(diagnostics)
     .insert_resource(Game {
         busy: true,
@@ -399,6 +418,9 @@ pub fn run() -> Result<(), Error> {
         (
             demo,
             capture.after(lighting::lamps),
+            frame_stats::frame_stats
+                .after(creatures::animate)
+                .run_if(|diagnostics: Res<Diagnostics>| diagnostics.frame_stats.is_some()),
             autoplay::run,
             autoplay::hunt,
             minimap::toggle,
@@ -408,6 +430,11 @@ pub fn run() -> Result<(), Error> {
         ),
     )
     .add_systems(Last, (props::maintain_cache, shutdown_on_exit));
+    // Timing frames also attributes the animation work in them.
+    if app.world().resource::<Diagnostics>().frame_stats.is_some() {
+        app.insert_resource(creatures::MotionProfile::default());
+        app.add_plugins(bevy::render::diagnostic::RenderDiagnosticsPlugin);
+    }
     load_internal_asset!(app, cave::SHADER, "cave.wgsl", Shader::from_wgsl);
     let exit = app.run();
     let network_result = network.lock().unwrap().shutdown();
@@ -447,6 +474,8 @@ pub(crate) struct Diagnostics {
     turn: f32,
     /// Seconds between screenshots with --capture.
     capture_every: Option<f32>,
+    /// Live play: time this many seconds of frames, uncapped, then report and exit.
+    frame_stats: Option<f32>,
     review_step_hz: Option<u32>,
     /// In the bestiary, go straight to the close-ups.
     portraits: bool,

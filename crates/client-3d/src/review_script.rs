@@ -131,7 +131,7 @@ pub(crate) fn run(path: &Path, output: &Path) -> Result<(), crate::Error> {
         )
             .chain(),
     )
-    .add_systems(Last, capture);
+    .add_systems(Last, (track_drawn_meshes, capture).chain());
     configure_animation(&mut app);
     app.sub_app_mut(RenderApp)
         .insert_resource(readiness)
@@ -195,7 +195,6 @@ fn setup(
     run: Res<Run>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    readiness: Res<Readiness>,
 ) {
     let mut library = PropLibrary::new(PropMaterials::new(&mut materials));
     for spec in &run.script.actors {
@@ -247,7 +246,12 @@ fn setup(
         crate::graphics::camera_antialiasing(),
         Transform::from_xyz(0.0, 1.5, 4.0).looking_at(Vec3::Y * 0.5, Vec3::Y),
     ));
-    readiness.0.lock().unwrap().meshes = meshes.ids().collect();
+}
+/// The meshes the scene draws now. A rebuild frees the old outfit's
+/// wearer-owned meshes, which never reach the renderer again, so readiness
+/// must not wait on every mesh asset that existed when it began.
+fn track_drawn_meshes(drawn: Query<&Mesh3d>, readiness: Res<Readiness>) {
+    readiness.0.lock().unwrap().meshes = drawn.iter().map(|mesh| mesh.id()).collect();
 }
 fn advance_actors(run: Res<Run>, mut actors: Query<(&ActorState, &mut Transform)>) {
     if run.phase == Phase::Apply && run.tick > 0 {
@@ -338,7 +342,6 @@ fn apply(
         }
     }
     run.phase = Phase::Pose;
-    readiness.0.lock().unwrap().meshes = meshes.ids().collect();
 }
 // Shared event semantics; rendering policies decide how to realize changed geometry.
 fn apply_operation(

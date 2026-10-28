@@ -312,6 +312,51 @@ class Native3DProcesses(ProcessTestCase):
                 self.assertEqual(position[1:], [0.0, 0.0])
 
     @model_generation.local
+    def test_scripted_redress_releasing_a_cloak_still_captures(self):
+        # Redressing frees the old outfit's wearer-owned meshes (here the
+        # paladin's cloak); readiness must wait only for what is drawn now.
+        executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
+        script = {
+            "version": 1, "hz": 50, "viewport": [480, 640],
+            "actors": [{"id": "actor", "model": "Human", "seed": 7,
+                        "body": {"woman": True}, "outfit": "paladin", "equipment": [],
+                        "position": [0, 0, 0], "yaw": 0}],
+            "cameras": [{"id": "front", "position": [0, 1, 3], "target": [0, 0.5, 0], "fov_degrees": 45}],
+            "events": [{"tick": 2, "actor": "actor", "operation": {"type": "dress", "outfit": "barbarian"}}],
+            "captures": [{"tick": 1, "name": "paladin", "camera": "front"},
+                         {"tick": 3, "name": "barbarian", "camera": "front"}],
+        }
+        source = self.directory / "redress.json"
+        source.write_text(json.dumps(script), encoding="utf-8")
+        output = self.directory / "redress"
+        window = self.launch("tor-client-3d", ["--scene-script", source, "--capture", output],
+                             executable=executable)
+        self.assertEqual(window.child.wait(timeout=240), 0,
+                         window.stdout_path.read_text(encoding="utf-8")[-3000:])
+        report = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(report["status"], "complete")
+        self.assertEqual([shot["name"] for shot in report["captures"]], ["paladin", "barbarian"])
+        self.assertTrue((output / "barbarian.png").is_file())
+
+    @model_generation.local
+    def test_frame_stats_report_the_crowd_benchmark_and_exit(self):
+        executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
+        window = self.launch("tor-client-3d", [
+            "--server-bin", self.bin / ("tor-server" + self.suffix), "--scenario", CLIENT / "scenarios/crowd",
+            "--save-root", self.directory / "crowd-saves", "--seed", "7", "--frame-stats", "2",
+        ], executable=executable)
+        report = self.frame(window, lambda frame: frame.get("type") == "3d_frame_stats", seconds=240)
+        self.assertEqual(window.child.wait(timeout=40), 0)
+        self.assertEqual(report["creatures"], 25, "the character and the crowd's 24 creatures")
+        self.assertEqual(report["posed_rigs"], 25)
+        self.assertGreater(report["frames"], 0)
+        self.assertLessEqual(report["p50_ms"], report["p95_ms"])
+        self.assertLessEqual(report["p95_ms"], report["p99_ms"])
+        self.assertLessEqual(report["p99_ms"], report["max_ms"])
+        self.assertAlmostEqual(report["fps"], 1000.0 / report["mean_ms"], places=3)
+        self.assertEqual(set(report["motion_ms_per_frame"]), {"pose", "robes", "drapes", "hair"})
+
+    @model_generation.local
     def test_scripted_action_boundaries_do_not_consume_a_step(self):
         executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
         script = {
