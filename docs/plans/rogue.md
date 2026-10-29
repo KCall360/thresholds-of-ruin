@@ -564,6 +564,8 @@ binaries and differential traces.
 Generation-extension/scripting need; creature CR/XP and survival balance;
 capacity and richer item details; hallucination shift policy; per-item edge cases;
 depth distributions and starting-gear tuning; presentation/scoring.
+The proposed [tuning plan](rogue-tuning.md) covers CR/XP, survival, depth and
+starting-gear tuning against a locked reference build.
 Implemented recipe schema, floor dimensions, stair resolution and basic rule
 imports, shared search/discovery and ranged collision/effect ordering are no
 longer undecided prerequisites. Every increment follows the

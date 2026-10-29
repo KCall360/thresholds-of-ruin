@@ -828,7 +828,8 @@ pressured runs. Topology/persistence witnesses do not establish survival balance
 Local graphical waivers were not passes; they did not remove required CI coverage.
 Work beyond the accepted 256-HD guard, including exact-row deep storage and
 disclosure paging, remains deferred rather than a prerequisite for functional Rogue.
-The [Rogue plan](plans/rogue.md) defines the adaptation and dependency order.
+The [Rogue plan](plans/rogue.md) defines the adaptation and dependency order;
+the proposed [tuning plan](plans/rogue-tuning.md) orders calibration milestones.
 Rogue species are built through the [progression plan](plans/progression.md)'s
 advancement ledger, edge rules, regeneration and strike sequences; each of its
 phases still needs separate approval.

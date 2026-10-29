@@ -305,6 +305,9 @@ tested band, and neither class dominates the paired matrix.
 **Acceptance:** a species is "tuned" when every ratio is inside its recorded
 tolerance over the paired seeds.
 
+The [Rogue tuning plan](rogue-tuning.md) proposes the detailed form of this
+phase, using a scenario-locked upgrade path as the reference PC.
+
 ## Phase 8: Rogue wave 1
 
 Species: emu, snake, hobgoblin, orc, zombie, quagga, rattlesnake.
