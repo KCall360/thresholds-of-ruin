@@ -4104,7 +4104,7 @@ pub const HELP: &[&str] = &[
     "#       extended commands: type to filter, Enter selects",
     "F2 F5   history / places       F4      state-anchored note",
     "F3      acquire control        #release releases control",
-    "F6 F12  read / zap aliases     F7      wizard editor",
+    "F6 F12  read / zap aliases     F7      wizard / creature list",
     "F8 F9   resume / cancel work   F10 F11 advancement / hold escape",
     "#slower/#faster journey pace   S       save and close",
     "Esc     cancel/close a screen; never quits from the map",

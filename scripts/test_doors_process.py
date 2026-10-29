@@ -61,7 +61,9 @@ class DoorProcesses(ProcessTestCase):
         watched = self.request(observer, {"type":"snapshot"})
         self.assertDisclosedStateEqual(watched["state"], closed_again["state"])
         self.assertEqual(watched["history"][-1]["content"]["event"]["type"], "door_changed")
-        key("Escape", True)
+        # Native S saves and closes; successful exit destroys the key target.
+        key("Shift_L", True)
+        key("s", True)
         self.assertEqual(window.child.wait(timeout=15), 0)
         self.assertTrue(capture.read_bytes().startswith(b"P6\n1200 800\n255\n"))
         player.stop(); observer.stop(); server.stop()

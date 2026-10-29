@@ -1029,6 +1029,61 @@ class NativeKeyNames(unittest.TestCase):
                             1 | (scan << 16) | (0 if down else 0xC0000000))
 
 
+class NativeCommandLetterFixture(unittest.TestCase):
+    def test_each_platform_owns_exactly_one_letter_injection(self):
+        from test_discovery_process import _native_ambiguous_command_letter
+        for platform in ("nt", "posix"):
+            with self.subTest(platform=platform):
+                harness = ProcessTestCase()
+                window = object()
+                events = []
+                native = Mock(side_effect=lambda name, down: events.append(("key", name, down)))
+                harness.native_text = Mock(side_effect=lambda client, text: events.append(("text", text)))
+
+                def frame(client, predicate):
+                    self.assertIs(client, window)
+                    self.assertFalse(predicate({}))
+                    self.assertFalse(predicate({"command_line": ""}))
+                    self.assertTrue(predicate({"command_line": "k"}))
+                    events.append(("edit",))
+                    return {"command_line": "k"}
+
+                harness.ascii_frame = frame
+                with patch("test_discovery_process.os.name", platform):
+                    self.assertEqual(_native_ambiguous_command_letter(harness, window, native),
+                                     {"command_line": "k"})
+                if platform == "nt":
+                    harness.native_text.assert_not_called()
+                    self.assertEqual(events, [("key", "k", True), ("edit",), ("key", "k", False)])
+                else:
+                    native.assert_not_called()
+                    harness.native_text.assert_called_once_with(window, "k")
+                    self.assertEqual(events, [("text", "k"), ("edit",)])
+
+    def test_duplicate_edit_is_rejected_immediately_and_releases_windows_key(self):
+        from test_discovery_process import _native_ambiguous_command_letter
+        harness = ProcessTestCase()
+        harness.native_text = Mock()
+        harness.ascii_frame = Mock(return_value={"command_line": "kk"})
+        native = Mock()
+        with patch("test_discovery_process.os.name", "nt"):
+            with self.assertRaisesRegex(AssertionError, "one physical letter"):
+                _native_ambiguous_command_letter(harness, object(), native)
+        self.assertEqual(native.call_args_list, [unittest.mock.call("k", True), unittest.mock.call("k", False)])
+        self.assertEqual(harness.ascii_frame.call_count, 1)
+
+    def test_windows_key_is_released_when_frame_wait_fails(self):
+        from test_discovery_process import _native_ambiguous_command_letter
+        harness = ProcessTestCase()
+        harness.native_text = Mock()
+        harness.ascii_frame = Mock(side_effect=RuntimeError("frame failed"))
+        native = Mock()
+        with patch("test_discovery_process.os.name", "nt"):
+            with self.assertRaisesRegex(RuntimeError, "frame failed"):
+                _native_ambiguous_command_letter(harness, object(), native)
+        self.assertEqual(native.call_args_list, [unittest.mock.call("k", True), unittest.mock.call("k", False)])
+
+
 class NativeKeyPresses(unittest.TestCase):
     def test_repeated_native_key_waits_for_fresh_release_before_next_press(self):
         harness = ProcessTestCase()

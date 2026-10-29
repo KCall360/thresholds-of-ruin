@@ -12,6 +12,22 @@ from process_harness import (
 from rogue_test_support import DisclosedFloorGraph
 
 
+def _native_ambiguous_command_letter(case, window, native):
+    """Exercise one physical/text edit without injecting a duplicate character."""
+    windows = os.name == "nt"
+    if windows:
+        native("k", True)
+    try:
+        if not windows:
+            case.native_text(window, "k")
+        edited = case.ascii_frame(window, lambda frame: frame.get("command_line") not in (None, ""))
+        case.assertEqual(edited["command_line"], "k", "one physical letter must produce one edit")
+        return edited
+    finally:
+        if windows:
+            native("k", False)
+
+
 class DiscoveryProcesses(ProcessTestCase):
     graphical = True
 
@@ -255,16 +271,9 @@ class DiscoveryProcesses(ProcessTestCase):
         # X11/Win32 report letters as both text and key events. In particular k
         # must not also act as Up and silently choose #attack from this filter.
         press("3", "commands", shift=True)
-        # native_text sends only WM_CHAR on Windows; also hold the physical
-        # alias across the presented edit so this exercises the native filter.
-        if os.name == "nt":
-            native("k", True)
-        try:
-            self.native_text(window, "k")
-            self.ascii_frame(window, lambda frame: frame.get("command_line") == "k")
-        finally:
-            if os.name == "nt":
-                native("k", False)
+        # minifb translates Windows KeyDown into WM_CHAR; X11's text driver
+        # already emits the native key and text events for one character.
+        _native_ambiguous_command_letter(self, window, native)
         ambiguous = press("Return", "enter")
         self.assertEqual(ambiguous["command_line"], "k")
         self.assertIn("ambiguous", ambiguous["status"])

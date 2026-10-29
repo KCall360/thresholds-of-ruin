@@ -1693,3 +1693,44 @@ free, pending pickup is cleared, and exact branch/tick/inventory/reconnect check
 remain. The actual affected process passes locally in 1.729 seconds. This adds one
 observed fixture synchronization failure, not a gameplay defect; no retry, timeout
 increase or production change was introduced.
+
+## ASCII NetHack-controls help regression
+
+[PR #205](https://github.com/KCall360/thresholds-of-ruin/pull/205)'s first hosted
+Linux debug and release Rust partitions exposed one presentation regression:
+the compact help rewrite retained F7's wizard-editor label but omitted the
+existing creature-list hint. The unchanged
+`presentation::wizard_creature_catalog_is_discoverable_in_ascii_help` assertion
+failed in both profiles; 177 other ASCII integration methods passed in each.
+This is one production discoverability defect and one distinct failing method,
+not two defects or an infrastructure failure. The correction restores the
+creature-list hint on the F7 line without changing the key binding, behavior or
+assertion. Final-head hosted qualification remains required.
+
+The same run's Linux debug native door/restart witness exposed one missed test
+fixture migration: its final Escape still expected process exit, although the
+new documented contract keeps the map open. The fixture now sends native Shift-S
+through the same OS-key path and retains its exact saved-door, spectator and
+restart assertions and timeout. This is one stale fixture root/method, separate
+from the help defect; it is not an unintended product quit regression. The new
+native Search/extended-command/spectator witness passed in that lane. Local
+physical-key qualification remains unavailable without xdotool; the corrected
+native door owner must pass hosted CI.
+
+Windows debug and release additionally timed out in the new ambiguous-command
+native witness while waiting for exactly `k`. The fixture sent both a held
+KeyDown and an explicit character; minifb's Windows event loop already calls
+[TranslateMessage](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-translatemessage),
+which translates the key into a character. Source tracing identifies duplicate
+character injection as the fixture cause; the retained diagnostic tail does not
+include the beginning of the final frame, so it is not direct evidence of the
+editor's full text. The corrected fixture uses one held native K on Windows
+and the existing native text route on X11. It asserts the first nonempty edit
+is exactly `k`, then retains the ambiguous-Enter, unchanged-state and paid-Search
+checks. This is one additional fixture root/method, not a verified product
+defect. Final Windows native qualification remains required.
+The cheap injection-ownership regression failed first on the duplicate Windows
+text call, then passed with the single-path correction. Companion checks retain
+Windows key release on a frame-wait failure and immediate rejection of a `kk`
+edit. These mocks prove fixture ownership/cleanup, not Win32 translation; the
+real native acceptance remains the platform authority.
