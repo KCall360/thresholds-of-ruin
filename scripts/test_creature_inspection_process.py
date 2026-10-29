@@ -984,6 +984,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
                         for field in ("conditions", "hp", "injury", "stats"):
                             self.assertEqual(frozen[field], before[field], field)
                     else:
+                        self.assertIsNone(self.request(wizard, {"type": "observe"})["error"])
                         unavailable = self.command(wizard, {"type": "wizard", "command": "creature inspect 2"})
                         self.assertIn("InvalidAction", unavailable["error"])
                         self.assertIn("unavailable", unavailable["error"])
@@ -1153,6 +1154,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
                    and resource(frame, "mana")["reserved"] == 1)
         before = self.request(observer, {"type":"snapshot"})
         self.assertTrue(before["state"]["observation"]["combat"]["preparation_active"])
+        self.assertNotIn("Server error", wizard.command("sync"))
         output = wizard.command("wizard creature inspect 1")
         self.assertNotIn("Server error", output)
         for detail in ("blue adept", "human", "arcane", "Hit die 1", "Spark Lance (Fire)"):

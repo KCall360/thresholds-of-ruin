@@ -127,7 +127,15 @@ class StreamingFixture:
                     time.sleep(0.05)
             else:
                 self.fail("blocked for good: " + str(moved.get("error")))
-        return moved
+        # Admission/start is not the final display boundary. The spectator may
+        # coalesce intermediate rat turns, so compare only the stable ready view.
+        for _ in range(200):
+            settled = self.request(client, {"type": "observe"})
+            self.assertIsNone(settled["error"])
+            if settled["state"]["observation"]["ready"] and not settled["intentions"]:
+                return settled
+            time.sleep(0.05)
+        self.fail("character did not become ready after crossing the caves")
 
 
     def rows(self):
@@ -453,14 +461,11 @@ class NativeStreamingProcesses(StreamingFixture, ProcessTestCase):
         self.assertEqual(again["state"]["observation"], inside["state"]["observation"])
         far = self.east_through(wizard, THROUGH_CAVES - INTO_CAVE)
         shown = self.ascii_frame(native,
-            lambda f: f["state"]["observation"]["tick"] == far["state"]["observation"]["tick"])
+            lambda f: f["state"]["observation"]["ready"]
+            and f["state"]["observation"]["tick"] == far["state"]["observation"]["tick"])
         self.assertEqual(shown["state"]["observation"], far["state"]["observation"])
-        # The rats act until the character is ready again; then time waits.
-        for _ in range(200):
-            settled = self.request(wizard, {"type": "snapshot"})["state"]["observation"]
-            if settled["ready"]:
-                break
-            time.sleep(0.05)
+        settled = far["state"]["observation"]
+        self.assertTrue(settled["ready"])
         self.assertIsNone(self.request(wizard, {"type": "save"})["error"])
         with closing(sqlite3.connect(self.save)) as db:
             copied = [r[0] for r in db.execute("SELECT region FROM region_sources ORDER BY region")]

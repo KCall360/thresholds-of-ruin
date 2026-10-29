@@ -1661,3 +1661,23 @@ gameplay defect. All four affected non-native processes pass (22.816 seconds),
 as does the helper's refresh-once/no-retry regression. The exact native case
 still requires hosted qualification: local X11 lacks xdotool; no local native
 pass or waiver is claimed. Production source and binaries are unchanged.
+
+The next hosted run exposed two timing-dependent stale fixtures. Generated-caves
+spectating waited for the final move's intermediate started-picture tick, which
+an independent native client may coalesce. The helper now waits for a stable
+ready/no-pending-action boundary before exact spectator, rewind and restart
+observation comparisons. The data-only condition test queried private creature
+state after a peer action without refreshing; it now uses the existing fresh-query
+helper. These are two observed failing methods/fixture roots, not gameplay errors.
+A broader audit also corrected four analogous inspection openings (one unavailable
+target negative, two Text inspections and one native inspection after external
+expiry); pinned report paging and intentional stale-context negatives are intact.
+
+The affected generated-caves graphical process, data-only condition/restart,
+frozen/detached unavailable-target, private paid-preparation and status-protection
+processes pass locally. One combined run preserved three successful methods before
+the disk guard interrupted its fourth; only that unfinished method was rerun after
+hash-verified reversible compression of two superseded server rlib cache objects
+reclaimed 659,116,032 physical bytes. This resource interruption is not a test
+pass or production detection. The native physical-key status case remains a hosted
+gate because local xdotool is absent. No production source or time limits changed.

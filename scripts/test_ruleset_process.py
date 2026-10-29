@@ -160,7 +160,7 @@ melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, stri
 
         def inspect(client):
             offset = len(client.transcript)
-            self.assertFalse(self.command(client, {"type": "wizard", "command": "creature inspect 2"}).get("error"))
+            self.wizard_command(client, "creature inspect 2")
             messages = [json.loads(line).get("message") for line in client.transcript[offset:] if line.startswith("{")]
             return next(message["report"] for message in reversed(messages)
                         if message and message["type"] == "creature_inspection")
