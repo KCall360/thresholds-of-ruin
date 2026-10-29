@@ -12,7 +12,7 @@ Up/Down and Enter choose natural, selected melee or a granted ability. Within
 strike details, `[` requests the previous page and `]` the next; scrolling stays
 within the current page. Esc returns to source selection, then the main report,
 then closes it. A “Uses selected melee” marker can be followed through Tab and
-**Selected melee**. Opening ordinary stats with `@` returns to the attached actor's
+**Selected melee**. Opening ordinary stats with Ctrl-X returns to the attached actor's
 personal stats. Changed state, a snapshot reset or disconnect clears private
 strike navigation; reopen the report after a stale-source error. See [wizard tools](../development/wizard.md).
 
@@ -30,7 +30,7 @@ strike navigation; reopen the report after a stale-source error. See [wizard too
   Travelling or Running. Resource balances are current/maximum; `[-n]` marks
   the part reserved for paid work. Gold counts only identified currency, never
   names or appearances. Status keeps its readable type size and omits whole
-  lower-priority fields rather than cutting numbers; `+` marks omitted fields. Press `@` for personal
+  lower-priority fields rather than cutting numbers; `+` marks omitted fields. Press Ctrl-X for personal
   stats, `i` for carried currency, and use the action prompts for pending work.
 - **Key hint and control** (bottom row). Whether you're in control, observing
   or spectating, and whether a request is waiting for the server.
@@ -72,7 +72,7 @@ they see the newest rows and are never held.
 
 ### Detection charts
 
-Press **m** to view server-disclosed Monster, Food, Magic or Mapping charts.
+Enter **#charts** to view server-disclosed Monster, Food, Magic or Mapping charts.
 The catalog distinguishes live, historical, empty, inactive and unavailable data.
 Capture time belongs to the retained sample; a later empty or unavailable attempt
 is shown separately and does not relabel an old positive sample as current.
@@ -147,38 +147,70 @@ does not prevent observation; press F3 once that client releases control. The
 server address must be a numeric loopback socket address (IPv4 or IPv6).
 Automatic server launch and packaged builds are not available; see [status](../status.md).
 
+The default letter layout follows the [NetHack 5.0 command keys](https://nethack.org/v500/Guidebook.html)
+(the core item and movement keys also match [NetHack 3.6.7](https://nethack.org/v367/Guidebook.html)).
+**Case matters:** `z` uses a device, whereas `Z` opens abilities. This is a key
+layout for Thresholds' existing actions, not an implementation of every NetHack
+command. There is no numeric-keypad mode.
+
 | Key | Behavior |
 | --- | --- |
 | `h` `j` `k` `l` `y` `u` `b` `n`, arrow keys | Move one cell; after your own strike prefix, cancel-and-step when permitted; otherwise moving into a hostile creature attacks it (`--bump-attacks hostile\|any\|off`) |
-| Shift + direction | Run until something happens: a message, a creature in sight, or the way ahead isn't open floor. Any key stops a run |
+| Shift + direction; `g` or `G`, then direction | Run using Thresholds' stop rules: a message, a creature in sight, or the way ahead not being open floor stops it. Any key stops a run. Both prefixes use the same rules; they do not introduce NetHack's differing corridor policies |
+| `m`, then direction | One step without converting the movement into a bump attack; the server can still refuse a blocked step. There is no automatic pickup to disable |
 | `<` / `>` | Go up / down where a stair or vertical link is |
 | `.` or Space | Wait one action |
-| `a` | Choose a creature to attack; the choice is outlined on the map |
-| `z` | Choose a granted ability, then a disclosed target. Supportive abilities offer yourself and eligible allies. Up/Down selects, Enter confirms and Esc cancels; choosing is free |
-| `g` or `,` | Pick up. A lone object is taken at once; otherwise choose by letter (digits first set a count) |
+| `s` | Use your disclosed Search ability on yourself. This is a paid action, unlike look; nothing is invented if Search is not granted |
+| `Z` | Choose a granted ability. Up/Down selects, Enter uses a self-only ability or opens its target/source picker, and Esc cancels; choosing is free |
+| `t` / `f` | Choose a source for the disclosed Throw / Launch ability, then direction and exact-action confirmation |
+| `,` | Pick up. A lone object is taken at once; otherwise choose by letter (digits first set a count) |
 | `d` | Drop: choose by inventory letter, digits first set a count |
-| `w` / `t` / `q` / `e` | Equip / remove / drink / eat: always asks, by inventory letter |
-| `F6` / `F12` | Read a carried item / select a device then a direction |
+| `w` / `W` / `P` | Equip a weapon / armor / accessory; always asks, by inventory letter |
+| `T` / `R` | Remove armor / an accessory; always asks, by inventory letter |
+| `q` / `e` | Drink / eat: choose by inventory letter |
+| `r` / `z` | Read a carried item / select a device then a direction; F6 / F12 remain aliases |
+| `a` | Apply a carried portable light: choose an eligible light to ignite or extinguish it using its currently disclosed affordance |
 | `o` / `c`, then a direction | Open / close an adjacent door |
-| `m` | Read-only detection charts: choose with Up/Down and Enter; Tab returns to the catalog; Page Up/Page Down page occurrences; Esc closes |
 | `i` | Inventory: letters, what's worn or in hand, and known equipment numbers |
-| `@` (Shift + 2) | Personal creature stats: attributes, skills, defenses, resources, talents and granted abilities. Up/Down scroll, Page Up/Down page; Esc or `@` closes |
-| `;` | Look: move a cursor, then `.`, `;` or Enter describes the cell without taking time |
+| Ctrl-X | Personal creature stats: attributes, skills, defenses, resources, talents and granted abilities. Up/Down scroll, Page Up/Down page; Esc or Ctrl-X closes |
+| `;` or `/` | Look: move a cursor, then `.`, `;` or Enter describes the cell without taking time |
 | `_` | Travel: move the cursor, `<` / `>` jump it to the nearest known stairs, `.` or Enter goes |
 | Left mouse click | Travel to the clicked known floor cell |
 | Any key during a journey | Show the rest of the journey at once; journeys can't be cancelled |
-| `[` / `]` | Show journey steps more slowly / quickly (`--pace <ms>` sets the start, default 75) |
+| `#` | Extended commands: type a listed command and Enter; Esc cancels |
 | `?` | Help: commands and map symbols |
 | Ctrl-P | Message log: earlier turns, newest at the bottom; Up/Down, Page Up/Down scroll |
 | F2 | Game history from the server, opening at the newest entries; Page Up for older pages |
 | F5 | Remembered places; Enter renames |
 | F4 | Write a note anchored to the state where composition began; Tab switches private / actor-visible |
-| F3 / R | Acquire / release actor control |
+| F3 | Acquire actor control; `#release` gives it up |
 | F8 / F9 | Resume or cancel eligible work when the server grants that control |
 | F10 | Owner-only advancement/respec screen; [command and preview controls](advancement.md) |
 | F11 | Escape a linked hold. A sole hold is selected immediately; otherwise Up/Down chooses and Enter confirms |
 | Enter on the end screen | Close the victory or death summary |
-| Escape | Cancel or close what's open, otherwise quit |
+| Escape | Cancel a prefix or selection, or close what's open; never quit from the map |
+| `S` | Save pending accepted work and close the window through the normal shutdown path |
+
+For an extended command, press `#`, type its name without the leading `#`, and
+press Enter. `#attack` retains the visible-target attack picker. `#charts` opens
+read-only detection charts. `#equip` and `#remove` retain the general equipment
+menus, including tools; the letter shortcuts above filter by item class.
+`#ignite` and `#extinguish` keep the explicit portable-light choices.
+`#slower` and `#faster` adjust journey presentation speed (`--pace <ms>` sets the
+start, default 75); `[` and `]` are reserved for pagination inside strike details.
+Other listed commands include abilities, search, throw, fire, stats, inventory,
+look, travel, places, note, control, release, advancement, escape-hold, resume,
+cancel, help and save. These select the same existing actions and menus, with
+the same server authority checks. Opening or cancelling the command editor is
+free; confirming a paid command is not.
+
+Unsupported NetHack mechanics are not bound to unrelated actions: force-fighting
+an empty square, automatic pickup, weapon swapping, two-weapon toggling, kicking,
+and count-prefixed repeated commands are not added by this layout. In particular,
+`@`, `x`, and `X` do not toggle any of those mechanics. `a` applies only portable
+lights; it does not break a wand or invent other tool uses. `Z` lists all disclosed
+non-basic abilities, not a client-inferred spell list. Search, Throw and Launch
+shortcuts require unambiguous current grants of the appropriate target kind.
 
 When the selected ability permits a weapon choice, Tab in the attack, ability
 or direction picker opens WEAPON. The first row preserves the default primary
@@ -199,7 +231,7 @@ not promise affordability. A stale response refreshes the observation and
 requires choosing again. The default row retains the ordinary immediate path.
 
 Projectile abilities use a separate server-authored source picker. Choose the
-ability with `z`, then use Up/Down and Enter to select a listed source. For a
+ability with `Z`, then use Up/Down and Enter to select a listed source. For a
 launch, select the equipped launcher first, then compatible ammunition. Left and
 Right request previous/next pages; an empty filtered page can still have more
 choices. Movement keys then choose the direction. Esc cancels at every stage.
@@ -287,7 +319,7 @@ protocol.
 2. Start ASCII with `--observe`. It receives the same actor's state and live notes.
 3. Enter `release` in text, then press F3 in ASCII.
 4. Move around in ASCII.
-5. Press R in ASCII and enter `control` in text to switch back.
+5. Enter `#release` in ASCII and `control` in text to switch back.
 
 Accepted actions and notes are saved in background batches. Normal player-window
 exit waits for saving; a crash can lose recent play. See [persistence](../architecture/persistence.md). Restart
@@ -348,7 +380,7 @@ creature to attack another above it. Distant high flyers leave ordinary movement
 available. This selects a target only: the server still checks actual melee reach.
 
 
-Use `a` to choose a visible creature, Up/Down to select and Enter to attack.
+Use `#attack` to choose a visible creature, Up/Down to select and Enter to attack.
 `--bump-attacks hostile|any|off` controls manual movement interpretation; the
 default is `hostile`. Travel stops rather than attacking. Exact own HP and action
 state appear in the status lines; look gives qualitative enemy injury and
@@ -430,4 +462,5 @@ Escape declines this paid choice without refund; Escape in an ordinary item or
 direction picker before submission is free. The choice is restored from server
 state on reconnect. Selection clears on changed observations or control loss.
 Only the owning player sees the choice and explicitly learned instance charges;
-spectators see neither. R remains release-control and Z remains the ability menu.
+spectators see neither. `#release` gives up actor control, `R` removes an accessory,
+and `Z` opens the ability menu.

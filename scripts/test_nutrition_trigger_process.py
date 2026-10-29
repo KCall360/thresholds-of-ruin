@@ -185,11 +185,11 @@ class NutritionTriggerNativeProcesses(ProcessTestCase):
         self.ascii_frame(window, lambda frame: frame["state"] is not None and not frame["busy"])
         before = read_capture(capture)
         native = self.native_keys(window)
-        native("Shift_L", True)
+        native("Control_L", True)
         try:
-            shown = self.native_press(window, native, "2", "stats")
+            shown = self.native_press(window, native, "x", "stats")
         finally:
-            native("Shift_L", False)
+            native("Control_L", False)
         rows = "\n".join(shown["stats_rows"])
         self.assertIn("Nutrition: -1/2000 (empty)", rows)
         self.assertIn("Fixture Faint: 1100 active ticks remaining", rows)
@@ -214,11 +214,11 @@ class NutritionTriggerNativeProcesses(ProcessTestCase):
         final = accepted if finished(accepted) else self.ascii_frame(window, finished)
         self.assertFalse(final["state"]["wizard_game"])
         self.assertFalse(any(item["name"] == "food ration" for item in observation(final)["inventory"]))
-        native("Shift_L", True)
+        native("Control_L", True)
         try:
-            shown = self.native_press(window, native, "2", "stats")
+            shown = self.native_press(window, native, "x", "stats")
         finally:
-            native("Shift_L", False)
+            native("Control_L", False)
         self.assertIn("Nutrition:", "\n".join(shown["stats_rows"]))
         self.assertTrue(shown["window_open"])
 

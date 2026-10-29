@@ -6,6 +6,8 @@ use tor_client_common::items::{
 use tor_client_common::ClientState;
 use tor_protocol::*;
 
+mod controls;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Key {
@@ -14,6 +16,19 @@ pub enum Key {
     Advancement,
     Attack,
     Abilities,
+    Search,
+    Throw,
+    Fire,
+    Apply,
+    Wield,
+    Wear,
+    PutOn,
+    TakeOff,
+    RemoveAccessory,
+    Commands,
+    SaveQuit,
+    RunPrefix,
+    MoveOnlyPrefix,
     Places,
     Travel,
     Up,
@@ -196,7 +211,14 @@ pub struct App {
     pub status: String,
     pub note: Option<NoteDraft>,
     pub wizard_command: Option<String>,
+    /// Client command names, never wizard commands or undisclosed capabilities.
+    pub command_line: Option<String>,
+    pub command_selected: usize,
+    command_selected_explicit: bool,
+    movement_prefix: Option<controls::MovementPrefix>,
     pub pickup: Vec<ItemView>,
+    /// Apply selects one disclosed usable portable light, not a generic game tool.
+    pub applying: bool,
     pub dropping: bool,
     pub item_operation: Option<ItemOperation>,
     /// Exact carried device bound to the displayed observation, before aiming.
@@ -269,7 +291,12 @@ impl App {
             status: "Connecting to the local server...".into(),
             note: None,
             wizard_command: None,
+            command_line: None,
+            command_selected: 0,
+            command_selected_explicit: false,
+            movement_prefix: None,
             pickup: vec![],
+            applying: false,
             dropping: false,
             item_operation: None,
             zap_selection: None,
@@ -287,21 +314,27 @@ impl App {
     fn clear_magic_selection(&mut self) {
         self.zap_selection = None;
         self.identification_selected = 0;
-        if matches!(
-            self.item_operation,
-            Some(
-                ItemOperation::Read
-                    | ItemOperation::Zap
-                    | ItemOperation::Ignite
-                    | ItemOperation::Extinguish
+        if self.applying
+            || matches!(
+                self.item_operation,
+                Some(
+                    ItemOperation::Read
+                        | ItemOperation::Zap
+                        | ItemOperation::Ignite
+                        | ItemOperation::Extinguish
+                )
             )
-        ) {
+        {
             self.item_operation = None;
             self.pickup.clear();
+            self.applying = false;
         }
     }
 
     pub fn set_state(&mut self, state: ClientState) {
+        self.movement_prefix = self
+            .movement_prefix
+            .map(|_| controls::MovementPrefix::Cancelled);
         let old = self
             .state
             .as_ref()
@@ -344,18 +377,26 @@ impl App {
             .ok_or(tor_client_common::StreamError::InconsistentState)?;
         let old = Some((state.branch().clone(), state.state().revision));
         state.apply(update)?;
+        if control_changed {
+            self.movement_prefix = self
+                .movement_prefix
+                .map(|_| controls::MovementPrefix::Cancelled);
+        }
         if observed || control_changed {
-            if matches!(
-                self.item_operation,
-                Some(
-                    ItemOperation::Read
-                        | ItemOperation::Zap
-                        | ItemOperation::Ignite
-                        | ItemOperation::Extinguish
+            if self.applying
+                || matches!(
+                    self.item_operation,
+                    Some(
+                        ItemOperation::Read
+                            | ItemOperation::Zap
+                            | ItemOperation::Ignite
+                            | ItemOperation::Extinguish
+                    )
                 )
-            ) {
+            {
                 self.item_operation = None;
                 self.pickup.clear();
+                self.applying = false;
             }
             self.zap_selection = None;
             self.identification_selected = 0;
@@ -408,6 +449,9 @@ impl App {
         } else {
             self.state = Some(ClientState::from_snapshot(snapshot)?);
         }
+        self.movement_prefix = self
+            .movement_prefix
+            .map(|_| controls::MovementPrefix::Cancelled);
         // Recovery cancels the transport's chart request. Return to the catalog
         // only after validation succeeds rather than leaving a loading selection
         // that has no corresponding worker query.
@@ -479,8 +523,13 @@ impl App {
             .is_some_and(|(branch, _)| branch != state.branch())
         {
             self.travel_cursor = None;
+            self.movement_prefix = self
+                .movement_prefix
+                .map(|_| controls::MovementPrefix::Cancelled);
+            self.command_line = None;
             self.note = None;
             self.pickup.clear();
+            self.applying = false;
             self.item_operation = None;
             self.zap_selection = None;
             self.attack_targets.clear();
@@ -509,6 +558,7 @@ impl App {
                 .place_selected
                 .min(state.state().observation.places.len().saturating_sub(1));
             self.pickup.clear();
+            self.applying = false;
             self.item_operation = None;
             self.zap_selection = None;
             self.attack_targets.clear();
@@ -522,7 +572,11 @@ impl App {
             self.travel_cursor = None;
         }
         if !state.has_control() {
+            self.movement_prefix = self
+                .movement_prefix
+                .map(|_| controls::MovementPrefix::Cancelled);
             self.pickup.clear();
+            self.applying = false;
             self.item_operation = None;
             self.zap_selection = None;
             self.attack_targets.clear();
@@ -628,7 +682,7 @@ impl App {
     /// A menu row's letter: an item's inventory letter when choosing from
     /// what's carried, otherwise a, b, c... down the list.
     pub fn choice_letter(&self, index: usize) -> char {
-        let carried = self.dropping || self.item_operation.is_some();
+        let carried = self.dropping || self.item_operation.is_some() || self.applying;
         self.pickup
             .get(index)
             .and_then(|item| {
@@ -645,7 +699,7 @@ impl App {
             .iter()
             .enumerate()
             .map(|(index, item)| {
-                let name = if !self.dropping && self.item_operation.is_none() {
+                let name = if !self.dropping && self.item_operation.is_none() && !self.applying {
                     self.state
                         .as_ref()
                         .and_then(|state| {
@@ -745,14 +799,19 @@ impl App {
             hint.push_str(" move to cancel and step;");
         }
         hint.push_str(if state.has_control() {
-            " F3/R control; F2 history; Esc quit"
+            " #release control; F2 history; S save/close"
         } else {
-            " F3 acquire control; F2 history; Esc quit"
+            " F3 acquire control; F2 history; S save/close"
         });
         Some(hint)
     }
 
     pub fn disconnect(&mut self, message: String) {
+        self.command_line = None;
+        self.movement_prefix = self
+            .movement_prefix
+            .map(|_| controls::MovementPrefix::Cancelled);
+        self.applying = false;
         self.charts.clear();
         self.charts_open = false;
         self.projectile_selection = None;
@@ -770,6 +829,7 @@ impl App {
         self.stats_open = false;
         self.note = None;
         self.pickup.clear();
+        self.applying = false;
         self.item_operation = None;
         self.zap_selection = None;
         self.identification_selected = 0;
@@ -1890,6 +1950,12 @@ impl App {
     }
 
     pub fn input(&mut self, input: Input) -> Effect {
+        if self.command_line.is_some() {
+            return self.command_input(input);
+        }
+        if self.movement_prefix.is_some() {
+            return self.prefix_input(input);
+        }
         if self.charts_open {
             return self.chart_input(input);
         }
@@ -2127,28 +2193,7 @@ impl App {
                             tor_client_common::abilities::choices(&state.state().observation)
                                 .contains(&ability)
                         }) {
-                            if ability.target_kind == AbilityTargetKind::DirectionalProjectile {
-                                self.selected_weapon = WeaponSelection::Default;
-                                return self.open_projectile_picker(&ability.id);
-                            }
-                            if matches!(
-                                ability.target_kind,
-                                AbilityTargetKind::SelfStep | AbilityTargetKind::DirectionalRay
-                            ) {
-                                self.status = format!(
-                                    "Choose a direction for {}. Movement keys select; {}Esc cancels.",
-                                    ability.name,
-                                    if ability.weapon_selection { "Tab chooses a weapon; " } else { "" }
-                                );
-                                self.selected_ability = Some(ability);
-                                return Effect::None;
-                            }
-                            if ability.target_kind == AbilityTargetKind::SelfOnly {
-                                let target =
-                                    self.state.as_ref().unwrap().state().observation.self_target;
-                                return self.choose_ability_target(ability, target);
-                            }
-                            self.select_targets(Some(ability));
+                            return self.choose_ability(ability);
                         } else {
                             self.status = format!("You don't have {}.", ability.name);
                         }
@@ -2246,7 +2291,7 @@ impl App {
                     self.status = format!("No item is lettered {letter}.");
                     return Effect::None;
                 }
-                if self.item_operation.is_some() {
+                if self.item_operation.is_some() || self.applying {
                     return Effect::None;
                 }
                 for ch in text.chars().filter(char::is_ascii_digit) {
@@ -2278,12 +2323,26 @@ impl App {
                 || self.door_direction.is_some()
             {
                 self.pickup.clear();
+                self.applying = false;
                 self.item_operation = None;
                 self.attack_targets.clear();
                 self.door_direction = None;
                 self.status = "Cancelled.".into();
                 return Effect::None;
             }
+            self.status = "Nothing to cancel. Press S to save and close, or # for commands.".into();
+            return Effect::None;
+        }
+        if matches!(input, Input::Key { key: Key::SaveQuit })
+            && self.note.is_none()
+            && self.wizard_command.is_none()
+            && self.place_name.is_none()
+            && self.pickup.is_empty()
+            && self.history_page.is_none()
+            && self.door_direction.is_none()
+            && self.look_cursor.is_none()
+            && self.travel_cursor.is_none()
+        {
             return Effect::Quit;
         }
         if !self.connected || self.busy {
@@ -2462,6 +2521,7 @@ impl App {
                     | Key::Stats
                     | Key::Help
                     | Key::MessageLog
+                    | Key::Commands
             )
         {
             self.status = "Spectator access is read-only.".into();
@@ -2522,6 +2582,24 @@ impl App {
                 Key::Down => self.selected = (self.selected + 1).min(self.pickup.len() - 1),
                 Key::Enter => {
                     let item = self.pickup[self.selected].id;
+                    if std::mem::take(&mut self.applying) {
+                        let result = self
+                            .state
+                            .as_ref()
+                            .ok_or_else(|| "No current attachment.".into())
+                            .and_then(|state| {
+                                controls::apply_action(&state.state().observation, item)
+                            });
+                        self.pickup.clear();
+                        self.applying = false;
+                        return match result {
+                            Ok(action) => self.act(action),
+                            Err(reason) => {
+                                self.status = reason;
+                                Effect::None
+                            }
+                        };
+                    }
                     if let Some(operation) = self.item_operation.take() {
                         if operation == ItemOperation::Zap {
                             let state = self.state.as_ref().expect("connected state");
@@ -2529,6 +2607,7 @@ impl App {
                                 .any(|candidate| candidate.id == item)
                             {
                                 self.pickup.clear();
+                                self.applying = false;
                                 self.status = "That device selection is no longer current.".into();
                                 return Effect::None;
                             }
@@ -2536,11 +2615,13 @@ impl App {
                                 item_action(&state.state().observation, item, operation)
                             {
                                 self.pickup.clear();
+                                self.applying = false;
                                 self.zap_selection = None;
                                 return self.act(action);
                             }
                             self.zap_selection = Some((item, state.reply_context()));
                             self.pickup.clear();
+                            self.applying = false;
                             let dual = state
                                 .state()
                                 .observation
@@ -2568,6 +2649,7 @@ impl App {
                             operation,
                         );
                         self.pickup.clear();
+                        self.applying = false;
                         self.item_operation = None;
                         return match result {
                             Ok(action) => self.act(action),
@@ -2589,6 +2671,7 @@ impl App {
                         }
                     };
                     self.pickup.clear();
+                    self.applying = false;
                     self.item_operation = None;
                     self.attack_targets.clear();
                     self.door_direction = None;
@@ -2726,6 +2809,39 @@ impl App {
             return Effect::None;
         }
         match key {
+            Key::Commands => {
+                self.command_line = Some(String::new());
+                self.command_selected = 0;
+                self.command_selected_explicit = false;
+                self.status = "Type a command or use Up/Down; Enter selects, Esc cancels.".into();
+                Effect::None
+            }
+            Key::Search => self.named_ability("search", AbilityTargetKind::SelfOnly),
+            Key::Throw => self.named_ability("throw", AbilityTargetKind::DirectionalProjectile),
+            Key::Fire => self.named_ability("launch", AbilityTargetKind::DirectionalProjectile),
+            Key::Apply => self.open_apply_picker(),
+            Key::Wield | Key::Wear | Key::PutOn | Key::TakeOff | Key::RemoveAccessory => {
+                let operation = if matches!(key, Key::TakeOff | Key::RemoveAccessory) {
+                    ItemOperation::Unequip
+                } else {
+                    ItemOperation::Equip
+                };
+                self.open_item_picker(operation, Some(key))
+            }
+            Key::RunPrefix | Key::MoveOnlyPrefix => {
+                self.movement_prefix = Some(if key == Key::RunPrefix {
+                    controls::MovementPrefix::Run
+                } else {
+                    controls::MovementPrefix::MoveOnly
+                });
+                self.status = if key == Key::RunPrefix {
+                    "Run in which direction? TOR stopping rules apply; Esc cancels."
+                } else {
+                    "Step in which direction without attacking? Esc cancels."
+                }
+                .into();
+                Effect::None
+            }
             Key::EscapeHold => self.escape_hold(),
             Key::Advancement => {
                 let Some(state) = &self.state else {
@@ -2933,6 +3049,7 @@ impl App {
                 Effect::None
             }
             Key::Pickup | Key::Drop => {
+                self.applying = false;
                 self.item_operation = None;
                 self.dropping = key == Key::Drop;
                 self.quantity.clear();
@@ -2997,50 +3114,7 @@ impl App {
                     Key::Extinguish => ItemOperation::Extinguish,
                     _ => ItemOperation::Drink,
                 };
-                let Some(state) = &self.state else {
-                    return Effect::None;
-                };
-                if matches!(
-                    operation,
-                    ItemOperation::Read
-                        | ItemOperation::Zap
-                        | ItemOperation::Ignite
-                        | ItemOperation::Extinguish
-                ) && !state.has_control()
-                {
-                    self.status = "You are observing. Press F3 to request control.".into();
-                    return Effect::None;
-                }
-                let view = &state.state().observation;
-                let mut seen = std::collections::BTreeSet::new();
-                let items: Vec<_> = item_choices(view, operation)
-                    .filter(|item| seen.insert(item.id))
-                    .cloned()
-                    .collect();
-                self.quantity.clear();
-                match items.as_slice() {
-                    [] => {
-                        self.status = if view.interactions.is_none() && !view.inventory.is_empty() {
-                            format!(
-                                "Nothing you carry can be used to {} here.",
-                                operation.verb()
-                            )
-                        } else {
-                            format!("You don't have anything to {}.", operation.verb())
-                        };
-                        Effect::None
-                    }
-                    _ => {
-                        self.pickup = items;
-                        self.item_operation = Some(operation);
-                        self.selected = 0;
-                        self.status = format!(
-                            "What do you want to {}? Type its letter; Esc cancels.",
-                            operation.verb()
-                        );
-                        Effect::None
-                    }
-                }
+                self.open_item_picker(operation, None)
             }
             Key::Places => {
                 self.places_open = true;
@@ -4009,31 +4083,33 @@ pub fn end_summary(state: &ClientState) -> Vec<String> {
 
 /// The help screen.
 pub const HELP: &[&str] = &[
-    "MOVING                         MAP",
+    "NETHACK KEYS (case matters)     MAP",
     "y k u   move; Shift runs        @ you      a-z creatures",
     "h @ l   (arrows also move)      # wall     # low wall (tan)",
     " b j n                          . floor    ^ drop or pit",
     "< >     go up / down stairs     < > stairs + / doors",
-    "_       travel (< > jump)       ) [ ! % ( = \" ? / $ * items",
-    "click   travel to a cell        grey: remembered, not in sight",
+    "_ click travel; ; / look        grey: remembered, not in sight",
+    "g/G then direction: run using TOR stopping rules",
+    "m then direction: step without bump-attacking; Esc cancels",
     "",
     "ACTING                         SEEING",
-    "a       attack a target         ;      look at a cell",
-    "z       ability, then target    @      creature stats",
-    "Tab     choose weapon for an ability that permits it",
-    ". space wait                    i      inventory",
-    "m       read-only detection charts",
-    "g , d   pick up / drop          ^P     earlier messages",
-    "w t q e equip/remove/drink/eat F2     game history",
-    "o c     open / close a door     F5     remembered places",
-    "F11     escape a hold           F4     write a note",
-    "F6 read; F12 zap, then direction; X ignite; V extinguish; Esc cancels",
-    "                                F7     wizard command editor",
-    "                                F10    advancement / respec",
-    "F3 R    take / release control  [ ]    slower / faster journeys",
-    "F8 F9   resume / cancel action  Esc    cancel, close, or quit",
-    "Move after a strike: cancel sequence and step (recovery still owed)",
-    "Wizard discovery: F7, then creature list (optional depth N)",
+    "s       Search                 i       inventory",
+    "t f     Throw / Launch         Ctrl-X  creature stats",
+    "z Z     zap device / ability   Ctrl-P  earlier messages",
+    "r a     read / apply light     #charts read-only charts",
+    "w W P   wield / wear / put on  #attack choose a target",
+    "T R     remove armor/accessory #equip/#remove include tools",
+    ", d q e pickup/drop/drink/eat  . Space wait",
+    "o c     open / close door      Tab     ability weapon choice",
+    "#       extended commands: type to filter, Enter selects",
+    "F2 F5   history / places       F4      state-anchored note",
+    "F3      acquire control        #release releases control",
+    "F6 F12  read / zap aliases     F7      wizard editor",
+    "F8 F9   resume / cancel work   F10 F11 advancement / hold escape",
+    "#slower/#faster journey pace   S       save and close",
+    "Esc     cancel/close a screen; never quits from the map",
+    "No numpad mode, count repeats, forced empty attacks or swaps.",
+    "Only disclosed grants/tools work; no new NetHack game rules.",
 ];
 
 /// Whether the run is over: won or lost with no further play.

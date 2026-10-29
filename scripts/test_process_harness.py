@@ -1002,6 +1002,33 @@ class NativeKeyNames(unittest.TestCase):
             user32.PostMessageW.assert_not_called()
 
 
+    def test_windows_nethack_keys_send_explicit_nonextended_press_and_release(self):
+        import ctypes
+        harness = ProcessTestCase()
+        user32 = Mock()
+        user32.PostMessageW.return_value = 1
+        # Independent virtual-key/scan literals for the newly supported native
+        # test inputs. No expected value is read from the mapping under test.
+        rows = (("Control_L", 0x11, 0x1D), ("k", 0x4B, 0x25), ("r", 0x52, 0x13),
+                ("s", 0x53, 0x1F), ("a", 0x41, 0x1E),
+                ("f", 0x46, 0x21), ("3", 0x33, 0x04))
+        scans = {vk: scan for _, vk, scan in rows}
+        user32.MapVirtualKeyW.side_effect = lambda vk, mode: scans[vk]
+        with patch.object(harness, "_native_window", return_value=42), \
+                patch("process_harness.os.name", "nt"), \
+                patch.object(ctypes, "WinDLL", return_value=user32, create=True):
+            native = harness.native_keys(object())
+            for name, vk, scan in rows:
+                for down in (True, False):
+                    with self.subTest(name=name, down=down):
+                        user32.reset_mock()
+                        native(name, down)
+                        user32.MapVirtualKeyW.assert_called_once_with(vk, 0)
+                        user32.PostMessageW.assert_called_once_with(
+                            42, 0x100 if down else 0x101, vk,
+                            1 | (scan << 16) | (0 if down else 0xC0000000))
+
+
 class NativeKeyPresses(unittest.TestCase):
     def test_repeated_native_key_waits_for_fresh_release_before_next_press(self):
         harness = ProcessTestCase()

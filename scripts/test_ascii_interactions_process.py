@@ -16,23 +16,29 @@ class AsciiInteractionProcesses(ProcessTestCase):
         native = self.native_keys(window)
 
         def press(name, action, **completion):
+            if name in ("W", "T"):
+                native("Shift_L", True)
+                try:
+                    return self.native_press(window, native, name.lower(), action, **completion)
+                finally:
+                    native("Shift_L", False)
             return self.native_press(window, native, name, action, **completion)
 
         def view(frame):
             return frame["state"]["observation"]
 
         mail = next(item["id"] for item in view(initial)["inventory"] if item["name"] == "mail")
-        # w always asks, as in NetHack, even with one candidate.
-        asking = press("w", "equip")
+        # W always asks, even with one eligible armor item.
+        asking = press("W", "wear")
         self.assertEqual(view(asking), view(initial), "opening a selection costs no turn")
         equipped = press("Return", "enter", wait_for_ready=True, wait_for_admission=True)
         self.assertEqual(next(item for item in view(equipped)["interactions"]["inventory"] if item["item"] == mail)["equipped_slot"], 1)
         self.assertEqual(int(view(equipped)["tick"]), 300)
         self.assertEqual(equipped["messages"]["turn"].count("You finish equipping the mail."), 1)
         self.assertEqual(equipped["messages"]["turn"], "You finish equipping the mail.")
-        selected = press("t", "unequip")
+        selected = press("T", "take_off")
         self.assertEqual(view(selected), view(equipped), "opening a selection costs no turn")
-        press("Down", "down")  # starting order: sword, mail, ring
+        self.assertEqual(len(selected["item_rows"]), 1, "T excludes equipped weapons and accessories")
         removed = press("Return", "enter", wait_for_ready=True, wait_for_admission=True)
         self.assertIsNone(next(item for item in view(removed)["interactions"]["inventory"] if item["item"] == mail)["equipped_slot"])
         self.assertEqual(int(view(removed)["tick"]), 600)

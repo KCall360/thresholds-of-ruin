@@ -1,6 +1,7 @@
 """Real Text/native/headless discovery and journal/checkpoint source-free recovery."""
 import copy
 import json
+import os
 import shutil
 import unittest
 
@@ -189,6 +190,120 @@ class DiscoveryProcesses(ProcessTestCase):
         self.assertEqual(underfoot(current["state"])["key"], first_exit)
         _, returned = self.explore_generated_floor(player, current, expected=first)
         self.assertEqual(returned[2:], first[2:], "Generated openings, trap families and IDs survive return")
+
+    def test_native_search_shortcut_menu_and_extended_commands_preserve_authority(self):
+        # Production Rogue grants/timing, ordinary validated geometry. DC 0 may
+        # already disclose the features, so this is a paid-input witness, not
+        # another discovery-success oracle.
+        self.server(scenario=package(self), seed=42)
+        window = self.launch("tor-client-ascii", ["--connect", self.address, "--report-frames"])
+        initial = self.ascii_frame(window, lambda frame: frame.get("state")
+                                   and frame["has_control"] and not frame["busy"]
+                                   and frame["can_admit_intention"])
+        native = self.native_keys(window)
+
+        def press(name, reported, *, shift=False, **completion):
+            if shift:
+                native("Shift_L", True)
+            try:
+                return self.native_press(window, native, name, reported, **completion)
+            finally:
+                if shift:
+                    native("Shift_L", False)
+
+        def search_actions(frame):
+            return [entry["content"]["action"] for entry in frame["history"]
+                    if entry["content"].get("action", {}).get("type") == "use_ability"
+                    and entry["content"]["action"]["id"] == "rogue.search"]
+
+        if initial["messages"]["more"]:
+            initial = press("Escape", "escape")
+        self.assertEqual(search_actions(initial), [])
+        expected = {"type": "use_ability", "id": "rogue.search", "invocation": {
+            "aim": {"kind": "actor_target", "target": observation(initial)["self_target"]},
+            "weapon": {"kind": "default"}}, "supplies": {"kind": "carried"}}
+        searched = press("s", "search", wait_for_ready=True, wait_for_admission=True)
+        self.assertEqual(search_actions(searched), [expected])
+        self.assertEqual(observation(searched)["position"], observation(initial)["position"])
+        # Search can be causal-only: its accepted outcome does not force the
+        # native client's demanded picture to refresh. Read an explicit fresh
+        # spectator picture for paid-time evidence, not the retained screen tick.
+        clock, paid = self.client(SPECTATOR_TOKEN, observe=True)
+        self.assertGreater(int(observation(paid)["tick"]), int(observation(initial)["tick"]))
+        self.assertFalse(searched["state"]["wizard_game"])
+        self.assertIsNone(searched["selected_ability"])
+        self.assertEqual(searched["ability_choices"], [])
+        if searched["messages"]["more"]:
+            searched = press("Escape", "escape")
+
+        menu = press("z", "abilities", shift=True)
+        self.assertEqual(menu["state"], searched["state"], "Z opens a free selection")
+        cancelled = press("Escape", "escape")
+        self.assertEqual(cancelled["state"], searched["state"])
+        self.assertEqual(search_actions(cancelled), [expected])
+
+        opened = press("3", "commands", shift=True)
+        self.assertEqual(opened["command_line"], "")
+        self.native_text(window, "search")
+        edited = self.ascii_frame(window, lambda frame: frame.get("command_line") == "search")
+        self.assertEqual(edited["state"], searched["state"], "typing command letters cannot invoke them")
+        closed = press("Escape", "escape")
+        self.assertIsNone(closed["command_line"])
+        self.assertEqual(search_actions(closed), [expected])
+        self.assertEqual(closed["state"], searched["state"])
+
+        # X11/Win32 report letters as both text and key events. In particular k
+        # must not also act as Up and silently choose #attack from this filter.
+        press("3", "commands", shift=True)
+        # native_text sends only WM_CHAR on Windows; also hold the physical
+        # alias across the presented edit so this exercises the native filter.
+        if os.name == "nt":
+            native("k", True)
+        try:
+            self.native_text(window, "k")
+            self.ascii_frame(window, lambda frame: frame.get("command_line") == "k")
+        finally:
+            if os.name == "nt":
+                native("k", False)
+        ambiguous = press("Return", "enter")
+        self.assertEqual(ambiguous["command_line"], "k")
+        self.assertIn("ambiguous", ambiguous["status"])
+        self.assertEqual(ambiguous["state"], searched["state"])
+        press("Escape", "escape")
+
+        # The original ability-menu route stays available and uses the same
+        # server-disclosed self target without asking for a creature target.
+        menu = press("z", "abilities", shift=True)
+        index = [ability["id"] for ability in menu["ability_choices"]].index("rogue.search")
+        for _ in range(index):
+            press("Down", "down")
+        again = press("Return", "enter", wait_for_ready=True, wait_for_admission=True)
+        expected_again = copy.deepcopy(expected)
+        expected_again["invocation"]["aim"]["target"] = observation(menu)["self_target"]
+        self.assertEqual(search_actions(again), [expected, expected_again])
+        self.assertEqual(observation(again)["position"], observation(initial)["position"])
+        paid_again = self.request(clock, {"type": "observe"})
+        self.assertIsNone(paid_again["error"])
+        self.assertGreater(int(observation(paid_again)["tick"]), int(observation(paid)["tick"]))
+        window.stop()
+
+        # A fresh read-only native window cannot submit Search through either
+        # entry point. Stop the owner window before selecting the unique OS window.
+        window = self.launch("tor-client-ascii", ["--connect", self.address, "--report-frames"],
+                             token=SPECTATOR_TOKEN)
+        watched = self.ascii_frame(window, lambda frame: frame.get("state") and not frame["busy"])
+        native = self.native_keys(window)
+        self.assertEqual(watched["role"], "spectator")
+        refused = press("s", "search")
+        self.assertIn("read-only", refused["status"])
+        self.assertEqual(refused["state"], watched["state"])
+        press("3", "commands", shift=True)
+        self.native_text(window, "search")
+        self.ascii_frame(window, lambda frame: frame.get("command_line") == "search")
+        refused = press("Return", "enter")
+        self.assertIn("read-only", refused["status"])
+        self.assertEqual(refused["state"], watched["state"])
+        self.assertEqual(search_actions(refused), search_actions(watched))
 
     def test_native_selected_look_examines_only_discovered_adjacent_trap(self):
         self.server(scenario=package(self), seed=42)

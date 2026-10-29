@@ -160,11 +160,11 @@ class RestorableLossAsciiProcesses(LossHelpers, ProcessTestCase):
         window = self.launch("tor-client-ascii", ["--connect", self.address, "--report-frames"])
         self.ascii_frame(window, lambda frame: frame["has_control"] and not frame["busy"])
         native = self.native_keys(window)
-        native("Shift_L", True)
+        native("Control_L", True)
         try:
-            shown = self.native_press(window, native, "2", "stats")
+            shown = self.native_press(window, native, "x", "stats")
         finally:
-            native("Shift_L", False)
+            native("Control_L", False)
         self.assertIn("Restorable losses: Hit Dice 1", "\n".join(shown["stats_rows"]))
         self.native_press(window, native, "Escape", "escape")
         self.native_press(window, native, "q", "drink")
@@ -184,11 +184,11 @@ class RestorableLossAsciiProcesses(LossHelpers, ProcessTestCase):
         window = self.launch("tor-client-ascii", ["--connect", self.address, "--report-frames"])
         self.ascii_frame(window, lambda frame: frame["has_control"] and not frame["busy"])
         native = self.native_keys(window)
-        native("Shift_L", True)
+        native("Control_L", True)
         try:
-            shown = self.native_press(window, native, "2", "stats")
+            shown = self.native_press(window, native, "x", "stats")
         finally:
-            native("Shift_L", False)
+            native("Control_L", False)
         self.assertIn("Restorable losses: Strength 1, maximum Health 1", "\n".join(shown["stats_rows"]))
         self.native_press(window, native, "Escape", "escape")
         self.native_press(window, native, "q", "drink")

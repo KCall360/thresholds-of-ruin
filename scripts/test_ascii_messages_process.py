@@ -243,7 +243,7 @@ class AsciiMessageProcesses(ProcessTestCase):
         logged = self.key(window, "message_log")
         self.assertEqual(logged["screen"]["message_log"], 0)
         self.assertEqual(self.key(window, "escape")["screen"]["message_log"], None)
-        self.assertEqual(self.key(window, "escape")["state"], before)
+        self.assertEqual(self.key(window, "save_quit")["state"], before)
         self.assertEqual(window.child.wait(timeout=10), 0)
 
 
