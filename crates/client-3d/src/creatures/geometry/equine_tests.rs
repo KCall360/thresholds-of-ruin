@@ -2,25 +2,18 @@ use super::*;
 use crate::creatures::rogue_tests::spawn_one;
 use bevy::render::mesh::VertexAttributeValues;
 
-fn vertices(world: &World, meshes: &Assets<Mesh>, joint: Entity) -> Vec<Vec3> {
+fn vertices(world: &World, rig: &Rig, meshes: &Assets<Mesh>, joint: Entity) -> Vec<Vec3> {
     let mut points = Vec::new();
-    for child in world.get::<Children>(joint).unwrap().iter() {
-        let Some(mesh) = world
-            .get::<Mesh3d>(child)
-            .and_then(|mesh| meshes.get(&mesh.0))
-        else {
-            continue;
-        };
+    for surface in super::test_support::joint_meshes(world, rig, meshes, joint) {
         let Some(VertexAttributeValues::Float32x3(values)) =
-            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+            surface.mesh.attribute(Mesh::ATTRIBUTE_POSITION)
         else {
             panic!("equine mesh positions")
         };
-        let at = world.get::<Transform>(child).unwrap().compute_affine();
         points.extend(
             values
                 .iter()
-                .map(|point| at.transform_point3((*point).into())),
+                .map(|point| surface.transform.transform_point3((*point).into())),
         );
     }
     assert!(!points.is_empty());
@@ -61,7 +54,7 @@ fn equine_masses_and_fore_hind_links_share_compact_support_proportions() {
                     (0.72..0.92).contains(&height),
                     "compact support height: {height}"
                 );
-                let body = vertices(&world, &meshes, rig.joint(J::Body).unwrap());
+                let body = vertices(&world, &rig, &meshes, rig.joint(J::Body).unwrap());
                 let low = body.iter().map(|p| p.y).fold(f32::INFINITY, f32::min);
                 let high = body.iter().map(|p| p.y).fold(f32::NEG_INFINITY, f32::max);
                 assert!(
@@ -78,7 +71,7 @@ fn equine_masses_and_fore_hind_links_share_compact_support_proportions() {
                         + rig.rest[root as usize]
                         + rig.rest[knee as usize]
                         + rig.rest[hoof as usize];
-                    let foot = vertices(&world, &meshes, rig.joint(hoof).unwrap());
+                    let foot = vertices(&world, &rig, &meshes, rig.joint(hoof).unwrap());
                     let floor = foot
                         .iter()
                         .map(|p| p.y + ankle.y)
@@ -101,7 +94,7 @@ fn equine_masses_and_fore_hind_links_share_compact_support_proportions() {
 fn equine_muzzle_has_a_substantial_bridge_and_jaw_instead_of_a_button_tip() {
     for model in [CreatureModel::Quagga, CreatureModel::BlackUnicorn] {
         let (world, rig, _, meshes) = spawn_one(&Look::of(model, 42));
-        let head = vertices(&world, &meshes, rig.joint(J::Snout).unwrap());
+        let head = vertices(&world, &rig, &meshes, rig.joint(J::Snout).unwrap());
         let muzzle: Vec<_> = head
             .iter()
             .filter(|p| p.z > 0.33 && p.y < 0.0 && p.y > -0.18)
@@ -143,6 +136,7 @@ fn equine_fallen_barrel_clears_the_floor_at_each_build() {
             let at = lift * body;
             let points = vertices(
                 world,
+                rig,
                 world.resource::<Assets<Mesh>>(),
                 rig.joint(J::Body).unwrap(),
             );
@@ -154,6 +148,84 @@ fn equine_fallen_barrel_clears_the_floor_at_each_build() {
                 floor > -0.015,
                 "{model:?} build {build}: fallen barrel cuts through the floor at {floor}"
             );
+        }
+    }
+}
+
+#[test]
+fn centaur_rider_arm_volume_tracks_build_without_changing_reach() {
+    for woman in [false, true] {
+        let mut widths = Vec::new();
+        let mut reaches = Vec::new();
+        for build in 0..3 {
+            let look = Look::with_choice(
+                CreatureModel::Centaur,
+                17,
+                Some(Variant {
+                    woman,
+                    build,
+                    ..default()
+                }),
+            );
+            let (world, rig, _, meshes) = spawn_one(&look);
+            let muscle: Vec<_> = vertices(&world, &rig, &meshes, rig.joint(J::ArmL).unwrap())
+                .into_iter()
+                .filter(|p| (-0.20..=-0.08).contains(&p.y))
+                .collect();
+            assert!(
+                !muscle.is_empty(),
+                "inspect actual upper-arm muscle surfaces"
+            );
+            let low = muscle.iter().map(|p| p.x).fold(f32::INFINITY, f32::min);
+            let high = muscle.iter().map(|p| p.x).fold(f32::NEG_INFINITY, f32::max);
+            widths.push(high - low);
+            let forearm = vertices(&world, &rig, &meshes, rig.joint(J::ForeL).unwrap());
+            let fingertips = forearm.iter().map(|p| p.y).fold(f32::INFINITY, f32::min);
+            let grip = rig.rest[J::HandL as usize];
+            assert!(grip.y > fingertips + 0.005 && grip.y < fingertips * 0.75,
+                "woman={woman}, build={build}: the grip belongs in the terminal fist, not at the elbow");
+            reaches.push((rig.rest[J::ForeL as usize], grip));
+        }
+        assert!(
+            widths[0] > 0.08,
+            "positive witness: substantial organic arm mass"
+        );
+        assert!(widths[1] > widths[0] * 1.04 && widths[2] > widths[1] * 1.04,
+            "woman={woman}: slender/average/sturdy must change local muscle volume, widths={widths:?}");
+        assert!(
+            reaches.windows(2).all(|pair| pair[0] == pair[1]),
+            "body fullness must not move the elbow or weapon grip"
+        );
+    }
+}
+
+#[test]
+fn centaur_rider_deltoid_caps_belong_to_the_animated_arms() {
+    for woman in [false, true] {
+        for build in 0..3 {
+            let look = Look::with_choice(
+                CreatureModel::Centaur,
+                17,
+                Some(Variant {
+                    woman,
+                    build,
+                    ..default()
+                }),
+            );
+            let (world, rig, _, meshes) = spawn_one(&look);
+            let torso = vertices(&world, &rig, &meshes, rig.joint(J::Torso).unwrap());
+            for joint in [J::ArmL, J::ArmR] {
+                let root = rig.rest[joint as usize];
+                assert!(!vertices(&world, &rig, &meshes, rig.joint(joint).unwrap()).is_empty());
+                // The torso may support the clavicle, but a broad lateral cap
+                // must rotate with its arm rather than stay behind on the chest.
+                let retained_cap = torso.iter().any(|p| {
+                    (root.y - 0.06..=root.y + 0.06).contains(&p.y)
+                        && p.x * root.x.signum() > root.x.abs() + 0.04
+                });
+                assert!(!retained_cap,
+                    "woman={woman}, build={build}, {joint:?}: torso retains a static deltoid beyond the shoulder root");
+            }
         }
     }
 }

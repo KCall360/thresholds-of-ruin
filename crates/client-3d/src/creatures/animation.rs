@@ -79,7 +79,7 @@ fn record_phase(
 /// Where hair solves run, and the camera that orders them.
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct HairScheduling<'w, 's> {
-    camera: Query<'w, 's, &'static GlobalTransform, With<Camera3d>>,
+    camera: Query<'w, 's, &'static GlobalTransform, crate::portrait::ExplorationCamera>,
     solving: Option<Res<'w, super::hair_budget::HairSolving>>,
 }
 

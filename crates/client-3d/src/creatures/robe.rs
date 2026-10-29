@@ -459,6 +459,9 @@ pub(super) struct RobeRig {
 }
 
 impl RobeRig {
+    pub(super) fn map_mesh(&mut self, map: &mut impl FnMut(&Handle<Mesh>) -> Handle<Mesh>) {
+        self.mesh = map(&self.mesh);
+    }
     pub(super) fn invalidate(&mut self) {
         self.dirty = true;
     }

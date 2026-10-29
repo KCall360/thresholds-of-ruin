@@ -288,14 +288,165 @@ humanoids, and O, or `--wardrobe-cycle SECONDS`, redresses them mid-stride,
 replacing only the model while motion carries on. Repeated recipe-level outfit
 changes retain the individual's original cache identity: selecting an outfit
 again reuses its model, and Native restores the original costume. Unchanged
-head and hair assets are reused across sequential replacements. This is presentation for
-review only: live creatures still wear their kind's outfit, as observations
-carry no equipment list (see 5).
+head and hair assets are reused across sequential replacements. Offline selections
+remain presentation for review; live creatures use their disclosed visual loadout
+and cannot inherit offline overrides.
+
+The [resolved head component](../../crates/client-3d/src/creatures/geometry/head.rs)
+owns its headwear, neck adornments, earrings and neck-coverage dependencies.
+One resolved value drives both mesh construction and cache identity. Unrelated
+garment changes can still reuse the head, while a changed choker or standing
+collar receives its own geometry. Fresh-versus-cached geometry tests exercise
+both outfit orders on Human, Nymph and Phantom. Native close-ups compare the
+same explicitly refreshed pose in both orders; a separate positive witness
+requires the neck ornament to be visible in the selected pixel region.
 
 Outfits also carry headwear: bare, a hood up or pushed back, or a closed helm.
 A hood or helm covers hair and what is worn in it, and pointed ears fold inside
 it; what the body grows, such as serpents, still shows. Redressing reuses the
 head and hanging hair when the outfit leaves them alone.
+
+Contact and hair fitting share a retained-source accessor. Initial fitting
+keeps source coordinates available after render extraction; warm fitting reads
+without mutable asset access. An application asset-event regression observes a
+real mutation first, then requires zero modifications to existing meshes during
+warm composition while private deforming meshes are still created. Existing
+hair isolation and posed-contact tests retain their geometry and motion coverage.
+This removes unnecessary invalidation; it is not a measured timing improvement.
+
+Yeti torso, hips and limbs compose the shared `fur_parts::Coat` surface
+component rather than rings of scattered tufts. Each patch supplies its body
+ellipsoid, comb direction, clump length, color and seed. Staggered clumps
+overlap continuous underfur; row heights vary to break up bands, and their crests and tips project along the body
+curve using destination normals. The same closed lock emitter serves garment
+caps and cuffs. Limb coats resolve their spans from the same elbow, wrist,
+knee and ankle attachments as the rig, with small overlaps at either end.
+Density has a bounded row/column count, and each complete Yeti
+build is covered by a 35,000-vertex / 42,000-triangle interim ceiling and zero additional warm-spawn meshes.
+The local debug models currently contain roughly 31,000–33,000 vertices and 39,000–41,000 triangles across
+both sexes and three builds. The coat supplies its own continuous backing; furred limbs do not also build
+covered skin or tube cores. Bent-joint witnesses cover the backing after removal.
+These ceilings are regression guards, not accepted crowd-rendering targets.
+The performance target is **100 or more visible creatures at 60 FPS**
+(16.7 ms/frame). The separate
+`crowd-hundred` live scenario repeats the existing crowd palette with 100 NPCs
+and the player; distance 34 frames its spaced layout within Manhattan sight
+range. A native functional run retained 101 body-bearing actors in the camera
+throughout all 90 measured frames; the smaller crowd at distance 16 retained
+25 throughout 176 frames. These runs captured screenshots to inspect placement
+and are not performance measurements. The additive `frustum_creatures` report
+tracks extrema over every timed frame after culling, excluding held props,
+decorations and oversized hair/cloth bounds; any unavailable count makes the
+extrema null. The original actor counter remains an instantiated-actor count.
+The old smaller fixture at default distance had only 15 bodies in the camera
+despite reporting 25 instantiated actors. Camera-frustum presence alone does
+not establish unoccluded pixels. Three subsequent release-client runs without
+screenshots retained all 101 bodies throughout their measurement windows and
+recorded matching physical viewports, but remain below the frame-rate target.
+The dominant reported GPU passes include opaque rendering, depth and shadows;
+shared torso/head meshes lead the source geometry inventory. Cache-miss source
+counts do not equal per-visible-instance work. Further density work and measured
+comparison remain required; offline CPU composition timings do not qualify
+this rendering target.
+
+Closed arm and leg surfaces now use radius-aware sampling, constrained projection
+and bounded conforming refinement. Their independent one-millimeter physical
+error and radial silhouette witnesses cover small/large capsules, gathered cloth,
+resolved limbs across sex/build variants and shared arm recipes. Rounded gathers
+and the sleeve underside use the same fields for generation and fitting. Actual
+offset muscle bounds include smooth-union growth before caller padding.
+The combined surface/evaluator checkpoint passed 469 methods (zero failures, one intentionally
+ignored subprocess fixture exercised by its lifecycle owner), and all four
+native composition methods passed. Matched native captures cover the same 26
+monster appearances on both sides: 1,861,887 to 1,721,261 source vertices and
+3,280,784 to 2,999,532 triangles, retaining 565 meshes. The final cast used one
+symmetric retry and no fine-grid fallback. Reviewed Centaur, Hobgoblin, Nymph,
+Vampire, Troll and Mage views retain
+their silhouettes. These are fixed-cast source counts, not crowd-instance or
+frame-time comparisons. Fresh live saves deliberately vary cosmetic identity
+through their persistent private salt, even at the same world seed; compare
+fixed appearances when attributing geometry changes. The exact benchmark Mage
+also retained its reviewed silhouette without fallback, using 94,525 source
+vertices and 148,136 triangles against 100,187 and 159,460 before this work.
+Upper-arm recipes resolve narrower clavicle/elbow features on their initial
+grid. The local field estimate uses a 0.75 mm allowance within independently
+tested one-millimeter physical error; guards cover 96 arm cases at 20,000
+triangles each and the benchmark Mage forearm at 12,000. Focused optimized
+checks passed all 22 SDF and eleven surface methods. Scalar and analytic
+value/gradient queries share primitive expressions and ordered composition;
+projection normally obtains both values in one traversal. Rejected surfaces get
+one symmetric-difference retry on the same grid. This preserves the exact Troll
+upper arm at 4,720 source vertices instead of the rejected candidate's 75,118.
+Its regression retains independent physical-distance/silhouette controls and a
+12,000-triangle budget. A fresh 101-body source inventory found six symmetric
+retries and zero fine fallbacks across 1,847 cache-miss parts: 7,321,211 source
+vertices and 13,405,296 triangles, which are not rendered-instance totals.
+Three fresh release runs after this correction at 1800 by 1125 pixels retained
+101 camera-visible bodies in every measured frame (474/474/461 frames, zero
+unavailable counts). Each run identified the NVIDIA GeForce RTX 2060 on DX12.
+They recorded 47.50/47.43/46.18 FPS; median frame times were
+20.95/21.08/21.19 ms, p95 23.78/23.52/24.24 ms, and maxima
+30.18/25.67/210.44 ms. The third run's hitch remains unresolved. The requested
+60 FPS remains unmet. These current operating
+points are not a controlled before/after comparison or evidence that projection
+improved frame time. Head and torso density remain the leading shared geometry
+follow-up. The controlled model workload comparison (version 4) used three balanced rounds and
+validated all six runs without failure on the same machine. Human and Nymph
+cold/warm construction and mesh storage improved against main. The Mage memory
+spike was removed, but its construction regression remains: cold p50/p95/max
+384.0/406.7/406.7 ms on main versus 482.5/538.6/538.6 ms here (nine samples per
+side); warm 5.609/6.158/6.158 versus 7.457/10.111/10.111 ms. Its pose median
+improves from 2.410 to 2.297 ms, but p95 rises from 2.700 to 3.419 ms (270
+samples per side). Its cold mesh bytes
+fell from 22,360,392 to 18,683,520, summed over the three cold samples in each
+round. The shared field-evaluation cost remains a separate optimization target;
+lower source counts do not establish uniformly faster construction.
+
+Live creature and found-corpse preparation now runs off the update thread,
+including fitting, hair and the articulated rig. Egg-shaped stand-ins retain
+movement and selection while work runs; each completed model replaces its egg
+on the next update without waiting for the remaining queue or a new server view.
+Obsolete results are discarded, current movement/death state is preserved, and
+weapon attachment reconciles when a hand becomes ready. One job bounds background
+contention and completed payloads; both source caches retain their idle bounds,
+with worker asset bookkeeping collected through Bevy's maintenance systems.
+Native debug/release client checks cover movement while loading, replacement and
+101 finished camera bodies. Quitting during unfinished work also passes locally.
+Frame timing waits for finished models before settling; this responsiveness work
+does not establish the still-open 60 FPS target. Offline art reviews and the
+controlled model workload retain synchronous construction.
+
+Live startup presents the embedded concept artwork in a software window before
+starting the world or graphics device. Its bar and information follow completed
+startup milestones, then hand over to the prepared game scene while creature
+models continue behind their eggs. The illustration and controls fit the display;
+startup can be cancelled without leaving its owned world running. Software
+milestone captures remain separate from gameplay GPU captures. This improves
+startup presentation without changing the offline review timelines or qualifying
+the frame-rate target. The [3D guide](../../crates/client-3d/README.md) owns its
+current behavior and capture locations.
+
+Shared tube paths now refine by a one-millimeter model-space target,
+Bezier control-hull flatness and radius-aware tangent variation. Authored knots,
+radii and explicit low-poly settings remain intact; paint spans stay short or
+retain the old larger-segment spacing. Bounded subdivision work and authored
+angular limits keep refinement finite. Tiny tubes avoid unnecessary side
+doubling. Independent dense S-bend references, closed-surface tests and the full
+3D library cover the shared change. Remaining head/hand density still needs review. These are geometry counts, not release timings.
+`yeti-coat.json` supplies fixed three-angle rest, walk and heavy-action review.
+The current body-coat finish is not visually accepted: its close surface pile
+still reads as tiled scales. Next work is dimensional stand-off/loft with visible
+free tips, retaining root overlap, curved flow, closed topology, resize and mesh
+budget coverage. Head fur, hand/claw integration and further silhouette refinement
+also remain open.
+
+The [shared organic arm surfaces](../../crates/client-3d/src/creatures/geometry/arm.rs)
+serve bipeds and centaur riders. Rider dimensions resolve width, muscle and
+shoulder spacing from the build profile while retaining elbow and hand reach.
+Deltoid caps belong to the animated arm; a compact root bridges the clavicle
+without raising the shoulder crown into fitted armor. Mesh tests cover build
+volume, grip placement and joint coverage through supported bends. The native
+`centaur-builds.json` review covers both sexes and all builds at rest and walking.
 
 The current people recipes place the head on a short neck and slope shoulders
 into the arms. Female pelvic breadth and thigh muscle volume are now independent;

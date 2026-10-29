@@ -122,6 +122,14 @@ pub(super) struct CloakRig {
 }
 
 impl CloakRig {
+    pub(super) fn map_references(
+        &mut self,
+        entity: &impl Fn(Entity) -> Entity,
+        mesh: &mut impl FnMut(&Handle<Mesh>) -> Handle<Mesh>,
+    ) {
+        self.entity = entity(self.entity);
+        self.mesh = mesh(&self.mesh);
+    }
     pub(super) fn invalidate(&mut self) {
         self.last_rotation = None;
     }

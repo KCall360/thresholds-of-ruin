@@ -214,6 +214,15 @@ impl AdvancementPages {
     pub fn retained_pages(&self) -> usize {
         self.pages.len()
     }
+    /// Whether retained private pages still belong to this exact disclosed state.
+    /// This does not imply that a paid intention is currently admissible.
+    pub fn is_current(&self, context: &ReplyContext) -> bool {
+        !self.stale && self.context.as_ref() == Some(context)
+    }
+    /// The exact-supply chooser overlays, rather than replaces, a retained page.
+    pub fn shows_supplies(&self) -> bool {
+        self.showing_supplies
+    }
     pub fn confirmation(&self) -> Option<&Confirmation> {
         self.confirmation.as_ref()
     }
@@ -249,7 +258,7 @@ impl AdvancementPages {
         self.pending = None;
     }
     fn fresh(&self, context: &ReplyContext) -> Result<(), String> {
-        if self.stale || self.context.as_ref() != Some(context) {
+        if !self.is_current(context) {
             return Err(STALE.into());
         }
         Ok(())

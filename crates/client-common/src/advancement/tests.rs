@@ -95,6 +95,39 @@ fn opened() -> AdvancementPages {
     install(&mut pages, overview_page(), "open").unwrap();
     pages
 }
+
+#[test]
+fn presentation_freshness_requires_the_exact_context_and_explicit_validity() {
+    let pages = opened();
+    assert!(
+        pages.is_current(&context()),
+        "a validated owner page is current"
+    );
+    for field in 0..8 {
+        let mut changed = context();
+        match field {
+            0 => changed.actor = ActorId(2),
+            1 => changed.branch = BranchId("other".into()),
+            2 => changed.input.stream.stream = StreamId("other".into()),
+            3 => changed.input.stream.epoch += 1,
+            4 => changed.input.readiness_revision += 1,
+            5 => changed.cursor.sequence += 1,
+            6 => changed.cursor.tick += 1,
+            _ => changed.revision += 1,
+        }
+        assert!(!pages.is_current(&changed));
+    }
+    let mut invalidated = pages.clone();
+    invalidated.invalidate();
+    assert!(
+        !invalidated.is_current(&context()),
+        "invalidation at the same revision is stale"
+    );
+    let mut redacted = pages.clone();
+    redacted.observe(&context(), false);
+    assert!(!redacted.is_current(&context()));
+    assert!(!AdvancementPages::default().is_current(&context()));
+}
 fn proposal() -> AdvancementProposal {
     AdvancementProposal::Replacement {
         replacement: ReplacementOperation {
@@ -1131,4 +1164,55 @@ fn permanent_potion_strength_has_distinct_overview_and_preview_label() {
                 .any(|row| row.contains(&format!("gross refund rows {refunds}"))));
         }
     }
+}
+
+#[test]
+fn supply_display_mode_is_disclosed_separately_from_the_retained_page() {
+    let context = context();
+    let mut observation = crate::test_support::observation();
+    observation.tick = context.cursor.tick;
+    let snapshot: Snapshot = serde_json::from_value(serde_json::json!({
+        "readiness": {"revision": context.input.readiness_revision.to_string(), "admission": false, "resume": [], "cancel": []},
+        "context": context.input.stream, "actor": context.actor, "branch": context.branch,
+        "cursor": context.cursor, "has_control": true, "intentions": [],
+        "history": {"entries": [], "older_before": null},
+        "state": {"wizard_game": false, "revision": context.revision.to_string(), "observation": observation},
+    })).unwrap();
+    let state = crate::ClientState::from_snapshot(snapshot).unwrap();
+    let mut pages = opened();
+    let before = pages.page().cloned();
+    assert!(!pages.shows_supplies());
+    assert!(pages
+        .request(AdvancementInput::Supplies, &state)
+        .unwrap()
+        .is_none());
+    assert!(pages.shows_supplies());
+    assert_eq!(
+        pages.page().cloned(),
+        before,
+        "supply display does not mutate the retained protocol page"
+    );
+    assert!(pages.display(&state.state().observation)[0].starts_with("Ration:"));
+    assert!(pages
+        .request(AdvancementInput::Ledger, &state)
+        .unwrap()
+        .is_some());
+    assert!(
+        pages.shows_supplies(),
+        "the retained display stays until a validated reply arrives"
+    );
+    let ledger = AdvancementPage {
+        basis: basis(),
+        revision: context.revision,
+        query: AdvancementQuery::Ledger {
+            basis: basis(),
+            offset: 0,
+        },
+        total: 0,
+        next: None,
+        entries: vec![],
+    };
+    ledger.validate().unwrap();
+    install(&mut pages, ledger, "ledger-after-supplies").unwrap();
+    assert!(!pages.shows_supplies());
 }

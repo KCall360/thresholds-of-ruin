@@ -3,6 +3,7 @@
 use super::*;
 mod chain;
 use super::deformation::{ControlCurve, SupportSide, SurfaceBinding};
+#[cfg(test)]
 use bevy::asset::RenderAssetUsages;
 use bevy::render::{mesh::VertexAttributeValues, primitives::Aabb};
 
@@ -43,6 +44,29 @@ impl std::ops::DerefMut for HairRig {
 }
 
 impl HairRig {
+    pub(super) fn map_references(
+        &mut self,
+        entity: &impl Fn(Entity) -> Entity,
+        mesh: &mut impl FnMut(&Handle<Mesh>) -> Handle<Mesh>,
+    ) {
+        assert!(
+            self.away.is_none(),
+            "only newly prepared hair can transfer worlds"
+        );
+        self.entity = entity(self.entity);
+        for contact in &mut self
+            .state
+            .as_deref_mut()
+            .expect("prepared hair state")
+            .meshes
+        {
+            contact.handle = mesh(&contact.handle);
+            #[cfg(test)]
+            {
+                contact.source = mesh(&contact.source);
+            }
+        }
+    }
     pub(super) fn reset_presentation(&mut self) {
         match self.state.as_deref_mut() {
             Some(state) => state.reset_presentation(),
@@ -253,12 +277,7 @@ pub(super) fn spawn(
     }) {
         // Never mutate the library mesh. Only deforming components need private
         // storage; fully attached components can stay shared under their joint.
-        let mesh = {
-            let source_mesh = meshes.get_mut(source).expect("cached hair mesh");
-            // Retain source coordinates for later composition and fitting.
-            source_mesh.asset_usage |= RenderAssetUsages::MAIN_WORLD;
-            source_mesh
-        };
+        let mesh = retained_mesh(meshes, source);
         let Some(VertexAttributeValues::Float32x3(points)) =
             mesh.attribute(Mesh::ATTRIBUTE_POSITION)
         else {
