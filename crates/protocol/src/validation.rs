@@ -4,6 +4,7 @@ use std::{collections::HashSet, hash::Hash};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InvalidState {
+    InvalidSnapshot,
     StateTooLarge,
     DuplicateCell,
     DuplicateInventoryItem,
@@ -59,6 +60,9 @@ impl StateView {
     /// are distinguished by observer-relative position. No world coordinates,
     /// portal graph, or hidden state are needed to check these invariants.
     pub fn validate(&self) -> Result<(), InvalidState> {
+        if !self.snapshot.is_valid() {
+            return Err(InvalidState::InvalidSnapshot);
+        }
         let o = &self.observation;
         if crate::chart_pages::validate_summaries(&o.charts).is_err() {
             return Err(InvalidState::InvalidChart);

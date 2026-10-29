@@ -1913,5 +1913,91 @@ class BuildTiming(unittest.TestCase):
                     self.assertGreaterEqual(row["seconds"], 0)
 
 
+
+class CausalPictureCompletion(unittest.TestCase):
+    class Client:
+        def __init__(self, frames):
+            self.frames = list(frames)
+        def write(self, value):
+            pass
+        def until(self, predicate, seconds, include_transcript=False):
+            while self.frames:
+                if predicate(json.dumps(self.frames.pop(0))):
+                    return
+            raise AssertionError("no frame satisfies completion")
+
+    @staticmethod
+    def update(body, revision=1, picture="old"):
+        return {"type": "update", "message": {"type": "update", "update": {"body": body}},
+                "readiness": {"revision": str(revision)}, "state": {"snapshot": picture}}
+
+    def test_dirty_outcome_before_lifecycle_waits_for_automatic_picture(self):
+        for phase in ("started", "resolved", "paused", "suspended"):
+            with self.subTest(phase=phase):
+                accepted = {"type": "ready", "intentions": [{"phase": "queued", "intention": "one"}]}
+                outcome = self.update({"type": "outcome", "visual_changed": True})
+                lifecycle = self.update({"type": "intention", "status": {"phase": phase, "intention": "one"}})
+                permission = self.update({"type": "readiness"}, revision=2)
+                picture = self.update({"type": "observation_delta"}, revision=2, picture="new")
+                client = self.Client([accepted, outcome, lifecycle, permission, picture])
+                actual = ProcessTestCase().act(client, {"type": "wait"})
+                self.assertEqual(actual["state"]["snapshot"], "new")
+                self.assertFalse(client.frames)
+
+    def test_causal_only_outcome_does_not_wait_for_a_picture(self):
+        accepted = {"type": "ready", "intentions": [{"phase": "queued", "intention": "one"}]}
+        outcome = self.update({"type": "outcome", "visual_changed": False})
+        lifecycle = self.update({"type": "intention", "status": {"phase": "resolved", "intention": "one"}})
+        permission = self.update({"type": "readiness"}, revision=2)
+        client = self.Client([accepted, outcome, lifecycle, permission])
+        actual = ProcessTestCase().act(client, {"type": "wait"})
+        self.assertEqual(actual, permission)
+        self.assertFalse(client.frames)
+
+    def test_picture_before_lifecycle_and_noqueued_acceptance_are_already_current(self):
+        outcome = self.update({"type": "outcome", "visual_changed": True})
+        picture = self.update({"type": "observation"}, picture="new")
+        accepted = {"type": "ready", "intentions": [], "state": {"snapshot": "new"}}
+        client = self.Client([outcome, picture, accepted])
+        self.assertEqual(ProcessTestCase().act(client, {"type": "wait"}), accepted)
+        self.assertFalse(client.frames)
+
+    def test_noqueued_acceptance_with_pending_visual_demand_waits(self):
+        outcome = self.update({"type": "outcome", "visual_changed": True})
+        accepted = {"type": "ready", "intentions": [], "state": {"snapshot": "old"}}
+        picture = self.update({"type": "observation"}, picture="new")
+        client = self.Client([outcome, accepted, picture])
+        self.assertEqual(ProcessTestCase().act(client, {"type": "wait"})["state"]["snapshot"], "new")
+
+    def test_disclosed_comparison_ignores_only_picture_identity_not_mechanics(self):
+        harness = ProcessTestCase()
+        original = {"snapshot": "a", "revision": "7", "observation": {"tick": "20", "health": 5}}
+        new = {**original, "snapshot": "b", "revision": "1"}
+        harness.assertDisclosedStateEqual(original, new)
+        for payload in ({"tick": "21", "health": 5}, {"tick": "20", "health": 4}):
+            with self.assertRaises(AssertionError):
+                harness.assertDisclosedStateEqual(original, {**new, "observation": payload})
+
+
+class CompactDetectionMemory(unittest.TestCase):
+    def test_compact_background_preserves_full_memory_assertion_without_snapshot(self):
+        from test_magic_items_process import MagicItemProcesses
+        case = MagicItemProcesses()
+        client = object()
+        hydration = {"complete": True, "failed": False, "limited": False}
+        pending = {"map_hydration": {**hydration, "complete": False}}
+        compact = {"map_hydration": hydration, "state_omitted": True}
+        full = {"map_hydration": hydration, "error": None,
+                "memory": [{"key": "cell", "wall": True, "last_seen_tick": "2", "last_seen_revision": "3"}]}
+        with patch.object(case, "frame", return_value=compact), \
+                patch.object(case, "command", return_value=full) as inspect:
+            actual = case.detection_memory(client, pending)
+        inspect.assert_called_once_with(client, {"type": "inspect"})
+        self.assertEqual(actual, [json.dumps({"key": "cell", "wall": True}, sort_keys=True)])
+        with patch.object(case, "command") as unused:
+            self.assertEqual(case.detection_memory(client, full), actual)
+        unused.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

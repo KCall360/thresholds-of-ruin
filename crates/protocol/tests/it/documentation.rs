@@ -56,7 +56,7 @@ fn documentation_validator_rejects_valid_json_with_invalid_wire_contracts() {
                 "stream": {"stream": "example-stream", "epoch": "1"},
                 "readiness_revision": "0"
             }, "branch": "example-branch",
-            "command": {"type": "act", "expected_revision": "0", "action": {"supplies":{"kind":"carried"},
+            "command": {"type": "act", "action": {"supplies":{"kind":"carried"},
                 "type": "use_ability", "id": "basic_melee",
                 "invocation": {"aim":{"kind":"actor_target", "target": tor_protocol::ActorTarget::from_digest([0; 32])},"weapon":{"kind":"default"}}
             }}
@@ -65,7 +65,7 @@ fn documentation_validator_rejects_valid_json_with_invalid_wire_contracts() {
     let example = |message: &serde_json::Value| format!("```json client-message\n{message}\n```\n");
     assert_eq!(validate_examples(&example(&valid)).unwrap(), (1, 0));
     let mut numeric_revision = valid.clone();
-    numeric_revision["request"]["command"]["expected_revision"] = serde_json::json!(0);
+    numeric_revision["request"]["context"]["readiness_revision"] = serde_json::json!(0);
     let mut numeric_target = valid.clone();
     numeric_target["request"]["command"]["action"]["invocation"]["aim"]["target"] =
         serde_json::json!(1);

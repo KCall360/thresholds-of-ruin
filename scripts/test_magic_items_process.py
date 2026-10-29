@@ -97,7 +97,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         probe, initial = self.client(observe=True)
         text, _ = self.text_client()
         for ground in observation(initial)["ground_items"]:
-            self.assertIn("Taken", text.command("take #" + ground["item"]["id"]))
+            self.assertIn("You pick up ", text.command("take #" + ground["item"]["id"]))
         carried = self.snapshot(probe)
         potion, = items(carried, "potion")
         scroll, = items(carried, "scroll")
@@ -149,7 +149,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
 
         text, relay = text_through_relay()
         for ground in observation(initial)["ground_items"]:
-            self.assertIn("Taken", text.command("take #" + ground["item"]["id"]))
+            self.assertIn("You pick up ", text.command("take #" + ground["item"]["id"]))
         carried = self.snapshot(probe)
         wand, = items(carried, "wand")
         scroll, = items(carried, "scroll")
@@ -238,6 +238,8 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         after = self.advance(owner, [])
         self.assertGreater(int(observation(after)["tick"]), int(before))
         self.assertEqual(actor_creature(checkpoint(self, owner))["build"]["body_build"]["active"]["id"], polymorph.FORM)
+        # A new inspection requests a current picture; continuation pages stay frozen.
+        self.snapshot(wizard)
         queried = self.command(wizard, {"type": "wizard", "command": "combat inspect"})
         self.assertIsNone(queried["error"])
         messages = [json.loads(line).get("message") for line in wizard.transcript if line.startswith("{")]
@@ -636,7 +638,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         probe, initial = self.client(observe=True)
         text, _ = self.text_client()
         for ground in observation(initial)["ground_items"]:
-            self.assertIn("Taken", text.command("take #" + ground["item"]["id"]))
+            self.assertIn("You pick up ", text.command("take #" + ground["item"]["id"]))
         carried = self.snapshot(probe)
         first, second = items(carried, "wand")
         scroll, = items(carried, "scroll")
@@ -718,7 +720,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         probe, initial = self.client(observe=True)
         text, _ = self.text_client()
         for ground in observation(initial)["ground_items"]:
-            self.assertIn("Taken", text.command("take #" + ground["item"]["id"]))
+            self.assertIn("You pick up ", text.command("take #" + ground["item"]["id"]))
         carried = self.snapshot(probe)
         self.assertEqual(observation(carried)["combat"]["own_stats"]["attributes"]["speed"], 0,
                          "effective compiled speed must preserve exact base-turn timing")
@@ -780,7 +782,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         text, _ = self.text_client()
         self.assertEqual(len(observation(initial)["ground_items"]), 1)
         wand = observation(initial)["ground_items"][0]["item"]["id"]
-        self.assertIn("Taken", text.command("take #" + wand))
+        self.assertIn("You pick up ", text.command("take #" + wand))
         carried = self.snapshot(probe)
         self.assertEqual(observation(carried)["combat"]["own_stats"]["attributes"]["speed"], 0)
         self.assertFalse(items(carried, "wand")[0]["identified"])
@@ -860,7 +862,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         probe, initial = self.client(observe=True)
         text, _ = self.text_client()
         for ground in observation(initial)["ground_items"]:
-            self.assertIn("Taken", text.command("take #" + ground["item"]["id"]))
+            self.assertIn("You pick up ", text.command("take #" + ground["item"]["id"]))
         carried = self.snapshot(probe)
         self.assertEqual(observation(carried)["combat"]["own_stats"]["attributes"]["speed"], 0,
                          "effective compiled speed must preserve exact base-turn timing")
@@ -1156,6 +1158,8 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         self.assertTrue(actor_creature(after, 2)["cancelled"])
         self.assertEqual(after["rules_rng"], before["rules_rng"])
         self.assertFalse(items(completed, "wand")[0]["identified"])
+        # A new inspection requests a current picture; continuation pages stay frozen.
+        self.snapshot(wizard)
         queried = self.command(wizard, {"type": "wizard", "command": "combat inspect"})
         self.assertFalse(queried.get("error"), queried.get("error"))
         effect_sample = message(wizard, "combat_diagnostics")
@@ -1286,6 +1290,8 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
             saved = checkpoint(self, owner)
             self.assertEqual(saved["rules_rng"], baseline["rules_rng"])
             self.assertEqual(actor_creature(saved)["build"]["hd"], actor_creature(baseline)["build"]["hd"])
+            # A new inspection requests a current picture; continuation pages stay frozen.
+            self.snapshot(wizard)
             queried = self.command(wizard, {"type": "wizard", "command": "combat inspect"})
             self.assertFalse(queried.get("error"), queried.get("error"))
             sample = message(wizard)
@@ -1308,7 +1314,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         self.addCleanup(relay.close)
         upstream, self.address = self.address, relay.address
         try:
-            client, frame = self.client(*(() if token is None else (token,)), observe=observe, actor=1)
+            client, frame = self.client(*(() if token is None else (token,)), observe=observe, actor=1, compact_background=True)
         finally:
             self.address = upstream
         if not hasattr(self, "detection_relays"):
@@ -1375,6 +1381,10 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
                 for key in ("complete", "failed", "limited")))
         self.assertTrue(frame["map_hydration"]["complete"], frame["map_hydration"])
         self.assertFalse(frame["map_hydration"]["failed"] or frame["map_hydration"]["limited"])
+        if frame.get("state_omitted", False):
+            # Local Inspect exposes already-hydrated memory without resetting it.
+            frame = self.command(client, {"type": "inspect"})
+            self.assertIsNone(frame["error"])
         return sorted(json.dumps({key: value for key, value in cell.items()
                                   if key not in ("last_seen_tick", "last_seen_revision")}, sort_keys=True)
                       for cell in frame["memory"])
@@ -1721,7 +1731,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         self.assertNotIn("actual visible peer", seen.lower())
         self.assertNotIn("gold coin", seen.lower())
         for _ in range(3):
-            self.assertEqual(self.snapshot(probe)["state"], first["state"])
+            self.assertDisclosedStateEqual(self.snapshot(probe)["state"], first["state"])
             self.assertEqual(checkpoint(self, probe), saved_first)
         first = self.snapshot(probe)
         self.hallucination_samples = {"visual": self.hallucination_snapshot_sample(probe, first)}
@@ -1922,6 +1932,8 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
             after = self.advance(owner, [])
             self.assertGreater(int(observation(after)["tick"]), int(observation(before)["tick"]))
             self.assertEqual(items(after, "potion"), items(carried, "potion"), "ability capture never impersonates potion consumption")
+            # A new inspection requests a current picture; continuation pages stay frozen.
+            self.snapshot(wizard)
             queried = self.command(wizard, {"type": "wizard", "command": "combat inspect"})
             self.assertFalse(queried.get("error"), queried.get("error"))
             sample = message(wizard, "combat_diagnostics")

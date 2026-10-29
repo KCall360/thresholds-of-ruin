@@ -85,6 +85,7 @@ WORKLOADS = {
                        manifest="crates/client-3d/Cargo.toml"),
     "latency": Workload("performance", "tor-server", "latency_bench", "scripts/performance_report.py",
                         ("--quick", "--phase-b", "--phase-c", "--phase-d", "--discovery-only", "--saved-discovery")),
+    "active-mobs": Workload("active-mobs-v1", "tor-server", "active_mob_bench", "scripts/active_mob_performance_report.py"),
     "combat": Workload("combat", "tor-server", "combat_bench", "scripts/combat_performance_report.py",
                        group=_combat_group, keys=("actors", "history", "sample", "version")),
     "strikes": Workload("ordered-strikes", "tor-server", "strike_bench", "scripts/strike_performance_report.py",
@@ -223,6 +224,9 @@ def _plain(timings):
 
 
 def extract(unit, rows):
+    if unit.workload == "active-mobs":
+        from active_mob_performance_report import extract as extract_active_mobs
+        return extract_active_mobs(rows)
     if unit.workload == "latency":
         return extract_latency(rows)
     return extract_rows(rows, unit.spec)

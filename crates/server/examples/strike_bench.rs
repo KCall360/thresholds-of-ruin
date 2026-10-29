@@ -123,7 +123,7 @@ fn act(engine: &mut Engine, actor: ActorId, id: &str, action: Action) -> Result<
         id,
         &engine.branch().clone(),
         Command::Act {
-            expected_revision: engine.revision(actor)?,
+            expected_boundary: engine.causal_boundary(actor)?,
             action,
         },
     )?;
@@ -148,7 +148,7 @@ impl Measurements {
     ) -> Result<()> {
         let branch = engine.branch().clone();
         let command = Command::Act {
-            expected_revision: engine.revision(actor)?,
+            expected_boundary: engine.causal_boundary(actor)?,
             action,
         };
         let before = work_counts();

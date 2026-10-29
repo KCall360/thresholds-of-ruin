@@ -122,7 +122,7 @@ fn publish(tx: &SyncSender<Event>, event: Event) -> Result<(), Error> {
 }
 
 /// Apply an already-delivered server boundary before considering a queued
-/// native command. The command retains its original revision and context.
+/// native command. Preserve its original input context and any query revision.
 async fn next_worker_input(
     server: impl Future<Output = Result<ServerMessage, Error>>,
     command: impl Future<Output = Option<Command>>,
@@ -145,7 +145,12 @@ async fn run(
     publish(tx, Event::Role(connection.role()))?;
     let mut shown_palette = (None, false);
     publish_palette_change(&mut shown_palette, &connection.palette, tx)?;
-    publish(tx, Event::Snapshot(Box::new(connection.state.snapshot())))?;
+    publish(
+        tx,
+        Event::Snapshot(Box::new(connection.state.reset_snapshot().map_err(
+            |error| format!("Initial session is not a reset: {error:?}"),
+        )?)),
+    )?;
     if connection.role() == AccessRole::Spectator {
         publish(
             tx,
@@ -191,10 +196,7 @@ async fn run(
                     }
                     let stale_input = matches!(request.as_ref(), Request::Command { context, .. }
                         if context != &connection.state.input_context());
-                    let stale_action = matches!(request.as_ref(), Request::Command {
-                        command: tor_protocol::Command::Act { expected_revision, .. }, ..
-                    } if *expected_revision != connection.state.state().revision);
-                    if &context != connection.state.context() || stale_input || stale_action {
+                    if &context != connection.state.context() || stale_input {
                         publish(
                             tx,
                             Event::Refused(
@@ -517,7 +519,6 @@ mod tests {
                 },
                 branch: BranchId("main".into()),
                 command: tor_protocol::Command::Act {
-                    expected_revision: 0,
                     action: Action::Move {
                         direction: Direction::East,
                     },
@@ -654,7 +655,7 @@ mod tests {
     fn creature_catalog_network_presentation_preserves_the_private_page() {
         let message: ServerMessage = serde_json::from_value(serde_json::json!({
             "type":"creature_catalog", "request_id":"catalog",
-            "context":{"input":{"stream":{"stream":"catalog","epoch":"0"},"readiness_revision":"0"},
+            "context":{"snapshot":"fixture-snapshot","input":{"stream":{"stream":"catalog","epoch":"0"},"readiness_revision":"0"},
                 "actor":"1","branch":"main","cursor":{"sequence":"0","tick":"0"},"revision":"0"},
             "page":{"depth":27,"entries":[{"selector":"rogue:imp","name":"Imp","details":"Racial growth"}],"next":null}
         })).unwrap();
@@ -753,7 +754,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn a_queued_run_step_from_an_older_observation_is_refused_without_retry() {
+    async fn a_queued_run_step_survives_a_display_only_update_without_retry() {
         queued_request_after_context_change(QueuedChange::MovementObservation).await;
     }
 
@@ -768,6 +769,7 @@ mod tests {
     async fn queued_request_after_context_change(change: QueuedChange) {
         let reset = matches!(change, QueuedChange::Reset);
         let advancement = matches!(change, QueuedChange::Observation);
+        let movement = matches!(change, QueuedChange::MovementObservation);
         let observation = matches!(
             change,
             QueuedChange::Observation | QueuedChange::MovementObservation
@@ -814,6 +816,10 @@ mod tests {
             fresh.context.epoch += 1;
         } else if observation {
             std::sync::Arc::make_mut(&mut fresh.state).revision += 1;
+            std::sync::Arc::make_mut(&mut fresh.state)
+                .snapshot
+                .0
+                .push_str("-next");
         } else {
             fresh.readiness.revision += 1;
         }
@@ -925,6 +931,46 @@ mod tests {
                 )
                 .await;
             }
+            if movement {
+                let ClientMessage::Request {
+                    request_id,
+                    request,
+                } = receive(&mut socket).await
+                else {
+                    panic!("display-only change must not discard the queued gameplay request")
+                };
+                let Request::Command {
+                    context,
+                    branch,
+                    command:
+                        tor_protocol::Command::Act {
+                            action:
+                                Action::Move {
+                                    direction: Direction::East,
+                                },
+                        },
+                } = *request
+                else {
+                    panic!("the original movement operands must remain exact")
+                };
+                assert_eq!(context, reply_context.input);
+                assert_eq!(branch, reply_context.branch);
+                send(
+                    &mut socket,
+                    ServerMessage::Ack {
+                        context: reply_context.clone(),
+                        request_id,
+                        receipt: RequestReceipt::Admitted {
+                            actor: reply_context.actor,
+                            branch: reply_context.branch.clone(),
+                            intention: IntentionId("accepted-once".into()),
+                            entry_id: EntryId("admission".into()),
+                            phase: IntentionPhase::Queued,
+                        },
+                    },
+                )
+                .await;
+            }
             let ClientMessage::Request {
                 request_id,
                 request,
@@ -1021,7 +1067,6 @@ mod tests {
                             }
                         } else {
                             tor_protocol::Command::Act {
-                                expected_revision: old_revision,
                                 action: Action::Move {
                                     direction: Direction::East,
                                 },
@@ -1041,6 +1086,15 @@ mod tests {
                 };
                 if match event {
                     Event::Fatal(error) => panic!("stale query became a fatal error: {error}"),
+                    Event::Status(status)
+                        if movement
+                            && status == tor_client_ascii::phase_status(IntentionPhase::Queued) =>
+                    {
+                        true
+                    }
+                    Event::Refused(status) if movement => {
+                        panic!("display-only update incorrectly refused queued movement: {status}")
+                    }
                     Event::Refused(status) if advancement => {
                         assert!(status.contains("Advancement"));
                         assert!(status.contains("not sent"));
@@ -1318,6 +1372,7 @@ mod tests {
                 tick: observation.tick,
             },
             state: std::sync::Arc::new(StateView {
+                snapshot: tor_protocol::SnapshotId("fixture-snapshot".into()),
                 wizard_game: false,
                 revision: 0,
                 observation,
@@ -1397,7 +1452,7 @@ mod tests {
             rx.try_recv().is_err(),
             "unchanged failure must not be republished"
         );
-        assert_eq!(state.snapshot(), initial);
+        assert_eq!(state.reset_snapshot().unwrap(), initial);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1459,7 +1514,7 @@ mod tests {
                     page: Box::new(ChartPage {
                         context: query.context.clone(),
                         branch: query.branch.clone(),
-                        base: query.base,
+                        base: query.base.clone(),
                         chart: query.chart.clone(),
                         kind: ChartKind::Monsters,
                         mode: ChartMode::Live,
@@ -1537,7 +1592,7 @@ mod tests {
             assert!(connection.is_synchronized());
             assert!(!connection.charts.loading());
             assert_eq!(connection.charts.selected(), None);
-            assert_eq!(connection.state.snapshot(), before);
+            assert_eq!(connection.state.reset_snapshot().unwrap(), before);
             connection.close().await.unwrap();
         });
         continuation_seen.await.unwrap();

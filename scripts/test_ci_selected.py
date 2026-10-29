@@ -97,6 +97,9 @@ class SelectedTests(unittest.TestCase):
                                       '--example', 'item_bench', '--example', 'place_bench', '--example', 'scenario_bench'])
         self.assertEqual(selected.required_stages('linux-debug-python', [physics]),
                          ['validate-applications', 'build-examples-debug', 'python-selected'])
+        active = prefix + 'test_active_mob_headless_smoke_preserves_activity_and_source_free_restart'
+        self.assertEqual(examples.stage([active], 'debug'), ('build-examples-debug',
+                         ['cargo', 'build', '-p', 'tor-server', '--locked', '--example', 'active_mob_bench'], {}))
         with self.assertRaises(ValueError): examples.stage([physics], 'relase')
         with self.assertRaises(ValueError): examples.stage(physics, 'debug')
         lane = {'id': 'linux-tooling', 'profile': 'debug', 'partition': 'tooling', 'test_ids': [physics]}
@@ -112,8 +115,8 @@ class SelectedTests(unittest.TestCase):
             for cls in (node for node in tree.body if isinstance(node, ast.ClassDef)):
                 for method in (node for node in cls.body if isinstance(node, ast.FunctionDef) and node.name.startswith('test_')):
                     calls = [node for node in ast.walk(method) if isinstance(node, ast.Call)]
-                    if any((isinstance(node.func, ast.Name) and node.func.id == 'benchmark') or
-                           (isinstance(node.func, ast.Attribute) and node.func.attr == 'benchmark') for node in calls):
+                    if any((isinstance(node.func, ast.Name) and node.func.id in ('benchmark', 'benchmark_executable')) or
+                           (isinstance(node.func, ast.Attribute) and node.func.attr in ('benchmark', 'benchmark_executable')) for node in calls):
                         identity = f'{module}.{cls.name}.{method.name}'
                         owners.add(identity)
                         names = {node.value for node in ast.walk(method)
@@ -122,7 +125,7 @@ class SelectedTests(unittest.TestCase):
                         self.assertEqual(set(examples.OWNERS.get(identity, ())), names, identity)
         self.assertEqual(set(examples.OWNERS), owners)
         names = examples.stage(sorted(owners), 'debug')[1][6::2]
-        self.assertEqual(names, ['combat_bench', 'horizon-profile', 'item_bench', 'latency_bench',
+        self.assertEqual(names, ['active_mob_bench', 'combat_bench', 'horizon-profile', 'item_bench', 'latency_bench',
                                  'physics_bench', 'place_bench', 'rogue_bench', 'scenario_bench'])
 
     def test_selected_receipts_reject_missing_extra_and_reordered_example_stages(self):

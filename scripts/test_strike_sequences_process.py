@@ -274,7 +274,7 @@ class StrikeSequenceProcesses(ProcessTestCase):
         self.assertNotEqual(reset["branch"], old["branch"])
         denied = self.request(player, {"type": "command", "context": old["input_context"],
             "branch": old["branch"], "command": {"type": "cancel_intention", "intention": identity,
-            "expected_revision": old["state"]["revision"], "step": "north_west"}})
+            "step": "north_west"}})
         self.assertIsNotNone(denied["error"])
         self.assertEqual(denied["state"], reset["state"])
 

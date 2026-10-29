@@ -13,9 +13,10 @@ perception: topology, occlusion and illumination still matter.
 
 [Geometry](geometry.md) explains finite material volumes, bodies, rotations and
 stairs. [Client architecture](clients.md) owns remembered sightings and surface
-presentation. Light propagation, portable lights, sound propagation, transparent
-materials, partial visibility, posture-dependent eyes and continuous stair
-meshes are outside the current model.
+presentation. Equipped or grounded finite-fuel portable lights contribute
+occluded physical illumination through the ordinary world scene. General light
+transport, sound propagation, transparent materials, partial visibility,
+posture-dependent eyes and continuous stair meshes remain outside the model.
 
 ## Concealed physical features
 
@@ -296,8 +297,10 @@ why it was perceived. This lets a renderer distinguish dark local awareness
 from illuminated sight without inferring illumination from visibility. Memory
 retains only the last disclosed value; it is not current authority. Text and
 ASCII retain their existing presentation. The 3D client mutes dark silhouettes
-and gates decorative glow on current illumination. Portable lights and light
-propagation are deferred. The current save/ruleset versions reject older
+and gates decorative glow on current illumination. Portable light remains
+item-owned: fuel, equipment/location and the exact emitter signature govern
+illumination, independently of ambient lighting and item identification. General
+light transport is deferred. The current save/ruleset versions reject older
 incompatible saves; see [status](../status.md).
 
 ### Symmetry

@@ -10,7 +10,7 @@ fn wizard(
     operation: WizardOperation,
 ) -> Result<tor_server::CommandResult, tor_server::Failure> {
     let branch = engine.branch().clone();
-    let expected_revision = engine.revision(ActorId(1)).unwrap();
+    let expected_revision = engine.causal_boundary(ActorId(1)).unwrap();
     engine.command(
         "wizard",
         "text",
@@ -18,7 +18,8 @@ fn wizard(
         id,
         &branch,
         Command::Wizard {
-            expected_revision,
+            display_basis: None,
+            expected_boundary: expected_revision,
             operation,
         },
     )
@@ -92,6 +93,7 @@ fn invalid_placement_is_atomic_and_successful_placement_is_idempotent() {
     let mut engine = Engine::memory(Scenario::two_room(1)).unwrap();
     engine.enable_wizard().unwrap();
     let before = engine.state(ActorId(1)).unwrap();
+    let before_boundary = engine.causal_boundary(ActorId(1)).unwrap();
     assert!(wizard(
         &mut engine,
         "bad",
@@ -109,7 +111,8 @@ fn invalid_placement_is_atomic_and_successful_placement_is_idempotent() {
     assert_eq!(engine.state(ActorId(1)).unwrap(), before);
     let branch = engine.branch().clone();
     let command = Command::Wizard {
-        expected_revision: before.revision,
+        display_basis: None,
+        expected_boundary: before_boundary,
         operation: WizardOperation::PlaceItem {
             kind: WizardItem::Tablet,
             position: Position {
@@ -171,7 +174,7 @@ fn rewind_restores_inventory_knowledge_scheduler_without_reusing_actor_identity(
             "take",
             &branch,
             Command::Act {
-                expected_revision: engine.revision(ActorId(1)).unwrap(),
+                expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
                 action: engine
                     .decode_action(
                         ActorId(1),
@@ -273,7 +276,8 @@ fn rewind_retry_after_restart_recovers_receipt_without_another_fork() {
     engine.enable_wizard().unwrap();
     let branch = engine.branch().clone();
     let command = Command::Wizard {
-        expected_revision: 0,
+        display_basis: None,
+        expected_boundary: 0,
         operation: WizardOperation::Rewind { target: None },
     };
     let first = engine
@@ -565,7 +569,8 @@ fn arena_step_retry_checkpoint_and_rewind_preserve_original_paid_work() {
         .own_stats;
     let branch = engine.branch().clone();
     let command = Command::Wizard {
-        expected_revision: engine.revision(ActorId(1)).unwrap(),
+        display_basis: None,
+        expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
         operation: WizardOperation::ArenaControl {
             paused: true,
             advance: 1,
@@ -652,7 +657,8 @@ fn creature_latest_hd_removal_is_owned_atomic_retryable_and_reversible() {
     engine.enable_wizard().unwrap();
     let branch = engine.branch().clone();
     let command = Command::Wizard {
-        expected_revision: engine.revision(ActorId(1)).unwrap(),
+        display_basis: None,
+        expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
         operation: operation.clone(),
     };
     let removed = engine
@@ -886,7 +892,8 @@ fn wizard_templates_use_authored_definitions_and_preserve_replay_retry_and_confl
     engine.enable_wizard().unwrap();
     let branch = engine.branch().clone();
     let command = Command::Wizard {
-        expected_revision: engine.revision(ActorId(1)).unwrap(),
+        display_basis: None,
+        expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
         operation: remove,
     };
     let changed = engine
@@ -1060,7 +1067,8 @@ fn creature_advancement_is_owned_atomic_retryable_and_persistent() {
     engine.enable_wizard().unwrap();
     let branch = engine.branch().clone();
     let command = Command::Wizard {
-        expected_revision: engine.revision(ActorId(1)).unwrap(),
+        display_basis: None,
+        expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
         operation: add.clone(),
     };
     let added = engine
@@ -1406,7 +1414,8 @@ fn purchase_replacement_is_privileged_atomic_idempotent_and_replayed() {
     assert_eq!(engine.inspect_creature(ActorId(1)).unwrap(), before);
     let branch = engine.branch().clone();
     let command = Command::Wizard {
-        expected_revision: engine.revision(ActorId(1)).unwrap(),
+        display_basis: None,
+        expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
         operation: replace,
     };
     let result = engine

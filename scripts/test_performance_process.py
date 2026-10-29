@@ -7,9 +7,9 @@ import tempfile
 import unittest
 from unittest.mock import patch
 from performance_driver import JsonProcess, run_demo
-from performance_process_support import assert_physics_report, benchmark
+from performance_process_support import assert_physics_report, benchmark, benchmark_executable
 
-from process_harness import ProcessTestCase, SUFFIX, TOKEN
+from process_harness import ProcessTestCase, ROOT, SUFFIX, TOKEN
 
 
 class PerformanceProcesses(ProcessTestCase):
@@ -57,6 +57,49 @@ class PerformanceProcesses(ProcessTestCase):
                 self.assertTrue(validate_report(rows))
                 with self.assertRaises(ValueError):
                     validate_report(rows[:-1])
+
+    def test_active_mob_producer_proves_all_live_regions_and_replay(self):
+        from active_mob_performance_report import extract
+        rows = self.benchmark('active_mob_bench', ['--steps', '8'], 180)
+        timings, counts, version = extract(rows)
+        self.assertEqual(version, 1)
+        self.assertEqual(set(timings), {'r20-ai100-s8'})
+        self.assertEqual(counts['r20-ai100-s8']['player_moves'], 8)
+        with self.assertRaises(ValueError):
+            extract([])
+
+    def test_active_mob_headless_smoke_preserves_activity_and_source_free_restart(self):
+        from active_mob_driver import run
+        from perf_ledger import sha256_file
+        executable = benchmark_executable(self, 'active_mob_bench')
+        profile = os.environ.get('TOR_TEST_PROFILE', 'debug')
+        def source(*args):
+            return subprocess.check_output(['git', *args], cwd=ROOT, text=True).strip()
+        binaries = {'tor-server': self.bin / ('tor-server' + SUFFIX),
+                    'tor-client-headless': self.bin / ('tor-client-headless' + SUFFIX),
+                    'active_mob_bench': executable}
+        # self.bin is supplied by the normal harness build or its validated CI
+        # application artifact; the example has its independent Cargo receipt.
+        manifest = dict(source_commit=source('rev-parse', 'HEAD'),
+                        source_tree=source('rev-parse', 'HEAD^{tree}'),
+                        dirty=bool(source('status', '--porcelain')), profile=profile,
+                        toolchain=subprocess.check_output(['rustc', '--version'], cwd=ROOT, text=True).strip(),
+                        binaries={name: sha256_file(path) for name, path in binaries.items()})
+        manifest_path = self.directory / 'active-mob-build.json'
+        manifest_path.write_text(json.dumps(manifest), encoding='utf-8')
+        output = self.directory / 'active-mob-headless'
+        result = run(self.bin, executable, output, manifest_path,
+                     duration=3.2, rate=5., burst=4, smoke=True)
+        self.assertTrue(result['complete'])
+        self.assertTrue(result['restart_equal'])
+        self.assertTrue(result['source_package_removed_from_original_path'])
+        self.assertEqual((len(result['samples']), len(result['burst_samples'])), (16, 4))
+        self.assertEqual(result['measured_inspection']['activity']['player_moves'], 16)
+        self.assertEqual(result['final_inspection']['activity']['player_moves'], 20)
+        self.assertEqual(result['provenance']['manifest']['profile'], profile)
+        self.assertFalse(result['provisional_load_target_met'], 'smoke is never a 60-second release acceptance claim')
+        self.assertTrue((output / 'result.json').is_file())
+        self.assertFalse((output / 'failure.json').exists())
 
     def test_rogue_benchmark_preserves_floor_work_and_residency_bounds(self):
         from performance_report import validate_rogue

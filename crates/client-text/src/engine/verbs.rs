@@ -1947,7 +1947,7 @@ fn session_command(session: &SessionCommand, scene: &Scene) -> Interpretation {
         }
         SessionCommand::Note { text, is_bookmark } => tool(Input::Command(Command::Annotate {
             anchor: Anchor::State {
-                revision: state.revision,
+                snapshot: state.snapshot.clone(),
             },
             text: text.clone(),
             source: ClientSource::User,
@@ -1981,7 +1981,7 @@ fn session_command(session: &SessionCommand, scene: &Scene) -> Interpretation {
             category,
             anchor,
             text,
-        } => match crate::annotation(source, audience, category, anchor, text, state.revision) {
+        } => match crate::annotation(source, audience, category, anchor, text, &state.snapshot) {
             Ok(input) => tool(input),
             Err(e) => refuse(e),
         },

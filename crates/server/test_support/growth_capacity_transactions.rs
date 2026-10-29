@@ -41,16 +41,16 @@ fn ability(id: &str, target: u64) -> Action {
     }
 }
 pub(crate) fn finisher(engine: &Engine, queued: bool) -> Command {
-    let expected_revision = engine.revision(ActorId(1)).unwrap();
+    let expected_revision = engine.causal_boundary(ActorId(1)).unwrap();
     let action = ability("growth_finisher", 2);
     if queued {
         Command::AdmitIntention {
-            expected_revision,
+            expected_boundary: expected_revision,
             action,
         }
     } else {
         Command::Act {
-            expected_revision,
+            expected_boundary: expected_revision,
             action,
         }
     }
@@ -89,7 +89,7 @@ pub(crate) fn prepared(maximum: bool) -> Engine {
                 id,
                 &engine.branch().clone(),
                 Command::AdmitIntention {
-                    expected_revision: engine.revision(ActorId(actor)).unwrap(),
+                    expected_boundary: engine.causal_boundary(ActorId(actor)).unwrap(),
                     action: ability(id, target),
                 },
             )

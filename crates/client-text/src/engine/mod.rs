@@ -254,21 +254,16 @@ fn yes_or_no(line: &str) -> Option<bool> {
 }
 
 /// The run is over: the character died, or it ended in victory.
-fn ended(state: &StateView) -> bool {
+fn ended(state: &tor_client_common::ClientState) -> bool {
     state
-        .observation
-        .combat
-        .as_ref()
-        .is_some_and(|c| c.terminal || c.dead)
+        .outcome_status()
+        .is_some_and(|status| status.terminal || status.dead)
 }
 
 fn hp(link: &impl Link) -> (u64, u64) {
     link.client()
-        .state()
-        .observation
-        .combat
-        .as_ref()
-        .map_or((0, 0), |c| (c.hp, c.max_hp))
+        .outcome_status()
+        .map_or((0, 0), |status| (status.hp, status.max_hp))
 }
 
 /// The most rounds one `fight` goes before stopping to let the player look.
@@ -1191,7 +1186,7 @@ impl Engine {
             .await?;
             self.tally.goals += 1;
             self.after_beats(link, record);
-            if ended(link.client().state()) {
+            if ended(link.client()) {
                 return Ok(Flow::Stop);
             }
             if !done {
@@ -1424,7 +1419,7 @@ impl Engine {
                     record.say("Wizard authority is required.");
                     return Ok(Flow::Stop);
                 }
-                let context = link.client().snapshot().reply_context();
+                let context = link.client().reply_context();
                 let command = link
                     .inspection_pages()
                     .ok_or_else(|| "Open a creature inspection first.".to_owned())
@@ -1569,7 +1564,7 @@ impl Engine {
             let arrival = self.arrival(link);
             record.entries.push(Entry::Description(arrival));
         }
-        if ended(link.client().state()) && !self.tally.told {
+        if ended(link.client()) && !self.tally.told {
             self.tally.told = true;
             record.entries.push(Entry::Description(self.ending(link)));
         }
@@ -1598,8 +1593,10 @@ impl Engine {
     /// The observed session account, never an authoritative whole-run history.
     fn ending(&self, link: &impl Link) -> String {
         let state = link.client().state();
-        let combat = state.observation.combat.as_ref();
-        let died = combat.is_some_and(|c| c.dead);
+        let died = link
+            .client()
+            .outcome_status()
+            .is_some_and(|status| status.dead);
         let banner = if died {
             "*** You have died ***"
         } else {

@@ -189,10 +189,9 @@ class HeadlessProcesses(ProcessTestCase):
         accepted = self.act(player, {"type": "wait"})
         self.assertIsNone(accepted["error"])
         rejected = self.request(player, {
-            "type": "command", "context": accepted["input_context"], "branch": initial["branch"],
-            "command": {"type": "act", "expected_revision": initial["state"]["revision"],
-                        "action": {"type": "wait"}}})
-        self.assertTrue(rejected["error"].startswith("StaleRevision:"))
+            "type": "command", "context": initial["input_context"], "branch": initial["branch"],
+            "command": {"type": "act", "action": {"type": "wait"}}})
+        self.assertTrue(rejected["error"].startswith("StaleContext:"))
         self.assertEqual(rejected["state"], accepted["state"])
         self.assertEqual(rejected["history"], accepted["history"])
         self.flush_save()

@@ -15,6 +15,11 @@ fn phases(p: &CommandProfile) -> BTreeMap<String, f64> {
         ("candidate_capture", p.rollback_capture),
         ("checkpoint_capture", p.checkpoint_capture),
         ("simulation", p.simulation_transition),
+        ("intention_derivation", p.intention_derivation),
+        ("request_validation", p.request_validation),
+        ("map_recording", p.map_recording),
+        ("commit_metadata", p.commit_metadata),
+        ("input_generation", p.input_generation),
         ("navigation", p.navigation_refresh),
         ("perception", p.perception),
         ("revision_comparison", p.revision_detection),
@@ -163,7 +168,7 @@ impl Runner {
                     &request,
                     &branch,
                     Command::Act {
-                        expected_revision: before.revision,
+                        expected_boundary: self.engine.causal_boundary(actor).unwrap(),
                         action,
                     },
                 )
@@ -210,7 +215,7 @@ impl Runner {
         let mut observation_wire = None;
         // Construct outside timing; encode, decode and apply to the same growing client.
         if let Some(entry) = event.as_ref().filter(|_| {
-            self.engine.revision(ActorId(1)).unwrap()
+            self.engine.causal_boundary(ActorId(1)).unwrap()
                 > self.app.state.as_ref().unwrap().state().revision
         }) {
             let state = self.engine.state(ActorId(1)).unwrap();
@@ -366,7 +371,7 @@ fn streaming_case(
     println!(
         "{}",
         json!({"kind":"stream","preloading":true,"case":case,"workload":"streaming-v1","regions":halls,"actors":1,
-        "steps_per_cycle":2*STREAM_LEG,"cycles":cycles,"commit":commit,"dirty":dirty,"profile_version":2,"wire_profile_version":2,"region_acquisition_version":1,
+        "steps_per_cycle":2*STREAM_LEG,"cycles":cycles,"commit":commit,"dirty":dirty,"profile_version":3,"observer_work_contract":"causal_facts_demand_display_v1","wire_profile_version":2,"region_acquisition_version":1,
         "platform":std::env::consts::OS,"architecture":std::env::consts::ARCH,
         "build_profile":if cfg!(debug_assertions){"debug"}else{"release"},
         "storage":if durable{"background_sqlite_journal"}else{"memory"},
@@ -535,7 +540,7 @@ fn main() {
                         "{}",
                         json!({"kind":"case","case":case,"regions":regions,"actors":actors,"history_start":history,
             "seed":trace.seed,"trace_version":trace.version,"commit":String::from_utf8_lossy(&commit.stdout).trim(),
-            "dirty":!dirty.success(),"profile_version":2,"wire_profile_version":2,"platform":std::env::consts::OS,"architecture":std::env::consts::ARCH,
+            "dirty":!dirty.success(),"profile_version":3,"observer_work_contract":"causal_facts_demand_display_v1","wire_profile_version":2,"platform":std::env::consts::OS,"architecture":std::env::consts::ARCH,
             "build_profile":if cfg!(debug_assertions){"debug"}else{"release"},"cycles":cycles,"warmup":0,
             "storage":if durable{"background_sqlite_journal"}else{"memory"},"client_observer":1,
             "save_policy":{"target_ms":save_policy.target_interval.as_millis(),"max_ms":save_policy.max_unsaved_age.as_millis(),"idle_ms":save_policy.idle_interval.as_millis(),"queue_bytes":save_policy.max_pending_bytes,"checkpoint_interval":save_policy.checkpoint_interval},
@@ -601,7 +606,7 @@ fn main() {
             "storage":if saved_discovery {"background_sqlite_journal"} else {"memory"},
             "checkpoint_interval":save_policy.checkpoint_interval,
             "trace_version":trace.version,"seed":trace.seed,"commit":String::from_utf8_lossy(&commit.stdout).trim(),
-            "dirty":!dirty.success(),"profile_version":2,"wire_profile_version":2,"build_profile":if cfg!(debug_assertions){"debug"}else{"release"},
+            "dirty":!dirty.success(),"profile_version":3,"observer_work_contract":"causal_facts_demand_display_v1","wire_profile_version":2,"build_profile":if cfg!(debug_assertions){"debug"}else{"release"},
             "cycles":if quick {2} else {regions-1},"platform":std::env::consts::OS,"architecture":std::env::consts::ARCH})
         );
         eprintln!("Starting {case}");

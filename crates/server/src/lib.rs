@@ -32,14 +32,15 @@ mod regions;
 mod runner;
 pub use regions::{RegionAcquisitionProfile, Streaming};
 pub mod scenario_package;
+mod semantic_visual;
 mod session;
 mod storage;
 pub use storage::{inspect_save, SavePolicy, SaveStatus};
 mod transport;
 pub mod wire_adapter;
 pub use engine::{
-    ActorSetup, BootstrapProfile, CommandProfile, CommandResult, Engine, Failure, RecoveryProfile,
-    RegionCounts, Scenario,
+    ActorSetup, BootstrapProfile, CommandProfile, CommandResult, Engine, Failure,
+    PresentationBoundary, RecoveryProfile, RegionCounts, Scenario,
 };
 pub use runner::{Simulation, SimulationHandle};
 #[cfg(feature = "service-contract-host")]
@@ -64,3 +65,11 @@ mod public_plan_test_fixture;
 #[cfg(test)]
 #[path = "../example_support/physics_options.rs"]
 mod physics_options;
+
+// Exercise the exact offline benchmark inspector and CLI in the ordinary unit target.
+#[cfg(test)]
+#[path = "../example_support/active_mob_options.rs"]
+mod active_mob_options;
+#[cfg(test)]
+#[path = "../example_support/active_mob_trace.rs"]
+mod active_mob_trace;

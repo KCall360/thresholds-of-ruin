@@ -56,7 +56,11 @@ fn request(wire: &Wire, actor: ActorId, query: ProjectileChoiceQuery) -> Request
         context: wire.service.input_context(wire.clients[&actor].id).unwrap(),
         branch: wire.service.engine.branch().clone(),
         command: Command::ProjectileChoices {
-            expected_revision: wire.service.engine.revision(actor).unwrap(),
+            expected_revision: wire
+                .service
+                .reply_context(wire.clients[&actor].id)
+                .unwrap()
+                .revision,
             query,
         },
     }

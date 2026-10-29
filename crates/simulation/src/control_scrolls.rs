@@ -674,6 +674,14 @@ impl Game {
         Ok(())
     }
     pub(crate) fn reconcile_control_contacts(&mut self) -> Result<(), GameError> {
+        let _diagnostic_span = crate::diagnostics::spans::span("control_contacts");
+        // Loaded ground items are the only possible sources of these contacts.
+        // A carried scare scroll is not a ground effect. This exact predicate
+        // avoids a new index/invalidation contract and is stable on the absent
+        // path, which only clears obsolete actor-owned contact receipts.
+        let has_ground_scare = self.items.values().any(|item| {
+            matches!(item.location, ItemLocation::Ground(_)) && item.spec.ground_scare.is_some()
+        });
         let recipients: Vec<_> = self.actors.keys().copied().collect();
         for recipient in recipients {
             if !self.alive(recipient)
@@ -691,9 +699,25 @@ impl Game {
             let cells = self
                 .body_cells(actor.location, actor.orientation, &actor.body)
                 .ok_or(GameError::InvalidLocation)?;
+            // Retain body validation even on this fast path: absence of a
+            // feature must not mask the existing InvalidLocation error.
+            if !has_ground_scare {
+                if !actor.control.scare_contacts.is_empty() {
+                    self.actors
+                        .get_mut(&recipient)
+                        .ok_or(GameError::UnknownActor)?
+                        .control
+                        .scare_contacts
+                        .clear();
+                }
+                // Earned flee/hold/confusion ownership is independent of these
+                // approach receipts and must survive removal of the scroll.
+                continue;
+            }
             let mut contacts = BTreeMap::new();
             for (cell, _) in cells {
                 for direction in Direction::HORIZONTAL {
+                    crate::diagnostics::control_contact_neighbor_probe();
                     let next = if direction.components().is_some() {
                         self.world.diagonal_reach(cell, direction, |_| true)
                     } else {
@@ -728,12 +752,17 @@ impl Game {
                 .filter(|(_, (source, _, _))| source.is_some())
                 .map(|(id, _)| *id)
                 .collect();
-            let entered = self
-                .actors
-                .get_mut(&recipient)
-                .ok_or(GameError::UnknownActor)?
-                .control
-                .enter_scared(&ids, &eligible)?;
+            // The bounded contact vector often remains identical. Compute the
+            // same ordered transition without dirtying actor indexes or taking
+            // a COW write guard unless authoritative control state changes.
+            let mut control = self.actors[&recipient].control.clone();
+            let entered = control.enter_scared(&ids, &eligible)?;
+            if control != self.actors[&recipient].control {
+                self.actors
+                    .get_mut(&recipient)
+                    .ok_or(GameError::UnknownActor)?
+                    .control = control;
+            }
             if self.forced_flee_location(recipient).is_some() {
                 continue;
             }

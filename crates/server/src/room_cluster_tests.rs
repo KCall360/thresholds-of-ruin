@@ -291,7 +291,7 @@ fn expired_abandoned_cluster_still_binds_selected_room_area_and_full_footprint()
                 &uuid::Uuid::new_v4().to_string(),
                 &engine.branch().clone(),
                 Command::Act {
-                    expected_revision: engine.revision(ActorId(1)).unwrap(),
+                    expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
                     action: Action::Wait,
                 },
             )

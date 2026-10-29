@@ -19,7 +19,7 @@ struct Spec {
 }
 fn wizard(engine: &mut Engine, id: &str, operation: String) -> tor_server::CommandProfile {
     let command = tor_server::wire_adapter::decode_command(&Command::Wizard {
-        expected_revision: engine.revision(ActorId(1)).unwrap(),
+        expected_revision: engine.causal_boundary(ActorId(1)).unwrap(),
         operation,
     })
     .unwrap();
@@ -123,16 +123,17 @@ fn main() {
         let mut canvas = Canvas::default();
         for sample in 0..spec.samples {
             let rename = sample % 2 == 0;
-            let revision = engine.revision(ActorId(1)).unwrap();
+            let revision = engine.causal_boundary(ActorId(1)).unwrap();
             let command = if rename {
                 journal::Command::RenamePlace {
-                    expected_revision: revision,
+                    display_basis: None,
+                    expected_boundary: revision,
                     key: key.clone(),
                     name: format!("Reverie {sample}"),
                 }
             } else {
                 journal::Command::Act {
-                    expected_revision: revision,
+                    expected_boundary: revision,
                     action: Action::Wait,
                 }
             };

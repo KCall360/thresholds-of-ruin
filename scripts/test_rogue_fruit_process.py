@@ -48,7 +48,7 @@ class RogueFruitProcesses(ProcessTestCase):
         self.assertEqual((fruit["item"]["name"], fruit["item"]["quantity"], fruit["item"]["class"]),
                          ("fruit", "2", "food"))
         self.assertEqual(inventory(initial, "food ration")["quantity"], "1")
-        self.assertIn("Taken", text.command("take fruit"))
+        self.assertIn("You pick up ", text.command("take fruit"))
         carried = self.snapshot(probe)
         selected = inventory(carried, "fruit")
         ration = inventory(carried, "food ration")

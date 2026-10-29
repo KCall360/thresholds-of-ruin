@@ -5,6 +5,8 @@ Each owner still performs its Cargo freshness check and actual bounded runtime.
 """
 
 OWNERS = {
+    'test_performance_process.PerformanceProcesses.test_active_mob_producer_proves_all_live_regions_and_replay': ('active_mob_bench',),
+    'test_performance_process.PerformanceProcesses.test_active_mob_headless_smoke_preserves_activity_and_source_free_restart': ('active_mob_bench',),
     'test_performance_process.PerformanceProcesses.test_small_maintained_producers_emit_complete_valid_reports': (
         'combat_bench', 'item_bench', 'place_bench', 'scenario_bench', 'horizon-profile'),
     'test_performance_process.PerformanceProcesses.test_rogue_benchmark_preserves_floor_work_and_residency_bounds': ('rogue_bench',),

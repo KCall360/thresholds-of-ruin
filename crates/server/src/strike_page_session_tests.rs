@@ -33,8 +33,8 @@ fn connect(service: &mut Service, user: &str, role: AccessRole) -> Connection {
 }
 fn request(service: &Service, client: u64, source: Value, cursor: Value) -> Value {
     json!({"type":"command","context":service.input_context(client).unwrap(),"branch":service.engine.branch(),
-        "command":{"type":"inspect_strike_source","expected_revision":service.engine.revision(ActorId(1)).unwrap().to_string(),
-            "actor":"1","target_revision":service.engine.revision(ActorId(1)).unwrap().to_string(),"source":source,"cursor":cursor}})
+        "command":{"type":"inspect_strike_source","expected_revision":service.engine.causal_boundary(ActorId(1)).unwrap().to_string(),
+            "actor":"1","target_revision":service.engine.causal_boundary(ActorId(1)).unwrap().to_string(),"source":source,"cursor":cursor}})
 }
 fn query(service: &mut Service, client: &mut Connection, value: Value) -> Vec<Value> {
     let request: Request =
@@ -310,7 +310,7 @@ fn wizard(service: &mut Service, client: &mut Connection, operation: &str) {
             context: service.input_context(client.id).unwrap(),
             branch: service.engine.branch().clone(),
             command: Command::Wizard {
-                expected_revision: service.engine.revision(ActorId(1)).unwrap(),
+                expected_revision: service.reply_context(client.id).unwrap().revision,
                 operation: operation.into(),
             },
         },
@@ -569,7 +569,6 @@ fn ordered_strikes_detail_ordinary_unequip_changes_selected_source_and_retires_h
             context: service.input_context(client.id).unwrap(),
             branch: service.engine.branch().clone(),
             command: Command::Act {
-                expected_revision: service.engine.revision(ActorId(1)).unwrap(),
                 action: Action::Unequip { item },
             },
         },
@@ -608,8 +607,11 @@ fn ordered_strikes_detail_other_target_unload_and_reload_reject_old_identity() {
     let target_request = |service: &Service, client, cursor| {
         let mut value = request(service, client, source.clone(), cursor);
         value["command"]["actor"] = json!("2");
-        value["command"]["target_revision"] =
-            json!(service.engine.revision(ActorId(2)).unwrap().to_string());
+        value["command"]["target_revision"] = json!(service
+            .engine
+            .causal_boundary(ActorId(2))
+            .unwrap()
+            .to_string());
         value
     };
     let input = target_request(&service, client.id, Value::Null);

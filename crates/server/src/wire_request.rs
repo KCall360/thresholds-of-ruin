@@ -1,30 +1,27 @@
 //! Resolve saved requests before consulting current target availability.
 use super::{valid_label, ActorId, BranchId, Command, CommandResult, Engine, Failure};
-use crate::wire_adapter::{self, DecodedCommand, TargetScope};
+use crate::wire_adapter::{self, DecodedCommand, DisplayCommand, TargetScope};
 use tor_protocol::ErrorCode;
 
 impl Engine {
-    pub(crate) fn ability_weapon_preview(
+    pub(crate) fn ability_weapon_preview_at(
         &self,
+        boundary: &super::PresentationBoundary,
         actor: ActorId,
-        branch: &BranchId,
-        revision: u64,
         ability: &str,
         invocation: tor_protocol::AbilityInvocation,
         supplies: &tor_protocol::SupplySelection,
     ) -> Result<tor_protocol::AbilityWeaponPreview, Failure> {
-        self.check_metadata(
-            actor,
-            branch,
-            Some((revision, "Refresh the observation before previewing")),
-        )?;
-        let action = self.decode_action(
-            actor,
+        let game = self.presentation_game(boundary)?;
+        let view = super::revision_view(game, actor)?;
+        let action = wire_adapter::decode_action(
             &tor_protocol::Action::UseAbility {
                 id: ability.into(),
                 invocation,
                 supplies: supplies.clone(),
             },
+            &self.target_scope(actor),
+            &view.observation,
         )?;
         let tor_simulation::Action::UseAbility {
             id,
@@ -34,8 +31,7 @@ impl Engine {
         else {
             unreachable!("ability decoder preserves action kind")
         };
-        let value = self
-            .game
+        let value = game
             .preview_ability_weapon(
                 tor_simulation::ActorId(actor.0),
                 &id,
@@ -135,6 +131,7 @@ impl Engine {
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn creature_catalog_query(
         &self,
         observer: ActorId,
@@ -157,16 +154,28 @@ impl Engine {
                 "Refresh the observation before inspecting",
             )),
         )?;
+        self.creature_catalog_query_at(&self.presentation_boundary(), observer, depth, after)
+    }
+
+    pub(crate) fn creature_catalog_query_at(
+        &self,
+        boundary: &super::PresentationBoundary,
+        observer: ActorId,
+        depth: Option<u32>,
+        after: Option<&str>,
+    ) -> Result<tor_protocol::CreatureCatalogPage, Failure> {
+        self.require_wizard_authority()?;
+        let game = self.presentation_game(boundary)?;
         let depth = depth.or_else(|| {
             self.regions.as_ref().and_then(|regions| {
-                self.game
-                    .known_actor_region(tor_simulation::ActorId(observer.0))
+                game.known_actor_region(tor_simulation::ActorId(observer.0))
                     .and_then(|at| regions.authored_depth(at.0))
             })
         });
-        crate::wizard_creatures::catalog(&self.game, self.regions.as_ref(), depth, after)
+        crate::wizard_creatures::catalog(game, self.regions.as_ref(), depth, after)
     }
 
+    #[cfg(test)]
     pub(crate) fn inspect_creature_query(
         &self,
         observer: ActorId,
@@ -188,7 +197,16 @@ impl Engine {
                 "Refresh the observation before inspecting",
             )),
         )?;
-        self.inspect_creature(target)
+        self.inspect_creature_query_at(&self.presentation_boundary(), target, expected_revision)
+    }
+
+    pub(crate) fn inspect_creature_query_at(
+        &self,
+        boundary: &super::PresentationBoundary,
+        target: ActorId,
+        display_revision: u64,
+    ) -> Result<tor_protocol::CreatureInspectionView, Failure> {
+        self.inspect_creature_at(boundary, target, display_revision)
     }
 
     /// Existing immutable run/package identities bind ephemeral inspection handles.
@@ -206,11 +224,10 @@ impl Engine {
         )
     }
 
-    pub(crate) fn strike_page_query(
+    pub(crate) fn strike_page_query_at(
         &self,
-        observer: ActorId,
-        branch: &BranchId,
-        expected_revision: u64,
+        boundary: &super::PresentationBoundary,
+        display_revision: u64,
         (target, target_revision): (ActorId, u64),
         (source, start): (
             &tor_protocol::StrikeSourceSelector,
@@ -219,22 +236,14 @@ impl Engine {
         budget: &crate::creature_view::PageBudget<'_>,
     ) -> Result<crate::creature_view::ProjectedPage, Failure> {
         self.require_wizard_authority()?;
-        self.check_metadata(
-            observer,
-            branch,
-            Some((
-                expected_revision,
-                "Refresh the observation before inspecting",
-            )),
-        )?;
-        if self.revision(target)? != target_revision {
+        if display_revision != target_revision {
             return Err(Failure::new(
                 ErrorCode::StaleContext,
                 "Creature changed; reopen its inspection",
             ));
         }
         crate::creature_view::strike_page(
-            &self.game,
+            self.presentation_game(boundary)?,
             tor_simulation::ActorId(target.0),
             source,
             start,
@@ -243,25 +252,38 @@ impl Engine {
     }
 
     /// Runtime diagnostic controls share query authorization and metadata checks.
-    pub(crate) fn combat_diagnostics_query(
+    pub(crate) fn combat_diagnostics_query_at(
         &mut self,
-        observer: ActorId,
-        branch: &BranchId,
-        expected_revision: u64,
+        boundary: &super::PresentationBoundary,
         operation: crate::wire_adapter::CombatDiagnosticsOperation,
     ) -> Result<tor_protocol::CombatDiagnosticsView, Failure> {
         self.require_wizard_authority()?;
-        self.check_metadata(
-            observer,
-            branch,
-            Some((
-                expected_revision,
-                "Refresh the observation before inspecting",
-            )),
-        )?;
         match operation {
             crate::wire_adapter::CombatDiagnosticsOperation::Inspect { through } => {
-                self.inspect_combat_diagnostics(through)
+                let report = crate::creature_view::combat_diagnostics(
+                    self.presentation_game(boundary)?,
+                    through,
+                )
+                .map_err(|error| {
+                    use crate::creature_view::DiagnosticProjectionError as E;
+                    match error {
+                        E::InvalidPage => Failure::new(
+                            ErrorCode::InvalidAction,
+                            "Combat diagnostic page is unavailable",
+                        ),
+                        E::Inconsistent => Failure::new(
+                            ErrorCode::InvalidArchive,
+                            "Combat diagnostics are inconsistent",
+                        ),
+                    }
+                })?;
+                report.validate().map_err(|_| {
+                    Failure::new(
+                        ErrorCode::InvalidArchive,
+                        "Combat diagnostics are inconsistent",
+                    )
+                })?;
+                Ok(report)
             }
             crate::wire_adapter::CombatDiagnosticsOperation::Capture { enabled } => {
                 self.configure_combat_diagnostics(enabled)
@@ -276,9 +298,69 @@ impl Engine {
         branch: &BranchId,
         command: DecodedCommand,
     ) -> Result<Command, Failure> {
-        self.check_metadata(actor, branch, command.revision_requirement())?;
+        self.resolve_command_with_display(actor, branch, command, None)
+    }
+
+    /// Only Service may supply a display generation after capability validation.
+    pub(crate) fn resolve_command_with_display(
+        &self,
+        actor: ActorId,
+        branch: &BranchId,
+        command: DecodedCommand,
+        validated_display: Option<(&super::PresentationBoundary, u64)>,
+    ) -> Result<Command, Failure> {
+        if command.display_basis() != validated_display.map(|(_, revision)| revision) {
+            return Err(Failure::new(
+                ErrorCode::StaleContext,
+                "Refresh the observation before acting",
+            ));
+        }
+        if let Some((boundary, _)) = validated_display {
+            if boundary.branch() != branch {
+                return Err(Failure::new(
+                    ErrorCode::StaleContext,
+                    "Snapshot branch changed",
+                ));
+            }
+            let game = self.presentation_game(boundary)?;
+            let unavailable =
+                || Failure::new(ErrorCode::InvalidAction, "Disclosed operand is unavailable");
+            let operand_available = match &command {
+                DecodedCommand::Display {
+                    operation: DisplayCommand::RenamePlace { key, .. },
+                    ..
+                } => game
+                    .remembered_places(tor_simulation::ActorId(actor.0))
+                    .any(|(location, ..)| {
+                        crate::adapt::cell_key(&self.archive.view_salt, actor.0, location) == *key
+                    }),
+                DecodedCommand::Display {
+                    operation: DisplayCommand::Travel { destination },
+                    ..
+                } => game
+                    .known_cells(tor_simulation::ActorId(actor.0))
+                    .any(|location| {
+                        crate::adapt::cell_key(&self.archive.view_salt, actor.0, location)
+                            == *destination
+                    }),
+                _ => true,
+            };
+            if !operand_available {
+                return Err(unavailable());
+            }
+        }
+        let requirement = if validated_display.is_some() {
+            None
+        } else {
+            command.revision_requirement()
+        };
+        let current_boundary = self.check_metadata(actor, branch, requirement)?;
         match command {
             DecodedCommand::Backend(command) => Ok(command),
+            DecodedCommand::Display {
+                expected_revision,
+                operation,
+            } => Ok(operation.resolve(expected_revision, current_boundary)),
             DecodedCommand::AbilityWeaponPreview { .. }
             | DecodedCommand::ProjectileChoices { .. }
             | DecodedCommand::Advancement { .. }
@@ -289,12 +371,18 @@ impl Engine {
                 ErrorCode::InvalidRequest,
                 "Read-only queries cannot become journal commands",
             )),
-            DecodedCommand::Gameplay {
-                expected_revision,
-                action,
-            } => Ok(Command::AdmitIntention {
-                expected_revision,
+            DecodedCommand::Gameplay { action } => Ok(Command::AdmitIntention {
+                expected_boundary: current_boundary,
                 action: self.decode_action(actor, &action)?,
+            }),
+            DecodedCommand::ResumeIntention { admission } => Ok(Command::ResumeIntention {
+                expected_boundary: current_boundary,
+                admission,
+            }),
+            DecodedCommand::CancelIntention { admission, step } => Ok(Command::CancelIntention {
+                expected_boundary: current_boundary,
+                admission,
+                step: step.map(crate::adapt::requested_direction),
             }),
         }
     }
@@ -377,7 +465,7 @@ mod tests {
         let project = |view| {
             crate::adapt::observation(
                 view,
-                scene.clone(),
+                &scene,
                 "fixture",
                 true,
                 &|_| [None, None, None],
@@ -430,7 +518,8 @@ mod tests {
         engine.enable_wizard().unwrap();
         let wizard = |engine: &mut Engine, request: &str, operation| {
             let command = Command::Wizard {
-                expected_revision: engine.revision(actor).unwrap(),
+                display_basis: None,
+                expected_boundary: engine.causal_boundary(actor).unwrap(),
                 operation,
             };
             engine
@@ -645,7 +734,6 @@ mod tests {
         let item = before.observation.ground_items[0].item.id;
         let branch = engine.branch().clone();
         let wire = WireCommand::Act {
-            expected_revision: before.revision,
             action: WireAction::Take {
                 item,
                 quantity: None,
@@ -684,7 +772,6 @@ mod tests {
         assert_eq!(engine.state(actor).unwrap(), taken);
 
         let fresh = WireCommand::Act {
-            expected_revision: taken.revision,
             action: WireAction::Take {
                 item,
                 quantity: None,
@@ -706,7 +793,7 @@ mod tests {
                 .resolve_command(actor, &branch, decoded)
                 .unwrap_err()
                 .code,
-            ErrorCode::StaleRevision
+            ErrorCode::InvalidAction
         );
     }
 
@@ -738,11 +825,7 @@ mod tests {
                 },
             ),
         ] {
-            let decoded = wire_adapter::decode_command(&WireCommand::Act {
-                expected_revision: engine.revision(actor).unwrap(),
-                action,
-            })
-            .unwrap();
+            let decoded = wire_adapter::decode_command(&WireCommand::Act { action }).unwrap();
             let command = engine
                 .resolve_command(actor, &branch, decoded.clone())
                 .unwrap();
@@ -762,7 +845,8 @@ mod tests {
                 "rewind",
                 &branch,
                 Command::Wizard {
-                    expected_revision: engine.revision(actor).unwrap(),
+                    display_basis: None,
+                    expected_boundary: engine.causal_boundary(actor).unwrap(),
                     operation: crate::journal::WizardOperation::Rewind { target: None },
                 },
             )
@@ -786,7 +870,6 @@ mod tests {
         assert!(retry.duplicate);
         assert_eq!(retry.entry, accepted.entry);
         let fresh = wire_adapter::decode_command(&WireCommand::Act {
-            expected_revision: restored.revision,
             action: WireAction::Drop {
                 item,
                 quantity: None,
@@ -808,7 +891,7 @@ mod tests {
         let actor = ActorId(1);
         let mut engine = Engine::memory(Scenario::two_room(42)).unwrap();
         let branch = engine.branch().clone();
-        let revision = engine.revision(actor).unwrap();
+        let revision = engine.causal_boundary(actor).unwrap();
         engine
             .command(
                 "player",
@@ -817,13 +900,12 @@ mod tests {
                 "accepted",
                 &branch,
                 Command::AdmitIntention {
-                    expected_revision: revision,
+                    expected_boundary: revision,
                     action: Action::Wait,
                 },
             )
             .unwrap();
         let unavailable = wire_adapter::decode_command(&WireCommand::Act {
-            expected_revision: revision,
             action: WireAction::Take {
                 item: engine
                     .target_scope(actor)
@@ -856,6 +938,62 @@ mod tests {
 #[cfg(test)]
 mod inspection_query_tests {
     use super::*;
+    #[test]
+    fn frozen_inspection_uses_issued_state_not_later_live_damage() {
+        let root =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/mob-arena");
+        let mut engine =
+            Engine::memory(crate::scenario_package::load(&root, 42, None, false).unwrap()).unwrap();
+        engine.enable_wizard().unwrap();
+        let actor = ActorId(1);
+        let boundary = engine.presentation_boundary();
+        let original = engine
+            .inspect_creature_query_at(&boundary, actor, 37)
+            .unwrap();
+        engine
+            .game
+            .apply(tor_simulation::abilities::Outcome {
+                actor: tor_simulation::ActorId(2),
+                target: tor_simulation::ActorId(1),
+                ability: None,
+                intention: None,
+                result: tor_simulation::abilities::OutcomeStatus::Applied,
+                check: None,
+                resistance: None,
+                participation: tor_simulation::abilities::AttemptedParticipation::target(),
+                target_rider_participated: false,
+                effects: vec![tor_simulation::abilities::ResolvedEffect::Damage { amount: 1 }],
+            })
+            .unwrap();
+        let live =
+            crate::creature_view::inspect(&engine.game, tor_simulation::ActorId(1), 37).unwrap();
+        assert_ne!(
+            live, original,
+            "fixture must actually change disclosed health"
+        );
+        let unchanged = engine.game.clone();
+        assert_eq!(
+            engine
+                .inspect_creature_query_at(&boundary, actor, 37)
+                .unwrap(),
+            original
+        );
+        assert_eq!(
+            engine.game, unchanged,
+            "frozen inspection must remain read-only"
+        );
+        let foreign = Engine::memory(crate::Scenario::two_room(43))
+            .unwrap()
+            .presentation_boundary();
+        assert_eq!(
+            engine
+                .inspect_creature_query_at(&foreign, actor, 37)
+                .unwrap_err()
+                .code,
+            ErrorCode::Unauthorized
+        );
+    }
+
     #[test]
     fn query_inspection_checks_authority_before_metadata_and_target() {
         let engine = Engine::memory(crate::Scenario::two_room(42)).unwrap();

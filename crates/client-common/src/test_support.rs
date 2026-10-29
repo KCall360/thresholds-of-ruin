@@ -188,6 +188,7 @@ pub fn portable_light_observation(lit: bool) -> Observation {
         }],
     });
     StateView {
+        snapshot: tor_protocol::SnapshotId("fixture".into()),
         revision: 0,
         wizard_game: false,
         observation: view.clone(),

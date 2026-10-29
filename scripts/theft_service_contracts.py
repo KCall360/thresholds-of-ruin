@@ -147,7 +147,7 @@ class TheftServiceContracts(unittest.TestCase):
     def envelope(current, command):
         return {"type": "command", "context": {"stream": current["context"],
             "readiness_revision": current["readiness"]["revision"]}, "branch": current["branch"],
-            "command": {"expected_revision": current["state"]["revision"], **command}}
+            "command": {**({"expected_revision": current["state"]["revision"]} if command["type"] not in ("act", "resume_intention", "cancel_intention") else {}), **command}}
 
     def setup_command(self, command):
         rows = self.request(self.wizard, {"type": "snapshot"}, response="snapshot")

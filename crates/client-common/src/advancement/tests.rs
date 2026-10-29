@@ -2,6 +2,7 @@ use super::*;
 
 fn context() -> ReplyContext {
     ReplyContext {
+        snapshot: tor_protocol::SnapshotId("fixture".into()),
         input: InputContext {
             stream: StreamContext {
                 stream: StreamId("owner-stream".into()),
@@ -192,7 +193,6 @@ fn confirmation_preserves_refund_only_operands_and_never_refreshes_a_stale_previ
             .confirm(&context(), &view, SupplySelection::Carried)
             .unwrap(),
         Command::Act {
-            expected_revision: 6,
             action: Action::Respec {
                 basis: Box::new(basis()),
                 replacement: match proposal() {
@@ -532,6 +532,7 @@ fn resume_and_cancel_name_only_the_exact_currently_permitted_respec_intention() 
         branch: context.branch.clone(),
         cursor: context.cursor,
         state: std::sync::Arc::new(StateView {
+            snapshot: tor_protocol::SnapshotId("fixture".into()),
             wizard_game: false,
             revision: context.revision,
             observation: view,
@@ -789,12 +790,10 @@ fn form_confirmation_retains_the_exact_preview_and_rejects_a_substituted_form() 
             purchase,
             basis: actual_basis,
         },
-        expected_revision,
     } = command
     else {
         panic!("exact purchase")
     };
-    assert_eq!(expected_revision, 6);
     assert_eq!(*actual_basis, basis());
     assert_eq!(AdvancementProposal::Purchase { purchase }, selected);
 }
@@ -841,7 +840,6 @@ fn growth_source_controls_keep_exact_preview_and_basis_without_client_xp() {
                 )
                 .unwrap(),
             Command::Act {
-                expected_revision: 6,
                 action: Action::ChooseGrowthSource {
                     basis: Box::new(basis()),
                     source
@@ -1011,7 +1009,6 @@ fn intellect_expertise_controls_preview_and_commit_exact_entitlement() {
                 )
                 .unwrap(),
             Command::Act {
-                expected_revision: 6,
                 action: Action::ChooseIntellectExpertise {
                     basis: Box::new(basis()),
                     choice

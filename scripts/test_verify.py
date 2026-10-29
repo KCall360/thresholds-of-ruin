@@ -123,7 +123,8 @@ class Selection(unittest.TestCase):
                     self.assertEqual(len(builds), 1 if shard == 1 else 0)
                     if shard == 1:
                         self.assertEqual(steps[-2], builds[0])
-                        self.assertEqual(builds[0][1][6:21:2], ['combat_bench', 'horizon-profile', 'item_bench',
+                        self.assertEqual([builds[0][1][i + 1] for i, arg in enumerate(builds[0][1]) if arg == '--example'],
+                                         ['active_mob_bench', 'combat_bench', 'horizon-profile', 'item_bench',
                                          'latency_bench', 'physics_bench', 'place_bench', 'rogue_bench', 'scenario_bench'])
                         self.assertEqual('--release' in builds[0][1], profile == 'release')
                         self.assertNotIn('--examples', builds[0][1])

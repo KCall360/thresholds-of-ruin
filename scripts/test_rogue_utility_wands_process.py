@@ -42,12 +42,11 @@ class RogueUtilityWandsProcesses(ProcessTestCase):
     def capture_anonymous_feedback(self, target, start, recipient):
         messages = [json.loads(line).get("message") for line in target.transcript[start:]
                     if line.startswith("{")]
-        # Retain the actual delta, keeping the required-kind manifest's existing
-        # full-observation exclusion unchanged. No synthetic envelope is built.
-        deltas = [message for message in messages if message and message.get("type") == "update"
-                  and message["update"]["body"]["type"] == "observation_delta"]
+        # Retain the actual ordered event, not a conversion of a later picture.
+        outcomes = [message for message in messages if message and message.get("type") == "update"
+                    and message["update"]["body"]["type"] == "outcome"]
         self.anonymous_ability_sample = copy.deepcopy(
-            assert_anonymous_recipient_feedback(self, deltas, recipient))
+            assert_anonymous_recipient_feedback(self, outcomes, recipient))
         # Validation context is frozen before this effect. It is not a wire
         # sample and must not be replaced by a later attachment's observation.
         self.anonymous_recipient_context = copy.deepcopy(recipient)

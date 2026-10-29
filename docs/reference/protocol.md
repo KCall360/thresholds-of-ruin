@@ -316,7 +316,7 @@ of this wire representation.
 The first frame authenticates and declares a frontend label:
 
 ```json client-message
-{"type":"hello","protocol":64,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":66,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and
@@ -353,13 +353,13 @@ disclosing game state. Attach once per connection:
 {"type":"request","request_id":"attach-1","request":{"type":"attach","actor":"1"}}
 ```
 
-The response is a snapshot containing the actor's observation, action revision,
+The response is a snapshot containing the actor's observation, display revision, opaque `snapshot` identity,
 branch ID, stream cursor, control status, and recent visible history. A client can
 observe without controlling the actor. `acquire_control` and `release_control`
 transfer exclusive control; acquisition fails while another connection controls
 the actor. Disconnecting releases control. Switching actors requires reconnecting.
 
-An action uses the branch and revision from the latest observation:
+An action uses the current branch and input context, not the observation revision:
 
 ```json client-message
 {
@@ -369,7 +369,7 @@ An action uses the branch and revision from the latest observation:
     "type":"command",
     "context":{"stream":{"stream":"<attachment stream>","epoch":"1"},"readiness_revision":"1"},
     "branch":"<branch from snapshot>",
-    "command":{"type":"act","expected_revision":"0","action":{"type":"move","direction":"east"}}
+    "command":{"type":"act","action":{"type":"move","direction":"east"}}
   }
 }
 ```
@@ -377,7 +377,7 @@ An action uses the branch and revision from the latest observation:
 Gameplay acknowledgements report admission, before simulation execution:
 
 ```json server-message
-{"type":"ack","context":{"input":{"stream":{"stream":"<attachment>","epoch":"1"},"readiness_revision":"2"},"actor":"1","branch":"<current branch>","cursor":{"sequence":"3","tick":"0"},"revision":"0"},"request_id":"move-1","receipt":{"type":"admitted","actor":"1","branch":"<request branch>","intention":"<opaque intention>","entry_id":"<admission record>","phase":"queued"}}
+{"type":"ack","context":{"input":{"stream":{"stream":"<attachment>","epoch":"1"},"readiness_revision":"2"},"actor":"1","branch":"<current branch>","cursor":{"sequence":"3","tick":"0"},"revision":"0","snapshot":"<issued snapshot>"},"request_id":"move-1","receipt":{"type":"admitted","actor":"1","branch":"<request branch>","intention":"<opaque intention>","entry_id":"<admission record>","phase":"queued"}}
 ```
 
 The simulation chooses when the actor's intention executes. Observations disclose
@@ -411,11 +411,11 @@ Restart and controller loss suspend queued human intentions and pause running
 preparation. Rewind restores the selected work and preparation; Session then
 suspends human work until fresh input. Acquiring control preserves that state.
 Explicit `resume_intention` and `cancel_intention` commands reference the original
-opaque identity using the current branch and observation revision. The following
+opaque identity using the current branch and input context. The following
 is a request-body fragment, to be wrapped in a `request` envelope with a unique ID:
 
 ```json
-{"type":"command","context":{"stream":{"stream":"<attachment stream>","epoch":"1"},"readiness_revision":"4"},"branch":"<current branch>","command":{"type":"resume_intention","expected_revision":"7","intention":"<original admission identity>"}}
+{"type":"command","context":{"stream":{"stream":"<attachment stream>","epoch":"1"},"readiness_revision":"4"},"branch":"<current branch>","command":{"type":"resume_intention","intention":"<original admission identity>"}}
 ```
 
 Resume returns suspended work or paused preparation to the simulation queue under
@@ -424,7 +424,7 @@ revalidates the original target at execution. Cancellation requires that identit
 in the current disclosed `readiness.cancel` permissions and an explicit `step`:
 
 ```json
-{"type":"cancel_intention","expected_revision":"7","intention":"<original admission identity>","step":null}
+{"type":"cancel_intention","intention":"<original admission identity>","step":null}
 ```
 
 `step: null` cancels in place. A direction such as `"west"` requests one atomic
@@ -459,7 +459,7 @@ the ordinary visible-actor list. This list is separate from timed personal
 conditions; it exposes neither protection records nor a hidden holder's location.
 
 The action `{"type":"escape","hold":"<opaque hold token>"}` selects exactly one
-current own offer under the ordinary action context, branch and revision gates.
+current own offer under the ordinary input-context and branch gates.
 A hold token cannot inspect an actor, reveal an endpoint or authorize another
 observer. It remains stable when its holder enters or leaves ordinary sight.
 A new ordinary human `move` action while held admits that same paid Escape
@@ -498,7 +498,8 @@ Clients receive `update` messages without polling:
 
 | Update body | Meaning |
 | --- | --- |
-| `observation` | New disclosed state, its revision, and an optional actor action/event entry |
+| `observation` | Demanded disclosed picture with display generation and opaque snapshot identity; not a narration source |
+| `outcome` | Ordered disclosed event-time facts, complete nullable owner status, optional authorized history entry and visual-change flag |
 | `observation_delta` | The same as `observation`, with cells and ordered collections sent as changes to the previous state on this stream |
 | `annotation` | A visible note was committed; game state is unchanged |
 | `travel` | Travel status and optional accepted-request history entry; no future route |
@@ -515,10 +516,44 @@ once per stop, and again after every answered request, so a client can end its
 turn on it instead of waiting for play to go quiet.
 
 Every update has actor and branch identities, a connection-scoped sequence, and
-simulation tick. Multiple updates can share a tick. The stream sequence increments
-for every delivered update; the action revision increments only when that actor's
-disclosed observation changes. A private note neither advances another user's
-sequence nor invalidates anyone's pending action revision.
+simulation tick. Multiple updates can share a tick. The sequence orders every
+admitted update; it is not a global simulation ordinal. Display `revision` is an
+attachment-local generation assigned when a visual picture is published on demand,
+not a per-actor counter advanced by hidden activity. Each published `StateView`
+also has an opaque `SnapshotId` in `snapshot`. Neither is gameplay input authority.
+
+### Ordered outcomes and demand-driven pictures
+
+`{"type":"observe"}` requests a fresh visual publication without resetting the
+attachment, control lease or input authority. Clients can coalesce redundant visual
+demand and pace animation independently of simulation. `snapshot` remains the
+complete recovery/reset operation. An `observation` or `observation_delta` installs
+a picture; it is not a narration trigger.
+
+Ordered `outcome` updates carry compact disclosed `facts`, required nullable
+`event`, and `visual_changed`. Facts include own-action names, discoveries, sight
+changes, item outcomes, combat receipts, injury/objective changes and pacing/status
+facts. Raw disclosed names and semantic values are rendered into prose by clients,
+not the server. Required nullable `facts.status` is the complete current owner
+combat/terminal/preparation/recovery status, independent of whether a narration
+line was produced. Clients update this authority without reconstructing it from a
+possibly older picture. `visual_changed` requests a later picture; it does not
+carry hidden actor activity or replace ordered outcomes.
+
+Every admitted outcome remains ordered even when pictures are coalesced. Repeated
+visual requests must not repeat narration. Internal event-batch identity separates
+a new identical same-tick receipt from a previously delivered receipt; appends in
+the same batch emit only the newly disclosed suffix. That private identity is not
+sent on the wire. Persistent-picture comparison ignores global tick alone,
+transient combat/item receipts, historical public-plan receipts and motion pulses,
+while retaining durable appearance, status and velocity. Clearing old receipts on
+a hidden action therefore does not by itself publish a visual-change signal.
+Role filtering precedes this comparison and fact capture.
+
+This is an attached ordered stream, not offline event delivery. Backpressure or
+validation failure disconnects rather than silently dropping admitted outcomes;
+a reconnect recovers current state and authorized durable history, not an unlimited
+backlog of transient animation events.
 
 Snapshots and updates require `context { stream, epoch }`. The host creates an
 opaque `stream` for each attachment outside simulation randomness and saved
@@ -530,7 +565,7 @@ An exhausted reset counter closes the attachment rather than wrapping.
 
 ### View deltas
 
-Most observation updates are `observation_delta`s. Scalars and optional combat
+Demanded visual updates may be `observation_delta`s. Scalars and optional combat
 and motion fields are carried in full. `visible_cells` is replaced with `cells`:
 
 - `shift` is added to the position of every cell in the previous state. Cell
@@ -573,9 +608,10 @@ protocol ceiling. Counting uses the same serializer with a constant-space byte
 sink, without allocating another full JSON buffer. This bound covers the current
 observation; remembered map cells and history have separate retention policies.
 
-An `observation_delta` body requires `base { cursor, revision }`, identifying
+An `observation_delta` body requires `base { cursor, revision, snapshot }`, identifying
 the last observation within its enclosing context and branch. Its embedded
-state delta also names that state's `base_revision`. Both must match: matching
+state delta also names that state's `base_revision` and `base_snapshot`, and carries
+the destination `snapshot`. All must match the exact installed base: matching
 a revision alone does not establish the correct base. Control, annotation,
 travel and intention messages consume stream sequence numbers without changing
 this observation base. A snapshot reset establishes a new base at its own cursor.
@@ -610,7 +646,7 @@ Snapshots include required `readiness { revision, admission, resume, cancel }`.
 control and run state; target validation and simulation timing still apply.
 `resume` and `cancel` contain only disclosed opaque intention IDs. The simulation
 owns their availability checks; the session applies authority and travel policy.
-Permission changes arrive as ordered `readiness` updates after their causing
+Permission or input-authority changes arrive as ordered `readiness` updates after their causing
 observation, control or lifecycle changes, and before the request acknowledgement.
 Each update advances the readiness counter by exactly one without advancing the
 observation base or simulation time. Counter exhaustion disconnects the client.
@@ -630,15 +666,32 @@ A current generation does not authorize disabled gameplay: new action/travel
 requests require `admission`, and resume/cancel requests require the intention ID
 in the corresponding permission list. The host rejects disabled admission with
 `ActorBusy` and unavailable recovery with `InvalidAction`, before any mutation.
-Simulation still validates targets, revisions and execution independently.
-Control changes advance this generation even if all permission vectors stay empty.
+`act`, `resume_intention` and `cancel_intention` have no `expected_revision`
+field. Their input context keeps its existing public shape: private monotonic
+registered-actor generations for action operands and disclosed intentions, together
+with controller generations, contribute to `readiness_revision`. Changes to an
+actor's origin or relevant operands advance authority even if the actor later
+returns to the same state. Losing and regaining control likewise cannot revive
+an old context, even when the permission vectors are unchanged. These private
+generations expose no extra entity identities or hidden-world state.
+
+A display-only or unrelated remote update does not by itself invalidate these
+three commands. This is not permission to reuse arbitrary stale inputs: stream,
+branch, input authority and the exact requested intention still must be valid.
+Queries, previews, inspection, travel and wizard operations retain their applicable
+`expected_revision` checks; renaming also retains its display-revision guard.
+Simulation still checks current targets, costs, permissions and execution conditions.
+Admitted human work retains frozen operand identities: execution cannot silently
+substitute another creature, item or interaction for the original selection.
+Already admitted work is not automatically cancelled merely because the display
+revision changes; its existing interruption, suspension and execution checks remain.
 Capture context when constructing input; never restamp queued or retried requests.
 An authorized retry returns its original receipt even after context abandonment.
 
 ### Reply contexts and errors
 
 Acknowledgements, history replies and palette messages require a current reply
-`context { input, actor, branch, cursor, revision }`. `input` has the same stream,
+`context { input, actor, branch, cursor, revision, snapshot }`. `input` has the same stream,
 epoch and readiness-generation shape as command input. This context names the
 client's last disclosed boundary at publication, after ordered permission changes;
 it does not advance the stream. The receipt still names the original operation,
@@ -675,16 +728,16 @@ advance only after the response enters the ordered output queue. The server then
 retains the owned full state as the next base without copying it again. Output
 rejection closes that stream rather than retaining an unpublished base.
 
-Readiness is part of that disclosed state. A same-tick turn handoff advances the
-revisions of the actors whose readiness changes, even when their geometry and
-tick remain unchanged.
+Readiness has its own input generation and ordered publication. A same-tick
+handoff can change input permissions without requiring a visual publication.
+`InputContext` is validated independently from display revision and SnapshotId;
+issuing a picture does not cancel admitted work or manufacture fresh input rights.
 
-An action's history timestamp is when it took effect; the accompanying observation
-reflects the next decision time. One ordered attack intention can produce multiple
-primary strike results and intermediate observations before its terminal lifecycle
-update. The transport preserves those boundaries between user decisions. Other actors can receive changed observations
-without receiving the acting actor's private command details. Richer cross-actor
-event descriptions still belong to the perception work.
+An action's history timestamp is when it took effect. One ordered attack intention
+can produce multiple primary strike outcomes before its terminal lifecycle update.
+Those event-time facts are delivered independently of how many pictures a client
+requests. Other observers receive only their disclosed facts, never the acting
+actor's private command details merely because an outcome occurred.
 
 ### Ability projection
 
@@ -766,7 +819,11 @@ before the connection closes.
 
 `map` is an attached, read-only request available to players and spectators.
 Its query binds the stream/epoch, branch, exact observation base and inclusive
-coordinate window. It cannot select a different actor. Initial requests have a
+coordinate window. The base shape is
+`{"cursor":{"sequence":"3","tick":"0"},"revision":"1","snapshot":"<issued snapshot>"}`.
+The outer ReplyContext describes the current attachment and can name a newer
+picture; the page's base must still match the requested immutable snapshot.
+It cannot select a different actor. Initial requests have a
 null cursor; later pages echo the opaque transfer, next cell ordinal and page.
 The response uses the ordinary correlated reply context and appearance-only
 `map_page` cells. There are no actor occupants, live targets, reach flags or
@@ -780,8 +837,9 @@ accompany surviving certified cells. A work-limited response is an empty termina
 page with `limited=true` and `complete=false`; an oversized appearance receives
 an explicit resource error. No partial transfer replaces the prior chart.
 
-The Service advances its continuation only after output admission. Stream,
-branch, observation or knowledge-root changes invalidate it. Clients cancel old
+The Service advances its continuation only after output admission. Stream resets and branch changes invalidate it. An issued snapshot retains its
+immutable map/knowledge basis while the bounded capability remains available; a
+newer visual publication alone does not retarget its pages. Clients may cancel old
 assemblies on new observations and atomically install a correlated whole transfer,
 then overlay current disclosure. Automatic hydration is independent of gameplay
 readiness and does not issue actions, learn cells, or load distant world regions.
@@ -827,13 +885,13 @@ available while `supported=false`. Missing optional source certification is not
 package rejection and does not permit fabricated paid Mapping.
 
 `Request::Chart { query }` has wire type `chart`. Its strict `ChartQuery` requires
-`context { stream, epoch }`, `branch`, exact observation `base { cursor, revision }`,
+`context { stream, epoch }`, `branch`, exact observation `base { cursor, revision, snapshot }`,
 the advertised `chart` token and an explicitly nullable `cursor`. Begin with
 null; thereafter echo exactly the previous page's nonzero `next` ordinal. This
-base is the last observation base, not the latest readiness or unrelated stream
-update cursor. The attachment actor, stream/reset epoch, current branch,
-observation base, advertised token and continuation must all still match.
-Reattach, rewind, reset or a changed observation invalidates the old transfer.
+base names an issued immutable visual snapshot, not the latest readiness or
+unrelated stream update cursor. The attachment actor, stream/reset epoch, branch,
+issued base, advertised token and continuation must all match. Reattach, rewind
+or reset invalidates the old transfer; a newer picture alone does not.
 There is no arbitrary past-Game selector: rewind establishes a new current
 branch, while retained acquisitions are explicitly historical.
 
@@ -897,7 +955,7 @@ Palettes have their own revisions and are separate from the observation
 stream. A complete envelope includes its required reply context:
 
 ```json server-message
-{"type":"palette","context":{"input":{"stream":{"stream":"example-stream","epoch":"1"},"readiness_revision":"1"},"actor":"1","branch":"example-branch","cursor":{"sequence":"0","tick":"0"},"revision":"0"},"request_id":null,"palette":{"revision":"1","body":{"type":"full","assets":["terrain.floor"]}}}
+{"type":"palette","context":{"input":{"stream":{"stream":"example-stream","epoch":"1"},"readiness_revision":"1"},"actor":"1","branch":"example-branch","cursor":{"sequence":"0","tick":"0"},"revision":"0","snapshot":"<issued snapshot>"},"request_id":null,"palette":{"revision":"1","body":{"type":"full","assets":["terrain.floor"]}}}
 ```
 
 The context and revision above illustrate shape; real responses carry the current
@@ -985,7 +1043,7 @@ the protocol does not generate automatic commentary.
     "branch":"<branch from snapshot>",
     "command":{
       "type":"annotate",
-      "anchor":{"type":"state","revision":"0"},
+      "anchor":{"type":"state","snapshot":"<issued snapshot>"},
       "text":"Return here after exploring the gallery.",
       "source":"user",
       "category":"bookmark",
@@ -1014,11 +1072,12 @@ producers must write from disclosed actor facts and use annotations sparingly.
 The API validates the actor and anchor but cannot infer whether arbitrary prose
 contains a spoiler.
 
-Anchors identify either a disclosed state revision (a decision/observation point)
-or a visible history entry ID. An action and its current single semantic event
-share one entry ID. Notes can also reference earlier notes. Past state revisions
-remain valid; future revisions, inaccessible entries, and another branch are
-rejected. A shared note cannot reference a private entry and expose its identity.
+State anchors name an issued `snapshot` capability; entry anchors name a visible
+history entry ID. The host resolves an authorized state capability to its exact
+causal boundary and saves a normalized durable anchor, not the ephemeral token. An action and its current single semantic event
+share one entry ID. Notes can also reference earlier notes. Only retained issued state capabilities are accepted; forged, expired or
+foreign capabilities, inaccessible entries and another branch are rejected.
+Already saved normalized notes survive capability eviction and reconnect. A shared note cannot reference a private entry and expose its identity.
 
 Audience `private` means only the authenticated author, across their authorized
 frontends. Audience `actor` means all authorized observers of that actor. Neither
@@ -1038,7 +1097,7 @@ belongs to the attached observer; `report.actor` identifies the inspected target
 It is sent only to the authenticated requesting wizard while server wizard mode is
 enabled. Authority is checked before command decoding, metadata or target lookup.
 The target must already be loaded and creature-backed. The query validates fresh
-input context, branch and revision but requires no actor control and produces no
+input context, branch and issued display revision but requires no actor control and produces no
 saved receipt, journal entry, simulation action, or ordinary observation update.
 
 The independently defined report carries bounded owned HD records, retained health
@@ -1066,7 +1125,8 @@ more. Their complete disclosed identities and total ranks must match `stats.skil
 with at most five ranks per skill. Unowned zero-rank rows are allowed; clients do
 not hardcode the server's skill catalog or recompute eligibility and modifiers.
 Natural and selected attacks are separate. The report's required decimal-string
-`revision` identifies the target's current state. `natural_attack` has species
+`revision` identifies the issued inspection display generation, not a global or
+per-target causal counter. `natural_attack` has species
 `source`, common skill/bonus/timing fields and `strike_count`, with no authored
 bodies or fabricated weapon damage. `selected_attack.attack` is tagged `weapon` or
 `natural`; weapon retains its existing bounded damage profile, natural is the same
@@ -1164,14 +1224,19 @@ its body; it cannot carry private pages through the separate 32 MiB recovery
 budget. Legitimate large snapshots retain that independent allowance.
 
 Each connection retains one random, ephemeral handle bound to input context,
-branch, observer revision, target/revision, selected source and existing run/catalog
-identity. Every page rechecks current grants and gear. Reset, rewind, reconnect,
-source replacement or stale target/content invalidates it; a stale continuation
-never silently restarts. Valid prior positions can be revisited for back navigation.
-The server directly indexes the selected rows and catalog references; it does not
-build other authored bodies or scan prior pages. Each request first obtains one
-current authoritative creature projection, which can rederive expired conditions;
-that existing refresh cost is counted separately from bounded page-entry work.
+branch, issued display generation, target, selected source and run/catalog identity.
+Inspection reads the immutable Game boundary behind the latest issued picture;
+`expected_revision` and `target_revision` name that issued display generation,
+not a global causal counter. Gear changes in the live world alone do not alter the
+frozen report or its detail pages. A new `Observe` changes the current query basis:
+subsequent inspection queries must use the newly issued generation. Unlike bounded
+map/chart transfers, inspection does not support arbitrary older picture menus.
+Reset, rewind, reconnect or mismatched source/target/catalog/cursor bindings reject
+a stale continuation rather than silently restarting it. Valid prior positions
+within the current inspection may be revisited for back navigation. The server
+indexes the selected rows and catalog references without building unrelated bodies
+or scanning prior pages. Fresh gameplay execution still validates current exact
+operands; a frozen inspection is descriptive, not permission to use old gear.
 
 Clients validate role, reply context and pending source/page identity before
 installation. They retain at most two rendered detail pages and at most 656
@@ -1291,8 +1356,8 @@ and the names the character knows them by, each with its `origin`
 positions, bearings, authored region identities or reachability metadata.
 `rename_place { expected_revision, key, name }` requires control; names contain
 1–80 UTF-8 bytes with no controls or edge whitespace. The journaled command
-increments the actor revision without advancing time and produces a
-`place_renamed { key, name }` history event in an ordinary observation update.
+changes the disclosed place without advancing time and produces a
+`place_renamed { key, name }` history event in an ordered outcome update.
 Retries, actor audiences, snapshots, rewind and strict replay use the existing
 boundaries. See [place knowledge](movement.md).
 
@@ -1483,7 +1548,8 @@ the same intention admission, authority and retry rules as other ordinary action
 The interaction snapshot also carries `completed`, a list of the observer's own
 completed item actions. These use opaque targets without item specifications;
 the target may refer to a consumed final unit absent from the current inventory.
-Clients resolve narration from their consecutive disclosed inventories. Other
+Outcome fact capture resolves disclosed names at the causal boundary; clients
+narrate the compact facts without requiring consecutive visual inventories. Other
 actors' equipment and consumption completions are not included. This also works
 for actors with anatomy and equipment but no combat state.
 

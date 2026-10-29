@@ -20,7 +20,7 @@ fn send(
 }
 fn act(engine: &mut Engine, id: &str, action: Action) -> tor_server::CommandResult {
     let command = Command::Act {
-        expected_revision: engine.revision(ActorId(1)).unwrap(),
+        expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
         action,
     };
     send(engine, id, command).unwrap()
@@ -42,7 +42,7 @@ fn wizard(
         engine,
         ActorId(1),
         &tor_protocol::Command::Wizard {
-            expected_revision: engine.revision(ActorId(1)).unwrap(),
+            expected_revision: 0,
             operation: operation.into(),
         },
     )?;
@@ -79,9 +79,9 @@ fn doors_replay_retry_and_rewind_with_disclosed_reach_and_approaches() {
             },
         );
     }
-    let before_close = engine.state(ActorId(1)).unwrap();
+    let before_close_boundary = engine.causal_boundary(ActorId(1)).unwrap();
     let command = Command::Act {
-        expected_revision: before_close.revision,
+        expected_boundary: before_close_boundary,
         action: engine
             .decode_action(
                 ActorId(1),

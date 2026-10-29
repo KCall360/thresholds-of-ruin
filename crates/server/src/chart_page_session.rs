@@ -35,18 +35,15 @@ impl Service {
             .map_err(|_| Failure::new(ErrorCode::InvalidRequest, "Invalid chart query"))?;
         let client = self.clients.get(&id).ok_or_else(stale)?;
         let actor = client.actor.ok_or_else(stale)?;
-        let observed = client.last_observation.as_ref().ok_or_else(stale)?;
+        let observed = self.issued_presentation(id, &query.base)?;
         if client.context.as_ref() != Some(&query.context)
             || observed.branch != query.branch
             || observed.base != query.base
             || self.engine.branch() != &query.branch
-            || self.engine.revision(actor).ok() != Some(query.base.revision)
         {
             return Err(stale());
         }
         let summary = observed
-            .state
-            .observation
             .charts
             .iter()
             .find(|summary| summary.chart.as_deref() == Some(query.chart.as_str()))
@@ -68,7 +65,7 @@ impl Service {
         // learning, clock advancement or Game mutation is allowed on this path.
         let chart = self
             .engine
-            .prepared_detection_charts(actor)?
+            .prepared_detection_charts_at(&observed.boundary, actor)?
             .chart(summary.kind)
             .ok_or_else(stale)?;
         Ok(ChartTransfer {
@@ -89,18 +86,13 @@ impl Service {
         mut transfer: ChartTransfer,
     ) -> Result<(), Failure> {
         let client = self.clients.get(&id).ok_or_else(stale)?;
-        let observed = client.last_observation.as_ref().ok_or_else(stale)?;
+        let observed = self.issued_presentation(id, &transfer.base)?;
         if client.context.as_ref() != Some(&transfer.context)
             || client.actor != Some(transfer.actor)
             || observed.branch != transfer.branch
             || observed.base != transfer.base
             || self.engine.branch() != &transfer.branch
-            || self.engine.revision(transfer.actor).ok() != Some(transfer.base.revision)
-            || !observed
-                .state
-                .observation
-                .charts
-                .contains(&transfer.summary)
+            || !observed.charts.contains(&transfer.summary)
         {
             return Err(stale());
         }
@@ -151,7 +143,7 @@ fn fit_page(
     let page = ChartPage {
         context: transfer.context.clone(),
         branch: transfer.branch.clone(),
-        base: transfer.base,
+        base: transfer.base.clone(),
         chart: transfer.summary.chart.clone().ok_or_else(invalid)?,
         kind: transfer.summary.kind,
         mode: transfer.summary.mode,

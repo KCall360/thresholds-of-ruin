@@ -155,31 +155,30 @@ def has_condition_event(message, condition):
     if not message or message["type"] != "update":
         return False
     body = message["update"]["body"]
-    if body["type"] == "observation":
-        view = body["state"]["observation"].get("combat")
-    elif body["type"] == "observation_delta":
-        view = body["state"].get("combat")
-    else:
+    if body["type"] != "outcome":
         return False
-    return any(event["type"] == "condition" and event["condition"]["id"] == condition
-               for event in (view or {}).get("events", []))
+    return any(fact.get("kind") == "combat"
+               and fact.get("event", {}).get("type") == "condition"
+               and fact["event"]["condition"]["id"] == condition
+               for fact in body["facts"]["facts"])
+
 
 
 SAMPLE_BASIS = {"actor": "1", "branch": "branch-1", "stream": "sample-attachment",
                 "reset": "1", "build_epoch": "1"}
 SAMPLE_ADVANCEMENT_COMMANDS = [
-    {"type": "act", "expected_revision": "3", "action": {"type": "choose_intellect_expertise",
+    {"type": "act", "action": {"type": "choose_intellect_expertise",
         "basis": SAMPLE_BASIS, "choice": {"threshold": 1, "expertise": "rogue.knife"}}},
-    {"type": "act", "expected_revision": "3", "action": {"type": "choose_growth_source", "basis": SAMPLE_BASIS,
+    {"type": "act", "action": {"type": "choose_growth_source", "basis": SAMPLE_BASIS,
         "source": {"kind": "racial"}}},
     {"type": "advancement", "expected_revision": "3", "query": {"kind": "overview"}},
-    {"type": "act", "expected_revision": "3", "action": {"type": "purchase", "basis": SAMPLE_BASIS,
+    {"type": "act", "action": {"type": "purchase", "basis": SAMPLE_BASIS,
         "purchase": {"owner": "0", "pool": "practice",
                      "selection": {"kind": "skill_rank", "skill": "perception"}}}},
-    {"type": "act", "expected_revision": "3", "action": {"type": "purchase", "basis": SAMPLE_BASIS,
+    {"type": "act", "action": {"type": "purchase", "basis": SAMPLE_BASIS,
         "purchase": {"owner": "0", "pool": "advancement",
                      "selection": {"kind": "talent_form", "talent": "evocation_initiate", "form": "spark_lance_cold"}}}},
-    {"type": "act", "expected_revision": "3", "action": {"type": "respec", "basis": SAMPLE_BASIS,
+    {"type": "act", "action": {"type": "respec", "basis": SAMPLE_BASIS,
         "replacement": {"source": {"owner": "0", "index": 0}, "replacement": None},
         "supplies": {"kind": "carried"}}},
 ]
@@ -196,10 +195,11 @@ CLIENT = [
         {"type": "acquire_control"},
         {"type": "release_control"},
         {"type": "snapshot"},
+        {"type": "observe"},
         {"type": "palette"},
         {"type": "map", "query": {
             "context": {"stream": "sample-attachment", "epoch": "1"},
-            "branch": "branch-1", "base": {"cursor": {"sequence": "1", "tick": "1"}, "revision": "3"},
+            "branch": "branch-1", "base": {"snapshot": "sample-issued-snapshot", "cursor": {"sequence": "1", "tick": "1"}, "revision": "3"},
             "window": {"min": {"x": -31, "y": -16, "z": -2}, "max": {"x": 31, "y": 16, "z": 3}},
             "cursor": None}},
         {"type": "history", "before": "entry-1", "limit": 20},
@@ -213,14 +213,14 @@ CLIENT = [
             {"type": "projectile_choices", "expected_revision": "3",
              "query": {"ability": "rogue.throw", "phase": {"kind": "sources"}, "offset": 0}},
             {"type": "rename_place", "expected_revision": "3", "key": "place-key", "name": "Lantern Hall"},
-            {"type": "resume_intention", "expected_revision": "3", "intention": "admission-1"},
-            {"type": "cancel_intention", "expected_revision": "3", "intention": "admission-1", "step": None},
-            {"type": "cancel_intention", "expected_revision": "3", "intention": "admission-1", "step": "west"},
+            {"type": "resume_intention", "intention": "admission-1"},
+            {"type": "cancel_intention", "intention": "admission-1", "step": None},
+            {"type": "cancel_intention", "intention": "admission-1", "step": "west"},
             {"type": "inspect_strike_source", "expected_revision": "3", "actor": "1",
              "target_revision": "3", "source": {"kind": "natural"}, "cursor": None},
             {"type": "travel", "expected_revision": "3", "destination": "cell-key"},
             {"type": "wizard", "expected_revision": "3", "operation": "rewind initial"},
-            *({"type": "act", "expected_revision": "3", "action": action} for action in [
+            *({"type": "act", "action": action} for action in [
                 {"type": "equip", "item": "i_" + "04" * 32, "slot": 1},
                 {"type": "unequip", "item": "i_" + "04" * 32},
                 {"type": "drink", "item": "i_" + "04" * 32},
@@ -250,7 +250,7 @@ CLIENT = [
                 {"type": "escape", "hold": "h_" + "09" * 32},
                 {"type": "wait"},
             ]),
-            {"type": "annotate", "anchor": {"type": "state", "revision": "3"}, "text": "A note",
+            {"type": "annotate", "anchor": {"type": "state", "snapshot": "sample-issued-snapshot"}, "text": "A note",
              "source": "user", "audience": "private", "category": "note"},
             {"type": "annotate", "anchor": {"type": "entry", "id": "entry-1"}, "text": "An explanation",
              "source": "frontend", "audience": "actor", "category": "explanation"},
@@ -578,7 +578,7 @@ class Recorder(ProcessTestCase):
         anonymous = copy.deepcopy(getattr(case, "anonymous_ability_sample", None))
         self.assertIsNotNone(anonymous, "The utility case must retain its real anonymous event")
         self.assertEqual(anonymous["type"], "update")
-        self.assertEqual(anonymous["update"]["body"]["type"], "observation_delta")
+        self.assertEqual(anonymous["update"]["body"]["type"], "outcome")
         recipient = copy.deepcopy(getattr(case, "anonymous_recipient_context", None))
         self.assertIsNotNone(recipient, "The event needs its actual pre-effect disclosure context")
         assert_anonymous_recipient_feedback(self, [anonymous], recipient)
@@ -599,7 +599,7 @@ class Recorder(ProcessTestCase):
         opened = samples["opened"]["snapshot"]
         self.assertTrue(next(iter(doors(opened).values()))["open"])
         self.assertEqual(len(traps(opened)), 2)
-        self.assertEqual(samples["restored"]["snapshot"]["state"], opened["state"])
+        self.assertDisclosedStateEqual(samples["restored"]["snapshot"]["state"], opened["state"])
         for sample in samples.values():
             self.assertEqual(sample["type"], "snapshot")
         server_samples.update({"zz.discovery_" + name: sample for name, sample in samples.items()})
@@ -727,7 +727,9 @@ class Recorder(ProcessTestCase):
         accepted = self.command(owner, {"type": "advancement", "command": "confirm using carried"})
         self.assertIsNone(accepted["error"])
         if any(row["phase"] == "queued" for row in accepted["intentions"]):
-            self.frame(owner, lambda frame: not any(row["phase"] == "queued" for row in frame["intentions"]))
+            accepted = self.frame(owner, lambda frame: not any(row["phase"] == "queued" for row in frame["intentions"]))
+        # Inspection remains picture-bound even though admission/readiness is not.
+        self.picture_after(owner, accepted)
         previous = len(captured)
         result = self.command(owner, {"type": "advancement", "command": "overview"})
         self.assertIsNone(result["error"])
@@ -754,7 +756,7 @@ class Recorder(ProcessTestCase):
         self.assertTrue(rejected["error"].startswith("InvalidAction:"))
         state = self.request(player, {"type": "snapshot"})
         state = self.request(player, {"type": "command", "context": state["input_context"], "branch": state["branch"], "command": {
-            "type": "annotate", "anchor": {"type": "state", "revision": state["state"]["revision"]},
+            "type": "annotate", "anchor": {"type": "state", "snapshot": state["state"]["snapshot"]},
             "text": "Shared sample note", "audience": "actor"}})
         self.assertIsNone(state["error"])
         # Simulation effects may arrive between the snapshot and note receipt.
@@ -775,10 +777,19 @@ class Recorder(ProcessTestCase):
                     message = json.loads(line).get("message")
                     if message:
                         server_samples.setdefault(kind(message), message)
+        # Ordered action facts must come from the real independent delivery path,
+        # not a manufactured conversion of a coalesced visual snapshot.
+        self.assertIn("update.outcome", server_samples)
+        outcome = server_samples["update.outcome"]["update"]["body"]
+        self.assertIsInstance(outcome["visual_changed"], bool)
+        self.assertIsInstance(outcome["facts"]["facts"], list)
         player.stop()
         watcher.stop()
         server.stop()
-        bounded = self.server("--outbound-frame-bytes", 512, "--outbound-client-bytes", 65536,
+        # Keep snapshots fragmented while allowing current control/reply envelopes.
+        # A 512-byte cap predates the separate input and picture contexts.
+        fragment_limit = 1024
+        bounded = self.server("--outbound-frame-bytes", fragment_limit, "--outbound-client-bytes", 65536,
                     "--outbound-total-bytes", 262144, scenario="generated-filler", seed=5)
         captured = []
 
@@ -794,6 +805,7 @@ class Recorder(ProcessTestCase):
         peer.stop()
         relay.close()
         self.assertEqual(len(captured), 1, "record an actual bounded snapshot transfer part")
+        self.assertLessEqual(len(json.dumps(captured[0], separators=(",", ":")).encode()), fragment_limit)
         server_samples["snapshot_part"] = captured[0]
         bounded.stop()
         self.save = self.save.parent / "item-samples.db"

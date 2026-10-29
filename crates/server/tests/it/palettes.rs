@@ -427,10 +427,7 @@ impl Viewer {
         let request = Request::Command {
             context: self.client.input_context(),
             branch: self.branch.clone(),
-            command: Command::Act {
-                expected_revision: self.state.revision,
-                action,
-            },
+            command: Command::Act { action },
         };
         self.client.request(&id, request).await;
         let mut admitted = None;

@@ -219,7 +219,7 @@ class ProjectileProcesses(ProcessTestCase):
         at_landing = self.settle()
         self.assertTrue(next(row for row in view(at_landing)["ground_items"]
                              if row["item"]["id"] == dagger)["reachable"])
-        self.assertIn("Taken", text.command(f"take #{dagger}"))
+        self.assertIn("You pick up ", text.command(f"take #{dagger}"))
         final = self.settle()
         self.assertEqual(item(final, "dagger")["quantity"], "1")
         self.flush_save()

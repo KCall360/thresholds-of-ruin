@@ -60,7 +60,7 @@ fn query(service: &mut Service, client: &mut Connection, query: Value) -> Vec<Va
         service,
         client.id,
         json!({"type":"advancement",
-        "expected_revision":service.engine.revision(actor).unwrap().to_string(),"query":query}),
+        "expected_revision":service.engine.causal_boundary(actor).unwrap().to_string(),"query":query}),
     );
     service.handle(client.id, "owner-page".into(), request);
     drain(client)
@@ -172,7 +172,6 @@ fn owner_advancement_foreign_and_reconnected_basis_do_not_authorize_fresh_purcha
         &service,
         owner.id,
         json!({"type":"act",
-        "expected_revision":service.engine.revision(ActorId(1)).unwrap().to_string(),
         "action":{"type":"purchase","basis":original,"purchase":{"owner":"0","pool":"advancement",
             "selection":{"kind":"skill_rank","skill":"perception"}}}}),
     );
@@ -196,7 +195,6 @@ fn owner_advancement_foreign_and_reconnected_basis_do_not_authorize_fresh_purcha
         &service,
         owner.id,
         json!({"type":"act",
-        "expected_revision":service.engine.revision(ActorId(1)).unwrap().to_string(),
         "action":{"type":"purchase","basis":fresh,"purchase":{"owner":"0","pool":"advancement",
             "selection":{"kind":"skill_rank","skill":"perception"}}}}),
     );
@@ -221,7 +219,6 @@ fn owner_advancement_matching_receipt_precedes_reconnect_freshness_without_priva
         &service,
         owner.id,
         json!({"type":"act",
-        "expected_revision":service.engine.revision(ActorId(1)).unwrap().to_string(),
         "action":{"type":"purchase","basis":basis,"purchase":{"owner":"0","pool":"advancement",
             "selection":{"kind":"skill_rank","skill":"perception"}}}}),
     );
@@ -281,7 +278,7 @@ fn advancement_boundary_private_purchase_is_absent_from_history_pages_and_anchor
             ActorId(1),
             "test",
             Anchor::State {
-                revision: service.engine.revision(ActorId(1)).unwrap(),
+                snapshot: tor_protocol::SnapshotId("backend-chronology".into()),
             },
             AnnotationCategory::Note,
             "public chronology control",
@@ -298,7 +295,6 @@ fn advancement_boundary_private_purchase_is_absent_from_history_pages_and_anchor
         &service,
         owner.id,
         json!({"type":"act",
-        "expected_revision":service.engine.revision(ActorId(1)).unwrap().to_string(),
         "action":{"type":"purchase","basis":basis,"purchase":{"owner":"0","pool":"advancement",
             "selection":{"kind":"skill_rank","skill":"perception"}}}}),
     );
@@ -306,12 +302,7 @@ fn advancement_boundary_private_purchase_is_absent_from_history_pages_and_anchor
     let admitted = drain(&mut owner);
     assert!(admitted.iter().any(|row| row["type"] == "ack"));
     no_private_reply(&admitted);
-    let revisions = service
-        .engine
-        .actors()
-        .into_iter()
-        .map(|actor| (actor, service.engine.revision(actor).unwrap()))
-        .collect();
+    let revisions = service.semantic_states().unwrap();
     let started = service.engine.execute_next_intention().unwrap().unwrap();
     assert!(matches!(
         started.entry.content,
@@ -373,7 +364,7 @@ fn owner_advancement_active_paused_and_resumed_respec_stays_out_of_ordinary_view
             ActorId(1),
             "test",
             Anchor::State {
-                revision: service.engine.revision(ActorId(1)).unwrap(),
+                snapshot: tor_protocol::SnapshotId("backend-chronology".into()),
             },
             AnnotationCategory::Note,
             "public chronology control",
@@ -397,7 +388,6 @@ fn owner_advancement_active_paused_and_resumed_respec_stays_out_of_ordinary_view
         &service,
         owner.id,
         json!({"type":"act",
-        "expected_revision":service.engine.revision(ActorId(1)).unwrap().to_string(),
         "action":{"type":"respec","basis":original_basis,"replacement":replacement,"supplies":{"kind":"carried"}}}),
     );
     service.handle(owner.id, "private-respec".into(), original.clone());
@@ -440,17 +430,12 @@ fn owner_advancement_active_paused_and_resumed_respec_stays_out_of_ordinary_view
                 &service,
                 owner.id,
                 json!({"type":"resume_intention",
-                "expected_revision":service.engine.revision(ActorId(1)).unwrap().to_string(),"intention":intention}),
+                "intention":intention}),
             );
             service.handle(owner.id, "resume-private-respec".into(), resume);
         }
         if active {
-            let revisions = service
-                .engine
-                .actors()
-                .into_iter()
-                .map(|actor| (actor, service.engine.revision(actor).unwrap()))
-                .collect();
+            let revisions = service.semantic_states().unwrap();
             let executed = service.engine.execute_next_intention().unwrap().unwrap();
             if phase == 0 {
                 assert!(matches!(
@@ -604,8 +589,7 @@ fn owner_growth_source_rejects_spectators_lost_control_and_stale_basis() {
         let request = command(
             &service,
             denied.id,
-            json!({"type":"act","expected_revision":service.engine.revision(ActorId(1)).unwrap().to_string(),
-            "action":{"type":"choose_growth_source","basis":b,"source":{"kind":"racial"}}}),
+            json!({"type":"act","action":{"type":"choose_growth_source","basis":b,"source":{"kind":"racial"}}}),
         );
         service.handle(denied.id, "choose-growth".into(), request);
         let messages = drain(denied);
@@ -621,8 +605,7 @@ fn owner_growth_source_rejects_spectators_lost_control_and_stale_basis() {
     let request = command(
         &service,
         owner.id,
-        json!({"type":"act","expected_revision":service.engine.revision(ActorId(1)).unwrap().to_string(),
-        "action":{"type":"choose_growth_source","basis":stale,"source":{"kind":"racial"}}}),
+        json!({"type":"act","action":{"type":"choose_growth_source","basis":stale,"source":{"kind":"racial"}}}),
     );
     service.handle(owner.id, "stale-growth".into(), request);
     assert!(drain(&mut owner)
@@ -644,7 +627,6 @@ fn growth_source_receipt_precedes_reconnect_freshness_without_private_projection
         &service,
         owner.id,
         json!({"type":"act",
-        "expected_revision":service.engine.revision(ActorId(1)).unwrap().to_string(),
         "action":{"type":"choose_growth_source","basis":basis,"source":{"kind":"racial"}}}),
     );
     service.handle(owner.id, "durable-request".into(), original.clone());
@@ -708,7 +690,7 @@ fn earned_growth_private_totals_stay_controller_only_alongside_shared_paid_histo
                 ability,
                 &engine.branch().clone(),
                 Command::AdmitIntention {
-                    expected_revision: engine.revision(ActorId(actor)).unwrap(),
+                    expected_boundary: engine.causal_boundary(ActorId(actor)).unwrap(),
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new(ability).unwrap(),
                         invocation: crate::journal::AbilityInvocation {
@@ -805,8 +787,7 @@ fn admit_capacity_ability(
         service,
         client.id,
         json!({
-            "type":"act", "expected_revision":service.engine.revision(actor).unwrap().to_string(),
-            "action":action
+            "type":"act", "action":action
         }),
     );
     service.handle(client.id, id.into(), request);
@@ -972,8 +953,7 @@ fn real_growth_invariant_refusal_reaches_only_its_controller_and_can_be_cancelle
         &service,
         owner.id,
         json!({
-            "type":"cancel_intention", "expected_revision":service.engine.revision(ActorId(1)).unwrap().to_string(),
-            "intention":queued[0].intention, "step":null
+            "type":"cancel_intention", "intention":queued[0].intention, "step":null
         }),
     );
     service.handle(owner.id, "cancel-refused-growth".into(), request);
@@ -1118,8 +1098,7 @@ fn real_capacity_notice_reaches_a_new_controller_after_suspend_and_resume() {
         &service,
         replacement.id,
         json!({
-            "type":"resume_intention", "expected_revision":service.engine.revision(ActorId(1)).unwrap().to_string(),
-            "intention":admission
+            "type":"resume_intention", "intention":admission
         }),
     );
     service.handle(replacement.id, "resume-failed-work".into(), request);
@@ -1393,11 +1372,11 @@ fn canonical_wraith_earned_regrowth_survives_source_free_service_reopen() {
             self.acts += 1;
             assert!(self.acts <= 8_000, "controlled Act admission bound");
             let client = self.clients[&actor].id;
-            let revision = self.service.engine.revision(actor).unwrap();
+            let revision = self.service.engine.causal_boundary(actor).unwrap();
             let wire: tor_protocol::Action = serde_json::from_value(action.clone()).unwrap();
             let decoded = self.service.engine.decode_action(actor, &wire).unwrap();
             let original = crate::journal::Command::AdmitIntention {
-                expected_revision: revision,
+                expected_boundary: revision,
                 action: decoded,
             };
             let request_id = format!("controlled-{}", self.acts);
@@ -1405,7 +1384,7 @@ fn canonical_wraith_earned_regrowth_survives_source_free_service_reopen() {
                 &self.service,
                 client,
                 json!({"type":"act",
-                "expected_revision":revision.to_string(), "action":action}),
+                "action":action}),
             );
             self.service.handle(client, request_id.clone(), request);
             let messages = self.drain();
@@ -1528,7 +1507,6 @@ fn canonical_wraith_earned_regrowth_survives_source_free_service_reopen() {
                             &self.service,
                             client,
                             json!({"type":"resume_intention",
-                            "expected_revision":self.service.engine.revision(actor).unwrap().to_string(),
                             "intention":work.intention}),
                         );
                         self.resumes += 1;
@@ -1990,7 +1968,6 @@ fn canonical_wraith_earned_regrowth_survives_source_free_service_reopen() {
                 &case.service,
                 client,
                 json!({"type":"act",
-                "expected_revision":case.service.engine.revision(OWNER).unwrap().to_string(),
                 "action":{"type":"use_ability","supplies":{"kind":"carried"},"id":"basic_melee",
                     "invocation":{"aim":{"kind":"actor_target","target":target},"weapon":{"kind":"default"}}}}),
             );

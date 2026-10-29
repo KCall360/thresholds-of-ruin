@@ -98,7 +98,7 @@ fn query(wire: &Wire, actor: ActorId, kind: ChartKind) -> ChartQuery {
     ChartQuery {
         context: client.context.clone().unwrap(),
         branch: observed.branch.clone(),
-        base: observed.base,
+        base: observed.base.clone(),
         chart,
         cursor: None,
     }
@@ -189,7 +189,7 @@ fn paid_monster_chart_is_nonvisual_nonactionable_pure_and_republishes_far_peer_m
         act_as(&mut wire, next, &format!("owner-turn-{turn}"), Action::Wait);
     }
     assert_eq!(wire.service.engine.next_actor(), Some(OTHER));
-    let revision = wire.service.engine.revision(OWNER).unwrap();
+    let revision = wire.service.engine.causal_boundary(OWNER).unwrap();
     let tick = wire.service.engine.state(OWNER).unwrap().observation.tick;
     act_as(
         &mut wire,
@@ -339,7 +339,7 @@ fn historical_magic_is_frozen_across_movement_source_deleted_reopen_and_spectato
     let q = ChartQuery {
         context: client.context.clone().unwrap(),
         branch: observed.branch.clone(),
-        base: observed.base,
+        base: observed.base.clone(),
         chart: summary.chart.clone().unwrap(),
         cursor: None,
     };
@@ -513,7 +513,6 @@ fn paid_magic_history_encoder_rollback(exact_retry: bool) {
             context: paused.reply_context().input,
             branch: paused.branch.clone(),
             command: Command::ResumeIntention {
-                expected_revision: paused.state.revision,
                 intention: original_intention,
             },
         };

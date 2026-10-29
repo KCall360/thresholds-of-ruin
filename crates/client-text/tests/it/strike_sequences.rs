@@ -8,12 +8,14 @@ use tor_protocol::*;
 #[test]
 fn ordered_strikes_text_chronicle_identifies_later_visible_miss_without_opponent_total() {
     let before = StateView {
+        snapshot: tor_protocol::SnapshotId("fixture-snapshot".into()),
         wizard_game: false,
         revision: 0,
         observation: test_support::observation(),
     };
     let mut after = before.clone();
     after.revision = 1;
+    after.snapshot = tor_protocol::SnapshotId(format!("fixture-display-{}", after.revision));
     after.observation.tick = 20;
     after.observation.combat.as_mut().unwrap().events =
         vec![serde_json::from_value(serde_json::json!({
@@ -21,7 +23,11 @@ fn ordered_strikes_text_chronicle_identifies_later_visible_miss_without_opponent
             "ability":{"id":"triple_strike","name":"Triple Strike"},"outcome":"miss","strike":1
         }))
         .unwrap()];
-    let beats = Chronicler::default().observe(&before, &after, None, &Palette::default());
+    let beats = Chronicler::default().outcome(&OutcomeFacts::capture(
+        &before.observation,
+        &after.observation,
+        None,
+    ));
     let text = compose(&Record {
         entries: vec![Entry::Beats(beats)],
     });
@@ -33,6 +39,7 @@ fn ordered_strikes_text_chronicle_identifies_later_visible_miss_without_opponent
 #[test]
 fn ordered_strikes_text_look_shows_paused_prefix_and_exact_cancel_debt() {
     let mut state = StateView {
+        snapshot: tor_protocol::SnapshotId("fixture-snapshot".into()),
         wizard_game: false,
         revision: 0,
         observation: test_support::observation(),
@@ -55,6 +62,7 @@ fn ordered_strikes_text_look_shows_paused_prefix_and_exact_cancel_debt() {
 #[test]
 fn ordered_strikes_text_parses_explicit_cancel_and_step_without_forged_identity() {
     let state = StateView {
+        snapshot: tor_protocol::SnapshotId("fixture-snapshot".into()),
         wizard_game: false,
         revision: 0,
         observation: test_support::observation(),
@@ -70,6 +78,7 @@ fn ordered_strikes_text_parses_explicit_cancel_and_step_without_forged_identity(
 #[test]
 fn ordered_strikes_text_parses_source_selection_and_bounded_page_navigation() {
     let state = StateView {
+        snapshot: tor_protocol::SnapshotId("fixture-snapshot".into()),
         wizard_game: true,
         revision: 0,
         observation: test_support::observation(),

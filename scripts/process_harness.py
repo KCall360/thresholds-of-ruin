@@ -1010,6 +1010,17 @@ class ProcessTestCase(unittest.TestCase):
             if not line.startswith("{"):
                 return False
             value = json.loads(line)
+            # The real client has already validated/applied this ordered message.
+            # Track only pending visual demand, never infer it from readiness,
+            # tick or picture identity. Causal-only outcomes need no picture.
+            message = value.get("message") or {}
+            body = (message.get("update") or {}).get("body") or {}
+            if message.get("type") == "snapshot" or (message.get("type") == "update"
+                    and body.get("type") in ("observation", "observation_delta")):
+                client._picture_dirty = False
+            elif message.get("type") == "update" and body.get("type") == "outcome":
+                client._picture_dirty = (getattr(client, "_picture_dirty", False) is True
+                                         or body["visual_changed"])
             if predicate(value):
                 found.append(value)
                 return True
@@ -1035,6 +1046,20 @@ class ProcessTestCase(unittest.TestCase):
     def request(self, client, request):
         return self.command(client, {"type": "request", "request": request})
 
+    def picture_after(self, client, current):
+        """Finish already-requested visual work, without advancing or resetting play."""
+        if getattr(client, "_picture_dirty", False) is not True:
+            return current
+        return self.frame(client, lambda frame: not frame.get("state_omitted", False)
+                          and getattr(client, "_picture_dirty", False) is not True)
+
+    def assertDisclosedStateEqual(self, actual, expected, message=None):
+        """Picture capabilities are local; every disclosed payload field is exact."""
+        def contents(state):
+            return {key: value for key, value in state.items()
+                    if key not in ("snapshot", "revision")}
+        self.assertEqual(contents(actual), contents(expected), message)
+
     def act(self, client, action):
         # This helper authors current valid requests. Raw command/request helpers
         # remain unchanged for missing-field and malformed-wire tests.
@@ -1046,7 +1071,7 @@ class ProcessTestCase(unittest.TestCase):
         pending = next((status for status in accepted.get("intentions", [])
                         if status["phase"] == "queued"), None)
         if pending is None:
-            return accepted
+            return self.picture_after(client, accepted)
         # Request acknowledgement is admission. Assert action effects only after
         # the matching ordered lifecycle update from simulation execution.
         executed = self.frame(client, lambda frame: (
@@ -1057,14 +1082,15 @@ class ProcessTestCase(unittest.TestCase):
                 ("started", "paused", "resolved", "failed", "cancelled", "suspended")))
         phase = executed["message"]["update"]["body"]["status"]["phase"]
         if phase == "started":
-            return executed
+            return self.picture_after(client, executed)
         # Work may start and be interrupted in one publication, reporting paused
         # without a separate started phase. Paused/completed/suspended work
         # changes the controls; wait for that ordered permission update. Pause
         # is not completion: the caller decides whether to resume the paid work.
         revision = int(executed["readiness"]["revision"])
-        return self.frame(client, lambda frame: not frame.get("state_omitted", False)
-                          and int(frame["readiness"]["revision"]) > revision)
+        permitted = self.frame(client, lambda frame: not frame.get("state_omitted", False)
+                               and int(frame["readiness"]["revision"]) > revision)
+        return self.picture_after(client, permitted)
 
     def play(self, client, steps):
         """Play fixture steps as ordinary actions: `{"move": direction}` or `{"take": item name}`."""

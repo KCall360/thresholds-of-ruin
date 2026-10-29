@@ -1,4 +1,4 @@
-//! What happened, as structured beats derived from consecutive views.
+//! What happened, as structured beats derived from ordered event-time facts.
 //!
 //! Beats name things as the character knew them at the time, so a passage
 //! can still name a figure that has since died or gone out of sight.
@@ -7,7 +7,9 @@ use std::collections::BTreeMap;
 use tor_client_common::Palette;
 use tor_protocol::*;
 
-use super::scene::{whereabouts, Kind, Scene};
+#[cfg(test)]
+use super::scene::whereabouts;
+use super::scene::{Kind, Scene};
 
 /// A figure as it was known when the beat happened.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -123,11 +125,19 @@ pub struct Chronicler {
     names: BTreeMap<ActorTarget, String>,
     /// Blows told so far, so each is worded afresh.
     blows: u32,
+    status: Option<OutcomeStatusFacts>,
 }
 
 impl Chronicler {
     /// Learn the names in a view without recording anything.
     pub fn learn(&mut self, state: &StateView, palette: &Palette) {
+        if self.status.is_none() {
+            self.status = state
+                .observation
+                .combat
+                .as_ref()
+                .map(OutcomeStatusFacts::from);
+        }
         for r in Scene::new(state, palette).of(Kind::Figure) {
             if let super::scene::Key::Actor(id) = r.key {
                 self.names.insert(id, r.name.clone());
@@ -154,9 +164,170 @@ impl Chronicler {
         }
     }
 
+    /// Consume event-time facts; never reconstruct action results from visuals.
+    pub fn outcome(&mut self, facts: &OutcomeFacts) -> Vec<Beat> {
+        for actor in &facts.actor_names {
+            self.names.insert(actor.actor, crate::safe(&actor.name));
+        }
+        // Prose has always told combat, wounds, plans, then progress. Sort
+        // typed facts directly; rendering never relies on positional pairing.
+        let mut ordered: Vec<_> = facts.facts.iter().collect();
+        ordered.sort_by_key(|fact| match fact {
+            OutcomeFact::OwnAction { .. } => 0,
+            OutcomeFact::ItemCompleted { .. } => 1,
+            OutcomeFact::TrapDiscovered { .. } | OutcomeFact::DoorDiscovered => 2,
+            OutcomeFact::Displaced | OutcomeFact::Impacted => 3,
+            OutcomeFact::Combat { .. } => 4,
+            OutcomeFact::Injured { .. } => 5,
+            OutcomeFact::PublicPlan { .. } => 6,
+            OutcomeFact::Status { .. } => 7,
+            OutcomeFact::Objective { .. } => 8,
+            OutcomeFact::Noticed { .. } => 9,
+            OutcomeFact::LostSight { .. } => 10,
+            OutcomeFact::DoorChanged { .. } => 11,
+            OutcomeFact::ItemRefused { .. }
+            | OutcomeFact::CurseBlocked { .. }
+            | OutcomeFact::Pacing { .. } => 12,
+        });
+        let mut beats = Vec::new();
+        for fact in ordered {
+            match fact {
+                OutcomeFact::Injured { actor, injury } => {
+                    beats.push(Beat::Injured {
+                        figure: self.figure(*actor),
+                        level: *injury,
+                    });
+                    continue;
+                }
+                OutcomeFact::Objective { objective } => {
+                    beats.push(Beat::Objective(*objective));
+                    continue;
+                }
+                _ => {}
+            }
+            let Some(line) = tor_client_common::narration::outcome_line(facts, fact) else {
+                continue;
+            };
+            match fact {
+                OutcomeFact::OwnAction {
+                    event,
+                    name,
+                    basic_attack,
+                } => {
+                    let name = name
+                        .as_ref()
+                        .map_or_else(|| "thing".into(), |name| crate::safe(&name.text));
+                    match event {
+                        Event::Moved { direction } => beats.push(Beat::Stepped(*direction)),
+                        Event::Waited => beats.push(Beat::Waited),
+                        Event::Taken { quantity, .. } => beats.push(Beat::Took {
+                            name,
+                            quantity: *quantity,
+                        }),
+                        Event::Dropped { quantity, .. } => beats.push(Beat::Dropped {
+                            name,
+                            quantity: *quantity,
+                        }),
+                        Event::Crumbled { quantity, .. } => beats.push(Beat::Crumbled {
+                            quantity: *quantity,
+                        }),
+                        Event::DoorChanged { open, .. } => {
+                            beats.push(Beat::SetDoor { name, open: *open })
+                        }
+                        Event::Escaped { .. } => beats.push(Beat::Escaped(line.text)),
+                        Event::EscapeStarted { .. } => beats.push(Beat::EscapeHold(line.text)),
+                        Event::ItemStarted { .. } => beats.push(Beat::ItemBegan(line.text)),
+                        Event::AbilityStarted { .. } if *basic_attack => {
+                            beats.push(Beat::AbilityBegan("You ready yourself to strike.".into()));
+                        }
+                        Event::AbilityStarted { .. } => beats.push(Beat::AbilityBegan(line.text)),
+                        Event::PreparationPaused => {}
+                    }
+                }
+                OutcomeFact::Combat {
+                    event,
+                    basic_attack,
+                } => beats.push(match event {
+                    CombatEventView::Ability {
+                        caster,
+                        target,
+                        ability,
+                        outcome,
+                        strike,
+                    } => {
+                        self.blows = self.blows.wrapping_add(1);
+                        Beat::AbilityResolved {
+                            ability: ability.clone(),
+                            attacker: self.who(*caster, facts.self_target),
+                            target: self.who(*target, facts.self_target),
+                            outcome: *outcome,
+                            strike: *strike,
+                            basic: *basic_attack,
+                            variant: self.blows,
+                        }
+                    }
+                    CombatEventView::Died { actor } => {
+                        Beat::Died(self.who(Some(*actor), facts.self_target))
+                    }
+                    CombatEventView::Interrupted { .. } => Beat::Interrupted,
+                    CombatEventView::Condition { condition } => {
+                        Beat::Condition(condition.name.clone())
+                    }
+                    _ => Beat::EscapeHold(line.text),
+                }),
+                OutcomeFact::Status { status } => {
+                    if self.status.as_ref().is_none_or(|old| {
+                        old.sequence != status.sequence
+                            || old.preparation_active != status.preparation_active
+                    }) {
+                        if let Some(line) =
+                            tor_client_common::narration::sequence_status_facts(status)
+                        {
+                            beats.push(Beat::SequenceStatus(line));
+                        }
+                    }
+                    if let Some(old) = &self.status {
+                        if old.hp != status.hp {
+                            beats.push(Beat::Hp {
+                                from: old.hp,
+                                to: status.hp,
+                                max: status.max_hp,
+                            });
+                        }
+                    }
+                    if status.victory && self.status.as_ref().is_none_or(|old| !old.victory) {
+                        beats.push(Beat::Victory {
+                            terminal: status.terminal,
+                        });
+                    }
+                    self.status = Some(status.clone());
+                }
+                OutcomeFact::ItemCompleted { .. } => beats.push(Beat::ItemFinished(line.text)),
+                OutcomeFact::PublicPlan { .. } => beats.push(Beat::PublicPlan(line.text)),
+                OutcomeFact::Displaced => beats.push(Beat::Displaced),
+                OutcomeFact::Impacted => beats.push(Beat::Impacted),
+                OutcomeFact::LostSight { actor, .. } => {
+                    beats.push(Beat::Vanished(self.figure(*actor)))
+                }
+                OutcomeFact::Noticed { .. }
+                | OutcomeFact::DoorChanged { .. }
+                | OutcomeFact::TrapDiscovered { .. }
+                | OutcomeFact::DoorDiscovered => beats.push(Beat::Discovery(line.text)),
+                OutcomeFact::ItemRefused { .. } | OutcomeFact::CurseBlocked { .. } => {
+                    beats.push(Beat::Condition(line.text))
+                }
+                OutcomeFact::Pacing { .. } => {}
+                OutcomeFact::Injured { .. } | OutcomeFact::Objective { .. } => unreachable!(),
+            }
+        }
+        self.status = facts.status.clone();
+        beats
+    }
+
     /// The beats between two consecutive observations, given the history
     /// event that came with the second.
-    pub fn observe(
+    #[cfg(test)]
+    fn observe(
         &mut self,
         before: &StateView,
         after: &StateView,
@@ -393,6 +564,7 @@ impl Chronicler {
 
 /// Whether the character's own disclosed ability is a plain attack. Names
 /// and IDs identify content; they never supply missing source-owned semantics.
+#[cfg(test)]
 fn basic(o: &Observation, ability: &ContentRef) -> bool {
     o.combat
         .as_ref()
@@ -404,6 +576,7 @@ fn basic(o: &Observation, ability: &ContentRef) -> bool {
         })
 }
 
+#[cfg(test)]
 fn item_name(items: &[ItemView], id: ItemTarget) -> String {
     items
         .iter()
@@ -412,6 +585,7 @@ fn item_name(items: &[ItemView], id: ItemTarget) -> String {
         .map_or_else(|| "thing".into(), |i| crate::safe(&i.name).to_lowercase())
 }
 
+#[cfg(test)]
 fn door_name(o: &Observation, id: DoorTarget) -> String {
     o.visible_cells
         .iter()
@@ -425,9 +599,102 @@ fn door_name(o: &Observation, id: DoorTarget) -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn ordered_outcomes_narrate_without_refreshing_the_visual_view() {
+        let before = view();
+        let mut after = before.clone();
+        after.observation.tick += 1;
+        after.observation.combat.as_mut().unwrap().hp = 40;
+        let event = Event::Moved {
+            direction: Direction::North,
+        };
+        let facts = OutcomeFacts::capture(&before.observation, &after.observation, Some(&event));
+        let mut chronicler = Chronicler::default();
+        chronicler.learn(&before, &Palette::default());
+        let beats = chronicler.outcome(&facts);
+        assert!(beats.contains(&Beat::Stepped(Direction::North)));
+        assert!(beats.contains(&Beat::Hp {
+            from: 50,
+            to: 40,
+            max: 50
+        }));
+        assert_eq!(before.observation.combat.as_ref().unwrap().hp, 50);
+    }
+
+    #[test]
+    fn outcome_keeps_legacy_combat_wounds_plan_progress_and_objective_order() {
+        let mut before = view();
+        let subject = before.observation.visible_actors[0].id;
+        before
+            .observation
+            .combat
+            .as_mut()
+            .unwrap()
+            .actors
+            .push(CombatActorView {
+                actor: subject,
+                hostile: true,
+                allied: false,
+                injury: Injury::Healthy,
+            });
+        let mut after = before.clone();
+        after.observation.tick += 1;
+        let me = after.observation.self_target;
+        let tick = after.observation.tick;
+        let combat = after.observation.combat.as_mut().unwrap();
+        combat.events.push(CombatEventView::Ability {
+            caster: Some(me),
+            target: Some(subject),
+            ability: ContentRef {
+                id: "test.strike".into(),
+                name: "Strike".into(),
+            },
+            outcome: AbilityOutcome::Applied,
+            strike: Some(1),
+        });
+        combat.actors[0].injury = Injury::Wounded;
+        combat.public_plan = Some(PublicPlanObservationView {
+            observed_at: tick,
+            subject_name: "remembered guard".into(),
+            state: PublicPlanStateView::Preparing {
+                ability: None,
+                aim: ObservedAimView::Unavailable,
+                remaining_work: 200,
+            },
+        });
+        combat.sequence = Some(SequenceView {
+            completed: 1,
+            total: 3,
+            next_strike_remaining: 5,
+            cancel_recovery_remaining: 35,
+        });
+        combat.preparation_active = true;
+        combat.hp = 40;
+        combat.victory = true;
+        combat.objective = Some(ObjectiveKind::RetrieveAndReturn);
+        let facts = OutcomeFacts::capture(&before.observation, &after.observation, None);
+        let expected = Chronicler::default().observe(&before, &after, None, &Palette::default());
+        let mut current = Chronicler::default();
+        current.learn(&before, &Palette::default());
+        let actual = current.outcome(&facts);
+        assert_eq!(actual, expected);
+        assert!(matches!(
+            actual.as_slice(),
+            [
+                Beat::AbilityResolved { .. },
+                Beat::Injured { .. },
+                Beat::PublicPlan(_),
+                Beat::SequenceStatus(_),
+                Beat::Hp { .. },
+                Beat::Victory { .. },
+                Beat::Objective(_),
+            ]
+        ));
+    }
+
     fn view() -> StateView {
         serde_json::from_value(serde_json::json!({
-            "wizard_game":false,"revision":"1","observation":{
+            "snapshot":"chronicle-fixture","wizard_game":false,"revision":"1","observation":{
             "actor":"1","self_target":tor_protocol::ActorTarget::from_digest([1; 32]),"tick":"5","position":{"x":0,"y":0,"z":0},"ready":true,
             "places":[],"visible_cells":[{"key":"here","position":{"x":0,"y":0,"z":0},
                 "wall":false,"material":"stone","lit":true,"place_hint":false,
@@ -545,6 +812,52 @@ mod tests {
             }],
         });
         state
+    }
+
+    #[test]
+    fn outcome_preparation_prose_uses_disclosed_basic_flag_not_ability_name() {
+        for basic_attack in [false, true] {
+            let mut before = armed_view();
+            let mut disclosed = tor_client_common::test_support::ability("custom.technique");
+            disclosed.name = "Renamed Technique".into();
+            disclosed.basic_attack = basic_attack;
+            before
+                .observation
+                .combat
+                .as_mut()
+                .unwrap()
+                .own_stats
+                .as_mut()
+                .unwrap()
+                .abilities = vec![disclosed];
+            let mut after = before.clone();
+            after.observation.tick += 1;
+            let event = Event::AbilityStarted {
+                ability: ContentRef {
+                    id: "custom.technique".into(),
+                    name: "Renamed Technique".into(),
+                },
+                target: after.observation.visible_actors[0].id,
+            };
+            let entry = action(event.clone());
+            let expected =
+                Chronicler::default().observe(&before, &after, Some(&entry), &Palette::default());
+            let facts =
+                OutcomeFacts::capture(&before.observation, &after.observation, Some(&event));
+            let actual = Chronicler::default().outcome(&facts);
+            assert_eq!(actual, expected);
+            assert_eq!(
+                actual,
+                vec![Beat::AbilityBegan(
+                    if basic_attack {
+                        "You ready yourself to strike."
+                    } else {
+                        "You prepare to use Renamed Technique."
+                    }
+                    .into()
+                )]
+            );
+        }
     }
 
     #[test]

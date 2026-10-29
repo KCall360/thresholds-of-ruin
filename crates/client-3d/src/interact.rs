@@ -544,16 +544,16 @@ pub fn keys(
         return;
     }
     if keys.just_pressed(KeyCode::F4) {
-        let revision = game.view.as_ref().map(|view| view.revision);
-        if let Some(revision) = revision.filter(|_| {
-            game.screen
+        let snapshot = game.view.as_ref().map(|view| view.shown.snapshot.clone());
+        if let Some(snapshot) = snapshot.filter(|_| {
+            game.screen.as_ref()
                 .is_none_or(|open| matches!(open, Screen::Note { .. }))
         }) {
             toggle(
                 &net,
                 &mut game,
                 Screen::Note {
-                    revision,
+                    snapshot,
                     private: true,
                 },
             );
@@ -564,11 +564,11 @@ pub fn keys(
         toggle(&net, &mut game, Screen::Places { renaming: None });
         return;
     }
-    if keys.just_pressed(KeyCode::KeyC) && game.screen.is_none_or(|open| open == Screen::Charts) {
+    if keys.just_pressed(KeyCode::KeyC) && game.screen.as_ref().is_none_or(|open| *open == Screen::Charts) {
         toggle(&net, &mut game, Screen::Charts);
         return;
     }
-    if let Some(open) = game.screen {
+    if let Some(open) = game.screen.clone() {
         if keys.just_pressed(KeyCode::Escape) {
             toggle(&net, &mut game, open);
         }

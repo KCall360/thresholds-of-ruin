@@ -1171,3 +1171,179 @@ fn item_preparation_keeps_known_threat_reference_domains_separate() {
 
 #[path = "contact_tests.rs"]
 mod contact_topology_contracts;
+
+#[test]
+fn one_observation_builds_each_projection_location_index_once() {
+    let game = fixture(&[], &[invisible()]);
+    // This is the cold-index contract; warm reuse has an independent owner.
+    game.scene(OWNER).unwrap();
+    let (scene, sight) = game.scene_snapshot(OWNER).unwrap();
+    assert!(!scene.is_empty());
+    assert!(!sight.is_empty());
+    let original = game.clone();
+    let before = crate::diagnostics::work_counts();
+    let view = game.observe(OWNER).unwrap();
+    let after = crate::diagnostics::work_counts();
+    assert_eq!(after.observations - before.observations, 1);
+    assert_eq!(
+        after.perception_projections - before.perception_projections,
+        1
+    );
+    assert_eq!(
+        after.projection_location_indexes - before.projection_location_indexes,
+        2,
+        "one disclosed-location index and one distinct eye-location index"
+    );
+    assert_eq!(
+        after.projection_location_cells - before.projection_location_cells,
+        scene.len() + sight.len()
+    );
+    let contact = view
+        .visible_actors
+        .iter()
+        .find(|actor| actor.id == SUBJECT)
+        .unwrap();
+    assert_eq!(contact.disclosure, ActorDisclosure::AnonymousContact);
+    assert!(contact.name.is_empty());
+    assert_eq!(contact.asset, None);
+    assert!(view.combat.unwrap().actors.is_empty());
+    assert_eq!(game, original);
+}
+
+#[test]
+fn reused_projection_indexes_preserve_independent_disclosure_boundaries() {
+    let cases = [
+        (vec![], vec![], ActorDisclosure::Creature),
+        (vec![], vec![invisible()], ActorDisclosure::AnonymousContact),
+        (
+            vec![PerceptionValue::SeeInvisible { enabled: true }],
+            vec![invisible()],
+            ActorDisclosure::Creature,
+        ),
+        (
+            vec![
+                PerceptionValue::SeeInvisible { enabled: true },
+                PerceptionValue::Sight { enabled: false },
+            ],
+            vec![invisible()],
+            ActorDisclosure::AnonymousContact,
+        ),
+        (vec![], vec![guise()], ActorDisclosure::ApparentObject),
+    ];
+    for (owner, subject, expected) in cases {
+        let mut game = fixture(&owner, &subject);
+        let (scene, sight) = game.scene_snapshot(OWNER).unwrap();
+        // This independently enumerates the subject's body and scans the scene,
+        // rather than using the entity-projection location index under test.
+        assert_eq!(
+            game.actor_disclosure_in_scene(OWNER, SUBJECT, &scene, &sight)
+                .unwrap(),
+            expected
+        );
+        let original = game.clone();
+        let view = game.observe(OWNER).unwrap();
+        let actors: Vec<_> = view
+            .visible_actors
+            .iter()
+            .filter(|row| row.id == SUBJECT)
+            .collect();
+        match expected {
+            ActorDisclosure::Creature => {
+                assert_eq!(actors.len(), 1);
+                assert_eq!(actors[0].disclosure, expected);
+                assert_eq!(actors[0].name, "private creature 2");
+                assert_eq!(actors[0].asset.as_deref(), Some("private_creature_asset"));
+            }
+            ActorDisclosure::AnonymousContact => {
+                assert_eq!(actors.len(), 1);
+                assert_eq!(actors[0].disclosure, expected);
+                assert!(actors[0].name.is_empty());
+                assert_eq!(actors[0].asset, None);
+                assert!(view.combat.as_ref().unwrap().actors.is_empty());
+            }
+            ActorDisclosure::ApparentObject => {
+                assert!(actors.is_empty());
+                assert_eq!(view.apparent_objects.len(), 1);
+                assert_eq!(view.apparent_objects[0].appearance, appearance());
+                assert!(view.combat.as_ref().unwrap().actors.is_empty());
+            }
+            ActorDisclosure::Hidden => unreachable!("hidden contrast follows"),
+        }
+        assert_eq!(game, original);
+        game.teleport(SUBJECT, at(2, 3, 2)).unwrap();
+        let hidden = game.observe(OWNER).unwrap();
+        assert!(hidden.visible_actors.iter().all(|row| row.id != SUBJECT));
+        assert!(hidden.apparent_objects.is_empty());
+        assert!(hidden.combat.unwrap().actors.is_empty());
+    }
+}
+
+#[test]
+fn reused_projection_indexes_keep_rotated_portal_sight_distinct_from_stair_disclosure() {
+    let mut game = fixture(
+        &[PerceptionValue::SeeInvisible { enabled: true }],
+        &[invisible()],
+    );
+    let landing = at(2, 2, 2);
+    game.teleport(SUBJECT, landing).unwrap();
+    game.register_named_anchors(
+        landing.region,
+        BTreeMap::from([("landing".into(), landing.position)]),
+    )
+    .unwrap();
+    game.connect_named_stair(
+        at(1, 2, 2),
+        Direction::Up,
+        tor_world::NamedAnchor {
+            region: landing.region,
+            name: "landing".into(),
+        },
+    )
+    .unwrap();
+    let (scene, sight) = game.scene_snapshot(OWNER).unwrap();
+    assert!(scene
+        .iter()
+        .any(|cell| cell.location == landing && !cell.physical));
+    assert!(!sight.iter().any(|cell| cell.location == landing));
+    let view = game.observe(OWNER).unwrap();
+    assert!(view.visible_actors.iter().all(|row| row.id != SUBJECT));
+    assert!(view.combat.unwrap().actors.is_empty());
+    assert_eq!(
+        game.actor_disclosure_in_scene(OWNER, SUBJECT, &scene, &sight)
+            .unwrap(),
+        ActorDisclosure::Hidden
+    );
+
+    // Unlike the abstract stair, a physical portal must leave a region boundary.
+    let portal = at(1, 8, 2);
+    game.teleport(OWNER, portal).unwrap();
+    game.connect(
+        tor_world::Passage {
+            from: portal,
+            to: landing,
+            direction: Direction::East,
+        },
+        1,
+    )
+    .unwrap();
+    let (scene, sight) = game.scene_snapshot(OWNER).unwrap();
+    assert!(sight
+        .iter()
+        .any(|cell| cell.location == landing && cell.rotation == 1));
+    assert_eq!(
+        game.actor_disclosure_in_scene(OWNER, SUBJECT, &scene, &sight)
+            .unwrap(),
+        ActorDisclosure::Creature
+    );
+    let original = game.clone();
+    let view = game.observe(OWNER).unwrap();
+    let subject = view
+        .visible_actors
+        .iter()
+        .find(|row| row.id == SUBJECT)
+        .unwrap();
+    assert_eq!(subject.disclosure, ActorDisclosure::Creature);
+    assert_eq!(subject.name, "private creature 2");
+    assert_eq!(subject.asset.as_deref(), Some("private_creature_asset"));
+    assert_eq!(game, original);
+}

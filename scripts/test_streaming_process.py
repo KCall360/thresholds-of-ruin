@@ -429,7 +429,7 @@ class NativeStreamingProcesses(StreamingFixture, ProcessTestCase):
         self.assertEqual(shown["state"]["observation"], far["state"]["observation"])
         native.stop()
         text, _ = self.text_client()
-        self.assertIn("Waited", text.command("wait"))
+        self.assertIn("Time passes.", text.command("wait"))
         text.stop()
         # Walking on builds hall 5 from the explicitly compiled moved bundle.
         player, _ = self.client(omit_memory=True)

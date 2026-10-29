@@ -79,8 +79,7 @@ class CompleteRecordingContracts(unittest.TestCase):
             "snapshot": {"state": {"wizard_game": False, "observation": {"interactions": {"inventory": [
                 {"item": "exact-item", "device_activation": "direction_or_self"}]}}}}},
             "request": {"type": "request", "request_id": "actual-self-zap", "request": {"type": "command",
-                "context": {"epoch": "exact-epoch"}, "command": {"type": "act", "expected_revision": "7",
-                    "action": {"type": "zap", "item": "exact-item", "aim": {"kind": "self_target"}}}}}}
+                "context": {"epoch": "exact-epoch"}, "command": {"type": "act", "action": {"type": "zap", "item": "exact-item", "aim": {"kind": "self_target"}}}}}}
         diagnostic = {"type": "combat_diagnostics", "report": {"enabled": True, "records": [
             {"ability": {"id": "fixture.polymorph"}, "outcome": {"effects": [
                 {"type": "baleful_polymorph", "target": "1", "changed": True}]}}]}}
@@ -551,10 +550,11 @@ class DetectionRecordingContracts(unittest.TestCase):
 
 
 ANONYMOUS_SAMPLE = {
-    "type": "update", "update": {"actor": "3", "body": {"type": "observation_delta", "state": {
-        "combat": {"events": [{"type": "anonymous_ability", "caster": "a_" + "11" * 32,
-                              "target": "a_" + "33" * 32, "outcome": "applied"}]},
-    }}, "context": {"stream": "actual-recipient-stream", "epoch": "1"},
+    "type": "update", "update": {"actor": "3", "body": {"type": "outcome", "visual_changed": True,
+        "facts": {"facts": [{"kind": "combat", "event": {
+            "type": "anonymous_ability", "caster": "a_" + "11" * 32,
+            "target": "a_" + "33" * 32, "outcome": "applied"}}]},
+    }, "context": {"stream": "actual-recipient-stream", "epoch": "1"},
         "cursor": {"sequence": "15", "tick": "200"}, "branch": "actual-branch"},
 }
 
@@ -663,13 +663,13 @@ class PersistentConditionRecordingContracts(unittest.TestCase):
                         record_wire_samples.Recorder().record_persistent_conditions(samples)
                 self.assertEqual(samples, {})
 
-    def test_anonymous_recording_requires_an_actual_applied_recipient_delta(self):
+    def test_anonymous_recording_requires_an_actual_applied_recipient_outcome(self):
         for changed in ("missing", "missing_context", "named", "identity_field", "wrong_target", "hidden_caster",
-                        "miss", "wrong_actor", "full_observation", "no_events"):
+                        "miss", "wrong_actor", "full_observation", "observation_delta", "no_events"):
             with self.subTest(changed=changed):
                 anonymous = copy.deepcopy(ANONYMOUS_SAMPLE)
                 update = anonymous["update"]
-                event = update["body"]["state"]["combat"]["events"][0]
+                event = update["body"]["facts"]["facts"][0]["event"]
                 if changed == "named":
                     event["type"] = "ability"
                 elif changed == "identity_field":
@@ -682,10 +682,13 @@ class PersistentConditionRecordingContracts(unittest.TestCase):
                     event["outcome"] = "miss"
                 elif changed == "wrong_actor":
                     update["actor"] = "1"
-                elif changed == "full_observation":
-                    update["body"]["type"] = "observation"
+                elif changed in ("full_observation", "observation_delta"):
+                    combat = {"events": [event]}
+                    update["body"] = ({"type": "observation", "state": {"observation": {"combat": combat}}}
+                                      if changed == "full_observation" else
+                                      {"type": "observation_delta", "state": {"combat": combat}})
                 elif changed == "no_events":
-                    update["body"]["state"]["combat"]["events"] = []
+                    update["body"]["facts"]["facts"] = []
                 case, _ = self.case(anonymous=anonymous)
                 if changed in ("missing", "missing_context"):
                     original = type(case).runTest
@@ -703,7 +706,7 @@ class PersistentConditionRecordingContracts(unittest.TestCase):
                         record_wire_samples.Recorder().record_persistent_conditions(samples)
                 self.assertEqual(samples, {}, "Neither artifact publishes after an invalid event")
 
-    def test_anonymous_process_capture_retains_only_the_new_raw_delta(self):
+    def test_anonymous_process_capture_retains_only_the_new_raw_outcome(self):
         case = record_wire_samples.utility_wands_recording_case()
         target = SimpleNamespace(transcript=[json.dumps({"message": ANONYMOUS_SAMPLE})])
         start = len(target.transcript)
@@ -735,7 +738,10 @@ class PersistentConditionRecordingContracts(unittest.TestCase):
         from utility_wands_package import assert_anonymous_recipient_feedback
         expected = assert_anonymous_recipient_feedback(self, [ANONYMOUS_SAMPLE], ANONYMOUS_RECIPIENT)
         self.assertIs(expected, ANONYMOUS_SAMPLE)
-        for messages in ([], [{"type": "snapshot", "snapshot": PERSISTENT_SAMPLE["snapshot"]}]):
+        event = copy.deepcopy(ANONYMOUS_SAMPLE["update"]["body"]["facts"]["facts"][0]["event"])
+        visual = copy.deepcopy(ANONYMOUS_SAMPLE)
+        visual["update"]["body"] = {"type": "observation_delta", "state": {"combat": {"events": [event]}}}
+        for messages in ([], [visual], [{"type": "snapshot", "snapshot": PERSISTENT_SAMPLE["snapshot"]}]):
             with self.subTest(messages=messages), self.assertRaises(AssertionError):
                 assert_anonymous_recipient_feedback(self, messages, ANONYMOUS_RECIPIENT)
 
@@ -770,19 +776,17 @@ class PersistentConditionRecordingContracts(unittest.TestCase):
 
 
 class ConditionEventSelection(unittest.TestCase):
-    def test_full_and_delta_updates_select_only_the_standalone_condition(self):
+    def test_ordered_outcome_selects_only_the_standalone_condition(self):
         event = {"type": "condition", "condition": {"id": "fixture_stupor", "name": "Fixture Faint"}}
-        for kind, state in (
-                ("observation", {"observation": {"combat": {"events": [event]}}}),
-                ("observation_delta", {"combat": {"events": [event]}})):
-            with self.subTest(kind=kind):
-                message = {"type": "update", "update": {"body": {"type": kind, "state": state}}}
-                unchanged = copy.deepcopy(message)
-                self.assertTrue(has_condition_event(message, "fixture_stupor"))
-                self.assertFalse(has_condition_event(message, "another_status"))
-                self.assertEqual(message, unchanged, "Selection must preserve the original server message")
+        message = {"type": "update", "update": {"body": {"type": "outcome",
+            "visual_changed": False, "facts": {"facts": [{"kind": "combat", "event": event}]}}}}
+        unchanged = copy.deepcopy(message)
+        self.assertTrue(has_condition_event(message, "fixture_stupor"))
+        self.assertFalse(has_condition_event(message, "another_status"))
+        self.assertEqual(message, unchanged, "Selection preserves the actual ordered message")
 
-    def test_ability_details_and_unrelated_messages_are_not_standalone_events(self):
+    def test_visual_copies_nested_ability_details_and_unrelated_messages_are_not_events(self):
+        event = {"type": "condition", "condition": {"id": "fixture_stupor"}}
         nested = {"type": "ability", "condition": {"id": "fixture_stupor"}}
         for message in (
                 None,
@@ -790,11 +794,21 @@ class ConditionEventSelection(unittest.TestCase):
                 {"type": "update", "update": {"body": {"type": "intention"}}},
                 {"type": "update", "update": {"body": {"type": "observation_delta", "state": {}}}},
                 {"type": "update", "update": {"body": {"type": "observation",
-                    "state": {"observation": {"combat": None}}}}},
-                {"type": "update", "update": {"body": {"type": "observation_delta",
-                    "state": {"combat": {"events": [nested]}}}}}):
+                    "state": {"observation": {"combat": {"events": [event]}}}}}},
+                {"type": "update", "update": {"body": {"type": "outcome",
+                    "facts": {"facts": [{"kind": "combat", "event": nested}]}}}}):
             with self.subTest(message=message):
                 self.assertFalse(has_condition_event(message, "fixture_stupor"))
+
+    def test_current_client_examples_use_snapshot_capabilities_and_observe(self):
+        requests = [entry["request"] for entry in record_wire_samples.CLIENT if entry["type"] == "request"]
+        self.assertIn({"type": "observe"}, requests)
+        maps = [request for request in requests if request["type"] == "map"]
+        self.assertEqual(maps[0]["query"]["base"]["snapshot"], "sample-issued-snapshot")
+        notes = [request["command"] for request in requests if request["type"] == "command"
+                 and request["command"]["type"] == "annotate"
+                 and request["command"]["anchor"]["type"] == "state"]
+        self.assertEqual(notes[0]["anchor"], {"type": "state", "snapshot": "sample-issued-snapshot"})
 
 
 class NutritionTriggerFixtureContracts(unittest.TestCase):

@@ -22,7 +22,7 @@ use crate::journal::{
     WizardResult,
 };
 
-pub(crate) const ARCHIVE_VERSION: u32 = 63;
+pub(crate) const ARCHIVE_VERSION: u32 = 64;
 #[path = "action_resolution.rs"]
 mod action_resolution;
 #[path = "advancement_query.rs"]
@@ -42,8 +42,11 @@ mod floor_activation_audit;
 #[cfg(test)]
 #[path = "floor_activation_tests.rs"]
 mod floor_activation_tests;
+#[path = "input_basis_generation.rs"]
+mod input_basis_generation;
 #[path = "intention.rs"]
 mod intention;
+use input_basis_generation::InputGenerations;
 #[path = "intention_lifecycle.rs"]
 mod intention_lifecycle;
 #[cfg(test)]
@@ -120,7 +123,7 @@ mod persisted_input_tests {
                         &format!("walk-{step}"),
                         &engine.branch().clone(),
                         Command::Act {
-                            expected_revision: engine.revision(ActorId(1)).unwrap(),
+                            expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
                             action: Action::Move {
                                 direction: Direction::East,
                             },
@@ -209,7 +212,7 @@ mod request_validation_tests {
             actor,
             branch: engine.branch().clone(),
             command: Command::Act {
-                expected_revision: engine.revision(actor).unwrap(),
+                expected_boundary: engine.causal_boundary(actor).unwrap(),
                 action: Action::Wait,
             },
         };
@@ -225,7 +228,7 @@ mod request_validation_tests {
 
         let mut conflict = receipt.clone();
         conflict.command = Command::Act {
-            expected_revision: 0,
+            expected_boundary: 0,
             action: Action::Move {
                 direction: Direction::East,
             },
@@ -234,7 +237,8 @@ mod request_validation_tests {
         unauthorized.request_id = "wizard".into();
         unauthorized.branch = BranchId("unavailable".into());
         unauthorized.command = Command::Wizard {
-            expected_revision: 0,
+            display_basis: None,
+            expected_boundary: 0,
             operation: WizardOperation::Teleport {
                 actor,
                 position: Position {
@@ -271,23 +275,26 @@ mod request_validation_tests {
         engine.enable_wizard().unwrap();
         let actor = ActorId(1);
         let before = engine.state(actor).unwrap();
-        let expected_revision = before.revision + 1;
+        let expected_boundary = before.revision + 1;
         let commands = [
             Command::Act {
-                expected_revision,
+                expected_boundary,
                 action: Action::Wait,
             },
             Command::Travel {
-                expected_revision,
+                display_basis: None,
+                expected_boundary,
                 destination: "unavailable".into(),
             },
             Command::RenamePlace {
-                expected_revision,
+                display_basis: None,
+                expected_boundary,
                 key: "unavailable".into(),
                 name: "name".into(),
             },
             Command::Wizard {
-                expected_revision,
+                display_basis: None,
+                expected_boundary,
                 operation: WizardOperation::Teleport {
                     actor,
                     position: Position {
@@ -325,6 +332,160 @@ mod request_validation_tests {
 #[cfg(test)]
 mod observation_reuse_tests {
     use super::*;
+
+    thread_local! {
+        static READINESS_PROBE: std::cell::Cell<(usize, usize, usize)> = const { std::cell::Cell::new((0, 0, 0)) };
+    }
+    fn readiness_probe(name: &'static str, enter: bool) {
+        READINESS_PROBE.with(|probe| {
+            let (mut depth, mut views, mut scans) = probe.get();
+            if name == "revision_view" {
+                if enter {
+                    depth += 1;
+                    views += 1;
+                } else {
+                    depth -= 1;
+                }
+            } else if name == "scheduler" && enter && depth > 0 {
+                scans += 1;
+            }
+            probe.set((depth, views, scans));
+        });
+    }
+
+    #[test]
+    fn remote_actor_boundaries_do_not_materialize_unrelated_observations() {
+        // The small diagnostic constructor caps its built-in actor list at
+        // eight. Reuse its validated locations across twenty distinct rooms.
+        let mut scenario = Scenario::performance(42, 20, 5).unwrap();
+        let local = scenario.actors.clone();
+        scenario.actors = (1..=20)
+            .flat_map(|region| {
+                local.iter().cloned().map(move |mut actor| {
+                    actor.position.region = region;
+                    actor
+                })
+            })
+            .collect();
+        let mut engine = Engine::memory(scenario).unwrap();
+        let actors = engine.actors();
+        assert_eq!(actors.len(), 100);
+        let before: Vec<_> = actors
+            .iter()
+            .map(|&actor| {
+                (
+                    actor,
+                    engine.causal_boundary(actor).unwrap(),
+                    engine.revision_view(actor).unwrap(),
+                )
+            })
+            .collect();
+        let count = tor_simulation::diagnostics::work_counts().observations;
+        engine
+            .command(
+                "test",
+                "test",
+                ActorId(1),
+                "change-driven-boundary",
+                &engine.branch().clone(),
+                Command::Act {
+                    expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
+                    action: Action::Move {
+                        direction: Direction::East,
+                    },
+                },
+            )
+            .unwrap();
+        let materialized = tor_simulation::diagnostics::work_counts().observations - count;
+        assert_ne!(
+            Some(
+                engine
+                    .revision_view(ActorId(1))
+                    .unwrap()
+                    .observation
+                    .location
+            ),
+            Some(before[0].2.observation.location)
+        );
+        for (actor, boundary, _old) in before {
+            assert_matches_uncached(&engine, actor);
+            assert_eq!(
+                engine.causal_boundary(actor).unwrap(),
+                boundary + 1,
+                "private causal position records every successful action, not visual differences"
+            );
+        }
+        let replayed = Engine::replay(engine.archive.clone(), None, None).unwrap();
+        assert_eq!(replayed.game, engine.game);
+        assert_eq!(
+            serde_json::to_value(&replayed.archive.records).unwrap(),
+            serde_json::to_value(&engine.archive.records).unwrap()
+        );
+        assert!(
+            materialized < actors.len() / 2,
+            "one actor move must not materialize all unrelated actor views: {materialized}"
+        );
+    }
+
+    #[test]
+    fn action_projection_reuses_settled_readiness_without_revising_disclosure() {
+        let mut engine = Engine::memory(Scenario::performance(42, 8, 8).unwrap()).unwrap();
+        let actors = engine.actors();
+        assert_eq!(actors.len(), 8);
+        assert_eq!(engine.game.next_actor(), Some(SimActor(1)));
+        for &actor in &actors {
+            engine.state(actor).unwrap();
+        }
+        let before = engine.state(ActorId(1)).unwrap();
+        READINESS_PROBE.set((0, 0, 0));
+        let observer = tor_simulation::diagnostics::spans::observe(readiness_probe);
+        let (_, profile) = engine
+            .command_profiled(
+                "test",
+                "test",
+                ActorId(1),
+                "readiness-context",
+                &engine.branch().clone(),
+                Command::Act {
+                    expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
+                    action: Action::Move {
+                        direction: Direction::East,
+                    },
+                },
+            )
+            .unwrap();
+        drop(observer);
+        let (depth, views, scans) = READINESS_PROBE.get();
+        assert_eq!(depth, 0);
+        assert!(views < actors.len());
+        assert!(profile.actors_observed < actors.len() * 2);
+        assert_ne!(engine.state(ActorId(1)).unwrap(), before);
+        assert_eq!(
+            engine.game.next_actor(),
+            Some(SimActor(2)),
+            "stable ready-time/identity tie"
+        );
+        for actor in actors {
+            assert_matches_uncached(&engine, actor);
+            assert_eq!(
+                engine.revision_view(actor).unwrap().ready,
+                actor == ActorId(2)
+            );
+        }
+        let replayed = Engine::replay(engine.archive.clone(), None, None).unwrap();
+        assert_eq!(replayed.game, engine.game);
+        assert_eq!(
+            serde_json::to_value(&replayed.archive.records).unwrap(),
+            serde_json::to_value(&engine.archive.records).unwrap()
+        );
+        for actor in engine.actors() {
+            assert_eq!(replayed.state(actor).unwrap(), engine.state(actor).unwrap());
+        }
+        assert_eq!(
+            scans, 0,
+            "the settled after-boundary readiness must not be rescanned per observer"
+        );
+    }
 
     fn assert_matches_uncached(engine: &Engine, actor: ActorId) {
         assert_eq!(
@@ -375,7 +536,8 @@ mod observation_reuse_tests {
                     &format!("wizard-{step}"),
                     &engine.branch().clone(),
                     Command::Wizard {
-                        expected_revision: engine.revision(actor).unwrap(),
+                        display_basis: None,
+                        expected_boundary: engine.causal_boundary(actor).unwrap(),
                         operation,
                     },
                 )
@@ -412,7 +574,7 @@ mod observation_reuse_tests {
                     &format!("step-{step}"),
                     &engine.branch().clone(),
                     Command::AdmitIntention {
-                        expected_revision: engine.revision(actor).unwrap(),
+                        expected_boundary: engine.causal_boundary(actor).unwrap(),
                         action: Action::Move {
                             direction: Direction::East,
                         },
@@ -432,21 +594,40 @@ mod observation_reuse_tests {
                     <= engine.actors().len() * (1 + profile.region_changes),
                 "residency comparison repeated a pre-transition observation: {profile:?}"
             );
+            let retained = engine.observations.snapshot();
+            let missing = engine
+                .actors()
+                .iter()
+                .filter(|actor| !retained.contains_key(actor))
+                .count();
             let before_read = tor_simulation::diagnostics::work_counts();
-            for observer in engine.actors() {
-                engine.state(observer).unwrap();
+            let states: Vec<_> = engine
+                .actors()
+                .into_iter()
+                .map(|observer| (observer, engine.state(observer).unwrap()))
+                .collect();
+            assert_eq!(
+                tor_simulation::diagnostics::work_counts().observations,
+                before_read.observations + missing,
+                "reuse retained residency views; build each deferred view once at step {step}"
+            );
+            let after_read = tor_simulation::diagnostics::work_counts();
+            for (observer, state) in states {
+                assert_eq!(engine.state(observer).unwrap(), state);
             }
             assert_eq!(
                 tor_simulation::diagnostics::work_counts().observations,
-                before_read.observations,
-                "discarded a finalized residency view at step {step}"
+                after_read.observations
             );
         }
         assert!(transitions > 0);
         let expected = engine.state(actor).unwrap();
         let replayed = Engine::replay(engine.archive.clone(), None, None).unwrap();
         assert_eq!(replayed.game, engine.game);
-        assert_eq!(replayed.revisions, engine.revisions);
+        assert_eq!(
+            serde_json::to_value(&replayed.archive.records).unwrap(),
+            serde_json::to_value(&engine.archive.records).unwrap()
+        );
         assert_eq!(replayed.state(actor).unwrap(), expected);
     }
 
@@ -465,7 +646,8 @@ mod observation_reuse_tests {
                 "teleport",
                 &branch,
                 Command::Wizard {
-                    expected_revision: engine.revision(actor).unwrap(),
+                    display_basis: None,
+                    expected_boundary: engine.causal_boundary(actor).unwrap(),
                     operation: WizardOperation::Teleport {
                         actor,
                         position: Position {
@@ -487,31 +669,36 @@ mod observation_reuse_tests {
                 "rewind",
                 &branch,
                 Command::Wizard {
-                    expected_revision: engine.revision(actor).unwrap(),
+                    display_basis: None,
+                    expected_boundary: engine.causal_boundary(actor).unwrap(),
                     operation: WizardOperation::Rewind { target: None },
                 },
             )
             .unwrap();
         assert_matches_uncached(&engine, actor);
         let state = engine.state(actor).unwrap();
-        engine
-            .command(
-                "test",
-                "test",
-                actor,
-                "note",
-                &engine.branch().clone(),
-                Command::Annotate {
-                    anchor: Anchor::State {
-                        revision: state.revision,
-                    },
-                    text: "private note".into(),
-                    source: ClientSource::User,
-                    audience: Audience::Private,
-                    category: AnnotationCategory::Note,
+        let snapshot = SnapshotId("test-note".into());
+        let receipt = Receipt {
+            user: "test".into(),
+            frontend: "test".into(),
+            actor,
+            request_id: "note".into(),
+            branch: engine.branch().clone(),
+            command: Command::Annotate {
+                anchor: Anchor::State {
+                    snapshot: snapshot.clone(),
                 },
-            )
-            .unwrap();
+                text: "private note".into(),
+                source: ClientSource::User,
+                audience: Audience::Private,
+                category: AnnotationCategory::Note,
+            },
+        };
+        let anchor = crate::journal::RecordedAnchor::State {
+            snapshot,
+            boundary: engine.presentation_boundary().entry().cloned(),
+        };
+        engine.command_with_annotation(&receipt, anchor).unwrap();
         assert_eq!(engine.state(actor).unwrap(), state);
         assert_matches_uncached(&engine, actor);
         engine.seed_profile_history(3).unwrap();
@@ -537,21 +724,22 @@ mod observation_reuse_tests {
                 "move",
                 &engine.branch().clone(),
                 Command::Act {
-                    expected_revision: initial.revision,
+                    expected_boundary: engine.causal_boundary(actor).unwrap(),
                     action: Action::Move {
                         direction: Direction::East,
                     },
                 },
             )
             .unwrap();
+        let missing = usize::from(!engine.observations.snapshot().contains_key(&actor));
         let before = tor_simulation::diagnostics::work_counts();
         let moved = engine.state(actor).unwrap();
         assert_ne!(moved, initial);
         assert_eq!(engine.state(actor).unwrap(), moved);
         assert_eq!(
             tor_simulation::diagnostics::work_counts().observations,
-            before.observations,
-            "reuse the post-action view used for revision comparison"
+            before.observations + missing,
+            "reuse a retained post-action view or materialize its deferred replacement once"
         );
         engine
             .command(
@@ -561,7 +749,7 @@ mod observation_reuse_tests {
                 "wait",
                 &engine.branch().clone(),
                 Command::Act {
-                    expected_revision: moved.revision,
+                    expected_boundary: engine.causal_boundary(actor).unwrap(),
                     action: Action::Wait,
                 },
             )
@@ -592,18 +780,18 @@ mod seed_equivalence_tests {
                         &format!("seed-{index}"),
                         &normal.branch().clone(),
                         Command::Act {
-                            expected_revision: normal.revision(actor).unwrap(),
+                            expected_boundary: normal.causal_boundary(actor).unwrap(),
                             action: Action::Wait,
                         },
                     )
                     .unwrap();
             }
             assert_eq!(seeded.game, normal.game);
-            assert_eq!(seeded.revisions, normal.revisions);
+            assert_eq!(seeded.game, normal.game);
             assert_eq!(seeded.boundaries.len(), normal.boundaries.len());
             for (a, b) in seeded.boundaries.iter().zip(&normal.boundaries) {
                 assert_eq!(a.game, b.game);
-                assert_eq!(a.revisions, b.revisions);
+                assert_eq!(a.game, b.game);
             }
             for (a, b) in seeded.archive.records.iter().zip(&normal.archive.records) {
                 assert_eq!(a.receipt, b.receipt);
@@ -843,14 +1031,14 @@ fn scenario_game(scenario: &Scenario) -> Result<Game, Failure> {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Receipt {
-    user: String,
-    frontend: String,
-    request_id: String,
+    pub(crate) user: String,
+    pub(crate) frontend: String,
+    pub(crate) request_id: String,
     #[serde(with = "crate::storage::schema::ActorId")]
-    actor: ActorId,
+    pub(crate) actor: ActorId,
     #[serde(with = "crate::storage::schema::BranchId")]
-    branch: BranchId,
-    command: Command,
+    pub(crate) branch: BranchId,
+    pub(crate) command: Command,
 }
 
 /// Small independent evidence survives expiration of a branch's snapshots.
@@ -1193,9 +1381,31 @@ impl Record {
         {
             return false;
         }
+        if let JournalContent::Annotation { anchor, .. } = &self.entry.content {
+            if let Some(receipt) = &self.receipt {
+                if !matches!(&receipt.command, Command::Annotate { anchor: raw, .. } if *raw == anchor.to_public())
+                {
+                    return false;
+                }
+            }
+        } else if self
+            .receipt
+            .as_ref()
+            .is_some_and(|receipt| matches!(receipt.command, Command::Annotate { .. }))
+        {
+            return false;
+        }
         match (&self.entry.content, self.receipt.as_ref()) {
-            (JournalContent::IntentionAdmitted { intention, .. }, Some(receipt)) => {
+            (
+                JournalContent::IntentionAdmitted {
+                    intention,
+                    action,
+                    human_operands,
+                },
+                Some(receipt),
+            ) => {
                 intention.0 != 0
+                    && human_operands.structurally_valid_for(&adapt::action(action))
                     && matches!(&receipt.command, Command::AdmitIntention { .. })
                     && receipt.actor == self.entry.actor
                     && receipt.branch == self.entry.branch
@@ -1297,6 +1507,14 @@ pub struct CommandProfile {
     pub checkpoint_capture: Duration,
     pub checkpoint_captures: usize,
     pub simulation_transition: Duration,
+    pub intention_derivation: Duration,
+    pub request_validation: Duration,
+    pub map_recording: Duration,
+    pub commit_metadata: Duration,
+    pub input_generation: Duration,
+    pub intention_actor_visits: usize,
+    pub intention_candidate_visits: usize,
+    pub intention_event_visits: usize,
     pub navigation_refresh: Duration,
     pub perception: Duration,
     pub revision_detection: Duration,
@@ -1310,7 +1528,20 @@ pub struct CommandProfile {
     pub navigation_refreshes: usize,
     pub candidate_captures: usize,
     pub actors_observed: usize,
+    /// Map acquisition consumes appearance facts, reusing a rich view if present.
+    pub map_rich_views_reused: usize,
+    pub map_appearance_projections: usize,
+    pub previous_observer_scene_reads: usize,
     pub revision_comparisons: usize,
+    /// Surviving action-selected observers, including stationary capability changes.
+    pub action_observer_boundaries: usize,
+    pub action_event_receipts_recorded: usize,
+    pub action_projection_validated: usize,
+    pub action_navigation_reviewed: usize,
+    /// Dependency proofs, separate from cold full-view comparisons.
+    pub observation_changes_proven: usize,
+    pub observations_unchanged_proven: usize,
+    pub observation_projection_fallbacks: usize,
     pub rollback_snapshots: usize,
     pub records_serialized: usize,
     pub bytes_written: u64,
@@ -1363,6 +1594,11 @@ impl CommandProfile {
         self.rollback_capture
             + self.checkpoint_capture
             + self.simulation_transition
+            + self.intention_derivation
+            + self.request_validation
+            + self.map_recording
+            + self.commit_metadata
+            + self.input_generation
             + self.navigation_refresh
             + self.perception
             + self.revision_detection
@@ -1376,88 +1612,21 @@ impl CommandProfile {
     }
 }
 
-/// Actors' revisions. Loaded actors' are the map itself; the rest are parked
-/// in a shared map, so what every command copies stays bounded by what's
-/// loaded. An actor moves between the two when its region attaches or
-/// detaches, and its revision moves on each time.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct Revisions {
-    #[serde(with = "crate::storage::schema::revisions")]
-    loaded: BTreeMap<ActorId, u64>,
-    #[serde(with = "crate::storage::schema::shared_revisions")]
-    parked: tor_world::Shared<BTreeMap<ActorId, u64>>,
-}
+#[cfg(test)]
+mod profile_accounting_tests {
+    use super::*;
 
-impl std::ops::Deref for Revisions {
-    type Target = BTreeMap<ActorId, u64>;
-    fn deref(&self) -> &Self::Target {
-        &self.loaded
-    }
-}
-
-impl std::ops::DerefMut for Revisions {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.loaded
-    }
-}
-
-impl Revisions {
-    fn new(game: &Game) -> Self {
-        Self {
-            loaded: game
-                .loaded_actor_ids()
-                .map(|id| (ActorId(id.0), 0))
-                .collect(),
-            parked: Default::default(),
-        }
-    }
-
-    /// Any known actor's revision, loaded or not. An actor is parked once it
-    /// leaves the loaded world; one never loaded is at revision zero.
-    fn any(&self, actor: ActorId, game: &Game) -> Option<u64> {
-        self.loaded
-            .get(&actor)
-            .or_else(|| self.parked.get(&actor))
-            .copied()
-            .or_else(|| game.known_actor_region(SimActor(actor.0)).map(|_| 0))
-    }
-
-    /// Follow actors into and out of loaded regions after a transition.
-    fn follow(&mut self, game: &Game) -> Result<(), Failure> {
-        let exhausted = || Failure::new(ErrorCode::InvalidAction, "Revision exhausted");
-        let left: Vec<_> = self
-            .loaded
-            .keys()
-            .copied()
-            .filter(|id| !game.has_actor(SimActor(id.0)))
-            .collect();
-        for id in left {
-            let revision = self.loaded.remove(&id).expect("listed actor");
-            self.parked
-                .insert(id, revision.checked_add(1).ok_or_else(exhausted)?);
-        }
-        for id in game.loaded_actor_ids().map(|id| ActorId(id.0)) {
-            if !self.loaded.contains_key(&id) {
-                let revision = self.parked.remove(&id).unwrap_or(0);
-                self.loaded
-                    .insert(id, revision.checked_add(1).ok_or_else(exhausted)?);
-            }
-        }
-        Ok(())
-    }
-
-    /// Whether these revisions cover exactly `game`'s actors, split by
-    /// whether they're loaded.
-    pub(crate) fn valid_for(&self, game: &Game) -> bool {
-        self.loaded
-            .keys()
-            .map(|a| a.0)
-            .eq(game.loaded_actor_ids().map(|a| a.0))
-            && self.parked.keys().all(|a| {
-                let id = SimActor(a.0);
-                !game.has_actor(id) && game.known_actor_region(id).is_some()
-            })
+    #[test]
+    fn narrow_boundary_phases_are_counted_once_in_exclusive_duration() {
+        let profile = CommandProfile {
+            intention_derivation: Duration::from_nanos(1),
+            request_validation: Duration::from_nanos(2),
+            map_recording: Duration::from_nanos(4),
+            commit_metadata: Duration::from_nanos(8),
+            input_generation: Duration::from_nanos(16),
+            ..CommandProfile::default()
+        };
+        assert_eq!(profile.exclusive_duration(), Duration::from_nanos(31));
     }
 }
 
@@ -1467,7 +1636,25 @@ struct Boundary {
     /// Derived from journal content, never trusted from a checkpoint payload.
     selectable: bool,
     game: Game,
-    revisions: Revisions,
+}
+
+/// Opaque immutable rules boundary retained for issued presentation capabilities.
+/// Clones share existing rewind ownership; they never copy a Game or grant access.
+#[derive(Clone, Debug)]
+pub struct PresentationBoundary {
+    boundary: Arc<Boundary>,
+    branch: BranchId,
+    owner: String,
+    wizard_game: bool,
+}
+
+impl PresentationBoundary {
+    pub fn branch(&self) -> &BranchId {
+        &self.branch
+    }
+    pub fn entry(&self) -> Option<&EntryId> {
+        self.boundary.id.as_ref()
+    }
 }
 
 /// Retain the union of the latest selectable states and latest raw transactions.
@@ -1505,8 +1692,8 @@ struct Candidate {
     current_branch: BranchId,
     boundaries: VecDeque<Arc<Boundary>>,
     game: Game,
-    revisions: Revisions,
-    observations: BTreeMap<ActorId, Arc<RevisionView>>,
+
+    observations: BTreeMap<ActorId, Arc<CachedObservation>>,
     /// Region records this command's transition made.
     made: Vec<(
         tor_simulation::RecordId,
@@ -1515,6 +1702,12 @@ struct Candidate {
 }
 
 impl Candidate {
+    /// Cold full-projection oracle retained only for causal equivalence tests.
+    #[cfg(test)]
+    fn revision_view(&self, actor: ActorId) -> Result<CachedObservation, Failure> {
+        revision_view(&self.game, actor)
+    }
+
     fn capture(engine: &Engine) -> Self {
         let mut game = engine.game.clone();
         game.begin_survival_diagnostics(engine.survival_log.is_some());
@@ -1522,7 +1715,7 @@ impl Candidate {
             current_branch: engine.current_branch.clone(),
             boundaries: engine.boundaries.clone(),
             game,
-            revisions: engine.revisions.clone(),
+
             observations: BTreeMap::new(),
             made: Vec::new(),
         }
@@ -1532,24 +1725,24 @@ impl Candidate {
     }
     /// Actors in loaded regions.
     fn actors(&self) -> Vec<ActorId> {
-        self.revisions.keys().copied().collect()
-    }
-    fn revision_view(&self, actor: ActorId) -> Result<RevisionView, Failure> {
-        revision_view(&self.game, actor)
+        self.game
+            .loaded_actor_ids()
+            .map(|id| ActorId(id.0))
+            .collect()
     }
     /// Population can create ordinary actors without changing residency. Keep
-    /// their revisions, navigation and observer projections in the transaction.
+    /// their navigation and observer knowledge inside the transaction.
     fn reconcile_actors(
         &mut self,
+        before: &Game,
         mut profile: Option<&mut CommandProfile>,
     ) -> Result<(), Failure> {
         let added: Vec<_> = self
             .game
             .loaded_actor_ids()
             .map(|id| ActorId(id.0))
-            .filter(|id| !self.revisions.contains_key(id))
+            .filter(|id| !before.has_actor(SimActor(id.0)))
             .collect();
-        self.revisions.follow(&self.game)?;
         self.observations
             .retain(|actor, _| self.game.has_actor(SimActor(actor.0)));
         if !added.is_empty() {
@@ -1559,18 +1752,22 @@ impl Candidate {
         }
         for actor in added {
             let started = Instant::now();
-            let view = Arc::new(self.revision_view(actor)?);
+            self.game
+                .validate_observer_projection(SimActor(actor.0))
+                .map_err(|_| invalid_archive())?;
+            let scene = self
+                .game
+                .capture_observation_scene_shared(SimActor(actor.0))
+                .map_err(|_| invalid_archive())?;
             if let Some(profile) = profile.as_deref_mut() {
                 profile.perception += started.elapsed();
-                profile.actors_observed += 1;
             }
             let started = Instant::now();
             self.game
-                .refresh_navigation_scene(SimActor(actor.0), &view.scene);
+                .refresh_navigation_scene(SimActor(actor.0), &scene);
             if let Some(profile) = profile.as_deref_mut() {
                 profile.navigation_refresh += started.elapsed();
             }
-            self.observations.insert(actor, view);
         }
         Ok(())
     }
@@ -1596,28 +1793,49 @@ impl Candidate {
         terrain: adapt::Terrain<'_>,
         mut profile: Option<&mut CommandProfile>,
     ) -> Result<(), Failure> {
+        let _span = tor_simulation::diagnostics::spans::span("map_acquisition");
         for actor in actors {
             let actor = ActorId(actor.0);
-            let view = match self.observations.get(&actor) {
-                Some(view) => view.clone(),
+            let (inputs, scene) = match self.observations.get(&actor) {
+                Some(view) => {
+                    if let Some(profile) = profile.as_deref_mut() {
+                        profile.map_rich_views_reused += 1;
+                    }
+                    (
+                        crate::map_memory::inputs(&view.observation, terrain),
+                        view.scene.clone(),
+                    )
+                }
                 None => {
                     let started = Instant::now();
-                    let view = Arc::new(self.revision_view(actor)?);
+                    let (view, scene) = {
+                        let _span =
+                            tor_simulation::diagnostics::spans::span("map_acquire_projection");
+                        self.game
+                            .observe_map_shared_scene(SimActor(actor.0))
+                            .map_err(|_| invalid_archive())?
+                    };
+                    let inputs = crate::map_memory::appearance_inputs(
+                        &view.visible_cells,
+                        &view.exits,
+                        &view.ground_items,
+                        terrain,
+                    );
                     if let Some(profile) = profile.as_deref_mut() {
                         profile.perception += started.elapsed();
-                        profile.actors_observed += 1;
+                        profile.map_appearance_projections += 1;
                     }
-                    self.observations.insert(actor, view.clone());
-                    view
+                    (inputs, scene)
                 }
             };
+            let _span = tor_simulation::diagnostics::spans::span("map_record_explored");
+            let started = profile.as_ref().map(|_| Instant::now());
             self.game
-                .record_explored_observation(
-                    SimActor(actor.0),
-                    &crate::map_memory::inputs(&view.observation, terrain),
-                    &view.scene,
-                )
+                .record_explored_observation(SimActor(actor.0), &inputs, &scene)
                 .map_err(|_| invalid_archive())?;
+            if let Some(profile) = profile.as_deref_mut() {
+                profile.map_recording += started.expect("profile clock").elapsed();
+            }
         }
         Ok(())
     }
@@ -1642,43 +1860,35 @@ impl Candidate {
                 {
                     continue;
                 }
-                let view = match self.observations.get(&actor) {
-                    Some(view) if self.game.event_observation_pending(&view.event_proof) => {
-                        let mut updated = (**view).clone();
+                let started = Instant::now();
+                let facts = self
+                    .game
+                    .capture_commit_event_facts(SimActor(actor.0))
+                    .map_err(|_| invalid_archive())?;
+                if self.game.event_observation_pending(facts.proof()) {
+                    if let Some(view) = self.observations.get_mut(&actor) {
+                        // Preserve an already captured map/presentation view;
+                        // only append historical authority licensed right now.
+                        let view = Arc::make_mut(view);
                         self.game
                             .record_event_observation(
                                 &witness,
-                                &updated.event_proof,
-                                &mut updated.observation,
-                            )
-                            .map_err(|_| invalid_archive())?;
-                        let updated = Arc::new(updated);
-                        self.observations.insert(actor, updated.clone());
-                        updated
-                    }
-                    Some(view) => view.clone(),
-                    None => {
-                        let started = Instant::now();
-                        let mut view = self.revision_view(actor)?;
-                        self.game
-                            .record_event_observation(
-                                &witness,
-                                &view.event_proof,
+                                facts.proof(),
                                 &mut view.observation,
                             )
                             .map_err(|_| invalid_archive())?;
-                        let view = Arc::new(view);
-                        if let Some(profile) = profile.as_deref_mut() {
-                            profile.perception += started.elapsed();
-                            profile.actors_observed += 1;
-                        }
-                        self.observations.insert(actor, view.clone());
-                        view
+                    } else {
+                        self.game
+                            .record_commit_event_facts(&witness, &facts)
+                            .map_err(|_| invalid_archive())?;
                     }
-                };
+                }
                 self.game
-                    .record_observation_knowledge(&view.observation)
+                    .record_committed_event_knowledge(SimActor(actor.0))
                     .map_err(|_| invalid_archive())?;
+                if let Some(profile) = profile.as_deref_mut() {
+                    profile.perception += started.elapsed();
+                }
             }
         }
         self.game
@@ -1695,7 +1905,6 @@ impl Candidate {
         engine
             .game
             .set_combat_diagnostics(engine.combat_diagnostics_enabled);
-        engine.revisions = self.revisions;
         engine.observations.replace(self.observations);
         let regions = engine.regions.as_mut()?;
         regions.publish(self.made);
@@ -1820,53 +2029,54 @@ impl Candidate {
             // Loading, detaching, or activating regions can change both the
             // projected scene and scheduler readiness. Recompute at the new
             // boundary instead of publishing a pre-transition observation.
-            let previous_views = std::mem::take(&mut self.observations);
-            // Only observers whose view the transition changed move on, so
-            // an update never discloses a change nobody could see.
-            let stayed: Vec<_> = self
-                .revisions
-                .keys()
-                .copied()
-                .filter(|id| self.game.has_actor(SimActor(id.0)))
-                .collect();
-            for actor in stayed {
-                // Successful action execution already resolved this exact
-                // pre-transition boundary. Other callers have no retained view.
-                let old = match previous_views.get(&actor) {
-                    Some(view) => view.clone(),
-                    None => Arc::new(revision_view(&before, actor)?),
-                };
-                let new = Arc::new(revision_view(&self.game, actor)?);
-                if new != old {
-                    let revision = self.revisions.get_mut(&actor).expect("loaded actor");
-                    *revision = revision.checked_add(1).ok_or_else(|| {
-                        Failure::new(ErrorCode::InvalidAction, "Revision exhausted")
-                    })?;
-                }
-                self.observations.insert(actor, new);
+            self.observations.clear();
+            for actor in before
+                .loaded_actor_ids()
+                .filter(|id| self.game.has_actor(*id))
+            {
+                before
+                    .validate_observer_projection(actor)
+                    .map_err(|_| invalid_archive())?;
+                self.game
+                    .validate_observer_projection(actor)
+                    .map_err(|_| invalid_archive())?;
             }
-            self.reconcile_actors(profile)?;
+            self.reconcile_actors(&before, profile)?;
         }
         Ok(())
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct RevisionView {
+struct CachedObservation {
     observation: tor_simulation::Observation,
     charts: Arc<crate::chart_view::PreparedCharts>,
-    event_proof: tor_simulation::EventObservation,
-    scene: Vec<tor_world::SightCell>,
+    scene: Arc<Vec<tor_world::SightCell>>,
     ready: bool,
+}
+
+#[cfg(test)]
+thread_local! {
+    static FULL_PICTURE_ADAPTATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// One event boundary's authorized narration inputs and immutable source. This
+/// is transient Service ownership, not a persisted presentation cache.
+#[derive(Clone, Debug)]
+pub(crate) struct SemanticObservation {
+    pub(crate) facts: tor_protocol::OutcomeObservation,
+    actor: ActorId,
+    boundary: PresentationBoundary,
+    view: Arc<CachedObservation>,
 }
 
 /// Derived views of the committed boundary, never encoded into a save or a
 /// rewind snapshot. The mutex preserves Engine's thread-safe read interface.
 #[derive(Debug, Default)]
-struct ObservationCache(Mutex<BTreeMap<ActorId, Arc<RevisionView>>>);
+struct ObservationCache(Mutex<BTreeMap<ActorId, Arc<CachedObservation>>>);
 
 impl ObservationCache {
-    fn view(&self, game: &Game, actor: ActorId) -> Result<Arc<RevisionView>, Failure> {
+    fn view(&self, game: &Game, actor: ActorId) -> Result<Arc<CachedObservation>, Failure> {
         let mut views = self
             .0
             .lock()
@@ -1879,14 +2089,14 @@ impl ObservationCache {
         Ok(view)
     }
 
-    fn snapshot(&self) -> BTreeMap<ActorId, Arc<RevisionView>> {
+    fn snapshot(&self) -> BTreeMap<ActorId, Arc<CachedObservation>> {
         self.0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
     }
 
-    fn replace(&mut self, views: BTreeMap<ActorId, Arc<RevisionView>>) {
+    fn replace(&mut self, views: BTreeMap<ActorId, Arc<CachedObservation>>) {
         *self
             .0
             .get_mut()
@@ -1894,16 +2104,16 @@ impl ObservationCache {
     }
 }
 
-fn revision_view(game: &Game, actor: ActorId) -> Result<RevisionView, Failure> {
-    let (view, scene, event_proof) = game
-        .observe_event_scene(SimActor(actor.0))
+fn revision_view(game: &Game, actor: ActorId) -> Result<CachedObservation, Failure> {
+    let _diagnostic_span = tor_simulation::diagnostics::spans::span("revision_view");
+    let (view, scene, _) = game
+        .observe_event_shared_scene(SimActor(actor.0))
         .map_err(|_| invalid_archive())?;
-    Ok(RevisionView {
+    Ok(CachedObservation {
         charts: Arc::new(crate::chart_view::PreparedCharts::for_game(
             game, actor, false,
         )?),
         observation: view,
-        event_proof,
         scene,
         ready: game.next_actor() == Some(SimActor(actor.0)),
     })
@@ -1921,8 +2131,9 @@ pub struct Engine {
     boundaries: VecDeque<Arc<Boundary>>,
     game: Game,
     archive: Archive,
-    revisions: Revisions,
+
     observations: ObservationCache,
+    input_generations: InputGenerations,
     history_index: crate::history_index::HistoryIndex,
     receipts: BTreeMap<(String, String), usize>,
     path: Option<PathBuf>,
@@ -1981,16 +2192,13 @@ impl Engine {
             (Some(1), None) => crate::performance_fixture::game(scenario.seed, scenario.regions)?,
             _ => return Err(invalid_archive()),
         };
-        let mut revisions = Revisions::new(&game);
         if scenario.actors.is_empty() && scenario.package.is_none() {
             return Err(invalid_archive());
         }
         for actor in &scenario.actors {
             let ticks = NonZeroU64::new(actor.turn_ticks).ok_or_else(invalid_archive)?;
-            let id = game
-                .spawn_actor(adapt::location(actor.position), ticks)
+            game.spawn_actor(adapt::location(actor.position), ticks)
                 .map_err(|_| invalid_archive())?;
-            revisions.insert(ActorId(id.0), 0);
         }
         game.initialize_discovery().map_err(|_| invalid_archive())?;
         game.refresh_navigation();
@@ -2006,7 +2214,11 @@ impl Engine {
                 })
         };
         let mut initial_views = BTreeMap::new();
-        for actor in revisions.keys().copied() {
+        for actor in game
+            .loaded_actor_ids()
+            .map(|id| ActorId(id.0))
+            .collect::<Vec<_>>()
+        {
             let view = Arc::new(revision_view(&game, actor)?);
             game.record_explored_observation(
                 SimActor(actor.0),
@@ -2023,7 +2235,6 @@ impl Engine {
             id: None,
             selectable: true,
             game: game.clone(),
-            revisions: revisions.clone(),
         });
         Ok(Self {
             recovery: RecoveryProfile::default(),
@@ -2033,9 +2244,9 @@ impl Engine {
             survival_log: None,
             boundaries: VecDeque::from([initial]),
             game,
-            revisions,
             receipts: BTreeMap::new(),
             observations: ObservationCache(Mutex::new(initial_views)),
+            input_generations: InputGenerations::default(),
             history_index: crate::history_index::HistoryIndex::default(),
             path: None,
             lock: None,
@@ -2290,6 +2501,10 @@ impl Engine {
             {
                 return Err(invalid_archive());
             }
+            let recorded_annotation = match &record.entry.content {
+                JournalContent::Annotation { anchor, .. } => Some(anchor.clone()),
+                _ => None,
+            };
             let result = if let Some((source, _)) = record.change_source() {
                 let index = engine
                     .history_index
@@ -2300,7 +2515,11 @@ impl Engine {
                 }
                 if let Some(receipt) = record.receipt {
                     engine
-                        .apply_command(&receipt, Some(record.entry.id.clone()))
+                        .apply_command_with_annotation(
+                            &receipt,
+                            Some(record.entry.id.clone()),
+                            recorded_annotation.clone(),
+                        )
                         .map(|result| result.entry)
                 } else if matches!(
                     record.entry.content,
@@ -2367,7 +2586,11 @@ impl Engine {
                     .map(|result| result.entry)
             } else if let Some(receipt) = record.receipt {
                 engine
-                    .apply_command(&receipt, Some(record.entry.id.clone()))
+                    .apply_command_with_annotation(
+                        &receipt,
+                        Some(record.entry.id.clone()),
+                        recorded_annotation.clone(),
+                    )
                     .map(|result| result.entry)
             } else if let (
                 Author::Backend { component },
@@ -2491,6 +2714,14 @@ impl Engine {
     /// Trusted read-only wizard query. Sessions additionally authorize the
     /// requesting account before target lookup and publish only private replies.
     pub fn inspect_creature(&self, actor: ActorId) -> Result<CreatureInspectionView, Failure> {
+        self.inspect_creature_at(&self.presentation_boundary(), actor, 0)
+    }
+    pub fn inspect_creature_at(
+        &self,
+        boundary: &PresentationBoundary,
+        actor: ActorId,
+        display_generation: u64,
+    ) -> Result<CreatureInspectionView, Failure> {
         self.require_wizard_authority()?;
         let unavailable = || {
             Failure::new(
@@ -2498,8 +2729,8 @@ impl Engine {
                 "Creature inspection is unavailable",
             )
         };
-        let revision = self.revision(actor).map_err(|_| unavailable())?;
-        let report = crate::creature_view::inspect(&self.game, SimActor(actor.0), revision)
+        let game = self.presentation_game(boundary)?;
+        let report = crate::creature_view::inspect(game, SimActor(actor.0), display_generation)
             .ok_or_else(unavailable)?;
         report.validate().map_err(|_| {
             Failure::new(
@@ -2565,10 +2796,12 @@ impl Engine {
     pub fn wizard_enabled(&self) -> bool {
         self.wizard_enabled
     }
-    /// Actors in loaded regions. Revisions also cover actors in regions that
-    /// are detached or not built yet.
+    /// Actors currently loaded in the authoritative game.
     pub fn actors(&self) -> Vec<ActorId> {
-        self.revisions.keys().copied().collect()
+        self.game
+            .loaded_actor_ids()
+            .map(|id| ActorId(id.0))
+            .collect()
     }
     pub fn is_ai(&self, actor: ActorId) -> bool {
         self.game.is_ai(SimActor(actor.0))
@@ -2640,14 +2873,80 @@ impl Engine {
         Ok((result, profile))
     }
 
-    pub fn revision(&self, actor: ActorId) -> Result<u64, Failure> {
-        self.revisions
-            .any(actor, &self.game)
-            .ok_or_else(|| Failure::new(ErrorCode::Unauthorized, "Actor is unavailable"))
+    /// Private backend freshness: branch plus append-only journal ordinal.
+    /// Never use this value as a public presentation generation.
+    pub fn causal_boundary(&self, actor: ActorId) -> Result<u64, Failure> {
+        if self.game.known_actor_region(SimActor(actor.0)).is_none() {
+            return Err(Failure::new(
+                ErrorCode::Unauthorized,
+                "Actor is unavailable",
+            ));
+        }
+        u64::try_from(self.archive.records.len()).map_err(|_| invalid_archive())
     }
+    pub fn presentation_boundary(&self) -> PresentationBoundary {
+        PresentationBoundary {
+            boundary: self.boundaries.back().expect("committed boundary").clone(),
+            branch: self.branch().clone(),
+            owner: self.archive.view_salt.clone(),
+            wizard_game: self.archive.wizard_game,
+        }
+    }
+    pub(crate) fn presentation_game<'a>(
+        &self,
+        boundary: &'a PresentationBoundary,
+    ) -> Result<&'a Game, Failure> {
+        if boundary.owner != self.archive.view_salt {
+            return Err(Failure::new(
+                ErrorCode::Unauthorized,
+                "Foreign presentation boundary",
+            ));
+        }
+        Ok(&boundary.boundary.game)
+    }
+    /// Private causal event identity, never serialized into presentation tokens.
+    pub(crate) fn event_history_boundary_at(
+        &self,
+        boundary: &PresentationBoundary,
+    ) -> Result<tor_protocol::EventProvenance, Failure> {
+        let (batch, through) = self.presentation_game(boundary)?.event_history_boundary();
+        Ok(tor_protocol::EventProvenance { batch, through })
+    }
+    /// Internal semantic read; generation zero is not issued to a client.
     pub fn observation(&self, actor: ActorId) -> Result<Observation, Failure> {
-        self.revision(actor)?;
-        let view = self.revision_view(actor)?;
+        self.observation_at(&self.presentation_boundary(), actor, 0)
+    }
+    pub fn observation_at(
+        &self,
+        boundary: &PresentationBoundary,
+        actor: ActorId,
+        display_generation: u64,
+    ) -> Result<Observation, Failure> {
+        let game = self.presentation_game(boundary)?;
+        let view = if self
+            .boundaries
+            .back()
+            .is_some_and(|current| Arc::ptr_eq(current, &boundary.boundary))
+            && boundary.branch == *self.branch()
+        {
+            self.revision_view(actor)?
+        } else {
+            Arc::new(revision_view(game, actor)?)
+        };
+        self.adapt_observation_at(boundary, actor, display_generation, &view)
+    }
+
+    fn adapt_observation_at(
+        &self,
+        boundary: &PresentationBoundary,
+        actor: ActorId,
+        display_generation: u64,
+        view: &CachedObservation,
+    ) -> Result<Observation, Failure> {
+        let game = self.presentation_game(boundary)?;
+        let _span = tor_simulation::diagnostics::spans::span("protocol_picture_adaptation");
+        #[cfg(test)]
+        FULL_PICTURE_ADAPTATIONS.with(|count| count.set(count.get() + 1));
         let package = self.archive.scenario.package.as_deref();
         let terrain = |region: tor_world::RegionId| {
             package
@@ -2658,7 +2957,7 @@ impl Engine {
         };
         let mut observation = adapt::observation(
             view.observation.clone(),
-            view.scene.clone(),
+            &view.scene,
             &self.archive.view_salt,
             view.ready,
             &terrain,
@@ -2667,11 +2966,10 @@ impl Engine {
         observation.charts = view.charts.summaries(
             &self.archive.view_salt,
             actor,
-            self.branch(),
-            self.revision(actor)?,
+            boundary.branch(),
+            display_generation,
         );
-        observation.places = self
-            .game
+        observation.places = game
             .remembered_places(SimActor(actor.0))
             .map(|(location, name, origin)| PlaceView {
                 key: adapt::cell_key(&self.archive.view_salt, actor.0, location),
@@ -2685,18 +2983,116 @@ impl Engine {
             .collect();
         Ok(observation)
     }
+    #[cfg(test)]
+    pub(crate) fn picture_adaptation_count() -> usize {
+        FULL_PICTURE_ADAPTATIONS.with(|count| count.get())
+    }
+
+    pub(crate) fn semantic_observation(
+        &self,
+        actor: ActorId,
+    ) -> Result<SemanticObservation, Failure> {
+        let boundary = self.presentation_boundary();
+        let view = self.revision_view(actor)?;
+        let facts = adapt::outcome_observation(
+            &view.observation,
+            &view.scene,
+            &self.archive.view_salt,
+            view.ready,
+            &self.target_scope(actor),
+        );
+        Ok(SemanticObservation {
+            facts,
+            actor,
+            boundary,
+            view,
+        })
+    }
+
+    /// A sufficient equality proof only. A failed proof never itself publishes
+    /// a change: the caller must compare the ordinary canonical pictures.
+    pub(crate) fn semantic_picture_unchanged(
+        &self,
+        before: &SemanticObservation,
+        after: &SemanticObservation,
+    ) -> Result<bool, Failure> {
+        if before.actor != after.actor
+            || before.boundary.branch != after.boundary.branch
+            || before.boundary.owner != after.boundary.owner
+            || before.boundary.wizard_game != after.boundary.wizard_game
+        {
+            return Ok(false);
+        }
+        let old = self.presentation_game(&before.boundary)?;
+        let new = self.presentation_game(&after.boundary)?;
+        Ok(old
+            .remembered_places(SimActor(before.actor.0))
+            .eq(new.remembered_places(SimActor(after.actor.0)))
+            && crate::semantic_visual::same_picture_inputs(
+                crate::semantic_visual::PictureInputs {
+                    observation: &before.view.observation,
+                    scene: &before.view.scene,
+                    ready: before.view.ready,
+                    charts: &before.view.charts,
+                },
+                crate::semantic_visual::PictureInputs {
+                    observation: &after.view.observation,
+                    scene: &after.view.scene,
+                    ready: after.view.ready,
+                    charts: &after.view.charts,
+                },
+            ))
+    }
+
+    pub(crate) fn semantic_picture(
+        &self,
+        capture: &SemanticObservation,
+    ) -> Result<StateView, Failure> {
+        Ok(StateView {
+            snapshot: SnapshotId("internal-unissued".into()),
+            wizard_game: capture.boundary.wizard_game,
+            revision: 0,
+            observation: self.adapt_observation_at(
+                &capture.boundary,
+                capture.actor,
+                0,
+                &capture.view,
+            )?,
+        })
+    }
+
+    #[cfg(test)]
     pub(crate) fn prepared_detection_charts(
         &self,
         actor: ActorId,
     ) -> Result<Arc<crate::chart_view::PreparedCharts>, Failure> {
-        Ok(self.revision_view(actor)?.charts.clone())
+        self.prepared_detection_charts_at(&self.presentation_boundary(), actor)
+    }
+    pub(crate) fn prepared_detection_charts_at(
+        &self,
+        boundary: &PresentationBoundary,
+        actor: ActorId,
+    ) -> Result<Arc<crate::chart_view::PreparedCharts>, Failure> {
+        Ok(Arc::new(crate::chart_view::PreparedCharts::for_game(
+            self.presentation_game(boundary)?,
+            actor,
+            false,
+        )?))
     }
     pub fn explored_map(
         &self,
         actor: ActorId,
         window: tor_protocol::MapWindow,
     ) -> Result<crate::PreparedMapProjection, Failure> {
-        self.revision(actor)?;
+        self.explored_map_at(&self.presentation_boundary(), actor, window)
+    }
+    pub fn explored_map_at(
+        &self,
+        boundary: &PresentationBoundary,
+        actor: ActorId,
+        window: tor_protocol::MapWindow,
+    ) -> Result<crate::PreparedMapProjection, Failure> {
+        let game = self.presentation_game(boundary)?;
         let normal = tor_protocol::MapWindow::normal();
         if window.validate().is_err()
             || !normal.contains(window.min)
@@ -2707,7 +3103,9 @@ impl Engine {
                 "Map window is outside the current viewport",
             ));
         }
-        let view = self.revision_view(actor)?;
+        let scene = game
+            .capture_observation_scene_shared(SimActor(actor.0))
+            .map_err(|_| invalid_archive())?;
         let simulation_window = |window: tor_protocol::MapWindow| tor_simulation::MapWindow {
             min: tor_world::Position {
                 x: window.min.x,
@@ -2720,11 +3118,10 @@ impl Engine {
                 z: window.max.z,
             },
         };
-        let projection = self
-            .game
+        let projection = game
             .project_explored_map_region(
                 SimActor(actor.0),
-                &view.scene,
+                &scene,
                 simulation_window(window),
                 simulation_window(normal),
             )
@@ -2745,7 +3142,7 @@ impl Engine {
             ambiguous: projection.ambiguous,
             limited: projection.limited,
             work: projection.work,
-            root: self.game.map_knowledge_root(SimActor(actor.0)),
+            root: game.map_knowledge_root(SimActor(actor.0)),
         })
     }
     pub fn map_projection_is_current(
@@ -2758,7 +3155,7 @@ impl Engine {
                 .game
                 .map_knowledge_is_current(SimActor(actor.0), &prepared.root)
     }
-    fn revision_view(&self, actor: ActorId) -> Result<Arc<RevisionView>, Failure> {
+    fn revision_view(&self, actor: ActorId) -> Result<Arc<CachedObservation>, Failure> {
         self.observations.view(&self.game, actor)
     }
 
@@ -2817,11 +3214,22 @@ impl Engine {
             .map_err(|_| unavailable())
     }
 
+    /// Internal semantic state only. Service issues its own display generation
+    /// and opaque snapshot capability through state_at, never this sentinel.
     pub fn state(&self, actor: ActorId) -> Result<StateView, Failure> {
+        self.state_at(&self.presentation_boundary(), actor, 0)
+    }
+    pub fn state_at(
+        &self,
+        boundary: &PresentationBoundary,
+        actor: ActorId,
+        display_generation: u64,
+    ) -> Result<StateView, Failure> {
         Ok(StateView {
-            wizard_game: self.archive.wizard_game,
-            revision: self.revision(actor)?,
-            observation: self.observation(actor)?,
+            snapshot: SnapshotId("internal-unissued".into()),
+            wizard_game: boundary.wizard_game,
+            revision: display_generation,
+            observation: self.observation_at(boundary, actor, display_generation)?,
         })
     }
 
@@ -2843,7 +3251,7 @@ impl Engine {
         before: Option<&EntryId>,
         limit: usize,
     ) -> Result<HistoryPage, Failure> {
-        self.revision(actor)?;
+        self.causal_boundary(actor)?;
         if limit == 0 || limit > MAX_HISTORY_PAGE {
             return Err(Failure::new(
                 ErrorCode::InvalidRequest,
@@ -2938,6 +3346,52 @@ impl Engine {
             None,
             None,
         )
+    }
+
+    /// Trusted backend issuance path. Unlike wire requests, this caller owns an
+    /// immutable presentation handle and explicitly binds its chosen snapshot ID.
+    /// Raw receipt identity remains unchanged; retries precede handle freshness.
+    #[allow(clippy::too_many_arguments)]
+    pub fn command_at_presentation(
+        &mut self,
+        user: &str,
+        frontend: &str,
+        actor: ActorId,
+        request_id: &str,
+        branch: &BranchId,
+        command: Command,
+        boundary: &PresentationBoundary,
+    ) -> Result<CommandResult, Failure> {
+        let receipt = Receipt {
+            user: user.into(),
+            frontend: frontend.into(),
+            actor,
+            request_id: request_id.into(),
+            branch: branch.clone(),
+            command,
+        };
+        if let Some(result) = self.resolve_receipt(&receipt)? {
+            return Ok(result);
+        }
+        let game = self.presentation_game(boundary)?;
+        if boundary.branch() != branch || game.known_actor_region(SimActor(actor.0)).is_none() {
+            return Err(invalid_anchor());
+        }
+        let anchor = match &receipt.command {
+            Command::Annotate {
+                anchor: Anchor::State { snapshot },
+                ..
+            } => crate::journal::RecordedAnchor::State {
+                snapshot: snapshot.clone(),
+                boundary: boundary.entry().cloned(),
+            },
+            Command::Annotate {
+                anchor: Anchor::Entry { id },
+                ..
+            } => crate::journal::RecordedAnchor::Entry { id: id.clone() },
+            _ => return self.apply_command(&receipt, None),
+        };
+        self.command_with_annotation(&receipt, anchor)
     }
 
     /// Execute the production command path while collecting phase diagnostics.
@@ -3138,6 +3592,12 @@ impl Engine {
                 "Only detached fixtures may be seeded",
             ));
         }
+        if !self.input_generations.is_empty() {
+            return Err(Failure::new(
+                ErrorCode::InvalidRequest,
+                "Diagnostic seeding cannot run with attached input observers",
+            ));
+        }
         let start = self.archive.records.len();
         let end = start.checked_add(count).ok_or_else(invalid_archive)?;
         if count > 0 {
@@ -3148,7 +3608,7 @@ impl Engine {
         }
         for index in start..end {
             let actor = ActorId(self.game.next_actor().ok_or_else(invalid_archive)?.0);
-            let expected_revision = self.revision(actor)?;
+            let expected_boundary = self.causal_boundary(actor)?;
             let tick = self.game.tick();
             let activation_count = self.game.activation_count();
             let retrieval_before = RetrievalBoundaryState::capture(&self.game);
@@ -3161,13 +3621,6 @@ impl Engine {
             // identical; equivalence tests compare the complete Game and every
             // retained boundary against ordinary commands. Never use this
             // shortcut for measured actions or an engine attached to a save.
-            for (&id, revision) in self.revisions.iter_mut() {
-                if outcome.next_tick != tick
-                    || ((id == actor) != (outcome.next_actor == Some(SimActor(id.0))))
-                {
-                    *revision = revision.checked_add(1).ok_or_else(invalid_archive)?;
-                }
-            }
             let entry = JournalEntry {
                 intention_suspensions: Vec::new(),
                 intention_ends: Vec::new(),
@@ -3191,7 +3644,7 @@ impl Engine {
                 actor,
                 branch: self.branch().clone(),
                 command: Command::Act {
-                    expected_revision,
+                    expected_boundary,
                     action: Action::Wait,
                 },
             };
@@ -3214,7 +3667,6 @@ impl Engine {
                     id: Some(entry.id),
                     selectable: true,
                     game: self.game.clone(),
-                    revisions: self.revisions.clone(),
                 }));
             }
             retain_boundaries(&mut self.boundaries, |b| b.selectable);
@@ -3236,10 +3688,45 @@ impl Engine {
         recorded_id: Option<EntryId>,
         profile: Option<&mut CommandProfile>,
     ) -> Result<CommandResult, Failure> {
+        self.apply_command_profiled_with_annotation(receipt, recorded_id, profile, None)
+    }
+    pub(crate) fn command_with_annotation(
+        &mut self,
+        receipt: &Receipt,
+        anchor: crate::journal::RecordedAnchor,
+    ) -> Result<CommandResult, Failure> {
+        self.apply_command_profiled_with_annotation(receipt, None, None, Some(anchor))
+    }
+    fn apply_command_with_annotation(
+        &mut self,
+        receipt: &Receipt,
+        recorded_id: Option<EntryId>,
+        annotation: Option<crate::journal::RecordedAnchor>,
+    ) -> Result<CommandResult, Failure> {
+        self.apply_command_profiled_with_annotation(receipt, recorded_id, None, annotation)
+    }
+    fn apply_command_profiled_with_annotation(
+        &mut self,
+        receipt: &Receipt,
+        recorded_id: Option<EntryId>,
+        mut profile: Option<&mut CommandProfile>,
+        annotation: Option<crate::journal::RecordedAnchor>,
+    ) -> Result<CommandResult, Failure> {
+        let started = profile.as_ref().map(|_| Instant::now());
         if let Some(result) = self.resolve_receipt(receipt)? {
+            if let Some(profile) = profile.as_deref_mut() {
+                profile.request_validation += started.expect("profile clock").elapsed();
+            }
             return Ok(result);
         }
         let checked = self.check_request(receipt)?;
+        let checked = match annotation {
+            Some(anchor) => checked.with_annotation_anchor(anchor)?,
+            None => checked,
+        };
+        if let Some(profile) = profile.as_deref_mut() {
+            profile.request_validation += started.expect("profile clock").elapsed();
+        }
         self.execute_checked_command(checked, recorded_id, profile)
     }
 
@@ -3283,7 +3770,6 @@ impl Engine {
         executed: Option<tor_simulation::ActionOutcome>,
         mut profile: Option<&mut CommandProfile>,
     ) -> Result<tor_simulation::ActionOutcome, Failure> {
-        let tick = self.game.tick();
         let mut navigation_refreshed = false;
         let geometry = self.game.geometry_snapshot();
         let started = Instant::now();
@@ -3319,15 +3805,13 @@ impl Engine {
                 .actors()
                 .into_iter()
                 .any(|observer| self.game.monster_detection_active(SimActor(observer.0)));
-        let before: BTreeMap<_, _> = self
+        let observers: Vec<_> = self
             .actors()
             .into_iter()
             .filter(|_| perception_changed)
-            .map(|actor| Ok((actor, self.revision_view(actor)?)))
-            .collect::<Result<_, Failure>>()?;
+            .collect();
         if let Some(profile) = profile.as_deref_mut() {
             profile.perception += started.elapsed();
-            profile.actors_observed += before.len();
         }
         let started = Instant::now();
         let already_executed = executed.is_some();
@@ -3361,49 +3845,48 @@ impl Engine {
         if !perception_changed {
             let started = Instant::now();
             let mut capability_changes = Vec::new();
-            for (&observer, revision) in candidate.revisions.iter_mut() {
+            for observer in candidate.actors() {
                 if self.game.actor_locomotion(SimActor(observer.0))
                     != candidate.game.actor_locomotion(SimActor(observer.0))
                 {
                     capability_changes.push(observer);
-                }
-                if outcome.next_tick != tick
-                    || ((observer == actor) != (outcome.next_actor == Some(SimActor(observer.0))))
-                {
-                    *revision = revision.checked_add(1).ok_or_else(|| {
-                        Failure::new(ErrorCode::InvalidAction, "Revision exhausted")
-                    })?;
-                }
-                if let Some(profile) = profile.as_deref_mut() {
-                    profile.revision_comparisons += 1;
                 }
             }
             if let Some(profile) = profile.as_deref_mut() {
                 profile.revision_detection += started.elapsed();
             }
             for observer in capability_changes {
-                let started = Instant::now();
-                let mut after = candidate.revision_view(observer)?;
-                candidate
-                    .game
-                    .record_event_observation(
-                        &event_witness,
-                        &after.event_proof,
-                        &mut after.observation,
-                    )
-                    .map_err(|_| invalid_archive())?;
                 if let Some(profile) = profile.as_deref_mut() {
-                    profile.perception += started.elapsed();
-                    profile.actors_observed += 1;
+                    profile.action_observer_boundaries += 1;
                 }
                 let started = Instant::now();
                 candidate
                     .game
-                    .refresh_navigation_scene(SimActor(observer.0), &after.scene);
-                candidate.observations.insert(observer, Arc::new(after));
+                    .validate_observer_projection(SimActor(observer.0))
+                    .map_err(|_| invalid_archive())?;
+                if let Some(profile) = profile.as_deref_mut() {
+                    profile.action_projection_validated += 1;
+                }
+                let facts = candidate
+                    .game
+                    .capture_commit_event_facts(SimActor(observer.0))
+                    .map_err(|_| invalid_archive())?;
+                candidate
+                    .game
+                    .record_commit_event_facts(&event_witness, &facts)
+                    .map_err(|_| invalid_archive())?;
+                if let Some(profile) = profile.as_deref_mut() {
+                    profile.action_event_receipts_recorded += 1;
+                    profile.perception += started.elapsed();
+                }
+                let started = Instant::now();
+                candidate
+                    .game
+                    .refresh_navigation_scene(SimActor(observer.0), facts.scene());
                 navigation_refreshed = true;
                 if let Some(profile) = profile.as_deref_mut() {
                     profile.navigation_refresh += started.elapsed();
+                    profile.action_navigation_reviewed += 1;
                 }
             }
         }
@@ -3411,60 +3894,77 @@ impl Engine {
         // action kind or changes to entities/readiness. An unsettled same-tick
         // physics handoff can change disclosure without changing known links.
         let navigation_changed = candidate.game.geometry_snapshot() != geometry;
-        for (actor, old) in before {
-            if !candidate.game.has_actor(SimActor(actor.0)) {
+        // Capture event-time authority synchronously, without making presentation
+        // DTOs. All receipts bind before the immutable dependency comparison.
+        let mut scenes = Vec::with_capacity(observers.len());
+        let perception_started = Instant::now();
+        for observer in observers {
+            if !candidate.game.has_actor(SimActor(observer.0)) {
                 continue;
             }
-            let perception_started = Instant::now();
-            let mut after = candidate.revision_view(actor)?;
-            candidate
+            if let Some(profile) = profile.as_deref_mut() {
+                profile.action_observer_boundaries += 1;
+            }
+            let old_scene = self
                 .game
-                .record_event_observation(
-                    &event_witness,
-                    &after.event_proof,
-                    &mut after.observation,
-                )
+                .capture_observation_scene_shared(SimActor(observer.0))
                 .map_err(|_| invalid_archive())?;
             if let Some(profile) = profile.as_deref_mut() {
-                profile.perception += perception_started.elapsed();
-                profile.actors_observed += 1;
+                profile.previous_observer_scene_reads += 1;
+            }
+            let current = candidate
+                .game
+                .capture_commit_event_facts(SimActor(observer.0))
+                .map_err(|_| invalid_archive())?;
+            candidate
+                .game
+                .record_commit_event_facts(&event_witness, &current)
+                .map_err(|_| invalid_archive())?;
+            if let Some(profile) = profile.as_deref_mut() {
+                profile.action_event_receipts_recorded += 1;
+            }
+            scenes.push((observer, old_scene, current.scene().clone()));
+        }
+        if let Some(profile) = profile.as_deref_mut() {
+            profile.perception += perception_started.elapsed();
+        }
+        for (observer, old_scene, current_scene) in scenes {
+            self.game
+                .validate_observer_projection(SimActor(observer.0))
+                .map_err(|_| invalid_archive())?;
+            candidate
+                .game
+                .validate_observer_projection(SimActor(observer.0))
+                .map_err(|_| invalid_archive())?;
+            if let Some(profile) = profile.as_deref_mut() {
+                profile.action_projection_validated += 1;
             }
             if navigation_changed
-                || self.game.actor_locomotion(SimActor(actor.0))
-                    != candidate.game.actor_locomotion(SimActor(actor.0))
+                || self.game.actor_locomotion(SimActor(observer.0))
+                    != candidate.game.actor_locomotion(SimActor(observer.0))
                 || candidate
                     .game
-                    .navigation_scene_changed(&old.scene, &after.scene)
+                    .navigation_scene_changed(&old_scene, &current_scene)
             {
                 navigation_refreshed = true;
                 let started = Instant::now();
                 candidate
                     .game
-                    .refresh_navigation_scene(SimActor(actor.0), &after.scene);
+                    .refresh_navigation_scene(SimActor(observer.0), &current_scene);
                 if let Some(profile) = profile.as_deref_mut() {
                     profile.navigation_refresh += started.elapsed();
                 }
             }
-            let started = Instant::now();
-            let changed = after != *old;
-            if changed {
-                let revision = candidate.revisions.get_mut(&actor).expect("known actor");
-                *revision = revision
-                    .checked_add(1)
-                    .ok_or_else(|| Failure::new(ErrorCode::InvalidAction, "Revision exhausted"))?;
-            }
             if let Some(profile) = profile.as_deref_mut() {
-                profile.revision_detection += started.elapsed();
-                profile.revision_comparisons += 1;
+                profile.action_navigation_reviewed += 1;
             }
-            candidate.observations.insert(actor, Arc::new(after));
         }
         if navigation_refreshed {
             if let Some(profile) = profile.as_deref_mut() {
                 profile.navigation_refreshes += 1;
             }
         }
-        candidate.reconcile_actors(profile)?;
+        candidate.reconcile_actors(&self.game, profile)?;
         Ok(outcome)
     }
 
@@ -3475,7 +3975,7 @@ impl Engine {
         mut profile: Option<&mut CommandProfile>,
         mut candidate: Candidate,
     ) -> Result<CommandResult, Failure> {
-        let (receipt, revision) = checked.into_parts();
+        let (receipt, _boundary, annotation) = checked.into_parts();
         let mut action_resolution = ActionResolution::Unchanged;
         let mut tick = self.game.tick();
         let entry_id = recorded_id.unwrap_or_else(new_id);
@@ -3537,6 +4037,11 @@ impl Engine {
                     Audience::Private,
                     JournalContent::IntentionAdmitted {
                         intention,
+                        human_operands: candidate
+                            .game
+                            .pending_intention(SimActor(receipt.actor.0))
+                            .and_then(|queued| queued.human_operands.clone())
+                            .ok_or_else(invalid_archive)?,
                         action: action.into_owned(),
                     },
                 )
@@ -3548,11 +4053,6 @@ impl Engine {
                     .ok_or_else(|| {
                         Failure::new(ErrorCode::InvalidAction, "No active preparation")
                     })?;
-                for revision in candidate.revisions.values_mut() {
-                    *revision = revision.checked_add(1).ok_or_else(|| {
-                        Failure::new(ErrorCode::InvalidAction, "Revision exhausted")
-                    })?;
-                }
                 (
                     Author::Backend {
                         component: "scheduler".into(),
@@ -3565,7 +4065,8 @@ impl Engine {
                 )
             }
             Command::RenamePlace {
-                expected_revision: _,
+                display_basis: _,
+                expected_boundary: _,
                 key,
                 name,
             } => {
@@ -3585,12 +4086,6 @@ impl Engine {
                     .map_err(|_| {
                         Failure::new(ErrorCode::InvalidRequest, "Place or name is unavailable")
                     })?;
-                *candidate
-                    .revisions
-                    .get_mut(&receipt.actor)
-                    .expect("known actor") = revision
-                    .checked_add(1)
-                    .ok_or_else(|| Failure::new(ErrorCode::InvalidRequest, "Revision exhausted"))?;
                 (
                     Author::User {
                         user: receipt.user.clone(),
@@ -3604,7 +4099,8 @@ impl Engine {
             }
 
             Command::Travel {
-                expected_revision: _,
+                display_basis: _,
+                expected_boundary: _,
                 destination,
             } => {
                 self.travel_route(receipt.actor, destination)?;
@@ -3623,7 +4119,8 @@ impl Engine {
             }
 
             Command::Wizard {
-                expected_revision: _,
+                display_basis: _,
+                expected_boundary: _,
                 operation,
             } => {
                 candidate.load_for_wizard(self.regions.as_mut(), operation)?;
@@ -3656,7 +4153,7 @@ impl Engine {
                 )
             }
             Command::Act {
-                expected_revision: _,
+                expected_boundary: _,
                 action,
             } => {
                 let (action, resolution) =
@@ -3681,12 +4178,13 @@ impl Engine {
                 )
             }
             Command::Annotate {
-                anchor,
+                anchor: _,
                 text,
                 source,
                 audience,
                 category,
             } => {
+                let anchor = annotation.as_ref().ok_or_else(invalid_anchor)?;
                 self.validate_note(receipt.actor, &receipt.user, *audience, anchor, text)?;
                 // An annotation owns no gameplay boundary. Keep the preceding
                 // entry evidence with the unchanged authoritative snapshot.
@@ -3780,23 +4278,27 @@ impl Engine {
         candidate
             .game
             .set_combat_diagnostics(self.combat_diagnostics_enabled);
-        entry.intention_suspensions = intention::derive_intention_suspensions(
+        let started = profile.as_ref().map(|_| Instant::now());
+        let changes = intention::derive_intention_changes(
             &self.game,
             &candidate.game,
             &entry,
             candidate.branch() == self.branch(),
         );
-        entry.intention_ends = intention::derive_intention_ends(
-            &self.game,
-            &candidate.game,
-            &entry,
-            candidate.branch() == self.branch(),
-        );
+        if let Some(profile) = profile.as_deref_mut() {
+            profile.intention_derivation += started.expect("profile clock").elapsed();
+            profile.intention_actor_visits += changes.actor_visits;
+            profile.intention_candidate_visits += changes.candidate_visits;
+            profile.intention_event_visits += changes.event_visits;
+        }
+        entry.intention_suspensions = changes.suspensions;
+        entry.intention_ends = changes.ends;
         // A no-residency-change entry can still create actors. Ordinary actions
         // with no entry keep their existing cost rather than rescan membership.
         if candidate.game.activation_count() != self.game.activation_count() {
-            candidate.reconcile_actors(profile.as_deref_mut())?;
+            candidate.reconcile_actors(&self.game, profile.as_deref_mut())?;
         }
+        let metadata_started = profile.as_ref().map(|_| Instant::now());
         // Rewind restores a previous ledger. That restoration is not an entry
         // and must never look like a fresh activation in the new branch.
         let activations = if candidate.branch() == self.branch() {
@@ -3833,6 +4335,9 @@ impl Engine {
         if entry.content.admission().is_some() {
             candidate.observations = self.observations.snapshot();
         }
+        if let Some(profile) = profile.as_deref_mut() {
+            profile.commit_metadata += metadata_started.expect("profile clock").elapsed();
+        }
         if !matches!(entry.content, JournalContent::Annotation { .. }) {
             let terrain = |region: tor_world::RegionId| {
                 self.archive
@@ -3851,13 +4356,17 @@ impl Engine {
                 id: Some(entry.id.clone()),
                 selectable: entry.content.rewindable(),
                 game: candidate.game.clone(),
-                revisions: candidate.revisions.clone(),
             }));
             retain_boundaries(&mut candidate.boundaries, |b| b.selectable);
             if let Some(profile) = profile.as_deref_mut() {
                 profile.rollback_snapshot += started.elapsed();
                 profile.rollback_snapshots += 1;
             }
+        }
+        let started = profile.as_ref().map(|_| Instant::now());
+        let input_generations = self.prepare_input_generations(&candidate, &entry);
+        if let Some(profile) = profile.as_deref_mut() {
+            profile.input_generation += started.expect("profile clock").elapsed();
         }
         let copied = self.admit(&record, &candidate, profile.as_deref_mut())?;
         let started = Instant::now();
@@ -3869,6 +4378,7 @@ impl Engine {
             profile.preload_links_examined += preload.links_examined;
         }
         self.append_record(record);
+        self.publish_input_generations(input_generations);
         if self.survival_log.is_some() {
             self.emit_survival(serde_json::json!({
                 "event":"survival.commit", "start_tick":start_tick, "end_tick":self.game.tick(),
@@ -3893,6 +4403,13 @@ impl Engine {
         category: AnnotationCategory,
         text: &str,
     ) -> Result<JournalEntry, Failure> {
+        let anchor = match anchor {
+            Anchor::Entry { id } => crate::journal::RecordedAnchor::Entry { id },
+            Anchor::State { snapshot } => crate::journal::RecordedAnchor::State {
+                snapshot,
+                boundary: self.presentation_boundary().entry().cloned(),
+            },
+        };
         self.backend_note(actor, component, anchor, category, text, None)
     }
 
@@ -3900,7 +4417,7 @@ impl Engine {
         &mut self,
         actor: ActorId,
         component: &str,
-        anchor: Anchor,
+        anchor: crate::journal::RecordedAnchor,
         category: AnnotationCategory,
         text: &str,
         recorded_id: Option<EntryId>,
@@ -3958,10 +4475,10 @@ impl Engine {
         actor: ActorId,
         user: &str,
         audience: Audience,
-        anchor: &Anchor,
+        anchor: &crate::journal::RecordedAnchor,
         text: &str,
     ) -> Result<(), Failure> {
-        let revision = self.revision(actor)?;
+        self.causal_boundary(actor)?;
         if text.trim().is_empty()
             || text.len() > MAX_NOTE_BYTES
             || text
@@ -3974,8 +4491,23 @@ impl Engine {
             ));
         }
         match anchor {
-            Anchor::State { revision: target } if *target <= revision => Ok(()),
-            Anchor::Entry { id } => {
+            crate::journal::RecordedAnchor::State { snapshot, boundary } => {
+                if !snapshot.is_valid() {
+                    return Err(invalid_anchor());
+                }
+                match boundary {
+                    Some(id) => {
+                        let index = self.history_index.find(id).ok_or_else(invalid_anchor)?;
+                        if self.archive.records[index].entry.branch != *self.branch() {
+                            return Err(invalid_anchor());
+                        }
+                    }
+                    None if self.branch() != &self.archive.branch => return Err(invalid_anchor()),
+                    None => {}
+                }
+                Ok(())
+            }
+            crate::journal::RecordedAnchor::Entry { id } => {
                 let position = self.history_index.find(id).ok_or_else(invalid_anchor)?;
                 let entry = &self.archive.records[position].entry;
                 if &entry.branch != self.branch()
@@ -3986,7 +4518,6 @@ impl Engine {
                 }
                 Ok(())
             }
-            _ => Err(invalid_anchor()),
         }
     }
 
@@ -4012,9 +4543,10 @@ impl Engine {
             boundaries: self.boundaries.clone(),
             game: self.game.clone(),
             archive: self.archive.clone(),
-            revisions: self.revisions.clone(),
+
             receipts: self.receipts.clone(),
             observations: ObservationCache::default(),
+            input_generations: InputGenerations::default(),
             history_index: self.history_index.clone(),
             path: self.path.clone(),
             lock: self.lock.clone(),
@@ -4032,6 +4564,10 @@ impl Engine {
         candidate: &Candidate,
         profile: Option<&mut CommandProfile>,
     ) -> Result<Vec<u64>, Failure> {
+        u64::try_from(self.archive.records.len())
+            .ok()
+            .and_then(|ordinal| ordinal.checked_add(1))
+            .ok_or_else(invalid_archive)?;
         // This bounded invariant runs before either persistence enqueue or
         // candidate publication. Rewind's target was validated by apply_wizard;
         // restoring it is not an entry and cannot carry a new receipt batch.
@@ -4251,11 +4787,12 @@ impl Candidate {
                 "Wizard target or settings are unavailable",
             )
         };
-        let before: BTreeMap<_, _> = self
-            .actors()
-            .into_iter()
-            .map(|actor| Ok((actor, self.revision_view(actor)?)))
-            .collect::<Result<_, Failure>>()?;
+        let before = self.actors();
+        for actor in &before {
+            self.game
+                .validate_observer_projection(SimActor(actor.0))
+                .map_err(|_| invalid_archive())?;
+        }
         let result = match operation {
             WizardOperation::AdvanceCreature { actor, advancement } => {
                 use crate::journal::CreatureAdvancement;
@@ -4660,7 +5197,7 @@ impl Candidate {
                         (actor, selector, None, None)
                     }
                 };
-                self.revisions.insert(ActorId(actor.0), 0);
+
                 WizardResult::CreatureSpawned {
                     actor: ActorId(actor.0),
                     selector,
@@ -4677,7 +5214,7 @@ impl Candidate {
                     .game
                     .spawn_actor(adapt::location(*position), duration)
                     .map_err(|_| invalid())?;
-                self.revisions.insert(ActorId(actor.0), 0);
+
                 WizardResult::ActorSpawned {
                     actor: ActorId(actor.0),
                 }
@@ -4710,8 +5247,8 @@ impl Candidate {
                     .cloned()
                     .ok_or_else(invalid)?;
                 if boundary
-                    .revisions
-                    .any(receipt.actor, &boundary.game)
+                    .game
+                    .known_actor_region(SimActor(receipt.actor.0))
                     .is_none()
                 {
                     return Err(invalid());
@@ -4720,7 +5257,6 @@ impl Candidate {
                 // Retained futures can still refer to their entities and work;
                 // new entities and work must never reuse those identities.
                 self.game.continue_identities(&later);
-                self.revisions = boundary.revisions.clone();
                 let from_branch = self.current_branch.clone();
                 self.current_branch = BranchId(entry_id.0.clone());
                 return Ok(WizardResult::Rewound {
@@ -4731,13 +5267,11 @@ impl Candidate {
                 });
             }
         };
-        for (actor, old) in before {
-            if !self.game.has_actor(SimActor(actor.0)) {
-                continue;
-            }
-            if actor == receipt.actor || self.revision_view(actor)? != old {
-                let revision = self.revisions.get_mut(&actor).expect("existing actor");
-                *revision = revision.checked_add(1).ok_or_else(invalid)?;
+        for actor in before {
+            if self.game.has_actor(SimActor(actor.0)) {
+                self.game
+                    .validate_observer_projection(SimActor(actor.0))
+                    .map_err(|_| invalid_archive())?;
             }
         }
         Ok(result)
@@ -4758,19 +5292,29 @@ mod scaling_tests {
         for hidden in [16, 256, 4096] {
             let mut engine = Engine::memory(Scenario::two_room(42)).unwrap();
             let mut append = |user: &str, request: &str, audience| {
+                let snapshot = SnapshotId("history-fixture-genesis".into());
+                let receipt = Receipt {
+                    user: user.into(),
+                    frontend: "history-index".into(),
+                    actor: ActorId(1),
+                    request_id: request.into(),
+                    branch: engine.branch().clone(),
+                    command: Command::Annotate {
+                        anchor: Anchor::State {
+                            snapshot: snapshot.clone(),
+                        },
+                        category: AnnotationCategory::Note,
+                        source: ClientSource::User,
+                        audience,
+                        text: request.into(),
+                    },
+                };
                 engine
-                    .command(
-                        user,
-                        "history-index",
-                        ActorId(1),
-                        request,
-                        &engine.branch().clone(),
-                        Command::Annotate {
-                            anchor: Anchor::State { revision: 0 },
-                            category: AnnotationCategory::Note,
-                            source: ClientSource::User,
-                            audience,
-                            text: request.into(),
+                    .command_with_annotation(
+                        &receipt,
+                        crate::journal::RecordedAnchor::State {
+                            snapshot,
+                            boundary: None,
                         },
                     )
                     .unwrap()
@@ -4813,7 +5357,7 @@ mod scaling_tests {
             .map(|id| {
                 (
                     id,
-                    engine.revision(id).unwrap(),
+                    engine.causal_boundary(id).unwrap(),
                     engine.revision_view(id).unwrap(),
                 )
             })
@@ -4826,7 +5370,7 @@ mod scaling_tests {
             &format!("action-{request}"),
             &engine.branch().clone(),
             Command::Act {
-                expected_revision: engine.revision(actor).unwrap(),
+                expected_boundary: engine.causal_boundary(actor).unwrap(),
                 action: action.clone(),
             },
         );
@@ -4862,9 +5406,11 @@ mod scaling_tests {
             engine.game, reference,
             "optimized navigation must equal a full refresh"
         );
-        for (id, revision, old) in before {
-            let changed = engine.revision_view(id).unwrap() != old;
-            assert_eq!(engine.revision(id).unwrap(), revision + u64::from(changed));
+        for (id, boundary, _old) in before {
+            assert_eq!(
+                engine.causal_boundary(id).unwrap(),
+                boundary + u64::from(result.is_ok())
+            );
         }
     }
 
@@ -4914,7 +5460,7 @@ mod scaling_tests {
         let game = engine.game.clone();
         let branch = engine.branch().clone();
         let command = Command::Act {
-            expected_revision: 0,
+            expected_boundary: 0,
             action: Action::Move {
                 direction: Direction::East,
             },
@@ -4937,7 +5483,7 @@ mod scaling_tests {
             assert_eq!(engine.game, game);
             assert!(engine.receipts.is_empty() && engine.archive.records.is_empty());
             assert_eq!(engine.boundaries.len(), 1);
-            assert_eq!(engine.revision(ActorId(1)).unwrap(), 0);
+            assert_eq!(engine.causal_boundary(ActorId(1)).unwrap(), 0);
         }
     }
 }
@@ -4990,7 +5536,7 @@ mod frozen_plan_profile_tests {
                 "start",
                 &engine.branch().clone(),
                 Command::Act {
-                    expected_revision: engine.revision(actor).unwrap(),
+                    expected_boundary: engine.causal_boundary(actor).unwrap(),
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                         invocation: crate::actions::AbilityInvocation {
@@ -5172,7 +5718,7 @@ mod playable_rogue_schema_tests {
                 "activation-shape",
                 &engine.branch().clone(),
                 crate::journal::Command::Act {
-                    expected_revision: 0,
+                    expected_boundary: 0,
                     action: crate::journal::Action::Wait,
                 },
             )
@@ -5209,5 +5755,212 @@ mod playable_rogue_schema_tests {
             ],
             "activations",
         );
+    }
+}
+
+#[cfg(test)]
+mod presentation_boundary_tests {
+    use super::*;
+
+    #[test]
+    fn frozen_presentation_survives_actions_without_durable_display_counters() {
+        let mut engine = Engine::memory(Scenario::two_room(42)).unwrap();
+        let actor = ActorId(1);
+        let boundary = engine.presentation_boundary();
+        let before = engine.state_at(&boundary, actor, 7).unwrap();
+        let authoritative = engine.game.clone();
+        assert_eq!(engine.causal_boundary(actor).unwrap(), 0);
+        assert_eq!(engine.state_at(&boundary, actor, 7).unwrap(), before);
+        assert_eq!(
+            engine.game, authoritative,
+            "materialization cannot acquire knowledge"
+        );
+        let branch = engine.branch().clone();
+        let (_, profile) = engine
+            .command_profiled(
+                "test",
+                "test",
+                actor,
+                "wait",
+                &branch,
+                Command::Act {
+                    expected_boundary: 0,
+                    action: Action::Wait,
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            profile.revision_comparisons, 0,
+            "causal execution must not compare every actor's display"
+        );
+        assert_eq!(
+            [
+                profile.action_observer_boundaries,
+                profile.action_event_receipts_recorded,
+                profile.action_projection_validated,
+                profile.action_navigation_reviewed,
+            ],
+            [0; 4],
+            "an ordinary stationary wait has no affected observer cohort"
+        );
+        assert_eq!(engine.causal_boundary(actor).unwrap(), 1);
+        assert_eq!(
+            engine.state_at(&boundary, actor, 7).unwrap(),
+            before,
+            "an issued boundary never reads a later game"
+        );
+        assert_eq!(
+            engine.state(actor).unwrap().revision,
+            0,
+            "internal semantic reads do not expose the causal ordinal"
+        );
+        let mut restored = Engine::replay(engine.archive.clone(), None, None).unwrap();
+        assert_eq!(restored.game, engine.game);
+        assert_eq!(
+            restored.causal_boundary(actor),
+            engine.causal_boundary(actor)
+        );
+        // Private ordinal freshness is exact and independent of any materialization.
+        assert_eq!(
+            restored
+                .command(
+                    "test",
+                    "test",
+                    actor,
+                    "stale",
+                    &branch,
+                    Command::Act {
+                        expected_boundary: 0,
+                        action: Action::Wait
+                    }
+                )
+                .unwrap_err()
+                .code,
+            ErrorCode::StaleRevision
+        );
+        let mut moved = Engine::memory(Scenario::two_room(42)).unwrap();
+        let actor_count = moved.actors().len();
+        let branch = moved.branch().clone();
+        let (_, profile) = moved
+            .command_profiled(
+                "test",
+                "test",
+                actor,
+                "move",
+                &branch,
+                Command::Act {
+                    expected_boundary: 0,
+                    action: Action::Move {
+                        direction: Direction::East,
+                    },
+                },
+            )
+            .unwrap();
+        assert_eq!(profile.revision_comparisons, 0);
+        assert_eq!(
+            [
+                profile.action_observer_boundaries,
+                profile.action_event_receipts_recorded,
+                profile.action_projection_validated,
+                profile.action_navigation_reviewed,
+            ],
+            [actor_count; 4],
+            "each selected observer completes the same causal boundary duties"
+        );
+    }
+
+    #[test]
+    fn normalized_snapshot_annotation_replays_and_retries_without_token_lookup() {
+        let mut engine = Engine::memory(Scenario::two_room(42)).unwrap();
+        let actor = ActorId(1);
+        let boundary = engine.presentation_boundary();
+        let snapshot = SnapshotId("issued-test-snapshot".into());
+        let receipt = Receipt {
+            user: "test".into(),
+            frontend: "test".into(),
+            actor,
+            request_id: "note".into(),
+            branch: engine.branch().clone(),
+            command: Command::Annotate {
+                anchor: Anchor::State {
+                    snapshot: snapshot.clone(),
+                },
+                text: "remember this".into(),
+                source: ClientSource::User,
+                audience: Audience::Private,
+                category: AnnotationCategory::Note,
+            },
+        };
+        assert_eq!(
+            engine.apply_command(&receipt, None).unwrap_err().code,
+            ErrorCode::InvalidAnchor
+        );
+        let normalized = crate::journal::RecordedAnchor::State {
+            snapshot,
+            boundary: boundary.entry().cloned(),
+        };
+        let first = engine
+            .command_with_annotation(&receipt, normalized)
+            .unwrap();
+        let retry = engine.apply_command(&receipt, None).unwrap();
+        assert!(retry.duplicate);
+        assert_eq!(retry.entry, first.entry);
+        assert_eq!(engine.archive.records.len(), 1);
+        let replayed = Engine::replay(engine.archive.clone(), None, None).unwrap();
+        assert_eq!(replayed.game, engine.game);
+        assert_eq!(
+            serde_json::to_value(&replayed.archive.records).unwrap(),
+            serde_json::to_value(&engine.archive.records).unwrap()
+        );
+    }
+}
+
+#[cfg(test)]
+mod semantic_capture_tests {
+    use super::*;
+
+    #[test]
+    fn compact_event_inputs_match_cold_pictures_without_materializing_them() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/mob-arena");
+        for scenario in [
+            Scenario::two_room(42),
+            crate::scenario_package::load(&root, 42, None, false).unwrap(),
+        ] {
+            let engine = Engine::memory(scenario).unwrap();
+            for actor in engine.actors() {
+                FULL_PICTURE_ADAPTATIONS.with(|count| count.set(0));
+                let capture = engine.semantic_observation(actor).unwrap();
+                assert_eq!(FULL_PICTURE_ADAPTATIONS.with(|count| count.get()), 0);
+                assert!(engine
+                    .semantic_picture_unchanged(&capture, &capture)
+                    .unwrap());
+                assert_eq!(FULL_PICTURE_ADAPTATIONS.with(|count| count.get()), 0);
+                let full = engine.state(actor).unwrap();
+                assert_eq!(
+                    capture.facts,
+                    tor_protocol::OutcomeObservation::from(&full.observation)
+                );
+                assert_eq!(engine.semantic_picture(&capture).unwrap(), full);
+            }
+        }
+    }
+
+    #[test]
+    fn picture_proof_ignores_clock_but_falls_back_for_disclosed_changes() {
+        let engine = Engine::memory(Scenario::two_room(42)).unwrap();
+        let before = engine.semantic_observation(ActorId(1)).unwrap();
+        let mut after = before.clone();
+        Arc::make_mut(&mut after.view).observation.tick += 1;
+        assert!(engine.semantic_picture_unchanged(&before, &after).unwrap());
+        assert!(!tor_protocol::OutcomeFacts::picture_changed(
+            &engine.semantic_picture(&before).unwrap().observation,
+            &engine.semantic_picture(&after).unwrap().observation
+        ));
+        Arc::make_mut(&mut after.view).ready = !before.view.ready;
+        assert!(!engine.semantic_picture_unchanged(&before, &after).unwrap());
+        assert!(tor_protocol::OutcomeFacts::picture_changed(
+            &engine.semantic_picture(&before).unwrap().observation,
+            &engine.semantic_picture(&after).unwrap().observation
+        ));
     }
 }

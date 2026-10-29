@@ -10,9 +10,10 @@ mod intention_admission_tests {
         let mut engine = Engine::memory(Scenario::two_room(42)).unwrap();
         engine.enable_wizard().unwrap();
         let branch = engine.branch().clone();
+        let issued = engine.presentation_boundary();
         let command = Command::Annotate {
             anchor: Anchor::State {
-                revision: engine.revision(actor).unwrap(),
+                snapshot: tor_protocol::SnapshotId("issued-original-note".into()),
             },
             text: "Original timeline note".into(),
             source: tor_protocol::ClientSource::User,
@@ -20,13 +21,14 @@ mod intention_admission_tests {
             category: tor_protocol::AnnotationCategory::Note,
         };
         let original = engine
-            .command(
+            .command_at_presentation(
                 "player",
                 "test",
                 actor,
                 "original-note",
                 &branch,
                 command.clone(),
+                &issued,
             )
             .unwrap();
         engine
@@ -37,7 +39,8 @@ mod intention_admission_tests {
                 "rewind",
                 &branch,
                 Command::Wizard {
-                    expected_revision: engine.revision(actor).unwrap(),
+                    display_basis: None,
+                    expected_boundary: engine.causal_boundary(actor).unwrap(),
                     operation: WizardOperation::Rewind { target: None },
                 },
             )
@@ -65,6 +68,7 @@ mod intention_admission_tests {
         let actor = ActorId(1);
         let mut engine = Engine::memory(Scenario::two_room(42)).unwrap();
         let state = engine.state(actor).unwrap();
+        let state_boundary = engine.causal_boundary(actor).unwrap();
         let destination = state
             .observation
             .visible_cells
@@ -81,7 +85,8 @@ mod intention_admission_tests {
                 "journey",
                 &engine.branch().clone(),
                 Command::Travel {
-                    expected_revision: state.revision,
+                    display_basis: None,
+                    expected_boundary: state_boundary,
                     destination: destination.clone(),
                 },
             )
@@ -93,13 +98,13 @@ mod intention_admission_tests {
             .admit_travel(actor, &root.entry.id, 2, steps[0])
             .is_err());
         assert_eq!(engine.game, before);
-        let revision = engine.revision(actor).unwrap();
+        let revision = engine.causal_boundary(actor).unwrap();
         let admitted = engine
             .admit_travel(actor, &root.entry.id, 1, steps[0])
             .unwrap();
         assert!(engine.disclose_entry(&admitted.entry).is_none());
         assert!(engine.archive.records.last().unwrap().receipt.is_none());
-        assert_eq!(engine.revision(actor).unwrap(), revision);
+        assert_eq!(engine.causal_boundary(actor).unwrap(), revision + 1);
         assert_eq!(engine.game.tick(), before.tick());
         assert!(engine.pending_intentions(actor).is_empty());
         assert!(engine
@@ -126,7 +131,7 @@ mod intention_admission_tests {
                 &cancelled.branch().clone(),
                 Command::CancelIntention {
                     step: None,
-                    expected_revision: revision,
+                    expected_boundary: revision,
                     admission: admitted.entry.id.clone()
                 }
             )
@@ -273,7 +278,7 @@ mod intention_admission_tests {
             },
         };
         assert_eq!(
-            super::super::intention::derive_intention_ends(&before, &after, &entry, true),
+            super::super::intention::derive_intention_changes(&before, &after, &entry, true).ends,
             vec![crate::journal::IntentionEnd {
                 actor: ActorId(actor.0),
                 intention,
@@ -297,6 +302,7 @@ mod intention_admission_tests {
                 let mut engine =
                     Engine::open_with_policy(&path, scenario.clone(), policy.clone()).unwrap();
                 let state = engine.state(actor).unwrap();
+                let state_boundary = engine.causal_boundary(actor).unwrap();
                 let destination = state
                     .observation
                     .visible_cells
@@ -306,7 +312,8 @@ mod intention_admission_tests {
                     .key
                     .clone();
                 let command = Command::Travel {
-                    expected_revision: state.revision,
+                    display_basis: None,
+                    expected_boundary: state_boundary,
                     destination: destination.clone(),
                 };
                 let root = engine
@@ -343,7 +350,7 @@ mod intention_admission_tests {
                 )
                 .unwrap();
                 let before = rejected.game.clone();
-                let revision = rejected.revision(actor).unwrap();
+                let revision = rejected.causal_boundary(actor).unwrap();
                 let records = rejected.archive.records.len();
                 let receipts = rejected.receipts.len();
                 let sequence = rejected.save_status().accepted_sequence;
@@ -362,7 +369,7 @@ mod intention_admission_tests {
                         "{operation}/{interval}"
                     );
                     assert_eq!(rejected.game, before);
-                    assert_eq!(rejected.revision(actor).unwrap(), revision);
+                    assert_eq!(rejected.causal_boundary(actor).unwrap(), revision);
                     assert_eq!(rejected.archive.records.len(), records);
                     assert_eq!(rejected.receipts.len(), receipts);
                     assert_eq!(rejected.save_status().accepted_sequence, sequence);
@@ -452,7 +459,7 @@ mod intention_admission_tests {
                 "wait-before-ai",
                 &engine.branch().clone(),
                 Command::Act {
-                    expected_revision: engine.revision(actor).unwrap(),
+                    expected_boundary: engine.causal_boundary(actor).unwrap(),
                     action: Action::Wait,
                 },
             )
@@ -555,7 +562,7 @@ mod intention_admission_tests {
                         &turn.to_string(),
                         &engine.branch().clone(),
                         Command::Act {
-                            expected_revision: engine.revision(actor).unwrap(),
+                            expected_boundary: engine.causal_boundary(actor).unwrap(),
                             action: Action::UseAbility {
                                 id: tor_simulation::content_ids::AbilityId::new("basic_melee")
                                     .unwrap(),
@@ -600,7 +607,7 @@ mod intention_admission_tests {
     fn autonomous_admission_is_effect_free_and_restores_the_exact_queued_decision() {
         let mut engine = autonomous_fixture();
         let actor = engine.next_actor().unwrap();
-        let revisions = engine.revisions.clone();
+        let causal_position = engine.archive.records.len();
         let mut expected = engine.game.clone();
         let identity = expected.admit_ai_intention(SimActor(actor.0)).unwrap();
         let before = tor_simulation::diagnostics::work_counts();
@@ -613,7 +620,7 @@ mod intention_admission_tests {
             engine.game, expected,
             "only the queue and identity counter may change"
         );
-        assert_eq!(engine.revisions, revisions);
+        assert_eq!(engine.archive.records.len(), causal_position);
         assert!(admission.entry.intention_ends.is_empty());
         assert!(admission.entry.intention_suspensions.is_empty());
         assert!(engine.disclose_entry(&admission.entry).is_none());
@@ -706,7 +713,7 @@ mod intention_admission_tests {
                     "wait",
                     &engine.branch().clone(),
                     Command::Act {
-                        expected_revision: engine.revision(player).unwrap(),
+                        expected_boundary: engine.causal_boundary(player).unwrap(),
                         action: Action::Wait,
                     },
                 )
@@ -830,7 +837,8 @@ mod intention_admission_tests {
                 "retain-ai",
                 &engine.branch().clone(),
                 Command::Wizard {
-                    expected_revision: engine.revision(player).unwrap(),
+                    display_basis: None,
+                    expected_boundary: engine.causal_boundary(player).unwrap(),
                     operation: WizardOperation::SetPlaceHint {
                         position: Position {
                             region: 1,
@@ -852,7 +860,7 @@ mod intention_admission_tests {
                 "future-player",
                 &engine.branch().clone(),
                 Command::Act {
-                    expected_revision: engine.revision(player).unwrap(),
+                    expected_boundary: engine.causal_boundary(player).unwrap(),
                     action: Action::Wait,
                 },
             )
@@ -878,7 +886,8 @@ mod intention_admission_tests {
                 "rewind-ai",
                 &old_branch,
                 Command::Wizard {
-                    expected_revision: engine.revision(player).unwrap(),
+                    display_basis: None,
+                    expected_boundary: engine.causal_boundary(player).unwrap(),
                     operation: WizardOperation::Rewind {
                         target: Some(marker.entry.id),
                     },
@@ -913,7 +922,7 @@ mod intention_admission_tests {
                 "new-player",
                 &engine.branch().clone(),
                 Command::Act {
-                    expected_revision: engine.revision(player).unwrap(),
+                    expected_boundary: engine.causal_boundary(player).unwrap(),
                     action: Action::Wait,
                 },
             )
@@ -964,7 +973,7 @@ mod intention_admission_tests {
                     &format!("admit-{index}"),
                     &engine.branch().clone(),
                     Command::AdmitIntention {
-                        expected_revision: engine.revision(actor).unwrap(),
+                        expected_boundary: engine.causal_boundary(actor).unwrap(),
                         action: Action::Wait,
                     },
                 )
@@ -983,7 +992,7 @@ mod intention_admission_tests {
                 "pending",
                 &engine.branch().clone(),
                 Command::AdmitIntention {
-                    expected_revision: engine.revision(actor).unwrap(),
+                    expected_boundary: engine.causal_boundary(actor).unwrap(),
                     action: Action::Wait,
                 },
             )
@@ -998,7 +1007,7 @@ mod intention_admission_tests {
                     &format!("resume-{index}"),
                     &engine.branch().clone(),
                     Command::ResumeIntention {
-                        expected_revision: engine.revision(actor).unwrap(),
+                        expected_boundary: engine.causal_boundary(actor).unwrap(),
                         admission: admitted.entry.id.clone(),
                     },
                 )
@@ -1041,7 +1050,8 @@ mod intention_admission_tests {
                     "rewind",
                     &recovered.branch().clone(),
                     Command::Wizard {
-                        expected_revision: recovered.revision(actor).unwrap(),
+                        display_basis: None,
+                        expected_boundary: recovered.causal_boundary(actor).unwrap(),
                         operation: WizardOperation::Rewind { target: None },
                     },
                 )
@@ -1064,7 +1074,7 @@ mod intention_admission_tests {
                 "queued",
                 &branch,
                 Command::AdmitIntention {
-                    expected_revision: 0,
+                    expected_boundary: 0,
                     action: Action::Wait,
                 },
             )
@@ -1134,7 +1144,7 @@ mod intention_admission_tests {
                 .is_err());
         }
         let command = Command::ResumeIntention {
-            expected_revision: 0,
+            expected_boundary: 0,
             admission: admitted.entry.id.clone(),
         };
         let resumed = engine
@@ -1153,7 +1163,7 @@ mod intention_admission_tests {
         verify(&engine);
         engine.execute_next_intention().unwrap().unwrap();
         verify(&engine);
-        let revision = engine.revision(actor).unwrap();
+        let revision = engine.causal_boundary(actor).unwrap();
         let next = engine
             .command(
                 "p",
@@ -1162,7 +1172,7 @@ mod intention_admission_tests {
                 "second",
                 &branch,
                 Command::AdmitIntention {
-                    expected_revision: revision,
+                    expected_boundary: revision,
                     action: Action::Wait,
                 },
             )
@@ -1178,7 +1188,7 @@ mod intention_admission_tests {
                 &branch,
                 Command::CancelIntention {
                     step: None,
-                    expected_revision: revision,
+                    expected_boundary: revision,
                     admission: suspended.entry.id
                 }
             )
@@ -1194,7 +1204,7 @@ mod intention_admission_tests {
                 &branch,
                 Command::CancelIntention {
                     step: None,
-                    expected_revision: revision,
+                    expected_boundary: revision,
                     admission: next.entry.id.clone(),
                 },
             )
@@ -1230,7 +1240,7 @@ mod intention_admission_tests {
                 "queued",
                 &branch,
                 Command::AdmitIntention {
-                    expected_revision: 0,
+                    expected_boundary: 0,
                     action: Action::Wait,
                 },
             )
@@ -1267,7 +1277,7 @@ mod intention_admission_tests {
                     &branch,
                     Command::CancelIntention {
                         step: None,
-                        expected_revision: 0,
+                        expected_boundary: 0,
                         admission: admitted.entry.id
                     }
                 )
@@ -1308,7 +1318,7 @@ mod intention_admission_tests {
                     "attack",
                     &engine.branch().clone(),
                     Command::AdmitIntention {
-                        expected_revision: engine.revision(actor).unwrap(),
+                        expected_boundary: engine.causal_boundary(actor).unwrap(),
                         action: Action::UseAbility {
                             id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                             invocation: crate::actions::AbilityInvocation {
@@ -1336,7 +1346,8 @@ mod intention_admission_tests {
                         "move-target",
                         &engine.branch().clone(),
                         Command::Wizard {
-                            expected_revision: engine.revision(actor).unwrap(),
+                            display_basis: None,
+                            expected_boundary: engine.causal_boundary(actor).unwrap(),
                             operation: WizardOperation::Teleport {
                                 actor: ActorId(2),
                                 position: Position {
@@ -1359,7 +1370,7 @@ mod intention_admission_tests {
                         "resume",
                         &engine.branch().clone(),
                         Command::ResumeIntention {
-                            expected_revision: engine.revision(actor).unwrap(),
+                            expected_boundary: engine.causal_boundary(actor).unwrap(),
                             admission: admitted.entry.id.clone(),
                         },
                     )
@@ -1377,7 +1388,7 @@ mod intention_admission_tests {
             )
             .unwrap();
             let before = engine.game.clone();
-            let revisions = engine.revisions.clone();
+            let causal_position = engine.archive.records.len();
             let boundaries = engine.boundaries.clone();
             let receipt = engine.request_receipt(&admitted);
             let record_count = engine.archive.records.len();
@@ -1394,13 +1405,13 @@ mod intention_admission_tests {
                         &engine.branch().clone(),
                         if stage == "resume" {
                             Command::ResumeIntention {
-                                expected_revision: engine.revision(actor).unwrap(),
+                                expected_boundary: engine.causal_boundary(actor).unwrap(),
                                 admission: admitted.entry.id.clone(),
                             }
                         } else {
                             Command::CancelIntention {
                                 step: None,
-                                expected_revision: engine.revision(actor).unwrap(),
+                                expected_boundary: engine.causal_boundary(actor).unwrap(),
                                 admission: admitted.entry.id.clone(),
                             }
                         },
@@ -1409,7 +1420,7 @@ mod intention_admission_tests {
             };
             assert_eq!(error.code, ErrorCode::StorageFailure, "{stage}");
             assert_eq!(engine.game, before, "{stage}");
-            assert_eq!(engine.revisions, revisions, "{stage}");
+            assert_eq!(engine.archive.records.len(), causal_position, "{stage}");
             assert_eq!(engine.archive.records.len(), record_count, "{stage}");
             assert_eq!(engine.receipts.len(), receipt_count, "{stage}");
             assert_eq!(engine.request_receipt(&admitted), receipt, "{stage}");
@@ -1437,7 +1448,7 @@ mod intention_admission_tests {
                 "attack",
                 &engine.branch().clone(),
                 Command::AdmitIntention {
-                    expected_revision: engine.revision(actor).unwrap(),
+                    expected_boundary: engine.causal_boundary(actor).unwrap(),
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                         invocation: crate::actions::AbilityInvocation {
@@ -1476,8 +1487,10 @@ mod intention_admission_tests {
             }
         };
         let active_state = engine.state(actor).unwrap();
+        let active_boundary = engine.causal_boundary(actor).unwrap();
         engine.pause_preparation(actor).unwrap().unwrap();
         let suspended_state = engine.state(actor).unwrap();
+        assert_ne!(suspended_state.observation, active_state.observation);
         assert!(
             !suspended_state
                 .observation
@@ -1487,8 +1500,8 @@ mod intention_admission_tests {
                 .preparation_active
         );
         assert!(
-            suspended_state.revision > active_state.revision,
-            "changed preparation must advance its disclosed observation revision"
+            engine.causal_boundary(actor).unwrap() > active_boundary,
+            "suspension commits a new causal boundary even at the same tick"
         );
         let pending = engine.pending_intentions(actor);
         assert_eq!(pending.len(), 1);
@@ -1508,7 +1521,7 @@ mod intention_admission_tests {
         verify(&engine);
         let before = engine.game.clone();
         let resume = Command::ResumeIntention {
-            expected_revision: engine.revision(actor).unwrap(),
+            expected_boundary: engine.causal_boundary(actor).unwrap(),
             admission: admitted.entry.id.clone(),
         };
         let resumed = engine
@@ -1560,6 +1573,7 @@ mod intention_admission_tests {
         assert_eq!(retry.entry, resumed.entry);
         assert_eq!(engine.game, before_retry);
         let before_cancel = engine.state(actor).unwrap();
+        let before_cancel_boundary = engine.causal_boundary(actor).unwrap();
         engine
             .command(
                 "p",
@@ -1569,7 +1583,7 @@ mod intention_admission_tests {
                 &engine.branch().clone(),
                 Command::CancelIntention {
                     step: None,
-                    expected_revision: engine.revision(actor).unwrap(),
+                    expected_boundary: engine.causal_boundary(actor).unwrap(),
                     admission: admitted.entry.id.clone(),
                 },
             )
@@ -1582,7 +1596,8 @@ mod intention_admission_tests {
             .unwrap()
             .preparation_remaining
             .is_none());
-        assert!(after_cancel.revision > before_cancel.revision);
+        assert!(engine.causal_boundary(actor).unwrap() > before_cancel_boundary);
+        assert_ne!(after_cancel.observation, before_cancel.observation);
         assert!(engine.pending_intentions(actor).is_empty());
         assert!(engine.game.preparation(SimActor(actor.0)).is_none());
         assert!(matches!(
@@ -1623,7 +1638,7 @@ mod intention_admission_tests {
                 "attack",
                 &engine.branch().clone(),
                 Command::AdmitIntention {
-                    expected_revision: engine.revision(actor).unwrap(),
+                    expected_boundary: engine.causal_boundary(actor).unwrap(),
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                         invocation: crate::actions::AbilityInvocation {
@@ -1647,7 +1662,7 @@ mod intention_admission_tests {
                 "later",
                 &engine.branch().clone(),
                 Command::AdmitIntention {
-                    expected_revision: engine.revision(actor).unwrap(),
+                    expected_boundary: engine.causal_boundary(actor).unwrap(),
                     action: Action::Wait,
                 },
             )
@@ -1673,7 +1688,7 @@ mod intention_admission_tests {
             let before = recovered.game.clone();
             let request = Command::CancelIntention {
                 step: None,
-                expected_revision: recovered.revision(actor).unwrap(),
+                expected_boundary: recovered.causal_boundary(actor).unwrap(),
                 admission: attack.entry.id.clone(),
             };
             let cancelled = recovered
@@ -1755,7 +1770,7 @@ mod intention_admission_tests {
                 "attack",
                 &engine.branch().clone(),
                 Command::AdmitIntention {
-                    expected_revision: engine.revision(actor).unwrap(),
+                    expected_boundary: engine.causal_boundary(actor).unwrap(),
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                         invocation: crate::actions::AbilityInvocation {
@@ -1794,7 +1809,7 @@ mod intention_admission_tests {
                             "resume",
                             &engine.branch().clone(),
                             Command::ResumeIntention {
-                                expected_revision: engine.revision(actor).unwrap(),
+                                expected_boundary: engine.causal_boundary(actor).unwrap(),
                                 admission: admitted.entry.id.clone(),
                             },
                         )
@@ -1813,7 +1828,7 @@ mod intention_admission_tests {
                             &engine.branch().clone(),
                             Command::CancelIntention {
                                 step: None,
-                                expected_revision: engine.revision(actor).unwrap(),
+                                expected_boundary: engine.causal_boundary(actor).unwrap(),
                                 admission: admitted.entry.id.clone(),
                             },
                         )
@@ -1829,7 +1844,8 @@ mod intention_admission_tests {
                     &format!("phase-{index}"),
                     &engine.branch().clone(),
                     Command::Wizard {
-                        expected_revision: engine.revision(actor).unwrap(),
+                        display_basis: None,
+                        expected_boundary: engine.causal_boundary(actor).unwrap(),
                         operation: WizardOperation::SetPlaceHint {
                             position: Position {
                                 region: 1,
@@ -1854,7 +1870,8 @@ mod intention_admission_tests {
                 &format!("rewind-{index}"),
                 &fork.branch().clone(),
                 Command::Wizard {
-                    expected_revision: fork.revision(actor).unwrap(),
+                    display_basis: None,
+                    expected_boundary: fork.causal_boundary(actor).unwrap(),
                     operation: WizardOperation::Rewind {
                         target: Some(target),
                     },
@@ -1903,7 +1920,7 @@ mod intention_admission_tests {
                 "attack",
                 &engine.branch().clone(),
                 Command::AdmitIntention {
-                    expected_revision: engine.revision(actor).unwrap(),
+                    expected_boundary: engine.causal_boundary(actor).unwrap(),
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                         invocation: crate::actions::AbilityInvocation {
@@ -1927,7 +1944,7 @@ mod intention_admission_tests {
                 "resume",
                 &engine.branch().clone(),
                 Command::ResumeIntention {
-                    expected_revision: engine.revision(actor).unwrap(),
+                    expected_boundary: engine.causal_boundary(actor).unwrap(),
                     admission: admitted.entry.id.clone(),
                 },
             )
@@ -1968,7 +1985,7 @@ mod intention_admission_tests {
         let mut engine = Engine::memory(Scenario::two_room(42)).unwrap();
         let actor = ActorId(1);
         let command = Command::AdmitIntention {
-            expected_revision: engine.revision(actor).unwrap(),
+            expected_boundary: engine.causal_boundary(actor).unwrap(),
             action: Action::Wait,
         };
         engine
@@ -2026,7 +2043,7 @@ mod intention_admission_tests {
                 "attack",
                 &engine.branch().clone(),
                 Command::AdmitIntention {
-                    expected_revision: engine.revision(actor).unwrap(),
+                    expected_boundary: engine.causal_boundary(actor).unwrap(),
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                         invocation: crate::actions::AbilityInvocation {
@@ -2093,7 +2110,7 @@ mod intention_admission_tests {
                 "attack",
                 &engine.branch().clone(),
                 Command::AdmitIntention {
-                    expected_revision: engine.revision(actor).unwrap(),
+                    expected_boundary: engine.causal_boundary(actor).unwrap(),
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                         invocation: crate::actions::AbilityInvocation {
@@ -2121,7 +2138,7 @@ mod intention_admission_tests {
                 &engine.branch().clone(),
                 Command::CancelIntention {
                     step: None,
-                    expected_revision: engine.revision(actor).unwrap(),
+                    expected_boundary: engine.causal_boundary(actor).unwrap(),
                     admission: admitted.entry.id.clone(),
                 },
             )
@@ -2136,7 +2153,8 @@ mod intention_admission_tests {
                     &format!("retain-{index}"),
                     &engine.branch().clone(),
                     Command::Wizard {
-                        expected_revision: engine.revision(actor).unwrap(),
+                        display_basis: None,
+                        expected_boundary: engine.causal_boundary(actor).unwrap(),
                         operation: WizardOperation::Teleport {
                             actor,
                             position: Position {
@@ -2260,7 +2278,7 @@ mod intention_admission_tests {
                 "attack",
                 &engine.branch().clone(),
                 Command::AdmitIntention {
-                    expected_revision: engine.revision(actor).unwrap(),
+                    expected_boundary: engine.causal_boundary(actor).unwrap(),
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                         invocation: crate::actions::AbilityInvocation {
@@ -2304,7 +2322,7 @@ mod intention_admission_tests {
         assert!(engine.game.preparation(SimActor(actor.0)).unwrap().active);
 
         let before = engine.game.clone();
-        let revisions = engine.revisions.clone();
+        let causal_position = engine.archive.records.len();
         let boundaries = engine.boundaries.clone();
         let records = engine.archive.records.len();
         let receipts = engine.receipts.clone();
@@ -2315,7 +2333,7 @@ mod intention_admission_tests {
             ErrorCode::StorageFailure
         );
         assert_eq!(engine.game, before);
-        assert_eq!(engine.revisions, revisions);
+        assert_eq!(engine.archive.records.len(), causal_position);
         assert_eq!(engine.archive.records.len(), records);
         assert_eq!(engine.receipts, receipts);
         assert_eq!(engine.request_receipt(&admitted), receipt);
@@ -2349,7 +2367,7 @@ mod intention_admission_tests {
                 "attack",
                 &engine.branch().clone(),
                 Command::AdmitIntention {
-                    expected_revision: engine.revision(actor).unwrap(),
+                    expected_boundary: engine.causal_boundary(actor).unwrap(),
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                         invocation: crate::actions::AbilityInvocation {
@@ -2424,7 +2442,7 @@ mod intention_admission_tests {
                 "resume",
                 &engine.branch().clone(),
                 Command::ResumeIntention {
-                    expected_revision: engine.revision(actor).unwrap(),
+                    expected_boundary: engine.causal_boundary(actor).unwrap(),
                     admission: admitted.entry.id.clone(),
                 },
             )
@@ -2453,7 +2471,7 @@ mod intention_admission_tests {
                 "attack",
                 &engine.branch().clone(),
                 Command::AdmitIntention {
-                    expected_revision: engine.revision(actor).unwrap(),
+                    expected_boundary: engine.causal_boundary(actor).unwrap(),
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                         invocation: crate::actions::AbilityInvocation {
@@ -2477,7 +2495,7 @@ mod intention_admission_tests {
                 "resume",
                 &engine.branch().clone(),
                 Command::ResumeIntention {
-                    expected_revision: engine.revision(actor).unwrap(),
+                    expected_boundary: engine.causal_boundary(actor).unwrap(),
                     admission: admitted.entry.id.clone(),
                 },
             )
@@ -2492,7 +2510,7 @@ mod intention_admission_tests {
                 &engine.branch().clone(),
                 Command::CancelIntention {
                     step: None,
-                    expected_revision: engine.revision(actor).unwrap(),
+                    expected_boundary: engine.causal_boundary(actor).unwrap(),
                     admission: admitted.entry.id.clone(),
                 },
             )
@@ -2507,7 +2525,8 @@ mod intention_admission_tests {
                     &format!("retain-{index}"),
                     &engine.branch().clone(),
                     Command::Wizard {
-                        expected_revision: engine.revision(actor).unwrap(),
+                        display_basis: None,
+                        expected_boundary: engine.causal_boundary(actor).unwrap(),
                         operation: WizardOperation::Teleport {
                             actor,
                             position: Position {
@@ -2566,7 +2585,7 @@ mod intention_admission_tests {
                 "attack",
                 &engine.branch().clone(),
                 Command::AdmitIntention {
-                    expected_revision: 0,
+                    expected_boundary: 0,
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                         invocation: crate::actions::AbilityInvocation {
@@ -2703,7 +2722,7 @@ mod intention_admission_tests {
                 "queued",
                 &engine.branch().clone(),
                 Command::AdmitIntention {
-                    expected_revision: 0,
+                    expected_boundary: 0,
                     action: Action::Wait,
                 },
             )
@@ -2744,7 +2763,7 @@ mod intention_admission_tests {
         let branch = engine.branch().clone();
         let before = engine.state(actor).unwrap();
         let command = Command::AdmitIntention {
-            expected_revision: 0,
+            expected_boundary: 0,
             action: Action::Move {
                 direction: Direction::East,
             },
@@ -2752,7 +2771,10 @@ mod intention_admission_tests {
         let result = engine
             .command("p", "test", actor, "queued", &branch, command.clone())
             .unwrap();
-        let JournalContent::IntentionAdmitted { intention, action } = &result.entry.content else {
+        let JournalContent::IntentionAdmitted {
+            intention, action, ..
+        } = &result.entry.content
+        else {
             panic!("admission must have its own journal content");
         };
         assert_eq!(
@@ -2791,7 +2813,7 @@ mod intention_admission_tests {
                     "queued",
                     &branch,
                     &Command::AdmitIntention {
-                        expected_revision: 0,
+                        expected_boundary: 0,
                         action: Action::Move {
                             direction: Direction::East
                         },
@@ -2827,7 +2849,7 @@ mod intention_admission_tests {
                     "queued",
                     &branch,
                     Command::AdmitIntention {
-                        expected_revision: 0,
+                        expected_boundary: 0,
                         action: Action::Wait,
                     },
                 )
@@ -2851,23 +2873,30 @@ mod intention_admission_tests {
                 "queued",
                 &engine.branch().clone(),
                 Command::AdmitIntention {
-                    expected_revision: 0,
+                    expected_boundary: 0,
                     action: Action::Wait,
                 },
             )
             .unwrap();
-        for case in 0..5 {
+        let JournalContent::IntentionAdmitted { human_operands, .. } =
+            &engine.archive.records[0].entry.content
+        else {
+            panic!("human admission")
+        };
+        let human_operands = human_operands.clone();
+        for case in 0..6 {
             let mut archive = engine.archive.clone();
             let record = &mut archive.records[0];
             match case {
                 0 => {
                     record.receipt.as_mut().unwrap().command = Command::Act {
-                        expected_revision: 0,
+                        expected_boundary: 0,
                         action: Action::Wait,
                     }
                 }
                 1 => {
                     record.entry.content = JournalContent::IntentionAdmitted {
+                        human_operands: human_operands.clone(),
                         intention: tor_simulation::IntentionId(1),
                         action: Action::Move {
                             direction: Direction::East,
@@ -2876,6 +2905,7 @@ mod intention_admission_tests {
                 }
                 2 => {
                     record.entry.content = JournalContent::IntentionAdmitted {
+                        human_operands: human_operands.clone(),
                         intention: tor_simulation::IntentionId(0),
                         action: Action::Wait,
                     }
@@ -2887,9 +2917,21 @@ mod intention_admission_tests {
                 }
                 4 => {
                     record.entry.content = JournalContent::IntentionAdmitted {
+                        human_operands: human_operands.clone(),
                         intention: tor_simulation::IntentionId(99),
                         action: Action::Wait,
                     }
+                }
+                5 => {
+                    let JournalContent::IntentionAdmitted { human_operands, .. } =
+                        &mut record.entry.content
+                    else {
+                        unreachable!()
+                    };
+                    *human_operands = serde_json::from_value(serde_json::json!({
+                        "weapon": {"kind":"natural"}, "items":[], "preparation":null
+                    }))
+                    .unwrap();
                 }
                 _ => unreachable!(),
             }
@@ -2917,14 +2959,14 @@ mod intention_execution_tests {
         let mut engine = Engine::memory(Scenario::performance(42, 16, 2).unwrap()).unwrap();
         assert_eq!(engine.game.next_actor(), Some(SimActor(1)));
         let before = [
-            engine.revision(ActorId(1)).unwrap(),
-            engine.revision(ActorId(2)).unwrap(),
+            engine.causal_boundary(ActorId(1)).unwrap(),
+            engine.causal_boundary(ActorId(2)).unwrap(),
         ];
         admit(&mut engine, Action::Wait);
         engine.execute_next_intention().unwrap().unwrap();
         assert_eq!(engine.game.next_actor(), Some(SimActor(2)));
-        assert!(engine.revision(ActorId(1)).unwrap() > before[0]);
-        assert!(engine.revision(ActorId(2)).unwrap() > before[1]);
+        assert!(engine.causal_boundary(ActorId(1)).unwrap() > before[0]);
+        assert!(engine.causal_boundary(ActorId(2)).unwrap() > before[1]);
         assert_eq!(
             Engine::replay(engine.archive.clone(), None, None)
                 .unwrap()
@@ -2948,7 +2990,8 @@ mod intention_execution_tests {
                     &format!("retain-{index}"),
                     &engine.branch().clone(),
                     Command::Wizard {
-                        expected_revision: engine.revision(ActorId(1)).unwrap(),
+                        display_basis: None,
+                        expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
                         operation: WizardOperation::Teleport {
                             actor: ActorId(1),
                             position: Position {
@@ -3006,7 +3049,7 @@ mod intention_execution_tests {
                 "queued-again",
                 &engine.branch().clone(),
                 Command::AdmitIntention {
-                    expected_revision: engine.revision(ActorId(1)).unwrap(),
+                    expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
                     action: Action::Wait,
                 },
             )
@@ -3046,7 +3089,8 @@ mod intention_execution_tests {
                 "retained",
                 &engine.branch().clone(),
                 Command::Wizard {
-                    expected_revision: 0,
+                    display_basis: None,
+                    expected_boundary: 0,
                     operation: WizardOperation::SetPlaceHint {
                         position: Position {
                             region: 1,
@@ -3068,7 +3112,7 @@ mod intention_execution_tests {
                 "abandoned",
                 &engine.branch().clone(),
                 Command::AdmitIntention {
-                    expected_revision: engine.revision(ActorId(1)).unwrap(),
+                    expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
                     action: Action::Wait,
                 },
             )
@@ -3082,7 +3126,8 @@ mod intention_execution_tests {
                 "rewind",
                 &engine.branch().clone(),
                 Command::Wizard {
-                    expected_revision: engine.revision(ActorId(1)).unwrap(),
+                    display_basis: None,
+                    expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
                     operation: WizardOperation::Rewind {
                         target: Some(retained.entry.id),
                     },
@@ -3119,7 +3164,7 @@ mod intention_execution_tests {
                 "new-future",
                 &engine.branch().clone(),
                 Command::AdmitIntention {
-                    expected_revision: engine.revision(ActorId(1)).unwrap(),
+                    expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
                     action: Action::Wait,
                 },
             )
@@ -3152,7 +3197,7 @@ mod intention_execution_tests {
                 "queued",
                 &engine.branch().clone(),
                 Command::AdmitIntention {
-                    expected_revision: engine.revision(ActorId(1)).unwrap(),
+                    expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
                     action,
                 },
             )
@@ -3189,7 +3234,7 @@ mod intention_execution_tests {
                 "queued",
                 &branch,
                 Command::AdmitIntention {
-                    expected_revision: 0,
+                    expected_boundary: 0,
                     action: Action::Move {
                         direction: Direction::East,
                     },
@@ -3254,7 +3299,8 @@ mod intention_execution_tests {
                 "block",
                 &engine.branch().clone(),
                 Command::Wizard {
-                    expected_revision: 0,
+                    display_basis: None,
+                    expected_boundary: 0,
                     operation: WizardOperation::SetWall {
                         position: Position {
                             region: 1,
@@ -3311,7 +3357,7 @@ mod ordered_strikes_cancel_tests {
                 "admit",
                 &branch,
                 Command::AdmitIntention {
-                    expected_revision: 0,
+                    expected_boundary: 0,
                     action: Action::Wait,
                 },
             )
@@ -3454,12 +3500,13 @@ mod ordered_strikes_terminal_tests {
         let intention = tor_simulation::IntentionId(1);
         for cancelled in [false, true] {
             let after = with_events(&before, serde_json::json!([prefix_event(intention)]));
-            let ends = super::super::intention::derive_intention_ends(
+            let ends = super::super::intention::derive_intention_changes(
                 &before,
                 &after,
                 &entry(intention, cancelled),
                 true,
-            );
+            )
+            .ends;
             assert_eq!(ends.len(), 1);
             assert_eq!(
                 ends[0].kind,
@@ -3507,19 +3554,21 @@ mod ordered_strikes_terminal_tests {
                 serde_json::json!([prefix_event(intention),
                 {"SequenceEnded":{"actor":actor,"intention":id,"reason":reason}}]),
             );
-            let ends = super::super::intention::derive_intention_ends(
+            let ends = super::super::intention::derive_intention_changes(
                 &before,
                 &after,
                 &entry(intention, false),
                 true,
-            );
+            )
+            .ends;
             assert_eq!(ends[0].kind, expected);
-            assert!(super::super::intention::derive_intention_ends(
+            assert!(super::super::intention::derive_intention_changes(
                 &before,
                 &after,
                 &entry(intention, false),
                 false
             )
+            .ends
             .is_empty());
         }
     }
@@ -3542,7 +3591,7 @@ mod ordered_strikes_receipt_tests {
                 "admit-step",
                 &branch,
                 Command::AdmitIntention {
-                    expected_revision: 0,
+                    expected_boundary: 0,
                     action: Action::Wait,
                 },
             )
@@ -3556,7 +3605,7 @@ mod ordered_strikes_receipt_tests {
                 &branch,
                 Command::CancelIntention {
                     step: None,
-                    expected_revision: 0,
+                    expected_boundary: 0,
                     admission: admitted.entry.id.clone(),
                 },
             )
@@ -3681,7 +3730,7 @@ mod ordered_strikes_ai_replay_tests {
                 id,
                 &engine.branch().clone(),
                 Command::Act {
-                    expected_revision: engine.revision(player).unwrap(),
+                    expected_boundary: engine.causal_boundary(player).unwrap(),
                     action,
                 },
             )
@@ -3892,7 +3941,7 @@ mod finite_supply_publication_tests {
                 "care",
                 &engine.branch().clone(),
                 Command::AdmitIntention {
-                    expected_revision: engine.revision(actor).unwrap(),
+                    expected_boundary: engine.causal_boundary(actor).unwrap(),
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("paid_care").unwrap(),
                         invocation: crate::actions::AbilityInvocation {
@@ -3964,7 +4013,7 @@ mod finite_supply_publication_tests {
         let mut engine = Engine::open(&path, scenario.clone()).unwrap();
         let branch = engine.branch().clone();
         let command = Command::AdmitIntention {
-            expected_revision: engine.revision(actor).unwrap(),
+            expected_boundary: engine.causal_boundary(actor).unwrap(),
             action: Action::UseAbility {
                 id: ability.clone(),
                 invocation: crate::actions::AbilityInvocation {
@@ -4005,7 +4054,7 @@ mod finite_supply_publication_tests {
                 unreachable!()
             };
             let request = Command::AdmitIntention {
-                expected_revision: engine.revision(actor).unwrap(),
+                expected_boundary: engine.causal_boundary(actor).unwrap(),
                 action: action.clone(),
             };
             engine
@@ -4035,7 +4084,7 @@ mod finite_supply_publication_tests {
             .balance(Resource::Stamina);
         let original_costs = before.creature(sim_actor).unwrap().costs().clone();
         let original_cooldowns = before.creature(sim_actor).unwrap().cooldowns().clone();
-        let revisions = rejected.revisions.clone();
+        let causal_position = rejected.archive.records.len();
         let receipts = rejected.receipts.clone();
         let records = serde_json::to_value(&rejected.archive.records).unwrap();
         let boundaries = rejected.boundaries.clone();
@@ -4117,7 +4166,7 @@ mod finite_supply_publication_tests {
                 rejected.game.creature(sim_actor).unwrap().cooldowns(),
                 &original_cooldowns
             );
-            assert_eq!(rejected.revisions, revisions);
+            assert_eq!(rejected.archive.records.len(), causal_position);
             assert_eq!(rejected.receipts, receipts);
             assert_eq!(
                 serde_json::to_value(&rejected.archive.records).unwrap(),
@@ -4170,7 +4219,7 @@ mod finite_supply_publication_tests {
         while recovered.game.preparation(sim_actor).is_some() {
             let next = recovered.next_actor().unwrap();
             let request = Command::Act {
-                expected_revision: recovered.revision(next).unwrap(),
+                expected_boundary: recovered.causal_boundary(next).unwrap(),
                 action: Action::Wait,
             };
             recovered
@@ -4277,7 +4326,7 @@ mod finite_supply_publication_tests {
     fn ordinary_wait(engine: &mut Engine) -> CommandResult {
         let actor = engine.next_actor().unwrap();
         let request = Command::Act {
-            expected_revision: engine.revision(actor).unwrap(),
+            expected_boundary: engine.causal_boundary(actor).unwrap(),
             action: Action::Wait,
         };
         engine
@@ -4304,7 +4353,7 @@ mod finite_supply_publication_tests {
         let mut engine = Engine::open(&path, scenario.clone()).unwrap();
         let branch = engine.branch().clone();
         let dose = Command::AdmitIntention {
-            expected_revision: engine.revision(actor).unwrap(),
+            expected_boundary: engine.causal_boundary(actor).unwrap(),
             action: Action::Drink { item: 11 },
         };
         engine
@@ -4331,7 +4380,7 @@ mod finite_supply_publication_tests {
             .instances()
             .any(|token| token.condition == readied && token.reserved_by.is_none()));
         let request = Command::AdmitIntention {
-            expected_revision: engine.revision(actor).unwrap(),
+            expected_boundary: engine.causal_boundary(actor).unwrap(),
             action: Action::UseAbility {
                 id: ability.clone(),
                 invocation: crate::actions::AbilityInvocation {
@@ -4416,7 +4465,7 @@ mod finite_supply_publication_tests {
         assert!(tokens
             .instances()
             .any(|token| token.condition == readied && token.reserved_by == Some(sim_actor)));
-        let revisions = rejected.revisions.clone();
+        let causal_position = rejected.archive.records.len();
         let receipts = rejected.receipts.clone();
         let records = serde_json::to_value(&rejected.archive.records).unwrap();
         let boundaries = rejected.boundaries.clone();
@@ -4426,7 +4475,7 @@ mod finite_supply_publication_tests {
             [ActorId(1), ActorId(2)].map(|observer| rejected.revision_view(observer).unwrap());
         let finishing_actor = ActorId(2);
         let wait = Command::Act {
-            expected_revision: rejected.revision(finishing_actor).unwrap(),
+            expected_boundary: rejected.causal_boundary(finishing_actor).unwrap(),
             action: Action::Wait,
         };
 
@@ -4495,7 +4544,7 @@ mod finite_supply_publication_tests {
             assert_eq!(creature.costs(), &costs);
             assert_eq!(creature.cooldowns(), &cooldowns);
             assert_eq!(creature.conditions(), &tokens);
-            assert_eq!(rejected.revisions, revisions);
+            assert_eq!(rejected.archive.records.len(), causal_position);
             assert_eq!(rejected.receipts, receipts);
             assert_eq!(
                 serde_json::to_value(&rejected.archive.records).unwrap(),

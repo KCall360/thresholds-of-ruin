@@ -146,7 +146,7 @@ class DriverTiming(unittest.TestCase):
             {"type": "act", "action": {"type": "wait"}},
             {"type": "request", "request": {"type": "command", "branch": "branch",
                 "context": {"stream": {"stream": "s", "epoch": "1"}, "readiness_revision": "1"},
-                "command": {"type": "act", "expected_revision": "0", "action": {"type": "wait"}}}},
+                "command": {"type": "act", "action": {"type": "wait"}}}},
         ]
         for value in actions:
             with self.subTest(input_type=value["type"]):

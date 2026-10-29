@@ -90,7 +90,7 @@ class TextProcesses(ProcessTestCase):
         self.assertIn("stone tablet", welcome)
         self.assertIn("Server error", client.command("take stone tablet"))
         self.assertIn("tick 0.", client.command("look"))
-        self.assertIn("Taken", client.command("take the token"))
+        self.assertIn("You pick up ", client.command("take the token"))
         self.assertIn("token", client.command("inventory"))
         self.assertIn("Private User", client.command("note Return here later."))
         note = client.command("annotate frontend actor explanation here The token is safe.")
@@ -169,7 +169,7 @@ class TextProcesses(ProcessTestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("InvalidAction", result.stdout)  # Visible, but out of reach.
         self.assertIn("tick 250.", result.stdout)
-        self.assertIn("Taken", result.stdout)
+        self.assertIn("You pick up ", result.stdout)
         self.assertIn("piped note", result.stdout)
         self.assertIn("Goodbye.", result.stdout)
 

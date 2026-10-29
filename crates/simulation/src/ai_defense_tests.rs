@@ -403,7 +403,7 @@ fn self_defense_reordering_uses_authored_priority_then_stable_identity() {
 
 #[test]
 fn self_defense_large_catalog_reuses_one_scene_without_rebuild_or_per_candidate_plans() {
-    let game = fixture(|doc, _| {
+    let mut game = fixture(|doc, _| {
         for index in 0..256 {
             let name = format!("defense_{index:03}");
             let mut candidate = definition(&name, "probe_guard");
@@ -416,6 +416,8 @@ fn self_defense_large_catalog_reuses_one_scene_without_rebuild_or_per_candidate_
                 .push(json!(name));
         }
     });
+    // One cold decision scene serves every candidate in the catalog.
+    game.lifecycle.scenes = Default::default();
     let before = crate::diagnostics::work_counts();
     let choice = game.choose_ai(OWNER).unwrap();
     let after = crate::diagnostics::work_counts();
@@ -740,6 +742,8 @@ fn self_defense_equal_family_catalog_uses_one_baseline_for_every_funded_candidat
         }
     });
     apply(&mut game, "probe_guard", 1);
+    // One cold decision scene serves every funded candidate.
+    game.lifecycle.scenes = Default::default();
     let before = crate::diagnostics::work_counts();
     assert_eq!(
         game.choose_ai(OWNER).unwrap().action,

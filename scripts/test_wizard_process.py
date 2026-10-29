@@ -89,7 +89,7 @@ class WizardProcesses(ProcessTestCase):
         player, _ = self.text(TOKEN)
         waited = player.command("wait")
         self.assertIn("Action: Resolved.", waited)
-        self.assertIn("Waited", waited)
+        self.assertIn("Time passes.", waited)
         final = self.ascii_frame(spectator, lambda f: f["state"]["observation"]["tick"] == '150')
         player.stop()
         wizard.stop()

@@ -15,7 +15,7 @@ fn views(count: usize, case: &str) -> (StateView, StateView) {
     let fixture: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/wire-v64.json"
+            "/tests/fixtures/wire-v66.json"
         ))
         .expect("regenerate current wire samples"),
     )
@@ -182,6 +182,7 @@ fn main() {
             let (base, next) = views(count, case);
             let expected = message(next.clone());
             let identity = ObservationBase {
+                snapshot: base.snapshot.clone(),
                 cursor: StreamCursor {
                     sequence: 1,
                     tick: base.observation.tick,
@@ -218,7 +219,7 @@ fn main() {
                     let start = Instant::now();
                     let encoded = encode_response(
                         black_box(&expected),
-                        selected.then_some((identity, &base)),
+                        selected.then_some((identity.clone(), &base)),
                         MAX_RESPONSE_BYTES,
                     )
                     .unwrap();
@@ -264,6 +265,7 @@ mod tests {
                 let (base, next) = views(count, case);
                 for selected in [false, true] {
                     let previous = ObservationBase {
+                        snapshot: base.snapshot.clone(),
                         cursor: StreamCursor {
                             sequence: 1,
                             tick: base.observation.tick,

@@ -11,7 +11,7 @@ fn act(engine: &mut Engine, actor: ActorId, action: crate::journal::Action) {
             &uuid::Uuid::new_v4().to_string(),
             &engine.branch().clone(),
             crate::journal::Command::Act {
-                expected_revision: engine.revision(actor).unwrap(),
+                expected_boundary: engine.causal_boundary(actor).unwrap(),
                 action,
             },
         )
@@ -38,7 +38,7 @@ fn paid_engine() -> Engine {
             "paid-observation",
             &engine.branch().clone(),
             Command::AdmitIntention {
-                expected_revision: engine.revision(ActorId(1)).unwrap(),
+                expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
                 action: observe,
             },
         )

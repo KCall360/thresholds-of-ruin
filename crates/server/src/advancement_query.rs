@@ -164,8 +164,14 @@ impl Engine {
         &self,
         context: &p::ReplyContext,
     ) -> Result<p::AdvancementBasis, Failure> {
-        let creature = self
-            .game
+        self.advancement_basis_at(&self.game, context)
+    }
+    fn advancement_basis_at(
+        &self,
+        game: &s::Game,
+        context: &p::ReplyContext,
+    ) -> Result<p::AdvancementBasis, Failure> {
+        let creature = game
             .creature(s::ActorId(context.actor.0))
             .ok_or_else(unavailable)?;
         Ok(p::AdvancementBasis {
@@ -186,6 +192,7 @@ impl Engine {
         }
         Ok(())
     }
+    #[cfg(test)]
     pub(crate) fn advancement_query(
         &self,
         actor: ActorId,
@@ -199,25 +206,41 @@ impl Engine {
             branch,
             Some((expected_revision, "Refresh before inspecting advancement")),
         )?;
+        self.advancement_query_at(
+            &self.presentation_boundary(),
+            actor,
+            revision,
+            query,
+            budget,
+        )
+    }
+
+    pub(crate) fn advancement_query_at(
+        &self,
+        boundary: &super::PresentationBoundary,
+        actor: ActorId,
+        revision: u64,
+        query: &p::AdvancementQuery,
+        budget: &PageBudget<'_>,
+    ) -> Result<p::AdvancementPage, Failure> {
+        let game = self.presentation_game(boundary)?;
+        let branch = boundary.branch();
         if budget.context.actor != actor
             || &budget.context.branch != branch
             || budget.context.revision != revision
         {
             return Err(stale());
         }
-        let basis = self.advancement_basis(budget.context)?;
+        let basis = self.advancement_basis_at(game, budget.context)?;
         if query.basis().is_some_and(|requested| requested != &basis) {
             return Err(stale());
         }
-        let creature = self
-            .game
-            .creature(s::ActorId(actor.0))
-            .ok_or_else(unavailable)?;
+        let creature = game.creature(s::ActorId(actor.0)).ok_or_else(unavailable)?;
         let build = creature.build();
         let offset = usize::from(query.offset());
         match query {
             p::AdvancementQuery::Overview {} => {
-                let value = self.advancement_overview(actor, &creature)?;
+                let value = self.advancement_overview(game, boundary.branch(), actor, &creature)?;
                 pack(
                     basis,
                     revision,
@@ -375,43 +398,39 @@ impl Engine {
                 let domain_basis = adapter::basis(&basis)?;
                 let preview = match proposal {
                     p::AdvancementProposal::GrowthSource { source } => Preview::Growth(Box::new(
-                        self.game
-                            .preview_player_growth_source(
-                                s::ActorId(actor.0),
-                                &domain_basis,
-                                &adapter::growth_source(source)?,
-                            )
-                            .map_err(|_| unavailable())?,
+                        game.preview_player_growth_source(
+                            s::ActorId(actor.0),
+                            &domain_basis,
+                            &adapter::growth_source(source)?,
+                        )
+                        .map_err(|_| unavailable())?,
                     )),
                     p::AdvancementProposal::IntellectExpertise { choice } => {
                         Preview::IntellectExpertise(Box::new(
-                            self.game
-                                .preview_player_intellect_expertise(
-                                    s::ActorId(actor.0),
-                                    &domain_basis,
-                                    &adapter::intellect_expertise(choice)?,
-                                )
-                                .map_err(|_| unavailable())?,
+                            game.preview_player_intellect_expertise(
+                                s::ActorId(actor.0),
+                                &domain_basis,
+                                &adapter::intellect_expertise(choice)?,
+                            )
+                            .map_err(|_| unavailable())?,
                         ))
                     }
                     p::AdvancementProposal::Purchase { purchase } => Preview::Purchase(Box::new(
-                        self.game
-                            .preview_player_purchase(
-                                s::ActorId(actor.0),
-                                &domain_basis,
-                                &adapter::purchase(purchase)?,
-                            )
-                            .map_err(|_| unavailable())?,
+                        game.preview_player_purchase(
+                            s::ActorId(actor.0),
+                            &domain_basis,
+                            &adapter::purchase(purchase)?,
+                        )
+                        .map_err(|_| unavailable())?,
                     )),
                     p::AdvancementProposal::Replacement { replacement } => {
                         Preview::Replacement(Box::new(
-                            self.game
-                                .preview_player_replacement(
-                                    s::ActorId(actor.0),
-                                    &domain_basis,
-                                    &adapter::replacement(replacement)?,
-                                )
-                                .map_err(|_| unavailable())?,
+                            game.preview_player_replacement(
+                                s::ActorId(actor.0),
+                                &domain_basis,
+                                &adapter::replacement(replacement)?,
+                            )
+                            .map_err(|_| unavailable())?,
                         ))
                     }
                 };
@@ -421,6 +440,8 @@ impl Engine {
     }
     fn advancement_overview(
         &self,
+        game: &s::Game,
+        branch: &BranchId,
         actor: ActorId,
         creature: &s::creatures::CreatureState,
     ) -> Result<p::AdvancementOverview, Failure> {
@@ -438,9 +459,8 @@ impl Engine {
                 .checked_add(u64::from(row.spent))
                 .ok_or_else(invalid)?;
         }
-        let pending = self.game.preparation(s::ActorId(actor.0));
-        let timing = self
-            .game
+        let pending = game.preparation(s::ActorId(actor.0));
+        let timing = game
             .preparation_timing(s::ActorId(actor.0))
             .ok_or_else(unavailable)?;
         let respec = match pending.map(|value| (&value.plan, value)) {
@@ -534,9 +554,9 @@ impl Engine {
                 },
             },
             received_loss_remaining: creature.received_health_loss_remaining(),
-            perceived_threat: self.game.has_perceived_hostile(s::ActorId(actor.0)),
-            ready: self.game.player_advancement_ready(s::ActorId(actor.0))
-                && self.input_readiness(actor).admission,
+            perceived_threat: game.has_perceived_hostile(s::ActorId(actor.0)),
+            ready: game.player_advancement_ready(s::ActorId(actor.0))
+                && self.input_readiness_at(game, branch, actor, None).admission,
             other_preparation: pending.is_some() && respec.is_none(),
             respec,
         })
@@ -812,7 +832,9 @@ mod owned_growth_disclosure_tests {
             if loss != 0 {
                 assert_eq!(creature.drain_latest_hit_die().unwrap().applied, 1);
             }
-            let overview = engine.advancement_overview(ActorId(1), &creature).unwrap();
+            let overview = engine
+                .advancement_overview(&engine.game, engine.branch(), ActorId(1), &creature)
+                .unwrap();
             assert_eq!(overview.growth.body_package_hit_dice, Some(2));
             assert_eq!(overview.growth.highest_applied_tier, 0);
             assert_eq!(overview.growth.highest_earned_tier, 0);

@@ -117,10 +117,7 @@ impl Wire {
         Request::Command {
             context: snapshot.reply_context().input,
             branch: snapshot.branch.clone(),
-            command: Command::Act {
-                expected_revision: snapshot.state.revision,
-                action,
-            },
+            command: Command::Act { action },
         }
     }
 

@@ -329,18 +329,47 @@ impl Game {
         &mut self,
         observation: &crate::Observation,
     ) -> Result<(), crate::GameError> {
+        self.record_disclosed_event_knowledge(
+            observation.actor,
+            observation
+                .combat
+                .as_ref()
+                .into_iter()
+                .flat_map(|combat| combat.events.iter()),
+        )
+    }
+
+    /// Host-only knowledge commit after event receipts have been persisted for
+    /// this boundary. Free reads/capture must never call this mutation.
+    /// Uses historical disclosure, not a fresh visibility check or raw event IDs.
+    pub fn record_committed_event_knowledge(
+        &mut self,
+        observer: ActorId,
+    ) -> Result<(), crate::GameError> {
+        let actor = self
+            .actors
+            .get(&observer)
+            .ok_or(crate::GameError::UnknownActor)?;
+        // Legacy ordinary views contain no combat event rows for plain actors.
+        if actor.combat.is_none() {
+            return Ok(());
+        }
+        let events = self.disclosed_event_history(observer);
+        self.record_disclosed_event_knowledge(observer, events.iter())
+    }
+
+    fn record_disclosed_event_knowledge<'a>(
+        &mut self,
+        observer: ActorId,
+        events: impl IntoIterator<Item = &'a crate::combat::DisclosedCombatEvent>,
+    ) -> Result<(), crate::GameError> {
         let known = &self
             .actors
-            .get(&observation.actor)
+            .get(&observer)
             .ok_or(crate::GameError::UnknownActor)?
             .recognized_abilities;
         let mut learned = std::collections::BTreeSet::new();
-        for event in observation
-            .combat
-            .as_ref()
-            .into_iter()
-            .flat_map(|combat| combat.events.iter())
-        {
+        for event in events {
             if let crate::combat::DisclosedCombatEvent::Ability { id, name, .. } = event {
                 if self
                     .content
@@ -359,7 +388,7 @@ impl Game {
         }
         if !learned.is_empty() {
             self.actors
-                .get_mut(&observation.actor)
+                .get_mut(&observer)
                 .ok_or(crate::GameError::UnknownActor)?
                 .recognized_abilities
                 .extend(learned);

@@ -60,6 +60,45 @@ impl Messages {
         }
     }
 
+    /// Compose ordered event-time lines without consulting a stale visual view.
+    pub fn absorb_outcome(&mut self, lines: &[Line], tick: u64) {
+        for line in lines {
+            match &line.basic_attack {
+                Some(BasicAttack::Preparing) => continue,
+                Some(BasicAttack::Resolved {
+                    target,
+                    outcome: AbilityOutcome::Applied,
+                }) => {
+                    self.push(format!("You hit {target}."));
+                    continue;
+                }
+                Some(BasicAttack::Resolved {
+                    target,
+                    outcome: AbilityOutcome::Miss,
+                }) => {
+                    self.push(format!("You miss {target}."));
+                    continue;
+                }
+                _ => {}
+            }
+            match &line.topic {
+                Topic::Own(Event::Waited) | Topic::LostSight(_) | Topic::Pacing => {}
+                Topic::Finished => self.finish(&line.text),
+                Topic::Noticed(actor) => {
+                    let returning = self
+                        .sightings
+                        .get(actor)
+                        .is_some_and(|seen| tick.saturating_sub(*seen) < SIGHTING_TICKS);
+                    if !returning {
+                        self.push(&line.text);
+                    }
+                    self.sightings.insert(*actor, tick);
+                }
+                _ => self.push(&line.text),
+            }
+        }
+    }
+
     /// Compose one observation's narrated lines into this turn.
     pub fn absorb(&mut self, lines: &[Line], view: &Observation) {
         for line in lines {
@@ -156,8 +195,9 @@ impl Messages {
         }
     }
 
+    /// This turn's sentences as one paragraph.
     /// What's underfoot after a move, as NetHack reports it.
-    fn here(&mut self, view: &Observation) {
+    pub fn here(&mut self, view: &Observation) {
         let items: Vec<_> = view
             .ground_items
             .iter()
@@ -192,7 +232,6 @@ impl Messages {
         }
     }
 
-    /// This turn's sentences as one paragraph.
     pub fn text(&self) -> String {
         self.turn
             .iter()
@@ -295,4 +334,33 @@ pub fn word_wrap(text: &str, width: usize) -> Vec<String> {
         rows.push(row);
     }
     rows
+}
+
+#[cfg(test)]
+mod outcome_tests {
+    use super::*;
+
+    #[test]
+    fn outcome_messages_use_event_time_text_without_a_visual_view() {
+        let mut messages = Messages::default();
+        messages.absorb_outcome(
+            &[
+                Line {
+                    topic: Topic::Own(Event::Moved {
+                        direction: tor_protocol::Direction::North,
+                    }),
+                    text: "You move north.".into(),
+                    basic_attack: None,
+                },
+                Line {
+                    topic: Topic::Status,
+                    text: "This run has ended.".into(),
+                    basic_attack: None,
+                },
+            ],
+            7,
+        );
+        assert!(messages.text().contains("You move north."));
+        assert!(messages.text().contains("This run has ended."));
+    }
 }

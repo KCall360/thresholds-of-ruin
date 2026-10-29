@@ -340,7 +340,6 @@ fn portable_torch_pending_ignition_survives_interval_one_deleted_source_and_exac
         context: snapshot.reply_context().input,
         branch: snapshot.branch.clone(),
         command: Command::ResumeIntention {
-            expected_revision: snapshot.state.revision,
             intention: snapshot.readiness.resume[0].clone(),
         },
     };

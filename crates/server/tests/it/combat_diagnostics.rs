@@ -22,12 +22,13 @@ fn scenario() -> Scenario {
     scenario
 }
 fn wizard(engine: &mut Engine, operation: WizardOperation) {
-    let expected_revision = engine.revision(ActorId(1)).unwrap();
+    let expected_revision = engine.causal_boundary(ActorId(1)).unwrap();
     support::submit(
         engine,
         ActorId(1),
         Command::Wizard {
-            expected_revision,
+            display_basis: None,
+            expected_boundary: expected_revision,
             operation,
         },
     )
@@ -175,12 +176,13 @@ fn rejected_commands_and_rewind_do_not_resurrect_disabled_capture() {
     let report = engine.inspect_combat_diagnostics(None).unwrap();
     let state = engine.state(ActorId(1)).unwrap();
     let history = engine.history(ActorId(1), "player", None, 100).unwrap();
-    let expected_revision = engine.revision(ActorId(1)).unwrap();
+    let expected_revision = engine.causal_boundary(ActorId(1)).unwrap();
     let failed = support::submit(
         &mut engine,
         ActorId(1),
         Command::Wizard {
-            expected_revision,
+            display_basis: None,
+            expected_boundary: expected_revision,
             operation: WizardOperation::Teleport {
                 actor: ActorId(999),
                 position: tor_server::journal::Position {

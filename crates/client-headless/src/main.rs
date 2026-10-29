@@ -188,7 +188,6 @@ async fn run() -> Result<(), Error> {
                                     Some("The server is not accepting another action".into())
                                 } else {
                                     let request = connection.state.command_request(Command::Act {
-                                        expected_revision: connection.state.state().revision,
                                         action,
                                     });
                                     transact(&mut connection, request, output).await?
@@ -320,6 +319,9 @@ fn emit(
         "cursor": connection.state.cursor(),
         "has_control": connection.state.has_control(),
         "readiness": connection.state.readiness(),
+        "narration": if matches!(message, Some(ServerMessage::Update { update }) if matches!(update.body, UpdateBody::Outcome { .. })) {
+            connection.state.narration()
+        } else { &[] },
         "input_context": connection.state.input_context(),
         "history": connection.state.history(),
         "travel": connection.state.travel(),
@@ -373,13 +375,13 @@ mod tests {
             "actor":"1", "branch":"first", "cursor":{"sequence":"0","tick":"0"},
             "context":{"stream":"3b7523b8-893a-4ea9-8b09-0a3887a7e6a1","epoch":"0"},
             "readiness":{"revision":"0","admission":false,"resume":[],"cancel":[]},
-            "state":{"wizard_game":false,"revision":"0","observation":observation},
+            "state":{"snapshot":"fixture-snapshot","wizard_game":false,"revision":"0","observation":observation},
             "has_control":false, "intentions":[], "travel":null,
             "history":{"entries":[],"older_before":null}
         }))
         .unwrap();
         let mut state = tor_client_common::ClientState::from_snapshot(snapshot).unwrap();
-        let mut current = state.snapshot();
+        let mut current = state.reset_snapshot().unwrap();
         current.context.epoch += 1;
         std::sync::Arc::make_mut(&mut current.state)
             .observation
@@ -415,7 +417,7 @@ mod tests {
         state
             .apply(StreamUpdate {
                 context: state.context().clone(),
-                actor: state.snapshot().actor,
+                actor: state.actor(),
                 branch: state.branch().clone(),
                 cursor,
                 body: UpdateBody::Readiness { readiness },
@@ -434,7 +436,7 @@ mod tests {
             .project(fields, &state);
             assert_eq!(
                 actual["observation_base"],
-                serde_json::to_value(base).unwrap()
+                serde_json::to_value(&base).unwrap()
             );
             assert_eq!(actual["cursor"], serde_json::to_value(cursor).unwrap());
         }

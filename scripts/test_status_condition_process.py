@@ -50,7 +50,7 @@ class StatusConditionHelpers:
         before = self.snapshot(client)
         result = self.request(client, {"type": "command", "context": before["input_context"],
             "branch": before["branch"], "command": {
-                "expected_revision": before["state"]["revision"], **command}})
+                **({"expected_revision": before["state"]["revision"]} if command["type"] not in ("act", "resume_intention", "cancel_intention") else {}), **command}})
         return before, result
 
     def assert_atomic_denial(self, client, command):

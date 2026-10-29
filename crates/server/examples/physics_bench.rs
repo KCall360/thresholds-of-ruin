@@ -116,10 +116,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let mut sequence = 0;
                 for turn in 0..(actors * 8) {
                     let actor = ActorId(turn % actors + 1);
-                    let revision = engine.revision(actor)?;
+                    let revision = engine.causal_boundary(actor)?;
                     let start = Instant::now();
                     let command = Command::Act {
-                        expected_revision: revision,
+                        expected_boundary: revision,
                         action: Action::Wait,
                     };
                     let profile = if profiling {

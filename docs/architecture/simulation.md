@@ -503,3 +503,98 @@ consequences, not another draw for the already-settled boundary. A condition pau
 retains the original paid plan and holds; no automatic resumption occurs on expiry.
 The ordinary candidate transaction covers all time, draws, lifecycle changes and
 events. See the [policy bounds and Rogue mapping](../reference/creature-rules.md#authored-empty-depletion-conditions).
+
+## Typed mutation evidence and dependent work
+
+Actor/item stores publish private process-local mutation stamps and bounded
+chronological change facts at edit completion, insertion and removal. A captured
+cursor certifies ancestry within a branch; unknown, pruned or unrelated ancestry
+falls back to canonical work. These identities do not enter checkpoints, protocol,
+semantic equality, ordering or RNG. Candidate clones keep independent publications;
+ABA edits never recover a prior stamp. Global dependencies use non-owning identity
+witnesses rather than retaining authoritative payloads.
+
+Two consumers share those publications:
+
+- An exhaustive effect classification skips only provably empty supplemental
+  preparation-residency scans. All live availability checks remain canonical;
+  a matching actor stamp proves ownership of the frozen plan classification.
+- Region contribution rows own counted edges and reverse dependencies. Changed
+  owners and their affected dependents refresh before the existing ordered
+  fixed-point computation; unknown/global changes rebuild. Active versus loaded
+  edges, policy-dependent points/links, and transition behavior remain unchanged.
+
+Actor deltas retain touched keys only, not body snapshots. Ordinary observation
+classification retains its exact visibility-epoch path; it does not use generic
+mutation-frame proofs. Neither subsystem changes synchronous event-time knowledge,
+disclosure, validation or actor scheduling.
+
+Diagnostic counters distinguish logical actor/validation coverage from actual
+row rebuilds and bucket queries. A lower work counter alone does not establish
+a throughput improvement. An earlier broader proof experiment reduced work
+counts without improving matched throughput and was simplified rather than
+retained solely for those counts.
+
+Map acquisition consumes canonical appearance facts (cells, exits and ground
+items), sharing item disclosure, raw terrain projection and hallucinated samples
+with the full observation. It reuses a rich view when one already exists but does
+not construct inventory, actor presentation or chart payloads solely to learn a
+map. Learning remains synchronous in the final candidate, before recognition;
+failed publication discards it. Skipped payload construction retains the former
+validation failures, including an exact fallback for an oversized event-proof
+candidate. Later cold rich views describe the same committed boundary.
+
+The previous side of an observer transition needs geometry, not another event
+proof. A sealed boundary supplies its canonical shared scene directly; an open
+batch retains the full event-fact fallback. Current-side historical authority is
+still captured and recorded synchronously. Neither projection split changes
+revision numbering, event disclosure, or query purity.
+
+### Boundary intention and event-reference derivation
+
+The server derives implicit suspension and terminal intention facts together from
+one ordered candidate table per committed boundary. Suspension and ending owners
+remain distinct within a candidate so their original insertion/overwrite rules
+also hold during archive validation. Loaded membership is queried directly;
+there is no second all-actor membership set or persistent lifecycle cache.
+Live publication and recovery use the same derivation. Test builds retain the
+independent original rules as differential oracles, including detached queued
+cancellation, interruption, explicit completion and branch restoration.
+
+Event authority queries the ordinary projected-row predicate directly against
+one classified scene rather than constructing an intermediate reference-row
+vector. The predicate still requires a live subject, reference disclosure, a
+body cell in the scene, and exclusion of the observer's own anchor. Rich and
+reference-only views share that predicate. This does not change event-time
+knowledge, row ordering, save identities or protocol semantics. Diagnostic
+counts distinguish remaining reference vectors/rows from full observations;
+server profiles attribute intention derivation separately, including actor,
+candidate and terminal-event visits. Fewer visits are not by themselves evidence
+of higher end-to-end throughput.
+
+
+Preparation validation owns one lazy creature projection for its immutable
+owner read segment. Funding and owner eligibility share that projection; no
+availability result survives the call or a strike mutation. Progress, item
+shape, funding and eligibility keep their original short-circuit order, and
+self-target reach continues using its canonical independent query.
+
+Awareness stages compact, identity-ordered subjects rather than body-cell rows.
+It retains a copied previous contact per subject, then performs live hostility,
+location, stealth, capacity and contest checks in their original order. This
+still allocates a compact subject vector; it does not skip awareness decisions.
+No read context crosses preparation settlement, awareness publication, later
+search/relocation or server observation boundaries.
+
+Preparation timing separately attributes residency, due settlement, live
+validation and due completion. The outer preparation span includes strike
+execution and is not a proxy for availability-check cost. Clock-free simulation
+notifications remain disabled unless a host installs a diagnostic observer;
+counts distinguish due, not-due and paused validation evaluations.
+
+Growth retry decides through a borrowed creature before requesting mutable
+copy-on-write ownership. The canonical fallible predicate keeps pending-context
+short-circuiting and growth validation order; a successful no-op does not detach
+a shared creature payload. Positive retries still use the existing transactional
+mutation path. Diagnostics count actual strong-shared no-op decisions separately
+from actor-table copies and do not influence rules.

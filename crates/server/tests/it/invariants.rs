@@ -79,7 +79,7 @@ fn play(
             let before = states(engine);
             let request = format!("turn-{turn}-{action:?}");
             let command = Command::Act {
-                expected_revision: engine.revision(character).unwrap(),
+                expected_boundary: engine.causal_boundary(character).unwrap(),
                 action: action.clone(),
             };
             let branch = engine.branch().clone();
@@ -136,7 +136,7 @@ fn every_package_rejects_retries_replays_and_rewinds_exactly() {
         let rejected_before = disclosed(&engine);
         let sequence = engine.save_status().accepted_sequence;
         let stale = Command::Act {
-            expected_revision: engine.revision(character).unwrap() + 1,
+            expected_boundary: engine.causal_boundary(character).unwrap() + 1,
             action: Action::Wait,
         };
         for _ in 0..2 {
@@ -166,7 +166,6 @@ fn every_package_rejects_retries_replays_and_rewinds_exactly() {
         // The public wire command resolves to a durable admission. Restart
         // before execution, recover its original receipt, then cancel it.
         let wire = tor_protocol::Command::Act {
-            expected_revision: engine.revision(character).unwrap(),
             action: tor_protocol::Action::Wait,
         };
         let command = support::decode_command(&engine, character, &wire).unwrap();
@@ -215,7 +214,6 @@ fn every_package_rejects_retries_replays_and_rewinds_exactly() {
             character,
             &tor_protocol::Command::CancelIntention {
                 step: None,
-                expected_revision: engine.revision(character).unwrap(),
                 intention: tor_protocol::IntentionId(admitted.entry.id.0),
             },
         )

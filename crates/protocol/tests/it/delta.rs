@@ -194,6 +194,7 @@ fn room(ox: i32, oy: i32, revision: u64) -> StateView {
     }
     cells.sort_by_key(|c| c.position);
     StateView {
+        snapshot: SnapshotId(format!("fixture-{ox}-{oy}-{revision}")),
         wizard_game: false,
         revision,
         observation: Observation {
@@ -649,6 +650,7 @@ fn complete_observation(state: StateView, sequence: u64) -> ServerMessage {
 
 fn exact_base(state: &StateView, sequence: u64) -> ObservationBase {
     ObservationBase {
+        snapshot: state.snapshot.clone(),
         cursor: StreamCursor {
             sequence,
             tick: state.observation.tick,
@@ -666,16 +668,31 @@ fn complete_encoding_selects_exact_bytes_and_handles_both_frame_ceilings() {
     next.observation.tick = 2;
     let message = complete_observation(next.clone(), 2);
     let previous = exact_base(&base, 1);
-    let selected = encode_response(&message, Some((previous, &base)), MAX_RESPONSE_BYTES).unwrap();
+    let selected = encode_response(
+        &message,
+        Some((previous.clone(), &base)),
+        MAX_RESPONSE_BYTES,
+    )
+    .unwrap();
     assert_eq!(selected.observation, Some(ObservationEncoding::Delta));
     let full = serde_json::to_string(&message).unwrap();
     assert!(selected.text.len() < full.len());
-    let exact = encode_response(&message, Some((previous, &base)), selected.text.len()).unwrap();
+    let exact = encode_response(
+        &message,
+        Some((previous.clone(), &base)),
+        selected.text.len(),
+    )
+    .unwrap();
     assert_eq!(
         exact.text, selected.text,
         "a delta fits even when full does not"
     );
-    assert!(encode_response(&message, Some((previous, &base)), selected.text.len() - 1).is_err());
+    assert!(encode_response(
+        &message,
+        Some((previous.clone(), &base)),
+        selected.text.len() - 1
+    )
+    .is_err());
     let ServerMessage::Update { update } = decode_response(&exact.text).unwrap() else {
         panic!("update")
     };
@@ -712,6 +729,10 @@ fn complete_encoding_prefers_full_when_every_cell_changes_or_base_is_wrong() {
     let message = complete_observation(next, 2);
     for wrong in [
         ObservationBase {
+            snapshot: SnapshotId("other-issued-base".into()),
+            ..exact_base(&base, 1)
+        },
+        ObservationBase {
             revision: 99,
             ..exact_base(&base, 1)
         },
@@ -746,6 +767,7 @@ fn equal_complete_encoded_sizes_prefer_full() {
     // equality without omitting any required cell fields or exceeding key bounds.
     for key_length in 1..=128 {
         let mut base = room(15, 15, 9_000_000_000_000_000_000);
+        base.snapshot = SnapshotId("s".into());
         base.observation.visible_cells.truncate(2);
         base.observation.visible_cells[0].key = "k".repeat(key_length);
         let mut next = base.clone();
@@ -761,14 +783,15 @@ fn equal_complete_encoded_sizes_prefer_full() {
             unreachable!()
         };
         update.body = UpdateBody::ObservationDelta {
-            base: previous,
+            base: previous.clone(),
             state: Box::new(StateDelta::between(&base, &next).unwrap()),
             event: None,
         };
         if serde_json::to_vec(&candidate).unwrap().len() == serde_json::to_vec(&full).unwrap().len()
         {
             let selected =
-                encode_response(&full, Some((previous, &base)), MAX_RESPONSE_BYTES).unwrap();
+                encode_response(&full, Some((previous.clone(), &base)), MAX_RESPONSE_BYTES)
+                    .unwrap();
             assert_eq!(selected.observation, Some(ObservationEncoding::Full));
             assert_eq!(selected.text, serde_json::to_string(&full).unwrap());
             found = true;
@@ -1959,4 +1982,25 @@ fn cosmetic_cell_changes_and_cures_are_not_lost_by_exhaustive_delta_comparison()
         vec![cured.observation.visible_cells[0].clone()]
     );
     assert!(cured.observation.visible_cells[0].stairs_down);
+}
+
+#[test]
+fn delta_preserves_destination_snapshot_and_rejects_same_revision_wrong_base() {
+    let base = room(5, 5, 1);
+    let mut next = base.clone();
+    next.snapshot = SnapshotId("new-visual-same-revision".into());
+    let delta = StateDelta::between(&base, &next).unwrap();
+    assert_eq!(delta.base_snapshot, base.snapshot);
+    assert_eq!(delta.snapshot, next.snapshot);
+    assert_eq!(delta.clone().apply(&base).unwrap(), next);
+    let mut wrong = base.clone();
+    wrong.snapshot = SnapshotId("other-base-same-revision".into());
+    assert_eq!(delta.clone().apply(&wrong), Err(DeltaError::WrongBase));
+    let mut invalid = delta;
+    invalid.snapshot = SnapshotId(String::new());
+    assert_eq!(invalid.apply(&base), Err(DeltaError::InvalidChange));
+    let mut invalid = next;
+    invalid.snapshot = SnapshotId(String::new());
+    assert_eq!(invalid.validate(), Err(InvalidState::InvalidSnapshot));
+    assert!(StateDelta::between(&base, &invalid).is_none());
 }

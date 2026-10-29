@@ -9,7 +9,6 @@ use tor_simulation::RecordId;
 pub(crate) struct Checkpoint {
     current_branch: BranchId,
     game: Game,
-    revisions: Revisions,
     boundaries: VecDeque<Arc<Boundary>>,
     record_count: usize,
     wizard_game: bool,
@@ -26,7 +25,6 @@ struct SavedBoundary {
     #[serde(with = "crate::storage::schema::optional_entry")]
     id: Option<EntryId>,
     game: Snapshot,
-    revisions: Revisions,
 }
 
 #[derive(Serialize)]
@@ -42,7 +40,6 @@ pub(crate) struct DiskCheckpoint {
     wizard_game: bool,
     shared: SharedState,
     game: Snapshot,
-    revisions: Revisions,
     #[serde(deserialize_with = "saved_boundaries::deserialize")]
     boundaries: Vec<SavedBoundary>,
 }
@@ -63,7 +60,6 @@ struct DiskCheckpointFields {
     wizard_game: bool,
     shared: SharedState,
     game: Snapshot,
-    revisions: Revisions,
     #[serde(deserialize_with = "saved_boundaries::deserialize")]
     boundaries: Vec<SavedBoundary>,
 }
@@ -105,7 +101,6 @@ impl Checkpoint {
         Self {
             current_branch: state.current_branch.clone(),
             game: state.game.clone(),
-            revisions: state.revisions.clone(),
             boundaries: state.boundaries.clone(),
             record_count,
             wizard_game,
@@ -147,7 +142,6 @@ impl Checkpoint {
             .map(|b| SavedBoundary {
                 id: b.id.clone(),
                 game: b.game.checkpoint(&mut shared),
-                revisions: b.revisions.clone(),
             })
             .collect();
         DiskCheckpoint {
@@ -160,7 +154,6 @@ impl Checkpoint {
             wizard_game: self.wizard_game,
             shared,
             game,
-            revisions: self.revisions.clone(),
             boundaries,
         }
     }
@@ -169,11 +162,7 @@ impl Checkpoint {
 /// Recover private queue transitions between retained gameplay states using
 /// the same simulation operations as live execution. No world effects or
 /// authority decisions are invented by the checkpoint decoder.
-fn replay_private_boundary(
-    game: &mut Game,
-    revisions: &mut Revisions,
-    record: &Record,
-) -> Result<(), Failure> {
+fn replay_private_boundary(game: &mut Game, record: &Record) -> Result<(), Failure> {
     let before = game.clone();
     if !matches!(record.entry.content, JournalContent::Annotation { .. }) {
         game.begin_retrieval_transaction();
@@ -186,7 +175,11 @@ fn replay_private_boundary(
         return Err(invalid_archive());
     }
     match &record.entry.content {
-        JournalContent::IntentionAdmitted { intention, action } => {
+        JournalContent::IntentionAdmitted {
+            intention,
+            action,
+            human_operands,
+        } => {
             let admitted = game
                 .admit_intention(
                     SimActor(record.entry.actor.0),
@@ -194,7 +187,12 @@ fn replay_private_boundary(
                     tor_simulation::IntentionOrigin::Human,
                 )
                 .map_err(|_| invalid_archive())?;
-            if admitted != *intention {
+            if admitted != *intention
+                || game
+                    .pending_intention(SimActor(record.entry.actor.0))
+                    .and_then(|queued| queued.human_operands.as_ref())
+                    != Some(human_operands)
+            {
                 return Err(invalid_archive());
             }
         }
@@ -254,11 +252,10 @@ fn replay_private_boundary(
         JournalContent::Annotation { .. } => {}
         _ => return Err(invalid_archive()),
     }
-    super::intention::preparation_revision_updates(&before, game, record.entry.actor, revisions)
+    super::intention::validate_preparation_observers(&before, game, record.entry.actor)
         .map_err(|_| invalid_archive())?;
-    if super::intention::derive_intention_suspensions(&before, game, &record.entry, true)
-        != record.entry.intention_suspensions
-    {
+    let changes = super::intention::derive_intention_changes(&before, game, &record.entry, true);
+    if changes.suspensions != record.entry.intention_suspensions {
         return Err(invalid_archive());
     }
     if record.after_tick != game.tick()
@@ -271,8 +268,7 @@ fn replay_private_boundary(
             .activations_since(before.activation_count())
             .map_err(|_| invalid_archive())?
             != record.activations
-        || super::intention::derive_intention_ends(&before, game, &record.entry, true)
-            != record.entry.intention_ends
+        || changes.ends != record.entry.intention_ends
     {
         return Err(invalid_archive());
     }
@@ -357,10 +353,29 @@ impl DiskCheckpoint {
             return Err(invalid_archive());
         }
         let mut receipts = BTreeMap::new();
-        let mut records_by_id = BTreeMap::new();
+        let mut records_by_id: BTreeMap<EntryId, &Record> = BTreeMap::new();
         let mut lifecycle =
             super::intention_lifecycle::JournalLifecycle::new(archive.branch.clone());
         for (index, record) in archive.records.iter().enumerate() {
+            // A restored checkpoint does not replay every annotation. Bind its
+            // private normalized anchor to the already-validated journal prefix,
+            // never to a future entry, itself, or another branch's snapshot.
+            if let JournalContent::Annotation {
+                anchor: crate::journal::RecordedAnchor::State { snapshot, boundary },
+                ..
+            } = &record.entry.content
+            {
+                if !snapshot.is_valid()
+                    || match boundary {
+                        Some(id) => records_by_id
+                            .get(id)
+                            .is_none_or(|previous| previous.entry.branch != record.entry.branch),
+                        None => record.entry.branch != archive.branch,
+                    }
+                {
+                    return Err(invalid_archive());
+                }
+            }
             if !record.valid_admission()
                 || Uuid::parse_str(&record.entry.id.0).is_err()
                 || Uuid::parse_str(&record.entry.branch.0).is_err()
@@ -489,7 +504,6 @@ impl DiskCheckpoint {
         if archive.records.last().map_or(0, |record| record.after_tick) != game.tick()
             || !valid_population(&game)
             || !valid_retrieval(&game)
-            || !self.revisions.valid_for(&game)
             || !activations.valid_game(
                 &game,
                 &self.boundaries.last().ok_or_else(invalid_archive)?.id,
@@ -557,7 +571,6 @@ impl DiskCheckpoint {
             }
             if !valid_population(&game)
                 || !valid_retrieval(&game)
-                || !boundary.revisions.valid_for(&game)
                 || !lifecycle.valid_game(&game, &boundary.id)
                 || !activations.valid_game(&game, &boundary.id)
             {
@@ -572,22 +585,14 @@ impl DiskCheckpoint {
                     let end = record_index.ok_or_else(invalid_archive)?;
                     let recovered = if start < end {
                         let mut preceding = previous.game.clone();
-                        let mut preceding_revisions = previous.revisions.clone();
                         for hidden in &archive.records[start..end] {
-                            replay_private_boundary(
-                                &mut preceding,
-                                &mut preceding_revisions,
-                                hidden,
-                            )?;
+                            replay_private_boundary(&mut preceding, hidden)?;
                         }
-                        Some((preceding, preceding_revisions))
+                        Some(preceding)
                     } else {
                         None
                     };
-                    let (preceding, preceding_revisions) = recovered
-                        .as_ref()
-                        .map(|(game, revisions)| (game, revisions))
-                        .unwrap_or((&previous.game, &previous.revisions));
+                    let preceding = recovered.as_ref().unwrap_or(&previous.game);
                     if !record.valid_action_resolution_at(preceding)
                         || record.before_tick != preceding.tick()
                         || record.after_tick != game.tick()
@@ -596,9 +601,8 @@ impl DiskCheckpoint {
                     }
                     if !record.entry.content.rewindable() {
                         let mut expected = preceding.clone();
-                        let mut expected_revisions = preceding_revisions.clone();
-                        replay_private_boundary(&mut expected, &mut expected_revisions, record)?;
-                        if expected != game || expected_revisions != boundary.revisions {
+                        replay_private_boundary(&mut expected, record)?;
+                        if expected != game {
                             return Err(invalid_archive());
                         }
                     }
@@ -607,22 +611,16 @@ impl DiskCheckpoint {
                         .as_ref()
                         .and_then(|id| records_by_id.get(id))
                         .is_none_or(|before| before.entry.branch == record.entry.branch);
-                    if super::intention::derive_intention_suspensions(
+                    let changes = super::intention::derive_intention_changes(
                         preceding,
                         &game,
                         &record.entry,
                         same_branch,
-                    ) != record.entry.intention_suspensions
-                    {
+                    );
+                    if changes.suspensions != record.entry.intention_suspensions {
                         return Err(invalid_archive());
                     }
-                    if super::intention::derive_intention_ends(
-                        preceding,
-                        &game,
-                        &record.entry,
-                        same_branch,
-                    ) != record.entry.intention_ends
-                    {
+                    if changes.ends != record.entry.intention_ends {
                         return Err(invalid_archive());
                     }
                 }
@@ -640,6 +638,12 @@ impl DiskCheckpoint {
                             queued.id != intention
                                 || queued.origin != work.origin()
                                 || !work.matches(queued.work.clone())
+                                || match &record.entry.content {
+                                    JournalContent::IntentionAdmitted {
+                                        human_operands, ..
+                                    } => queued.human_operands.as_ref() != Some(human_operands),
+                                    _ => queued.human_operands.is_some(),
+                                }
                                 || queued.state != tor_simulation::IntentionState::Queued
                         })
                     {
@@ -651,7 +655,6 @@ impl DiskCheckpoint {
                 id: boundary.id,
                 selectable,
                 game,
-                revisions: boundary.revisions,
             }));
             previous_record_index = record_index;
         }
@@ -661,10 +664,7 @@ impl DiskCheckpoint {
         drop(activations);
         drop(population);
         drop(retrieval);
-        if boundaries
-            .back()
-            .is_none_or(|b| b.game != game || b.revisions != self.revisions)
-        {
+        if boundaries.back().is_none_or(|b| b.game != game) {
             return Err(invalid_archive());
         }
         let mut regions = crate::engine::streaming_regions(&archive.scenario)?;
@@ -697,8 +697,8 @@ impl DiskCheckpoint {
             boundaries,
             game,
             archive,
-            revisions: self.revisions,
             observations: ObservationCache::default(),
+            input_generations: InputGenerations::default(),
             receipts,
             path: None,
             lock: None,
@@ -1037,7 +1037,7 @@ mod tests {
                 "wait",
                 &engine.branch().clone(),
                 Command::Act {
-                    expected_revision: 0,
+                    expected_boundary: 0,
                     action: Action::Wait,
                 },
             )
@@ -1091,7 +1091,7 @@ mod tests {
                         &format!("{cycle}-{index}"),
                         &engine.branch().clone(),
                         Command::Act {
-                            expected_revision: before.revision,
+                            expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
                             action: engine
                                 .decode_action(ActorId(1), &step.resolve(&before))
                                 .unwrap(),
@@ -1107,7 +1107,6 @@ mod tests {
         assert_eq!(restored.boundaries.len(), engine.boundaries.len());
         for (actual, expected) in restored.boundaries.iter().zip(&engine.boundaries) {
             assert_eq!(actual.game, expected.game);
-            assert_eq!(actual.revisions, expected.revisions);
             assert_eq!(actual.id, expected.id);
         }
         assert_eq!(
@@ -1122,7 +1121,6 @@ mod tests {
         assert_eq!(disk.boundaries.len(), engine.boundaries.len());
         for (saved, original) in disk.boundaries.into_iter().zip(&engine.boundaries) {
             assert_eq!(saved.id, original.id);
-            assert_eq!(saved.revisions, original.revisions);
             assert_eq!(
                 Game::restore_checkpoint(saved.game, &disk.shared, engine.game.content().clone()),
                 Ok(original.game.clone())
@@ -1132,8 +1130,8 @@ mod tests {
 
     fn walk(engine: &mut Engine, direction: Direction, steps: usize) {
         for _ in 0..steps {
-            let revision = engine.revision(ActorId(1)).unwrap();
-            let request = format!("walk-{direction:?}-{revision}");
+            let boundary = engine.causal_boundary(ActorId(1)).unwrap();
+            let request = format!("walk-{direction:?}-{boundary}");
             engine
                 .command(
                     "player",
@@ -1142,7 +1140,7 @@ mod tests {
                     &request,
                     &engine.branch().clone(),
                     Command::Act {
-                        expected_revision: revision,
+                        expected_boundary: boundary,
                         action: Action::Move { direction },
                     },
                 )
@@ -1150,29 +1148,29 @@ mod tests {
         }
     }
 
-    /// Revisions a command copies are bounded by what's loaded: actors in
-    /// unbuilt or detached regions are parked in a map the copy shares.
+    /// Presentation numbering is not checkpoint authority. Retained boundary
+    /// identity and exact Game state still round-trip and reject obsolete fields.
     #[test]
-    fn a_command_copies_revisions_only_for_loaded_actors() {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../scenarios/tests/streaming-corridor");
-        let mut scenario = crate::scenario_package::load(&root, 5, None, false).unwrap();
-        scenario.streaming = Some(crate::Streaming {
-            active_radius: 0,
-            load_radius: 0,
-        });
-        let engine = Engine::memory(scenario).unwrap();
-        // The guard's hall hasn't been needed, so the game doesn't know the
-        // guard yet; nothing is parked until an actor leaves the loaded world.
-        assert_eq!(engine.revisions.keys().collect::<Vec<_>>(), [&ActorId(1)]);
-        assert!(engine.revision(ActorId(2)).is_err());
-        assert!(engine.revisions.parked.is_empty());
-        let candidate = Candidate::capture(&engine);
-        assert!(candidate
-            .revisions
-            .parked
-            .shares_storage(&engine.revisions.parked));
-        assert!(engine.revisions.valid_for(&engine.game));
+    fn checkpoint_omits_and_rejects_obsolete_revision_maps() {
+        let engine = Engine::memory(Scenario::performance(5, 2, 1).unwrap()).unwrap();
+        let disk = Checkpoint::capture(&engine).encode("test", 0);
+        let mut saved = serde_json::to_value(&disk).unwrap();
+        assert!(saved.get("revisions").is_none());
+        for boundary in saved["boundaries"].as_array().unwrap() {
+            assert!(boundary.get("revisions").is_none());
+        }
+        let restored: DiskCheckpoint = serde_json::from_value(saved.clone()).unwrap();
+        let restored = restored.restore(engine.archive.clone()).unwrap();
+        assert_eq!(restored.game, engine.game);
+        assert_eq!(
+            restored.boundaries.back().unwrap().id,
+            engine.boundaries.back().unwrap().id
+        );
+        saved["revisions"] = serde_json::json!({"loaded": {}, "parked": {}});
+        assert!(serde_json::from_value::<DiskCheckpoint>(saved).is_err());
+        let mut saved = serde_json::to_value(&disk).unwrap();
+        saved["boundaries"][0]["revisions"] = serde_json::json!({"loaded": {}, "parked": {}});
+        assert!(serde_json::from_value::<DiskCheckpoint>(saved).is_err());
     }
 
     /// A save attached to a game that started in memory (as the benchmarks

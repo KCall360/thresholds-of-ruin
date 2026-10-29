@@ -6865,7 +6865,7 @@ mod tests {
         // Continue far enough to demand a source that had never been copied.
         for step in 0..76 {
             let actor = tor_protocol::ActorId(1);
-            let revision = restored.revision(actor).unwrap();
+            let revision = restored.causal_boundary(actor).unwrap();
             let branch = restored.branch().clone();
             restored
                 .command(
@@ -6875,7 +6875,7 @@ mod tests {
                     &format!("pinned-{step}"),
                     &branch,
                     crate::journal::Command::Act {
-                        expected_revision: revision,
+                        expected_boundary: revision,
                         action: crate::journal::Action::Move {
                             direction: crate::journal::Direction::East,
                         },

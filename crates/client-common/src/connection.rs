@@ -52,6 +52,21 @@ type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 pub type ConnectionError = Box<dyn Error + Send + Sync>;
 const DEADLINE: Duration = Duration::from_secs(10);
 
+// Keep the socket policy in the production connection path so it can be
+// checked directly without timing-sensitive request/response assertions.
+async fn connect_socket(address: SocketAddr) -> Result<Socket, ConnectionError> {
+    let config = WebSocketConfig::default()
+        .max_message_size(Some(MAX_RESPONSE_BYTES))
+        .max_frame_size(Some(MAX_RESPONSE_BYTES));
+    // Interactive messages should not wait for Nagle's small-write batching.
+    let (socket, _) = timeout(
+        DEADLINE,
+        connect_async_with_config(format!("ws://{address}"), Some(config), true),
+    )
+    .await??;
+    Ok(socket)
+}
+
 #[derive(Debug)]
 struct QueryExpired(&'static str);
 impl std::fmt::Display for QueryExpired {
@@ -119,6 +134,24 @@ impl PendingQuery {
     }
 }
 
+#[derive(Default)]
+struct ObservationDemand {
+    pending: Option<PendingQuery>,
+    dirty: bool,
+}
+impl ObservationDemand {
+    fn ensure_pending(&mut self) -> &mut PendingQuery {
+        self.pending.get_or_insert_with(PendingQuery::new)
+    }
+    fn outcome(&mut self, visual_changed: bool) {
+        self.dirty |= visual_changed;
+    }
+    fn published(&mut self) {
+        self.pending = None;
+        self.dirty = false;
+    }
+}
+
 /// Loopback transport for one attached actor. Disconnects are surfaced; uncertain
 /// commands are never retried with a new identity. Reconnect with a fresh snapshot.
 pub struct Connection {
@@ -145,6 +178,9 @@ pub struct Connection {
     /// Applied exactly once, retained until its automatic query is flushed.
     pending_presentation: Option<ServerMessage>,
     palette_request: Option<PendingQuery>,
+    // One visual demand at a time. Ordered outcomes continue while a picture
+    // is pending; a later visual change dirties the next client-paced picture.
+    observation_demand: ObservationDemand,
     map_request: Option<(PendingQuery, MapQuery)>,
     chart_request: Option<(PendingQuery, tor_protocol::chart_pages::ChartQuery)>,
 }
@@ -171,14 +207,7 @@ impl Connection {
         if !address.ip().is_loopback() {
             return Err("Only loopback connections are supported".into());
         }
-        let config = WebSocketConfig::default()
-            .max_message_size(Some(MAX_RESPONSE_BYTES))
-            .max_frame_size(Some(MAX_RESPONSE_BYTES));
-        let (mut socket, _) = timeout(
-            DEADLINE,
-            connect_async_with_config(format!("ws://{address}"), Some(config), false),
-        )
-        .await??;
+        let mut socket = connect_socket(address).await?;
         send(
             &mut socket,
             ClientMessage::Hello {
@@ -262,6 +291,7 @@ impl Connection {
             last_recovery_snapshot: None,
             pending_presentation: None,
             palette_request: None,
+            observation_demand: ObservationDemand::default(),
             map_request: None,
             chart_request: None,
         })
@@ -324,6 +354,7 @@ impl Connection {
         self.charts.clear();
         self.chart_request = None;
         self.map_request = None;
+        self.observation_demand.published();
         if self.recovery.is_none() {
             self.recovery = Some(PendingQuery::new());
         }
@@ -339,6 +370,37 @@ impl Connection {
                     self.capabilities.max_request_bytes as usize,
                 )
                 .await?;
+        }
+        Ok(())
+    }
+
+    fn observation_due(&self) -> Option<tokio::time::Instant> {
+        (self.observation_demand.dirty
+            && self.observation_demand.pending.is_none()
+            && self.recovery.is_none())
+        .then(|| {
+            self.last_shown
+                .filter(|_| !self.skipping)
+                .map(|last| last + self.pace)
+                .unwrap_or_else(Instant::now)
+                .into()
+        })
+    }
+
+    fn prepare_observation_request(&mut self) -> Result<(), ConnectionError> {
+        if self
+            .observation_due()
+            .is_some_and(|due| due <= tokio::time::Instant::now())
+        {
+            self.observation_demand.ensure_pending();
+        }
+        if self
+            .observation_demand
+            .pending
+            .as_ref()
+            .is_some_and(|query| tokio::time::Instant::now() >= query.deadline)
+        {
+            return Err(QueryExpired("Visual observation request timed out").into());
         }
         Ok(())
     }
@@ -478,7 +540,7 @@ impl Connection {
     /// Background writes share polling with live reads. The stored query phase
     /// owns any queued frame across cancellation; a blocked flush must never
     /// prevent an already-arrived observation from reaching the reducer.
-    async fn receive_with_map_request(
+    async fn receive_with_background_queries(
         &mut self,
     ) -> Result<(ServerMessage, usize), ConnectionError> {
         poll_fn(|cx| {
@@ -499,6 +561,22 @@ impl Connection {
                 ));
                 if let Poll::Ready(result) = received.as_mut().poll(cx) {
                     return Poll::Ready(result);
+                }
+            }
+            // Observe is visual background work too. Its stored phase must
+            // survive cancellation, but its flush must never gate live events.
+            if let Some(pending) = &mut self.observation_demand.pending {
+                let sent = {
+                    let mut send = std::pin::pin!(pending.send(
+                        &mut self.socket,
+                        Request::Observe,
+                        "Visual observation request timed out",
+                        self.capabilities.max_request_bytes as usize,
+                    ));
+                    send.as_mut().poll(cx)
+                };
+                if let Poll::Ready(Err(error)) = sent {
+                    return Poll::Ready(Err(error));
                 }
             }
             if let Some((pending, query)) = &mut self.chart_request {
@@ -559,6 +637,20 @@ impl Connection {
         }
         self.progress_palette_request().await?;
         self.skipping = false;
+        if matches!(request, Request::Observe) {
+            self.observation_demand.dirty = true;
+            if self.observation_demand.pending.is_none() {
+                self.observation_demand.ensure_pending();
+            }
+            self.prepare_observation_request()?;
+            return Ok(self
+                .observation_demand
+                .pending
+                .as_ref()
+                .expect("prepared visual demand")
+                .request_id
+                .clone());
+        }
         if let Request::Chart { query } = &request {
             self.start_chart_request(query.clone())?;
             let id = self
@@ -587,7 +679,7 @@ impl Connection {
         {
             if self.state.has_control() && self.role != AccessRole::Spectator {
                 self.advancement_pages.track(
-                    &self.state.snapshot().reply_context(),
+                    &self.state.reply_context(),
                     &request_id,
                     *expected_revision,
                     query,
@@ -637,6 +729,7 @@ impl Connection {
         loop {
             self.progress_recovery().await?;
             self.progress_palette_request().await?;
+            self.prepare_observation_request()?;
             self.prepare_chart_request()?;
             self.prepare_map_request()?;
             if let Some(message) = self.pending_presentation.take() {
@@ -666,8 +759,15 @@ impl Connection {
                                     .as_ref()
                                     .map(|(pending, _)| pending.deadline),
                             )
+                            .chain(
+                                self.observation_demand
+                                    .pending
+                                    .as_ref()
+                                    .map(|pending| pending.deadline),
+                            )
+                            .chain(self.observation_due())
                             .min();
-                        let received = self.receive_with_map_request();
+                        let received = self.receive_with_background_queries();
                         if let Some(deadline) = deadline {
                             match tokio::time::timeout_at(deadline, received).await {
                                 Ok(result) => result?,
@@ -903,6 +1003,17 @@ impl Connection {
                         self.require_snapshot();
                         continue;
                     }
+                    match &update.body {
+                        UpdateBody::Outcome { visual_changed, .. } => {
+                            self.observation_demand.outcome(*visual_changed);
+                        }
+                        UpdateBody::Observation { .. } | UpdateBody::ObservationDelta { .. } => {
+                            // Stream order certifies that this picture follows
+                            // all outcomes consumed before it, even at one tick.
+                            self.observation_demand.published();
+                        }
+                        _ => {}
+                    }
                 }
                 ServerMessage::Snapshot {
                     request_id,
@@ -920,6 +1031,7 @@ impl Connection {
                                 self.last_recovery_snapshot = Some(request_id.clone());
                             }
                             self.recovery = None;
+                            self.observation_demand.published();
                             self.last_shown = None;
                         }
                         Err(error) if recovering => {
@@ -971,10 +1083,9 @@ impl Connection {
                     }
                 }
                 ServerMessage::Snapshot { .. } => self.advancement_pages.clear(),
-                ServerMessage::Update { .. } => self.advancement_pages.observe(
-                    &self.state.snapshot().reply_context(),
-                    self.state.has_control(),
-                ),
+                ServerMessage::Update { .. } => self
+                    .advancement_pages
+                    .observe(&self.state.reply_context(), self.state.has_control()),
                 ServerMessage::Error {
                     request_id: Some(id),
                     ..
@@ -1156,3 +1267,56 @@ async fn receive_sized(
 #[cfg(test)]
 #[path = "connection_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod socket_policy_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn visual_demands_coalesce_until_the_ordered_picture_and_then_rearm() {
+        let mut demand = ObservationDemand::default();
+        assert!(!demand.dirty);
+        demand.outcome(true);
+        let first = demand.ensure_pending().request_id.clone();
+        demand.ensure_pending().phase = QueryPhase::AwaitReply;
+        demand.outcome(true);
+        assert_eq!(demand.ensure_pending().request_id, first);
+        assert!(demand.pending.as_ref().unwrap().phase == QueryPhase::AwaitReply);
+        demand.published();
+        assert!(!demand.dirty);
+        assert!(demand.pending.is_none());
+        // A later visual change, including a zero-time commit, requires a new demand.
+        demand.outcome(true);
+        assert!(demand.dirty);
+        assert_ne!(demand.ensure_pending().request_id, first);
+    }
+
+    #[tokio::test]
+    async fn causal_only_outcomes_neither_request_nor_clear_a_pending_picture() {
+        let mut demand = ObservationDemand::default();
+        demand.outcome(false);
+        assert!(!demand.dirty);
+        assert!(demand.pending.is_none());
+        demand.outcome(true);
+        let identity = demand.ensure_pending().request_id.clone();
+        demand.outcome(false);
+        assert!(demand.dirty);
+        assert_eq!(demand.pending.as_ref().unwrap().request_id, identity);
+    }
+
+    #[tokio::test]
+    async fn client_connection_disables_nagle() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let accept = async {
+            let (stream, _) = listener.accept().await.unwrap();
+            tokio_tungstenite::accept_async(stream).await.unwrap()
+        };
+        let (socket, _peer) = tokio::join!(connect_socket(address), accept);
+        let socket = socket.unwrap();
+        let MaybeTlsStream::Plain(stream) = socket.get_ref() else {
+            panic!("loopback ws connection must be plain TCP");
+        };
+        assert!(stream.nodelay().unwrap());
+    }
+}

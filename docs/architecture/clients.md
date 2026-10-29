@@ -11,6 +11,30 @@ Wire ordering, limits, target references and delta formats belong to
 [protocol](../reference/protocol.md). This page describes client responsibilities
 and the presentation invariants needed when extending them.
 
+## Gameplay input and display versions
+
+Clients construct `Act`, `ResumeIntention` and `CancelIntention` with the current
+branch and `InputContext`, without `expected_revision`. Observation revisions
+still identify displayed state and delta bases; they are not gameplay admission
+versions. A display-only update must not cause a local rejection or a retry of an
+otherwise unchanged request. Queries, previews, inspection, travel and wizard
+operations keep their applicable display-revision checks.
+
+The public input-context shape remains stream, epoch and `readiness_revision`.
+The server folds private registered-actor operand, disclosed-intention and control
+generations into that readiness counter. An origin change followed by a return,
+or loss followed by reacquisition of control, cannot make an old input current
+again. Clients capture the context once when constructing the request and never
+restamp queued input or retries. An authorized exact retry resolves its original
+receipt before fresh-input checks; it does not admit the action twice.
+
+The server still validates the current target, cost, permissions and execution
+conditions. Already admitted work was not automatically cancelled by display
+updates and remains subject to its existing lifecycle safeguards. Its frozen
+operands prevent silent substitution of a different target or interaction.
+Display progress used to settle a turn is distinct from authority to submit the
+next command: consume the ordered readiness boundary before building that command.
+
 ## Independently maintained 3D prototype
 
 The optional [3D client](../../crates/client-3d/README.md) also consumes

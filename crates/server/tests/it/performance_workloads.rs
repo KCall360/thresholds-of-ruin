@@ -7,21 +7,25 @@ use tor_server::{
 use tor_test_support::performance::Trace;
 
 #[test]
-fn same_tick_turn_handoff_changes_both_actors_disclosed_readiness_revisions() {
+fn same_tick_turn_handoff_commits_readiness_without_engine_display_generations() {
     let mut engine = Engine::memory(Scenario::performance(42, 8, 8).unwrap()).unwrap();
     let before = engine.state(ActorId(1)).unwrap();
     let next = engine.state(ActorId(2)).unwrap();
+    let boundary = engine.causal_boundary(ActorId(1)).unwrap();
     step(&mut engine, Action::Wait);
     let after = engine.state(ActorId(1)).unwrap();
     let ready = engine.state(ActorId(2)).unwrap();
     assert_eq!(after.observation.tick, before.observation.tick);
     assert!(!after.observation.ready && ready.observation.ready);
-    assert!(after.revision > before.revision && ready.revision > next.revision);
+    assert!(engine.causal_boundary(ActorId(1)).unwrap() > boundary);
+    assert_ne!(after.observation.ready, before.observation.ready);
+    assert_ne!(ready.observation.ready, next.observation.ready);
+    assert_eq!((after.revision, ready.revision), (0, 0));
 }
 
 fn step(engine: &mut Engine, action: Action) {
     let actor = ActorId(1);
-    let revision = engine.revision(actor).unwrap();
+    let revision = engine.causal_boundary(actor).unwrap();
     let result = engine
         .command(
             "trace",
@@ -30,7 +34,7 @@ fn step(engine: &mut Engine, action: Action) {
             &format!("step-{revision}"),
             &engine.branch().clone(),
             Command::Act {
-                expected_revision: revision,
+                expected_boundary: revision,
                 action,
             },
         )
@@ -91,7 +95,7 @@ fn performance_fixture_has_real_door_stairs_and_exact_region_counts() {
                 "blocked",
                 &engine.branch().clone(),
                 Command::Act {
-                    expected_revision: revision,
+                    expected_boundary: revision,
                     action: Action::Move {
                         direction: Direction::East
                     }
@@ -161,8 +165,9 @@ fn performance_fixture_has_real_door_stairs_and_exact_region_counts() {
             );
         }
         let boundary = engine.state(ActorId(1)).unwrap();
+        let boundary_boundary = engine.causal_boundary(ActorId(1)).unwrap();
         let crossing = Command::Act {
-            expected_revision: boundary.revision,
+            expected_boundary: boundary_boundary,
             action: Action::Move {
                 direction: Direction::East,
             },
@@ -229,7 +234,8 @@ fn mixed_trace_schedules_actors_changes_los_and_replays_identical_disclosure() {
                         Action::Wait
                     };
                     let before = engine.state(ActorId(1)).unwrap();
-                    let revision = engine.revision(actor).unwrap();
+                    let before_boundary = engine.causal_boundary(ActorId(1)).unwrap();
+                    let revision = engine.causal_boundary(actor).unwrap();
                     engine
                         .command(
                             "trace",
@@ -238,7 +244,7 @@ fn mixed_trace_schedules_actors_changes_los_and_replays_identical_disclosure() {
                             &format!("other-{accepted}"),
                             &engine.branch().clone(),
                             Command::Act {
-                                expected_revision: revision,
+                                expected_boundary: revision,
                                 action,
                             },
                         )
@@ -252,12 +258,13 @@ fn mixed_trace_schedules_actors_changes_los_and_replays_identical_disclosure() {
                             .collect::<std::collections::BTreeSet<_>>()
                     };
                     if ids(&before) != ids(&after) {
-                        assert!(after.revision > before.revision);
+                        assert!(engine.causal_boundary(ActorId(1)).unwrap() > before_boundary);
                         visibility_changes += 1;
                     }
                     accepted += 1;
                 }
                 let before = engine.state(ActorId(1)).unwrap();
+                let before_boundary = engine.causal_boundary(ActorId(1)).unwrap();
                 let action = engine
                     .decode_action(ActorId(1), &step.resolve(&before))
                     .unwrap();
@@ -268,7 +275,7 @@ fn mixed_trace_schedules_actors_changes_los_and_replays_identical_disclosure() {
                     &format!("c{cycle}-s{index}"),
                     &engine.branch().clone(),
                     Command::Act {
-                        expected_revision: before.revision,
+                        expected_boundary: before_boundary,
                         action,
                     },
                 );

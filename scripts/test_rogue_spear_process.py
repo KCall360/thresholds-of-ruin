@@ -181,7 +181,7 @@ class RogueSpearProcesses(ProcessTestCase):
         at_landing = self.settle()
         self.assertTrue(next(row for row in observation(at_landing)["ground_items"]
                              if row["item"]["id"] == item)["reachable"])
-        self.assertIn("Taken", text.command(f"take #{item}"))
+        self.assertIn("You pick up ", text.command(f"take #{item}"))
         final = self.settle()
         self.assertEqual(spear(final)["id"], item)
         self.assertEqual(spear(final)["quantity"], "1")

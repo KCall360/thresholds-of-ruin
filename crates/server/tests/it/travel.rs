@@ -30,7 +30,8 @@ fn replay_restores_knowledge_receipts_and_moves_and_rewind_forgets_future() {
         .key
         .clone();
     let travel = Command::Travel {
-        expected_revision: 0,
+        display_basis: None,
+        expected_boundary: 0,
         destination: destination.clone(),
     };
     let receipt = command(&mut engine, "travel", travel.clone());
@@ -39,7 +40,7 @@ fn replay_restores_knowledge_receipts_and_moves_and_rewind_forgets_future() {
         &mut engine,
         "step",
         Command::Act {
-            expected_revision: 0,
+            expected_boundary: 0,
             action: Action::Move {
                 direction: Direction::East,
             },
@@ -66,7 +67,7 @@ fn replay_restores_knowledge_receipts_and_moves_and_rewind_forgets_future() {
             &engine,
             ActorId(1),
             &WireCommand::Wizard {
-                expected_revision: engine.revision(ActorId(1)).unwrap(),
+                expected_revision: 0,
                 operation: operation.into(),
             },
         )
@@ -80,7 +81,7 @@ fn replay_restores_knowledge_receipts_and_moves_and_rewind_forgets_future() {
         &engine,
         ActorId(1),
         &WireCommand::Wizard {
-            expected_revision: engine.revision(ActorId(1)).unwrap(),
+            expected_revision: 0,
             operation: "rewind initial".into(),
         },
     )
@@ -104,7 +105,7 @@ fn previously_seen_offscreen_destinations_remain_routable_after_restart() {
             &engine,
             ActorId(1),
             &WireCommand::Wizard {
-                expected_revision: engine.revision(ActorId(1)).unwrap(),
+                expected_revision: 0,
                 operation: operation.into(),
             },
         )
@@ -121,12 +122,12 @@ fn previously_seen_offscreen_destinations_remain_routable_after_restart() {
         .key
         .clone();
     for index in 0..17 {
-        let revision = engine.revision(ActorId(1)).unwrap();
+        let revision = engine.causal_boundary(ActorId(1)).unwrap();
         command(
             &mut engine,
             &format!("step-{index}"),
             Command::Act {
-                expected_revision: revision,
+                expected_boundary: revision,
                 action: Action::Move {
                     direction: Direction::East,
                 },

@@ -68,7 +68,7 @@ class LinkedHoldServiceContracts(unittest.TestCase):
     def command(snapshot, action):
         return {"type": "command", "context": {"stream": snapshot["context"],
             "readiness_revision": snapshot["readiness"]["revision"]}, "branch": snapshot["branch"],
-            "command": {"type": "act", "expected_revision": snapshot["state"]["revision"], "action": action}}
+            "command": {"type": "act", "action": action}}
 
     def audit(self, actor=1):
         return self.host.call("audit", case=self.case, actor=actor, user=f"player-{actor}")

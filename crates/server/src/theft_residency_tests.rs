@@ -163,7 +163,7 @@ fn act(engine: &mut Engine, actor: u64, request: &str, action: Action) {
             request,
             &engine.branch().clone(),
             Command::Act {
-                expected_revision: engine.revision(ActorId(actor)).unwrap(),
+                expected_boundary: engine.causal_boundary(ActorId(actor)).unwrap(),
                 action,
             },
         )

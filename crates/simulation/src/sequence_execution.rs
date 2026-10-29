@@ -5,6 +5,7 @@ use crate::{Game, GameError, ScheduleError, Work};
 impl Game {
     /// Caller owns the outer transaction. Actor IDs and authored ordinals break ties.
     pub(crate) fn resolve_preparations(&mut self) -> Result<(), GameError> {
+        let _diagnostic_span = crate::diagnostics::spans::span("preparations");
         let ids: Vec<_> = self.actors.keys().copied().collect();
         crate::diagnostics::preparation_candidates(ids.len());
         for id in ids {
@@ -14,7 +15,13 @@ impl Game {
             if self.actor_frozen(id) {
                 continue;
             }
-            self.ensure_preparation_residency(id)?;
+            if self.preparation(id).is_some() {
+                crate::diagnostics::preparation_owner_visit();
+            }
+            {
+                let _span = crate::diagnostics::spans::span("preparation_residency");
+                self.ensure_preparation_residency(id)?;
+            }
             if self.region_transition_pending() {
                 return Ok(());
             }
@@ -25,7 +32,7 @@ impl Game {
                 if self.actor_frozen(id) {
                     break;
                 }
-                let Some(preparation) = self.preparation(id).cloned() else {
+                let Some(preparation) = self.preparation(id) else {
                     break;
                 };
                 let due = preparation
@@ -33,16 +40,26 @@ impl Game {
                     .checked_add(preparation.remaining)
                     .ok_or(GameError::Schedule(ScheduleError::TimeExhausted))?;
                 let completion_due = preparation.active && due <= self.tick;
-                if completion_due {
-                    self.settle_actor_time(id)?;
-                    let target = preparation.plan.target();
-                    if self.actors.contains_key(&target) && !self.actor_frozen(target) {
-                        self.settle_actor_time(target)?;
+                // Only due work crosses time-settling mutations. Ordinary and
+                // paused checks borrow their frozen plan; they still validate
+                // at every boundary and interrupt in the original actor order.
+                let snapshot = completion_due.then(|| {
+                    crate::diagnostics::preparation_snapshot();
+                    preparation.clone()
+                });
+                if let Some(preparation) = snapshot.as_ref() {
+                    {
+                        let _span = crate::diagnostics::spans::span("preparation_due_settlement");
+                        self.settle_actor_time(id)?;
+                        let target = preparation.plan.target();
+                        if self.actors.contains_key(&target) && !self.actor_frozen(target) {
+                            self.settle_actor_time(target)?;
+                        }
                     }
                     if self.run_outcome().terminal {
                         break;
                     }
-                    if self.preparation(id) != Some(&preparation) {
+                    if self.preparation(id) != Some(preparation) {
                         continue;
                     }
                     // Health recovery can cross Drain's weak threshold during
@@ -57,13 +74,25 @@ impl Game {
                             ray.traversal == crate::abilities::RayTraversal::FirstBody
                         })
                     {
-                        self.ensure_preparation_residency(id)?;
+                        {
+                            let _span = crate::diagnostics::spans::span("preparation_residency");
+                            self.ensure_preparation_residency(id)?;
+                        }
                         if self.region_transition_pending() {
                             return Ok(());
                         }
                     }
                 }
-                let available = self.preparation_still_available(&preparation, None);
+                let preparation = snapshot
+                    .as_ref()
+                    .or_else(|| self.preparation(id))
+                    .expect("borrowed work has not crossed a mutation");
+                crate::diagnostics::preparation_validation_evaluation();
+                crate::diagnostics::preparation_validation_kind(preparation.active, completion_due);
+                let available = {
+                    let _span = crate::diagnostics::spans::span("preparation_live_validation");
+                    self.preparation_still_available(preparation, None)
+                };
                 if !available || self.physics.displaced.contains(&id) {
                     let mut outcome = self.actor_outcome(id)?;
                     outcome.interrupt(crate::lifecycle::Interruption::Discard, self.tick)?;
@@ -84,6 +113,11 @@ impl Game {
                 if !completion_due {
                     break;
                 }
+                // This guard ends with this strike iteration, including every
+                // early break/continue/error; it never covers the next owner.
+                let _completion_span =
+                    crate::diagnostics::spans::span("preparation_due_completion");
+                let preparation = snapshot.expect("due work owns its pre-settlement snapshot");
                 if matches!(preparation.plan, crate::abilities::Plan::Escape(_)) {
                     self.complete_escape(preparation, due)?;
                     break;

@@ -113,7 +113,7 @@ fn assert_wait_refresh(suppressed: bool) {
             "hover",
             &engine.branch().clone(),
             crate::journal::Command::Act {
-                expected_revision: engine.revision(actor).unwrap(),
+                expected_boundary: engine.causal_boundary(actor).unwrap(),
                 action: crate::journal::Action::UseAbility {
                     id: tor_simulation::content_ids::AbilityId::new("fixture_hover").unwrap(),
                     invocation: crate::journal::AbilityInvocation {
@@ -163,7 +163,6 @@ fn assert_wait_refresh(suppressed: bool) {
             context: service.input_context(client.id).unwrap(),
             branch: service.engine.branch().clone(),
             command: Command::Act {
-                expected_revision: service.engine.revision(actor).unwrap(),
                 action: Action::Wait,
             },
         },

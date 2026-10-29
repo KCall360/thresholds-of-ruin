@@ -777,3 +777,151 @@ fn committed_unavailable_attack_releases_hold_but_retains_confusion_charge() {
     assert!(game.actors[&ActorId(2)].control.held.is_none());
     assert_eq!(game.actors[&ActorId(1)].control.confusion, Some(charge));
 }
+
+#[test]
+fn no_ground_scare_avoids_neighborhood_work_and_shared_actor_writes() {
+    // A nonempty store is not sufficient: carried scare scrolls and ordinary
+    // ground items do not supply ground-scare contacts.
+    for fixture in 0..3 {
+        let mut game = game();
+        match fixture {
+            0 => {} // Ordinary starting gear remains; absence is checked below.
+            1 => {
+                let item = scare(&mut game);
+                game.items
+                    .edit(item, |item| {
+                        item.location = ItemLocation::Carried(ActorId(1));
+                    })
+                    .unwrap();
+                assert!(game.items[&item].spec.ground_scare.is_some());
+            }
+            2 => {
+                game.place_item_stack(
+                    81,
+                    at(1),
+                    None,
+                    1,
+                    crate::ItemSpec::ordinary("ordinary stone".into()),
+                )
+                .unwrap();
+            }
+            _ => unreachable!(),
+        }
+        assert!(game.alive(ActorId(2)));
+        assert!(!game.actor_frozen(ActorId(2)));
+        assert!(game.combat.ai.contains_key(&ActorId(2)));
+        assert!(game.actors[&ActorId(2)].control.scare_contacts.is_empty());
+        assert!(!game
+            .items
+            .values()
+            .any(|item| matches!(item.location, ItemLocation::Ground(_))
+                && item.spec.ground_scare.is_some()));
+        let expected = game.clone(); // Deliberately retain a shared actor table.
+        let rng = game.rules_rng;
+        let before = crate::diagnostics::work_counts();
+        game.reconcile_control_contacts().unwrap();
+        let after = crate::diagnostics::work_counts();
+        assert_eq!(
+            game, expected,
+            "absent-feature reconciliation changes no authoritative state"
+        );
+        assert_eq!(game.rules_rng, rng);
+        assert_eq!(
+            after.control_contact_neighbor_probes - before.control_contact_neighbor_probes,
+            0
+        );
+        assert_eq!(after.actor_table_copies - before.actor_table_copies, 0);
+    }
+}
+
+#[test]
+fn absent_ground_scare_clears_only_eligible_receipts_and_preserves_earned_flee() {
+    let mut game = game();
+    let item = scare(&mut game);
+    game.teleport(ActorId(2), at(2)).unwrap();
+    game.reconcile_control_contacts().unwrap();
+    assert_eq!(game.forced_flee_location(ActorId(2)), Some(at(1)));
+    assert_eq!(game.actors[&ActorId(2)].control.scare_contacts.len(), 1);
+    assert!(game.actors[&ActorId(2)].control.scare_contacts[0].attempted);
+    // Ordinary actors are excluded by the existing eligibility gate; their
+    // historical receipts must not be silently cleared by the absent path.
+    game.actors
+        .get_mut(&ActorId(1))
+        .unwrap()
+        .control
+        .enter_scared(&[item], &[])
+        .unwrap();
+    game.items.remove(&item).unwrap();
+    let mut expected = game.clone();
+    expected
+        .actors
+        .get_mut(&ActorId(2))
+        .unwrap()
+        .control
+        .scare_contacts
+        .clear();
+    let rng = game.rules_rng;
+    let before = crate::diagnostics::work_counts();
+    game.reconcile_control_contacts().unwrap();
+    let after = crate::diagnostics::work_counts();
+    assert_eq!(game, expected);
+    assert_eq!(game.rules_rng, rng);
+    assert_eq!(game.forced_flee_location(ActorId(2)), Some(at(1)));
+    assert_eq!(
+        after.control_contact_neighbor_probes - before.control_contact_neighbor_probes,
+        0
+    );
+}
+
+#[test]
+fn unchanged_present_scare_contact_does_not_copy_shared_actors() {
+    let mut game = game();
+    scare(&mut game);
+    game.teleport(ActorId(2), at(2)).unwrap();
+    game.reconcile_control_contacts().unwrap();
+    assert_eq!(game.forced_flee_location(ActorId(2)), Some(at(1)));
+    assert_eq!(game.actors[&ActorId(2)].control.scare_contacts.len(), 1);
+    let expected = game.clone();
+    let rng = game.rules_rng;
+    let before = crate::diagnostics::work_counts();
+    game.reconcile_control_contacts().unwrap();
+    let after = crate::diagnostics::work_counts();
+    assert_eq!(game, expected);
+    assert_eq!(game.rules_rng, rng);
+    assert!(
+        after.control_contact_neighbor_probes > before.control_contact_neighbor_probes,
+        "present-feature path must still inspect current contacts"
+    );
+    assert_eq!(after.actor_table_copies - before.actor_table_copies, 0);
+}
+
+#[test]
+fn absent_ground_scare_still_rejects_unresolvable_recipient_body() {
+    let mut game = game();
+    let actor = &game.actors[&ActorId(2)];
+    assert!(game
+        .body_cells(actor.location, actor.orientation, &actor.body)
+        .is_some());
+    // Fault injection after a valid positive fixture: a multi-cell body in an
+    // absent region cannot resolve its neighboring component.
+    {
+        let mut actor = game.actors.get_mut(&ActorId(2)).unwrap();
+        actor.location.region = tor_world::RegionId(999);
+        actor.body.cells = vec![[0, 0, 0], [1, 0, 0]];
+    }
+    let actor = &game.actors[&ActorId(2)];
+    assert!(game
+        .body_cells(actor.location, actor.orientation, &actor.body)
+        .is_none());
+    assert!(!game
+        .items
+        .values()
+        .any(|item| matches!(item.location, ItemLocation::Ground(_))
+            && item.spec.ground_scare.is_some()));
+    let expected = game.clone();
+    assert_eq!(
+        game.reconcile_control_contacts(),
+        Err(GameError::InvalidLocation)
+    );
+    assert_eq!(game, expected);
+}

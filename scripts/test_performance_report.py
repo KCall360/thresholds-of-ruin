@@ -69,6 +69,106 @@ class PhaseDWorkTests(unittest.TestCase):
                     validate_work({**profile, 'perception_calls': calls}, {"type":"move"}, 8)
 
 
+class BoundaryProofWorkTests(unittest.TestCase):
+    proof_fields = ("observation_changes_proven", "observations_unchanged_proven",
+                    "observation_projection_fallbacks")
+
+    def profile(self):
+        # Eight observers: two proven changed, four proven unchanged, two cold
+        # comparisons. One additional rich view records the mover's map.
+        return dict(actors_observed=5, perception_calls=3, scene_calls=1,
+                    revision_comparisons=8, candidate_captures=1, rollback_snapshots=1,
+                    observation_changes_proven=2, observations_unchanged_proven=4,
+                    observation_projection_fallbacks=2)
+
+    def test_complete_boundary_proofs_replace_eager_disclosure_requirements(self):
+        # Establish the legacy fixture before exercising the new valid contract.
+        legacy = dict(actors_observed=16, perception_calls=8, scene_calls=0,
+                      candidate_captures=1, rollback_snapshots=1)
+        validate_work(legacy, {"type": "move"}, 8)
+        validate_work(self.profile(), {"type": "move"}, 8)
+        validate_work({**self.profile(), "perception_calls": 5}, {"type": "move"}, 8)
+        validate_work({**self.profile(), "observation_changes_proven": 8,
+                       "observations_unchanged_proven": 0, "observation_projection_fallbacks": 0,
+                       "actors_observed": 1, "perception_calls": 1}, {"type": "move"}, 8)
+        validate_work({**self.profile(), "observation_changes_proven": 0,
+                       "observations_unchanged_proven": 0, "observation_projection_fallbacks": 8,
+                       "actors_observed": 16, "perception_calls": 8}, {"type": "move"}, 8)
+
+    def test_proof_fields_are_atomic_and_strict_nonnegative_integer_counts(self):
+        # Use otherwise-valid legacy work so missing fields cannot be rejected
+        # merely by the old eager counts while silently bypassing schema checks.
+        legacy = dict(actors_observed=16, perception_calls=8, scene_calls=0,
+                      revision_comparisons=8, candidate_captures=1, rollback_snapshots=1)
+        for field in self.proof_fields:
+            with self.subTest(single_field=field), self.assertRaises(InvalidWorkload):
+                validate_work({**legacy, field: 0}, {"type": "move"}, 8)
+        for missing in self.proof_fields:
+            profile = {**self.profile(), **legacy}
+            del profile[missing]
+            with self.subTest(missing=missing), self.assertRaises(InvalidWorkload):
+                validate_work(profile, {"type": "move"}, 8)
+        for field in (*self.proof_fields, "revision_comparisons"):
+            for value in (True, False, -1, 0.0, 1.5, None, "2"):
+                with self.subTest(field=field, value=value), self.assertRaises(InvalidWorkload):
+                    validate_work({**self.profile(), field: value}, {"type": "move"}, 8)
+        profile = self.profile()
+        del profile["revision_comparisons"]
+        with self.assertRaises(InvalidWorkload):
+            validate_work(profile, {"type": "move"}, 8)
+
+    def test_every_observer_requires_exactly_one_proof_or_cold_comparison(self):
+        for field, value in (("observation_changes_proven", 1),
+                             ("observations_unchanged_proven", 5),
+                             ("observation_projection_fallbacks", 1),
+                             ("revision_comparisons", 7), ("revision_comparisons", 9)):
+            with self.subTest(field=field, value=value), self.assertRaises(InvalidWorkload):
+                validate_work({**self.profile(), field: value}, {"type": "move"}, 8)
+
+    def test_proofs_do_not_hide_missing_or_repeated_rich_work(self):
+        # Every fallback accounts for two logical views and at least one actual
+        # fresh view; its old view alone may be supplied by the committed cache.
+        for field, values in (("actors_observed", (3, 11)),
+                              ("perception_calls", (2, 6)), ("scene_calls", (17,))):
+            for value in values:
+                with self.subTest(field=field, value=value), self.assertRaises(InvalidWorkload):
+                    validate_work({**self.profile(), field: value}, {"type": "move"}, 8)
+        for field in ("actors_observed", "perception_calls", "scene_calls"):
+            for value in (True, False, -1, 0.0, 1.5):
+                with self.subTest(field=field, value=value), self.assertRaises(InvalidWorkload):
+                    validate_work({**self.profile(), field: value}, {"type": "move"}, 8)
+
+    def test_door_validation_keeps_its_single_extra_projection_allowance(self):
+        profile = {**self.profile(), "observation_changes_proven": 8,
+                   "observations_unchanged_proven": 0, "observation_projection_fallbacks": 0,
+                   "actors_observed": 8, "perception_calls": 9, "scene_calls": 8}
+        validate_work(profile, {"type": "set_door"}, 8)
+        with self.assertRaises(InvalidWorkload):
+            validate_work({**profile, "perception_calls": 10}, {"type": "set_door"}, 8)
+        with self.assertRaises(InvalidWorkload):
+            validate_work({**profile, "scene_calls": 18}, {"type": "set_door"}, 8)
+
+    def test_wait_retains_its_zero_work_contract_with_zero_boundary_proofs(self):
+        profile = {**self.profile(), **dict.fromkeys(self.proof_fields, 0),
+                   "actors_observed": 0, "perception_calls": 0, "scene_calls": 0,
+                   "navigation_refreshes": 0}
+        validate_work(profile, {"type": "wait"}, 8)
+        for field in (*self.proof_fields, "actors_observed", "perception_calls", "scene_calls",
+                      "navigation_refreshes"):
+            with self.subTest(field=field), self.assertRaises(InvalidWorkload):
+                validate_work({**profile, field: 1}, {"type": "wait"}, 8)
+        for field in ("revision_comparisons", "navigation_refreshes"):
+            with self.subTest(field=field), self.assertRaises(InvalidWorkload):
+                validate_work({**profile, field: False}, {"type": "wait"}, 8)
+
+    def test_absent_proof_fields_cannot_relax_legacy_work_requirements(self):
+        profile = self.profile()
+        for field in self.proof_fields:
+            del profile[field]
+        with self.assertRaises(InvalidWorkload):
+            validate_work(profile, {"type": "move"}, 8)
+
+
 class DiscoveryValidationTests(unittest.TestCase):
     def rows(self):
         rows = []
@@ -430,3 +530,51 @@ class RogueEvidenceValidation(unittest.TestCase):
                 initial['residency']['frozen'] = 17
             with self.subTest(mutation=mutation), self.assertRaises(InvalidWorkload):
                 validate_rogue(rows)
+
+
+class DemandDrivenObserverWorkTests(unittest.TestCase):
+    def profile(self, cohort=8):
+        from performance_report import ACTION_OBSERVER_COUNTS, EAGER_DISPLAY_COUNTS
+        return dict(actors_observed=0, perception_calls=0, scene_calls=0,
+                    navigation_refreshes=0, candidate_captures=1, rollback_snapshots=1,
+                    **{field: cohort for field in ACTION_OBSERVER_COUNTS},
+                    **{field: 0 for field in EAGER_DISPLAY_COUNTS})
+
+    def validate(self, profile, action="move", **metadata):
+        from performance_report import OBSERVER_WORK_CONTRACT
+        options = dict(profile_version=3, observer_work_contract=OBSERVER_WORK_CONTRACT)
+        options.update(metadata)
+        validate_work(profile, {"type": action}, 8, **options)
+
+    def test_explicit_v3_reowns_complete_observer_work_without_eager_display(self):
+        self.validate(self.profile())
+        self.validate(self.profile(), "set_door")
+        self.validate(self.profile(0), "wait")
+
+    def test_marker_and_version_cannot_be_missing_unknown_or_mixed(self):
+        for metadata in ({"observer_work_contract": None}, {"observer_work_contract": "unknown"},
+                         {"profile_version": 2}, {"profile_version": 4}, {"profile_version": True}):
+            with self.subTest(metadata=metadata), self.assertRaises(InvalidWorkload):
+                self.validate(self.profile(), **metadata)
+        with self.assertRaises(InvalidWorkload):
+            validate_work(self.profile(), {"type": "move"}, 8)
+
+    def test_every_stage_is_required_exactly_once_and_eager_work_stays_zero(self):
+        from performance_report import ACTION_OBSERVER_COUNTS, EAGER_DISPLAY_COUNTS
+        for field in (*ACTION_OBSERVER_COUNTS, *EAGER_DISPLAY_COUNTS):
+            missing = self.profile()
+            del missing[field]
+            with self.subTest(missing=field), self.assertRaises(InvalidWorkload):
+                self.validate(missing)
+            for value in (True, -1, 1.5, 7 if field in ACTION_OBSERVER_COUNTS else 1):
+                with self.subTest(field=field, value=value), self.assertRaises(InvalidWorkload):
+                    self.validate({**self.profile(), field: value})
+        with self.assertRaises(InvalidWorkload):
+            self.validate(self.profile(0))
+        with self.assertRaises(InvalidWorkload):
+            self.validate(self.profile(8), "wait")
+        with self.assertRaises(InvalidWorkload):
+            self.validate({**self.profile(), "actors_observed": 1})
+        with self.assertRaises(InvalidWorkload):
+            self.validate({**self.profile(), "scene_calls": 17})
+        self.validate({**self.profile(), "scene_calls": 17}, "set_door")

@@ -96,13 +96,13 @@ fn command(engine: &mut Engine, actor: ActorId, request: &str, command: Command)
 fn item_preparation_preserves_admission_through_pause_resume_replay_and_completion() {
     let mut engine = fixture();
     let actor = ActorId(1);
-    let revision = engine.revision(actor).unwrap();
+    let revision = engine.causal_boundary(actor).unwrap();
     let admitted = command(
         &mut engine,
         actor,
         "equip",
         Command::AdmitIntention {
-            expected_revision: revision,
+            expected_boundary: revision,
             action: Action::Equip { item: 10, slot: 0 },
         },
     );
@@ -119,7 +119,7 @@ fn item_preparation_preserves_admission_through_pause_resume_replay_and_completi
     );
     verify(&engine);
     let before = engine.game.clone();
-    let revision = engine.revision(actor).unwrap();
+    let revision = engine.causal_boundary(actor).unwrap();
     assert!(engine
         .command(
             "player",
@@ -129,7 +129,7 @@ fn item_preparation_preserves_admission_through_pause_resume_replay_and_completi
             &engine.branch().clone(),
             Command::CancelIntention {
                 step: None,
-                expected_revision: revision,
+                expected_boundary: revision,
                 admission: admitted.entry.id.clone()
             }
         )
@@ -140,7 +140,7 @@ fn item_preparation_preserves_admission_through_pause_resume_replay_and_completi
         actor,
         "resume",
         Command::ResumeIntention {
-            expected_revision: revision,
+            expected_boundary: revision,
             admission: admitted.entry.id.clone(),
         },
     );
@@ -153,13 +153,13 @@ fn item_preparation_preserves_admission_through_pause_resume_replay_and_completi
             engine.execute_next_intention().unwrap().unwrap();
         } else {
             let next = engine.next_actor().unwrap();
-            let revision = engine.revision(next).unwrap();
+            let revision = engine.causal_boundary(next).unwrap();
             command(
                 &mut engine,
                 next,
                 &format!("wait-{step}"),
                 Command::Act {
-                    expected_revision: revision,
+                    expected_boundary: revision,
                     action: Action::Wait,
                 },
             );

@@ -457,11 +457,12 @@ mod tests {
     fn view(game: &s::Game, actor: s::ActorId, revision: u64) -> p::StateView {
         let (observation, scene) = game.observe_scene(actor).unwrap();
         p::StateView {
+            snapshot: tor_protocol::SnapshotId("fixture".into()),
             wizard_game: false,
             revision,
             observation: crate::adapt::observation(
                 observation,
-                scene,
+                &scene,
                 "inspection",
                 true,
                 &|_| [None, None, None],
@@ -572,10 +573,45 @@ mod tests {
     }
 
     #[test]
+    fn fresh_observations_do_not_copy_owned_personal_inspection_collections() {
+        let (game, actor, _) = game();
+        let expected_wire = view(&game, actor, 0);
+        assert!(!expected_wire
+            .observation
+            .combat
+            .as_ref()
+            .unwrap()
+            .own_stats
+            .as_ref()
+            .unwrap()
+            .abilities
+            .is_empty());
+        let expected_observation = game.observe(actor).unwrap();
+        let before = s::diagnostics::work_counts();
+        for _ in 0..4 {
+            assert_eq!(game.observe(actor).unwrap(), expected_observation);
+        }
+        let after = s::diagnostics::work_counts();
+        assert_eq!(view(&game, actor, 0), expected_wire);
+        assert!(
+            s::diagnostics::work_counts().own_stats_materializations
+                > after.own_stats_materializations
+        );
+        assert_eq!(
+            after.own_stats_materializations,
+            before.own_stats_materializations
+        );
+        assert_eq!(
+            after.own_stats_static_entries_copied,
+            before.own_stats_static_entries_copied
+        );
+    }
+
+    #[test]
     fn restorable_loss_projection_is_fixed_size_and_owned_by_the_observer() {
         let (game, actor, other) = game();
         let (observation, _) = game.observe_scene(actor).unwrap();
-        let mut stats = observation.combat.unwrap().own_stats.unwrap();
+        let mut stats = observation.combat.unwrap().own_stats.unwrap().into_owned();
         stats.restorable_losses = s::creatures::RestorableLosses {
             attributes: s::attributes::ByAttribute {
                 strength: 1,
@@ -1262,6 +1298,7 @@ mod tests {
         assert!(client_bytes < 4 * 1024 * 1024);
         let message = p::ServerMessage::CreatureInspection {
             context: p::ReplyContext {
+                snapshot: tor_protocol::SnapshotId("fixture".into()),
                 input: p::InputContext {
                     stream: p::StreamContext {
                         stream: p::StreamId("bounded-ledger".into()),

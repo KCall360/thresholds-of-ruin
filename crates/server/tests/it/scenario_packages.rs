@@ -264,7 +264,7 @@ fn pinned_inputs_survive_source_edits_and_checkpoint_restart() {
             "wait",
             &engine.branch().clone(),
             tor_server::journal::Command::Act {
-                expected_revision: 0,
+                expected_boundary: 0,
                 action: tor_server::journal::Action::Wait,
             },
         )
@@ -297,7 +297,8 @@ fn wizard_lineage_is_independent_of_structural_validation_and_rewind() {
                 &uuid::Uuid::new_v4().to_string(),
                 &engine.branch().clone(),
                 Command::Wizard {
-                    expected_revision: engine.revision(actor).unwrap(),
+                    display_basis: None,
+                    expected_boundary: engine.causal_boundary(actor).unwrap(),
                     operation,
                 },
             )

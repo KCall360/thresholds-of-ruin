@@ -334,7 +334,6 @@ fn peer_driven_exact_base_period_publishes_unsolicited_owner_and_followed_visual
         context: initial.reply_context().input,
         branch: initial.branch.clone(),
         command: Command::Act {
-            expected_revision: initial.state.revision,
             action: Action::Wait,
         },
     };
@@ -570,7 +569,6 @@ fn pending_paid_dose_and_active_palette_reopen_interval_one_without_sources_befo
             context: snapshot.reply_context().input,
             branch: snapshot.branch.clone(),
             command: Command::ResumeIntention {
-                expected_revision: snapshot.state.revision,
                 intention: snapshot.readiness.resume[0].clone(),
             },
         },
@@ -835,4 +833,98 @@ fn acquired_map_and_paid_public_plan_keep_historical_cosmetics_after_door_cure_a
         .observation
         .ground_items
         .is_empty());
+}
+// Ordinary knowledge recording must be a fixed point for deferred presentation.
+#[test]
+fn map_learning_is_a_fixed_point_for_current_hallucinated_stair_disclosure() {
+    use tor_simulation::{ActorId as NativeActor, Game};
+    use tor_world::{Direction, Location, NamedAnchor, Position, RegionId};
+
+    fn add_stair(game: &mut Game) -> Location {
+        let region = RegionId(1);
+        let stair = Location {
+            region,
+            position: Position { x: 3, y: 1, z: 0 },
+        };
+        game.connect_named_stair(
+            stair,
+            Direction::Up,
+            NamedAnchor {
+                region,
+                name: "start".to_owned(),
+            },
+        )
+        .unwrap();
+        stair
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let scenario = source(directory.path());
+    let content = scenario.content().unwrap();
+    let mut wire = Wire::new(Engine::memory(scenario).unwrap());
+    let restore = |wire: &Wire| {
+        let saved = wire.checkpoint();
+        Game::restore_checkpoint(
+            serde_json::from_value(saved["game"].clone()).unwrap(),
+            &serde_json::from_value(saved["shared"].clone()).unwrap(),
+            content.clone(),
+        )
+        .unwrap()
+    };
+    let mut sober = restore(&wire);
+    drink(&mut wire, 30, "map-fixed-point-dose");
+    let mut unknown = restore(&wire);
+    // Add a new stair after dosing so ordinary commit learning cannot already
+    // have genuinely recognized it in either clone.
+    let stair = add_stair(&mut sober);
+    assert_eq!(add_stair(&mut unknown), stair);
+    let actor = NativeActor(OWNER.0);
+    let terrain = |_: RegionId| [None, None, None];
+    let factual = sober.observe_event_shared_scene(actor).unwrap();
+    let mut known = unknown.clone();
+    known
+        .record_explored_observation(
+            actor,
+            &crate::map_memory::inputs(&factual.0, &terrain),
+            &factual.1,
+        )
+        .unwrap();
+
+    for (mut game, should_have_art) in [(sober, false), (unknown, true), (known, false)] {
+        let before = game.observe_event_shared_scene(actor).unwrap();
+        let art = before
+            .0
+            .visible_cells
+            .iter()
+            .find(|cell| cell.location == stair)
+            .expect("lit new stair must be visible")
+            .object_presentation
+            .clone();
+        assert_eq!(art.is_some(), should_have_art);
+        assert!(before
+            .0
+            .exits
+            .iter()
+            .any(|exit| exit.location == stair && exit.direction == Direction::Up));
+        let inputs = crate::map_memory::inputs(&before.0, &terrain);
+        game.record_explored_observation(actor, &inputs, &before.1)
+            .unwrap();
+        let after = game.observe_event_shared_scene(actor).unwrap();
+        assert_eq!(
+            before.0, after.0,
+            "final map learning must not alter a lazy current observation"
+        );
+        assert_eq!(before.1, after.1);
+        // EventObservation equality intentionally ignores proof identity. The
+        // learning operation does not change world/actor event authority either.
+        assert_eq!(
+            art,
+            after
+                .0
+                .visible_cells
+                .iter()
+                .find(|cell| cell.location == stair)
+                .unwrap()
+                .object_presentation
+        );
+    }
 }

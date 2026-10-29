@@ -266,15 +266,15 @@ fn command(
     action: Action,
     admit: bool,
 ) -> Result<()> {
-    let revision = engine.revision(actor)?;
+    let revision = engine.causal_boundary(actor)?;
     let command = if admit {
         Command::AdmitIntention {
-            expected_revision: revision,
+            expected_boundary: revision,
             action,
         }
     } else {
         Command::Act {
-            expected_revision: revision,
+            expected_boundary: revision,
             action,
         }
     };

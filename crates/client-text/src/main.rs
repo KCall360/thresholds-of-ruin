@@ -137,7 +137,7 @@ async fn run() -> Result<(), Error> {
                                 "yes" | "y" => {
                                     match preview.confirm(&connection.state) {
                                         Ok(action) => {
-                                            let command = Command::Act { expected_revision: connection.state.state().revision, action };
+                                            let command = Command::Act {  action };
                                             let request = connection.state.command_request(command);
                                             transact(&mut connection, request).await?;
                                         }
@@ -184,7 +184,7 @@ async fn run() -> Result<(), Error> {
                             Ok(input @ (Input::StrikeSource(_) | Input::StrikeNext | Input::StrikePrevious)) => {
                                 if connection.role() != AccessRole::Wizard { println!("Wizard authority is required."); }
                                 else {
-                                    let context = connection.state.snapshot().reply_context();
+                                    let context = connection.state.reply_context();
                                     match tor_client_text::strike_command(&input, &mut connection.inspection_pages, &context) {
                                         Ok(command) => { let request = connection.state.command_request(command); transact(&mut connection, request).await?; },
                                         Err(error) => println!("{}", safe(&error)),
@@ -291,10 +291,12 @@ fn present(connection: &Connection, message: &ServerMessage) -> Result<(), Error
         ServerMessage::Update { update } => match &update.body {
             UpdateBody::Readiness { .. } | UpdateBody::Travel { .. } => {}
             UpdateBody::Intention { status } => println!("Action: {:?}.", status.phase),
-            UpdateBody::Observation { event, .. } | UpdateBody::ObservationDelta { event, .. } => {
-                if let Some(entry) = event {
-                    println!("{}", history(entry));
+            UpdateBody::Outcome { .. } => {
+                for line in connection.state.narration_lines() {
+                    println!("{}", line.text);
                 }
+            }
+            UpdateBody::Observation { .. } | UpdateBody::ObservationDelta { .. } => {
                 println!("{}", describe(connection.state.state()));
                 if let Some(prompt) = tor_client_common::items::identification_prompt(
                     &connection.state.state().observation,

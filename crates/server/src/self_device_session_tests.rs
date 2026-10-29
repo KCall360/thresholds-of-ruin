@@ -387,7 +387,6 @@ fn paused_nothing_preserves_direction_and_payload_across_identification_and_dele
             context: snapshot.reply_context().input,
             branch: snapshot.branch.clone(),
             command: Command::ResumeIntention {
-                expected_revision: snapshot.state.revision,
                 intention: snapshot.readiness.resume[0].clone(),
             },
         };
@@ -3088,7 +3087,6 @@ fn paid_first_contact_chain(noncombat: bool, ordinary: bool) {
         context: snapshot.reply_context().input,
         branch: snapshot.branch.clone(),
         command: Command::ResumeIntention {
-            expected_revision: snapshot.state.revision,
             intention: snapshot.readiness.resume[0].clone(),
         },
     };

@@ -60,7 +60,7 @@ fn returned_floor_rehydrates_unseen_walls_and_stairs_after_source_free_resume() 
         .key
         .clone();
     let walk = |engine: &mut Engine, direction| {
-        let revision = engine.revision(actor).unwrap();
+        let revision = engine.causal_boundary(actor).unwrap();
         let branch = engine.branch().clone();
         engine
             .command(
@@ -70,7 +70,7 @@ fn returned_floor_rehydrates_unseen_walls_and_stairs_after_source_free_resume() 
                 &format!("walk-{revision}"),
                 &branch,
                 crate::journal::Command::Act {
-                    expected_revision: revision,
+                    expected_boundary: revision,
                     action: crate::journal::Action::Move { direction },
                 },
             )
@@ -192,7 +192,6 @@ fn returned_floor_rehydrates_unseen_walls_and_stairs_after_source_free_resume() 
         client.id,
         "return-up".into(),
         model.command_request(Command::Act {
-            expected_revision: model.state().revision,
             action: Action::Move {
                 direction: Direction::Up,
             },

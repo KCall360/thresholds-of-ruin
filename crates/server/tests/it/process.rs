@@ -83,7 +83,7 @@ async fn actual_server_connection_remains_usable_after_local_request_byte_reject
     let before = client.state.state().clone();
     let request = client.state.command_request(Command::Annotate {
         anchor: Anchor::State {
-            revision: before.revision,
+            snapshot: before.snapshot.clone(),
         },
         text: "\\".repeat(MAX_REQUEST_BYTES),
         source: ClientSource::User,
@@ -130,7 +130,7 @@ async fn actual_server_rejects_new_work_while_recovered_queue_disables_admission
                 "original",
                 &engine.branch().clone(),
                 tor_server::journal::Command::AdmitIntention {
-                    expected_revision: 0,
+                    expected_boundary: 0,
                     action: tor_server::journal::Action::Wait,
                 },
             )
@@ -181,7 +181,6 @@ async fn actual_server_rejects_new_work_while_recovered_queue_disables_admission
                 context: client.input_context(),
                 branch: controlled.branch.clone(),
                 command: Command::Act {
-                    expected_revision: controlled.state.revision,
                     action: Action::Wait,
                 },
             },
@@ -259,14 +258,15 @@ async fn actual_server_process_persists_an_action_and_annotation_across_restart(
         (
             "wait",
             Some(Command::Act {
-                expected_revision: 0,
                 action: Action::Wait,
             }),
         ),
         (
             "note",
             Some(Command::Annotate {
-                anchor: Anchor::State { revision: 1 },
+                anchor: Anchor::State {
+                    snapshot: snapshot.state.snapshot.clone(),
+                },
                 text: "Remember this after restarting.".into(),
                 source: ClientSource::User,
                 audience: Audience::Private,
@@ -401,7 +401,6 @@ async fn actual_server_process_persists_an_action_and_annotation_across_restart(
             context: wait_context.unwrap(),
             branch,
             command: Command::Act {
-                expected_revision: 0,
                 action: Action::Wait,
             },
         }),
@@ -435,7 +434,9 @@ async fn actual_server_process_persists_an_action_and_annotation_across_restart(
                     context: note_context.unwrap(),
                     branch: snapshot.branch.clone(),
                     command: Command::Annotate {
-                        anchor: Anchor::State { revision: 1 },
+                        anchor: Anchor::State {
+                            snapshot: snapshot.state.snapshot.clone(),
+                        },
                         text: "Remember this after restarting.".into(),
                         source: ClientSource::User,
                         audience: Audience::Private,
@@ -561,7 +562,6 @@ async fn actual_server_recovers_a_client_gap_without_repeating_an_admitted_actio
             context: client.state.input_context(),
             branch: client.state.branch().clone(),
             command: Command::Act {
-                expected_revision: client.state.state().revision,
                 action: Action::Wait,
             },
         })

@@ -81,6 +81,7 @@ fn ordered_strikes_invalid_sequence_delta_keeps_the_entire_client_unchanged() {
     let mut client = ClientState::from_snapshot(initial.clone()).unwrap();
     let mut next = initial.state.as_ref().clone();
     next.revision = 1;
+    next.snapshot = tor_protocol::SnapshotId(format!("fixture-{}", next.revision));
     next.observation.tick = 1;
     next.observation.combat = Some(combat(true, 3));
     let before = client.clone();

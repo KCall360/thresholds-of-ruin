@@ -23,10 +23,12 @@ mod combat_diagnostics;
 mod combat_trace;
 mod projectile_choices;
 pub use projectile_choices::*;
+mod outcome_facts;
 mod projectile_selection;
 mod public_plan;
 pub use combat_diagnostics::*;
 pub use combat_trace::*;
+pub use outcome_facts::*;
 pub use projectile_selection::*;
 pub use public_plan::*;
 mod creature_catalog;
@@ -92,9 +94,10 @@ impl StreamContext {
 
 /// Exact prior observation within the enclosing stream context and branch.
 /// Control, annotation, travel and intention messages do not advance this base.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ObservationBase {
+    pub snapshot: SnapshotId,
     pub cursor: StreamCursor,
     #[serde(with = "crate::integers::unsigned")]
     pub revision: u64,

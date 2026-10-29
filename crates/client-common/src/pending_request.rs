@@ -100,6 +100,7 @@ mod tests {
 
     pub(super) fn reply_context() -> ReplyContext {
         ReplyContext {
+            snapshot: tor_protocol::SnapshotId("fixture".into()),
             input: InputContext {
                 stream: StreamContext {
                     stream: StreamId("test".into()),

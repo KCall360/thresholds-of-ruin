@@ -435,7 +435,9 @@ async fn immediate_note_receipt_retry_after_rewind_keeps_the_original_branch() {
         context: game.wizard.input_context(),
         branch: branch.clone(),
         command: tor_protocol::Command::Annotate {
-            anchor: Anchor::State { revision: 0 },
+            anchor: Anchor::State {
+                snapshot: game.initial.state.snapshot.clone(),
+            },
             text: "Original branch note".into(),
             source: ClientSource::User,
             audience: Audience::Private,
@@ -602,6 +604,7 @@ async fn explored_map_pages_round_trip_without_control_or_game_mutation() {
         context: before.context.clone(),
         branch: before.branch.clone(),
         base: ObservationBase {
+            snapshot: before.state.snapshot.clone(),
             cursor: before.cursor,
             revision: before.state.revision,
         },

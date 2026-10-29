@@ -168,7 +168,7 @@ pub struct PreparationTiming {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CombatView {
     /// Exact creature information belongs only to the observer's own actor.
-    pub own_stats: Option<crate::creatures::OwnStats>,
+    pub own_stats: Option<crate::creatures::OwnStatsFacts>,
     /// The observer's immutable paid record, never a current subject lookup.
     pub public_plan: Option<tor_world::Shared<crate::public_plan::PublicPlanObservation>>,
     pub hp: u64,
@@ -553,7 +553,7 @@ impl Game {
             .collect();
         let events = self.disclosed_event_history(id);
         Some(CombatView {
-            own_stats: Some(creature.own_stats()),
+            own_stats: Some(creature.own_stats_facts()),
             public_plan: a.public_plan.clone(),
             hp: creature.health().current(),
             max_hp: creature.health().maximum(),
@@ -834,10 +834,27 @@ impl Game {
     }
 
     pub fn attack_available(&self, actor: ActorId, target: ActorId) -> bool {
-        let Ok(scene) = self.scene(actor) else {
+        // These gates stay live even when geometry is retained. In particular,
+        // a non-combat actor is "alive" for other systems but cannot make contact.
+        if actor == target
+            || [actor, target].into_iter().any(|id| {
+                self.actors
+                    .get(&id)
+                    .and_then(|state| state.combat.as_ref())
+                    .is_none_or(|combat| combat.hp() == 0)
+            })
+        {
+            return false;
+        }
+        let Ok(snapshot) = self.scene_snapshot_shared(actor) else {
             return false;
         };
-        self.attack_available_in_scene(actor, target, &scene)
+        let target = &self.actors[&target];
+        let Some(body) = self.body_cells(target.location, target.orientation, &target.body) else {
+            return false;
+        };
+        let endpoints = snapshot.contact_locations(self, actor);
+        body.iter().any(|(at, _)| endpoints.contains(at))
     }
     pub(crate) fn attack_available_in_scene(
         &self,

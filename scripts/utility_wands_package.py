@@ -84,17 +84,13 @@ def assert_invisibility(test, caster, target, rear, invisible_id):
 
 
 def live_combat_events(message):
-    """Read only actual live observation updates, never history or client state."""
+    """Read actual ordered outcome facts, never pictures, history or client state."""
     if message.get("type") != "update":
         return []
     body = message["update"]["body"]
-    if body["type"] == "observation":
-        combat = body["state"]["observation"].get("combat")
-    elif body["type"] == "observation_delta":
-        combat = body["state"].get("combat")
-    else:
+    if body["type"] != "outcome":
         return []
-    return (combat or {}).get("events", [])
+    return [fact["event"] for fact in body["facts"]["facts"] if fact["kind"] == "combat"]
 
 
 def assert_anonymous_recipient_feedback(test, messages, recipient):

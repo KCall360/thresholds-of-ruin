@@ -60,7 +60,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "identify",
                 &branch,
                 Command::Wizard {
-                    expected_revision: 0,
+                    display_basis: None,
+                    expected_boundary: 0,
                     operation: tor_server::journal::WizardOperation::IdentifyItem {
                         actor,
                         item: identities - 1,
@@ -117,7 +118,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         },
                     )?
                 };
-                let revision = engine.revision(actor).unwrap();
+                let revision = engine.causal_boundary(actor).unwrap();
                 let branch = engine.branch().clone();
                 let start = Instant::now();
                 let result = engine.command(
@@ -127,7 +128,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     &format!("{turn}"),
                     &branch,
                     Command::Act {
-                        expected_revision: revision,
+                        expected_boundary: revision,
                         action,
                     },
                 )?;
@@ -175,7 +176,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "take",
                 &durable.branch().clone(),
                 Command::Act {
-                    expected_revision: 0,
+                    expected_boundary: 0,
                     action: Action::Take {
                         item: 1,
                         quantity: Some(1),

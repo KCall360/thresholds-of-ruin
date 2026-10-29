@@ -6,7 +6,7 @@ fn snapshot() -> Snapshot {
         "readiness":{"revision":"0","admission":false,"resume":[],"cancel":[]},"context":{"stream":"3b7523b8-893a-4ea9-8b09-0a3887a7e6a1","epoch":"0"},
         "actor":"1","branch":"branch-1","cursor":{"sequence":"0","tick":"0"},"has_control":false, "intentions":[],
         "history":{"entries":[],"older_before":null},
-        "state":{"wizard_game":false,"revision":"0","observation":{
+        "state":{"snapshot":"fixture", "wizard_game":false,"revision":"0","observation":{
             "actor":"1","self_target":"a_0101010101010101010101010101010101010101010101010101010101010101","tick":"0","position":{"x":1,"y":1,"z":0},
 
             "places":[],"visible_cells":[{"key":"here","trap":null,"object_presentation":null,"stairs_up":false,"stairs_down":false,"position":{"x":1,"y":1,"z":0},"wall":false,"lit":true,"place_hint":false}],"ground_items":[],"inventory":[],"charts":[],"linked_holds":[],"visible_actors":[],"ready":true
@@ -31,7 +31,9 @@ fn note(sequence: u64) -> StreamUpdate {
                 },
                 audience: Audience::Private,
                 content: HistoryContent::Annotation {
-                    anchor: Anchor::State { revision: 0 },
+                    anchor: Anchor::State {
+                        snapshot: tor_protocol::SnapshotId("fixture".into()),
+                    },
                     category: AnnotationCategory::Note,
                     text: "A note".into(),
                 },

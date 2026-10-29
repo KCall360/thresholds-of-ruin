@@ -88,6 +88,7 @@ fn base<'de, D: serde::Deserializer<'de>>(d: D) -> Result<ObservationBase, D::Er
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
     struct Fields {
+        snapshot: crate::SnapshotId,
         #[serde(deserialize_with = "cursor")]
         cursor: StreamCursor,
         #[serde(with = "crate::integers::unsigned")]
@@ -95,6 +96,7 @@ fn base<'de, D: serde::Deserializer<'de>>(d: D) -> Result<ObservationBase, D::Er
     }
     let f: Fields = crate::bounded::named_map(d)?;
     Ok(ObservationBase {
+        snapshot: f.snapshot,
         cursor: f.cursor,
         revision: f.revision,
     })
@@ -361,7 +363,8 @@ record!(MapQuery {
 });
 impl MapQuery {
     pub fn validate(&self) -> Result<(), &'static str> {
-        if !self.context.is_valid() || !label(&self.branch.0, 128) {
+        if !self.context.is_valid() || !label(&self.branch.0, 128) || !self.base.snapshot.is_valid()
+        {
             return Err("invalid map query context");
         }
         self.window.validate()?;
@@ -409,7 +412,8 @@ impl MapPage {
         {
             return Err("limited map projection cannot publish an uncertified prefix");
         }
-        if !label(&self.transfer, 128)
+        if !self.base.snapshot.is_valid()
+            || !label(&self.transfer, 128)
             || !label(&self.branch.0, 128)
             || page >= MAX_MAP_TRANSFER_PAGES
             || self.cells.len() > MAX_MAP_PAGE_CELLS
@@ -475,6 +479,7 @@ fn reply_context<'de, D: serde::Deserializer<'de>>(d: D) -> Result<crate::ReplyC
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
     struct Fields {
+        snapshot: crate::SnapshotId,
         #[serde(deserialize_with = "input")]
         input: crate::InputContext,
         actor: ActorId,
@@ -487,6 +492,7 @@ fn reply_context<'de, D: serde::Deserializer<'de>>(d: D) -> Result<crate::ReplyC
     }
     let f: Fields = crate::bounded::named_map(d)?;
     Ok(crate::ReplyContext {
+        snapshot: f.snapshot,
         input: f.input,
         actor: f.actor,
         branch: f.branch,
@@ -513,9 +519,9 @@ pub(crate) fn read_page_reply<'de, D: serde::Deserializer<'de>>(
     if !label(&f.request_id, 128)
         || f.context.actor != f.page.actor
         || f.context.branch != f.page.branch
-        || f.context.revision != f.page.base.revision
+        || f.context.revision < f.page.base.revision
+        || f.context.cursor.tick < f.page.base.cursor.tick
         || f.context.cursor.sequence < f.page.base.cursor.sequence
-        || f.context.cursor.tick != f.page.base.cursor.tick
     {
         return Err(serde::de::Error::custom("map reply context mismatch"));
     }

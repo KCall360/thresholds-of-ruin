@@ -171,7 +171,7 @@ impl HistoryIndex {
 mod tests {
     use super::*;
     use crate::journal::JournalContent;
-    use tor_protocol::{Anchor, AnnotationCategory};
+    use tor_protocol::AnnotationCategory;
 
     #[test]
     fn indexed_pages_match_reference_filter_for_every_scope_and_anchor() {
@@ -205,7 +205,10 @@ mod tests {
                                 author: author.clone(),
                                 audience,
                                 content: JournalContent::Annotation {
-                                    anchor: Anchor::State { revision: 0 },
+                                    anchor: crate::journal::RecordedAnchor::State {
+                                        snapshot: tor_protocol::SnapshotId("fixture".into()),
+                                        boundary: None,
+                                    },
                                     category: AnnotationCategory::Note,
                                     text: "note".into(),
                                 },

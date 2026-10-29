@@ -1341,7 +1341,11 @@ mod tests {
         assert_eq!(action, basic(ActorId(1)));
         let after = crate::diagnostics::work_counts();
         assert_eq!(after.route_searches - before.route_searches, 1);
-        assert_eq!(after.scenes - before.scenes, 1);
+        assert_eq!(
+            after.scenes - before.scenes,
+            0,
+            "the decision reuses the exact geometry warmed by observation"
+        );
     }
 
     #[test]
@@ -1924,6 +1928,8 @@ mod tests {
         for reverse in [false, true] {
             let mut game = data_ability_game(reverse);
             game.teleport(ActorId(1), at(1, 4, 1)).unwrap();
+            // Measure one cold construction, independently of fixture reads.
+            game.lifecycle.scenes = Default::default();
             let before = crate::diagnostics::work_counts();
             let AiDecision { action, .. } = game.choose_ai(ActorId(2)).unwrap();
             let after = crate::diagnostics::work_counts();
@@ -1946,6 +1952,8 @@ mod tests {
         game.teleport(ActorId(1), at(1, 4, 1)).unwrap();
         game.act(ActorId(1), Action::Wait).unwrap();
         assert_eq!(game.next_actor(), Some(ActorId(2)));
+        // Keep this a cold-build witness; admission itself must not build.
+        game.lifecycle.scenes = Default::default();
         let before_admission = crate::diagnostics::work_counts();
         game.admit_ai_intention(ActorId(2)).unwrap();
         let before = crate::diagnostics::work_counts();
@@ -2005,6 +2013,8 @@ mod tests {
     fn tactile_awareness_does_not_count_as_illuminated_sight_for_ranged_abilities() {
         let mut game = data_ability_game(false);
         game.set_region_light(RegionId(1), false).unwrap();
+        // Keep the cold-build assertion independent of setup observations.
+        game.lifecycle.scenes = Default::default();
         let before = crate::diagnostics::work_counts();
         let snapshot = game.decision_snapshot(ActorId(2)).unwrap();
         assert!(snapshot

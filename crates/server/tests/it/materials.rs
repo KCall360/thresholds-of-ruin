@@ -11,7 +11,7 @@ fn wizard(
         engine,
         ActorId(1),
         &WireCommand::Wizard {
-            expected_revision: engine.revision(ActorId(1)).unwrap(),
+            expected_revision: 0,
             operation: operation.into(),
         },
     )?;
@@ -44,7 +44,7 @@ fn chamber_setup_is_atomic_retryable_rewindable_and_durable() {
         &engine,
         ActorId(1),
         &WireCommand::Wizard {
-            expected_revision: engine.revision(ActorId(1)).unwrap(),
+            expected_revision: 0,
             operation: "chamber 3 5 3 2 Stone chamber".into(),
         },
     )

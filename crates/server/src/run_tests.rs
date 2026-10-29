@@ -40,7 +40,7 @@ fn setup(service: &mut Service, client: &mut Connection, operation: &str) {
             context: service.input_context(client.id).unwrap(),
             branch: service.engine.branch().clone(),
             command: Command::Wizard {
-                expected_revision: service.engine.revision(ActorId(1)).unwrap(),
+                expected_revision: service.reply_context(client.id).unwrap().revision,
                 operation: operation.into(),
             },
         },
@@ -56,10 +56,19 @@ fn fixture() -> (Service, Connection) {
     let mut client = connect(&mut service, AccessRole::Wizard);
     setup(&mut service, &mut client, "room 3 8 1 1 Corridor");
     setup(&mut service, &mut client, "teleport 1 3 0 0 0");
+    service.handle(client.id, "fixture-picture".into(), Request::Observe);
+    drain(&mut client);
     (service, client)
 }
 fn start(service: &mut Service, client: &mut Connection, x: i32) -> Request {
-    let state = service.engine.state(ActorId(1)).unwrap();
+    service.handle(client.id, "travel-picture".into(), Request::Observe);
+    drain(client);
+    let state = service.clients[&client.id]
+        .last_observation
+        .as_ref()
+        .unwrap()
+        .state
+        .clone();
     let destination = state
         .observation
         .visible_cells
@@ -254,6 +263,7 @@ fn startup_cancellation_storage_failure_preserves_saved_travel_for_retry() {
         let actor = ActorId(1);
         let mut engine = Engine::open_with_policy(&path, scenario.clone(), policy.clone()).unwrap();
         let before = engine.state(actor).unwrap();
+        let before_boundary = engine.causal_boundary(actor).unwrap();
         let destination = before
             .observation
             .visible_cells
@@ -270,7 +280,8 @@ fn startup_cancellation_storage_failure_preserves_saved_travel_for_retry() {
                 "journey",
                 &engine.branch().clone(),
                 crate::journal::Command::Travel {
-                    expected_revision: before.revision,
+                    display_basis: None,
+                    expected_boundary: before_boundary,
                     destination: destination.clone(),
                 },
             )
@@ -346,12 +357,11 @@ fn commands_during_a_journey_are_busy_and_leave_it_running() {
     let Command::Travel { destination, .. } = command else {
         unreachable!()
     };
-    let revision = service.engine.revision(ActorId(1)).unwrap();
+    let revision = service.engine.causal_boundary(ActorId(1)).unwrap();
     for (id, command) in [
         (
             "act",
             Command::Act {
-                expected_revision: revision,
                 action: Action::Wait,
             },
         ),
@@ -385,7 +395,10 @@ fn commands_during_a_journey_are_busy_and_leave_it_running() {
         (status.phase, &status.id),
         (TravelPhase::Active, &travel_id)
     );
-    assert_eq!(service.engine.revision(ActorId(1)).unwrap(), revision);
+    assert_eq!(
+        service.engine.causal_boundary(ActorId(1)).unwrap(),
+        revision
+    );
     service.run_until_blocked();
     assert_eq!(
         service.travel_status[&ActorId(1)].phase,
@@ -586,16 +599,14 @@ fn second_player(service: &mut Service, client: &mut Connection, x: i32) -> Conn
 }
 
 fn act(service: &mut Service, client: &mut Connection, actor: ActorId, action: Action) {
+    assert_eq!(service.clients[&client.id].actor, Some(actor));
     service.handle(
         client.id,
         uuid::Uuid::new_v4().to_string(),
         Request::Command {
             context: service.input_context(client.id).unwrap(),
             branch: service.engine.branch().clone(),
-            command: Command::Act {
-                expected_revision: service.engine.revision(actor).unwrap(),
-                action,
-            },
+            command: Command::Act { action },
         },
     );
     let messages = drain(client);
@@ -672,23 +683,24 @@ fn another_players_action_can_interrupt_a_waiting_journey() {
 fn stale_unknown_and_wrong_branch_requests_are_atomic() {
     let (mut service, mut client) = fixture();
     let before = service.engine.state(ActorId(1)).unwrap();
+    let display_revision = service.reply_context(client.id).unwrap().revision;
     let known = before.observation.visible_cells[0].key.clone();
     for (branch, revision, destination, code) in [
         (
             service.engine.branch().clone(),
-            before.revision,
+            display_revision,
             "unknown".into(),
             ErrorCode::InvalidAction,
         ),
         (
             service.engine.branch().clone(),
-            before.revision - 1,
+            display_revision - 1,
             known.clone(),
             ErrorCode::StaleRevision,
         ),
         (
             BranchId("wrong".into()),
-            before.revision,
+            display_revision,
             known,
             ErrorCode::WrongBranch,
         ),
@@ -758,7 +770,8 @@ fn rewind_to_retained_pending_travel_settles_restored_work_before_snapshot() {
             "retain-pending-travel",
             &service.engine.branch().clone(),
             crate::journal::Command::Wizard {
-                expected_revision: service.engine.revision(actor).unwrap(),
+                display_basis: None,
+                expected_boundary: service.engine.causal_boundary(actor).unwrap(),
                 operation: crate::developer::parse_wizard("place 3 7 0 0 on").unwrap(),
             },
         )

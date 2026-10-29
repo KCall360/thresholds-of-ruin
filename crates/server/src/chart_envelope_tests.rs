@@ -87,6 +87,7 @@ fn actual_complete_chart_wire_pages_fit_core_admission_with_maximum_correlated_e
         let reply = wire::ChartPageReply {
             message_type: wire::ChartReplyType::ChartPage,
             context: tor_protocol::ReplyContext {
+                snapshot: tor_protocol::SnapshotId("fixture".into()),
                 input: tor_protocol::InputContext {
                     stream: tor_protocol::StreamContext {
                         stream: tor_protocol::StreamId("\"".repeat(128)),
@@ -110,6 +111,7 @@ fn actual_complete_chart_wire_pages_fit_core_admission_with_maximum_correlated_e
                 },
                 branch: tor_protocol::BranchId("\\".repeat(128)),
                 base: tor_protocol::ObservationBase {
+                    snapshot: tor_protocol::SnapshotId("fixture".into()),
                     cursor: tor_protocol::StreamCursor {
                         sequence: u64::MAX,
                         tick: u64::MAX,

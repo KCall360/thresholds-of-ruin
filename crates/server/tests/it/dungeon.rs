@@ -282,6 +282,7 @@ fn victory_death_and_pending_attacks_survive_durable_restart() {
             );
         }
         let terminal = engine.state(ActorId(1)).unwrap();
+        let terminal_boundary = engine.causal_boundary(ActorId(1)).unwrap();
         assert!(terminal.observation.combat.as_ref().unwrap().terminal);
         assert!(engine
             .command(
@@ -291,7 +292,7 @@ fn victory_death_and_pending_attacks_survive_durable_restart() {
                 "terminal",
                 &engine.branch().clone(),
                 tor_server::journal::Command::Act {
-                    expected_revision: terminal.revision,
+                    expected_boundary: terminal_boundary,
                     action: Action::Wait
                 }
             )
@@ -491,7 +492,7 @@ fn stationary_attack_does_not_rebuild_unchanged_navigation() {
             "attack",
             &engine.branch().clone(),
             tor_server::journal::Command::Act {
-                expected_revision: engine.revision(ActorId(1)).unwrap(),
+                expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
                 action: Action::UseAbility {
                     id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                     invocation: tor_server::journal::AbilityInvocation {

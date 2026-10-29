@@ -31,7 +31,7 @@ fn snapshot() -> Snapshot {
     serde_json::from_value(serde_json::json!({
         "readiness":{"revision":"0","admission":true,"resume":[],"cancel":[]},"context":{"stream":"fixture-attachment","epoch":"0"},"actor":"1","branch":"turns","cursor":{"sequence":"0","tick":"100"},"has_control":true,"intentions":[],
         "history":{"entries":[],"older_before":null},
-        "state":{"wizard_game":false,"revision":"5","observation":{"charts":[],"linked_holds":[],
+        "state":{"snapshot":"fixture-snapshot","wizard_game":false,"revision":"5","observation":{"charts":[],"linked_holds":[],
             "actor":"1","self_target":super::actor_target(1),"tick":"100","position":{"x":0,"y":0,"z":0},
             "places":[],"visible_cells":cells,
             "ground_items":[{"presentation":null,"supply_reachable":false,"reachable":true,"item":{"known_currency":null,"known_supply":null,"quantity":"1","class":"weapon","appearance":"sword","identified":true,"id":super::item_target(7),"name":"sword"},"position":{"x":-1,"y":0,"z":0}}],
@@ -66,8 +66,10 @@ fn view() -> Observation {
 
 fn update(app: &mut App, sequence: u64, change: impl FnOnce(&mut Observation)) {
     let initial = snapshot();
-    let mut state = Arc::unwrap_or_clone(app.state.as_ref().unwrap().snapshot().state);
+    let mut state =
+        Arc::unwrap_or_clone(app.state.as_ref().unwrap().reset_snapshot().unwrap().state);
     state.revision += 1;
+    state.snapshot = tor_protocol::SnapshotId(format!("fixture-display-{}", state.revision));
     state.observation.tick += 100;
     change(&mut state.observation);
     let tick = state.observation.tick;
@@ -171,6 +173,8 @@ fn streamed_basic_attack_keeps_history_and_stays_quiet_until_its_result() {
     app.set_state(ClientState::from_snapshot(initial.clone()).unwrap());
     let mut preparing = Arc::unwrap_or_clone(initial.state.clone());
     preparing.revision += 1;
+    preparing.snapshot =
+        tor_protocol::SnapshotId(format!("fixture-display-{}", preparing.revision));
     preparing.observation.tick += 1;
     preparing.observation.ready = false;
     let combat = preparing.observation.combat.as_mut().unwrap();
@@ -910,17 +914,20 @@ fn automatic_run_waits_for_character_readiness_after_acknowledgement_and_executi
             assert_eq!(app.running, Some(Direction::East));
             update(&mut app, 6, |view| view.ready = true);
         }
-        let expected_revision = app.state.as_ref().unwrap().state().revision;
         assert!(matches!(
             super::request(app.continue_run()),
             Some(Request::Command {
-                context: InputContext { readiness_revision: 2, .. },
+                context: InputContext {
+                    readiness_revision: 2,
+                    ..
+                },
                 command: Command::Act {
-                    expected_revision: actual_revision,
-                    action: Action::Move { direction: Direction::East },
+                    action: Action::Move {
+                        direction: Direction::East
+                    },
                 },
                 ..
-            }) if actual_revision == expected_revision
+            })
         ));
         assert_eq!(
             app.continue_run(),
@@ -1016,7 +1023,7 @@ fn running_stops_for_messages_and_a_fresh_key_without_an_extra_action() {
             Effect::Request(_)
         ));
         app.ready();
-        let before = app.state.as_ref().unwrap().snapshot();
+        let before = app.state.as_ref().unwrap().session().clone();
         if stop_with_key {
             assert_eq!(app.input(Input::Key { key: Key::Right }), Effect::None);
         } else {
@@ -1024,7 +1031,7 @@ fn running_stops_for_messages_and_a_fresh_key_without_an_extra_action() {
             assert_eq!(app.continue_run(), Effect::None);
         }
         assert_eq!(app.running, None);
-        assert_eq!(app.state.as_ref().unwrap().snapshot(), before);
+        assert_eq!(app.state.as_ref().unwrap().session().clone(), before);
     }
 }
 
@@ -1462,7 +1469,7 @@ fn map_look_and_inventory_share_assets_without_renaming_disclosed_things() {
         },
     });
     let state = app.state.as_ref().unwrap();
-    let unchanged = state.snapshot();
+    let unchanged = state.session().clone();
     let tiles = render::map_tiles(state, &app.palette);
     let actor = tiles
         .iter()
@@ -1488,7 +1495,7 @@ fn map_look_and_inventory_share_assets_without_renaming_disclosed_things() {
         tor_client_ascii::describe(state, &app.palette, -1, 0),
         "\" - a sword."
     );
-    assert_eq!(state.snapshot(), unchanged);
+    assert_eq!(state.session().clone(), unchanged);
 
     // A palette-only loss and recovery changes appearance without changing
     // observation, inventory handles, commands, memory or authored names.
@@ -1523,7 +1530,7 @@ fn map_look_and_inventory_share_assets_without_renaming_disclosed_things() {
         },
     });
     assert_eq!(render::map_tiles(state, &app.palette), tiles);
-    assert_eq!(state.snapshot(), unchanged);
+    assert_eq!(state.session().clone(), unchanged);
 }
 
 #[test]

@@ -39,7 +39,8 @@ fn wizard(
         request,
         &engine.branch().clone(),
         Command::Wizard {
-            expected_revision: engine.revision(actor()).unwrap(),
+            display_basis: None,
+            expected_boundary: engine.causal_boundary(actor()).unwrap(),
             operation,
         },
     )
@@ -146,7 +147,7 @@ fn off_sight_edge_slab_matches_the_full_normal_projection() {
                 &format!("edge-walk-{step}"),
                 &engine.branch().clone(),
                 Command::Act {
-                    expected_revision: engine.revision(actor()).unwrap(),
+                    expected_boundary: engine.causal_boundary(actor()).unwrap(),
                     action: Action::Move {
                         direction: if step <= 16 {
                             Direction::East
@@ -224,7 +225,7 @@ fn unchanged_wait_builds_no_ordinary_views_or_scenes_and_writes_no_map_knowledge
             "unchanged-wait",
             &engine.branch().clone(),
             Command::Act {
-                expected_revision: engine.revision(actor()).unwrap(),
+                expected_boundary: engine.causal_boundary(actor()).unwrap(),
                 action: Action::Wait,
             },
         )
@@ -435,7 +436,7 @@ fn late_storage_rejection_discards_candidate_map_learning_and_retry_still_works(
     engine.enable_wizard().unwrap();
     let root = engine.game.map_knowledge_root(sim_actor());
     let before = engine.game.clone();
-    let revision = engine.revision(actor()).unwrap();
+    let revision = engine.causal_boundary(actor()).unwrap();
     let records = serde_json::to_value(&engine.archive.records).unwrap();
     let boundaries = engine.boundaries.clone();
     reset_map_work_counts();
@@ -455,7 +456,7 @@ fn late_storage_rejection_discards_candidate_map_learning_and_retry_still_works(
     );
     assert!(engine.game.map_knowledge_is_current(sim_actor(), &root));
     assert_eq!(engine.game, before);
-    assert_eq!(engine.revision(actor()).unwrap(), revision);
+    assert_eq!(engine.causal_boundary(actor()).unwrap(), revision);
     assert_eq!(
         serde_json::to_value(&engine.archive.records).unwrap(),
         records
@@ -508,7 +509,7 @@ impl Engine {
             let view = candidate.revision_view(actor).unwrap();
             adapt::observation(
                 view.observation,
-                view.scene,
+                &view.scene,
                 &self.archive.view_salt,
                 view.ready,
                 &terrain,
@@ -562,4 +563,65 @@ impl Engine {
         }
         work
     }
+}
+
+#[test]
+fn map_acquisition_projects_only_appearance_and_reuses_existing_rich_views() {
+    let engine = Engine::memory(Scenario::two_room(42)).unwrap();
+    let mut narrow = Candidate::capture(&engine);
+    let mut full = narrow.clone();
+    let actors = narrow.actors();
+    let terrain = |_region| [None, None, None];
+    for actor in &actors {
+        let view = full.revision_view(*actor).unwrap();
+        full.game
+            .record_explored_observation(
+                SimActor(actor.0),
+                &crate::map_memory::inputs(&view.observation, &terrain),
+                &view.scene,
+            )
+            .unwrap();
+    }
+    let before = tor_simulation::diagnostics::work_counts().observations;
+    let mut profile = CommandProfile::default();
+    narrow
+        .record_explored_for_actors(
+            actors.iter().map(|actor| SimActor(actor.0)).collect(),
+            &terrain,
+            Some(&mut profile),
+        )
+        .unwrap();
+    assert_eq!(
+        narrow.game, full.game,
+        "map acquisition matches cold full-view authority"
+    );
+    assert_eq!(
+        tor_simulation::diagnostics::work_counts().observations,
+        before,
+        "map-only acquisition must not materialize rich observations"
+    );
+    assert_eq!(profile.map_appearance_projections, actors.len());
+    assert_eq!(profile.map_rich_views_reused, 0);
+    assert!(narrow.observations.is_empty());
+    for actor in &actors {
+        assert_eq!(
+            narrow.revision_view(*actor).unwrap(),
+            full.revision_view(*actor).unwrap(),
+            "deferred rich views retain the exact post-learning boundary"
+        );
+        narrow
+            .observations
+            .insert(*actor, Arc::new(narrow.revision_view(*actor).unwrap()));
+    }
+    let mut reused = CommandProfile::default();
+    narrow
+        .record_explored_for_actors(
+            actors.iter().map(|actor| SimActor(actor.0)).collect(),
+            &terrain,
+            Some(&mut reused),
+        )
+        .unwrap();
+    assert_eq!(reused.map_appearance_projections, 0);
+    assert_eq!(reused.map_rich_views_reused, actors.len());
+    assert_eq!(narrow.game, full.game);
 }

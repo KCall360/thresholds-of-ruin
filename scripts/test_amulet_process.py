@@ -290,13 +290,13 @@ class AmuletProcesses(ProcessTestCase):
 
         # Spectator snapshots and reconnects must not activate the objective.
         observer, watched = self.client(token=SPECTATOR_TOKEN, observe=True)
-        self.assertEqual(watched["state"], current["state"])
-        self.assertEqual(self.request(observer, {"type": "snapshot"})["state"], current["state"])
+        self.assertDisclosedStateEqual(watched["state"], current["state"])
+        self.assertDisclosedStateEqual(self.request(observer, {"type": "snapshot"})["state"], current["state"])
         self.assertEqual(self.retrieval_receipts(player), created)
         observer.stop()
         player.stop()
         player, reopened = self.client()
-        self.assertEqual(reopened["state"], current["state"])
+        self.assertDisclosedStateEqual(reopened["state"], current["state"])
         self.assertEqual(self.retrieval_receipts(player), created)
 
         current = self.transition(player, reopened, "down")
@@ -329,7 +329,7 @@ class AmuletProcesses(ProcessTestCase):
         server = self.server("--checkpoint-interval", 1, scenario=unrelated_fallback(self),
                              seed=None, save_actor=ACTOR)
         player, current = self.client()
-        self.assertEqual(current["state"], before["state"])
+        self.assertDisclosedStateEqual(current["state"], before["state"])
         self.assertEqual(current["history"], before["history"])
         self.assertEqual(self.bound_authority(player), bound)
         self.assertEqual(self.retrieval_receipts(player), receipts)
@@ -345,11 +345,11 @@ class AmuletProcesses(ProcessTestCase):
         self.assertIn("carry it up through the surface exit", welcome)
         self.assertIn("You are standing at the exit.", welcome)
         observer, watched = self.client(token=SPECTATOR_TOKEN, observe=True)
-        self.assertEqual(watched["state"], dropped["state"])
+        self.assertDisclosedStateEqual(watched["state"], dropped["state"])
         refused = self.say(text, "up")
         self.assertNotIn("You leave the dungeon", refused)
         unchanged = self.request(observer, {"type": "snapshot"})
-        self.assertEqual(unchanged["state"], dropped["state"], "Missing artifact refusal must cost zero time")
+        self.assertDisclosedStateEqual(unchanged["state"], dropped["state"], "Missing artifact refusal must cost zero time")
         self.assertEqual(unchanged["history"], dropped["history"])
         taken = self.say(text, "take Amulet of Yendor")
         self.assertEqual(taken, "You pick up the amulet of yendor.\n> ")
@@ -392,7 +392,7 @@ class AmuletProcesses(ProcessTestCase):
         self.work_budget.track(window, initial)
         self.assertTrue(initial["window_open"])
         self.assertTrue(initial["has_control"])
-        self.assertEqual(initial["state"], current["state"])
+        self.assertDisclosedStateEqual(initial["state"], current["state"])
         self.assertIn("surface exit", " ".join(initial["status_lines"]))
         self.assertTrue(underfoot(initial["state"])["stairs_up"])
         self.assertEqual(observation(initial)["combat"]["exit"], underfoot(initial["state"])["key"])
@@ -406,7 +406,7 @@ class AmuletProcesses(ProcessTestCase):
             self.work_budget.before()
             initial = self.native_press(window, native, "Return", "enter",
                                         seconds=self.remaining(20), wait_for_simulation=False)
-            self.assertEqual(initial["state"], current["state"])
+            self.assertDisclosedStateEqual(initial["state"], current["state"])
         self.assertFalse(initial["messages"]["more"], "Opening narration exceeded eight native pages")
         self.work_budget.before()
         try:

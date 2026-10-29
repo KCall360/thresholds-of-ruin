@@ -50,7 +50,7 @@ class DiscoveryServiceContracts(unittest.TestCase):
         current = self.snapshot()
         request = {"type": "command", "context": {"stream": current["context"],
             "readiness_revision": current["readiness"]["revision"]}, "branch": current["branch"],
-            "command": {"type": "act", "expected_revision": current["state"]["revision"], "action": action}}
+            "command": {"type": "act", "action": action}}
         rows = self.request(request)
         receipts = [row["receipt"] for row in rows if row["type"] == "ack"]
         self.assertEqual(len(receipts), 1)

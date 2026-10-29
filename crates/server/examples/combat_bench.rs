@@ -196,7 +196,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             )
                         };
                     let decision_ms = decision_start.elapsed().as_secs_f64() * 1000.;
-                    let revision = engine.revision(actor)?;
+                    let revision = engine.causal_boundary(actor)?;
                     let start = Instant::now();
                     let (_, profile) = if let Some(action) = action {
                         engine.command_profiled(
@@ -206,7 +206,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             &turn.to_string(),
                             &engine.branch().clone(),
                             Command::Act {
-                                expected_revision: revision,
+                                expected_boundary: revision,
                                 action,
                             },
                         )?

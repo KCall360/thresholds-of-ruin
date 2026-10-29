@@ -345,7 +345,6 @@ fn pending_haste_dose_interval_one_deleted_source_reopen_preserves_payload_and_r
         context: snapshot.reply_context().input,
         branch: snapshot.branch.clone(),
         command: Command::ResumeIntention {
-            expected_revision: snapshot.state.revision,
             intention: snapshot.readiness.resume[0].clone(),
         },
     };

@@ -391,6 +391,557 @@ changes did not cause it.
   client: a harness/environment limit, not a result). Exact-head hosted CI
   remains their qualification.
 
+## Server performance review: bounded local findings, 27 October 2026
+
+This window covers the new active-mob harness, five diagnostic-accounting
+regressions, and the subsequent ten-method simulation selection on harness base
+`9fe8b6d818cc8c0a3364251e99924237d32b3303` plus the recorded local test changes.
+It includes the coherent corrected simulation/server checkpoints described below.
+The two initial red selections reused one source-qualified library binary; green
+selections reused their separately built binary. Inspected command receipts
+report unchanged inputs.
+These are local development findings, not a claim that gameplay defects shipped.
+
+### Existing diagnostic contracts
+
+Five deliberately added regressions established **3 pre-existing diagnostic
+accounting roots / 5 distinct failing methods / 5 failed method executions**.
+Group roots by the missing accounting rule, not by each affected write site:
+
+| Root | Methods and actual red evidence | Correction / qualification |
+| --- | --- | --- |
+| Shared actor-table mutation accounting omitted insert/replacement and removal. | `actor_store::tests::actor_table_copy_counter_includes_shared_insert_and_replacement` and `actor_store::tests::actor_table_copy_counter_includes_shared_remove_and_edit`: each observed 0 copied actors where the independent two-actor snapshot required 2. | Route table mutations through one copy-accounting seam. Two methods, two failed executions; not four bugs for the subcases. Both methods subsequently passed in the selected local opt-level 0 checkpoint. |
+| A weak-only `Arc` identity change was counted as an actor payload clone. | `actor_store::tests::actor_table_copy_counter_excludes_weak_only_disassociation`: observed 1 instead of 0. | Distinguish strong shared ownership from weak disassociation. One method, one failed execution; the corrected method subsequently passed in the selected local opt-level 0 checkpoint. |
+| Scene-array clone accounting omitted the sight array on installation and both arrays on a warm read. | `observation::tests::scene_cache_copy_counter_includes_both_arrays_at_install`: 143 instead of 279; `observation::tests::scene_cache_copy_counter_includes_warm_snapshot_arrays`: 0 instead of 279. | Count the arrays actually copied; subsequent shared-ownership optimization must still count any retained public `Vec` copies. Two methods, two failed executions; both corrected methods subsequently passed in the selected local opt-level 0 checkpoint. |
+
+These are instrumented-work contract defects, not five gameplay defects or five
+naturally encountered failures. Their explicit diagnostic first-red executions
+are retained separately from new performance acceptance below.
+
+### New harness and fixture maintenance
+
+The causal harness selection exposed **3 new-harness roots / 3 distinct failing
+methods / 3 failed method executions**:
+
+- `test_active_mob_driver.ActivityEvidence.test_run_preserves_causal_failure_and_records_terminal_cleanup`:
+  terminal cleanup evidence was absent, and cleanup could replace the original
+  movement failure. Count the shared causal-failure/cleanup publication rule as
+  one root; its two subtest failures are one method execution.
+- `test_active_mob_performance_report.ActiveMobReportTests.test_wait_only_actor_cannot_hide_behind_active_region_totals`:
+  active region totals could conceal an individual AI that only waited.
+- `test_active_mob_performance_report.ActiveMobReportTests.test_every_crossing_matches_corridor_geometry`:
+  the validator accepted crossing counts inconsistent with the exact corridor
+  route. Seven negative subcase failures are one method execution, not seven bugs.
+
+The log's **10 assertion failure blocks** therefore do not mean ten methods or
+executions. All three corrected methods subsequently passed in the recorded
+63-method focused Python checkpoint (exit 0, unchanged inputs). This is evidence
+for the driver/validator contracts, not evidence of meeting a latency target.
+
+One additional **new test-fixture root / 1 method / 1 failed execution** occurred
+in `perception::contract_tests::reused_projection_indexes_keep_rotated_portal_sight_distinct_from_stair_disclosure`.
+Its abstract stair and hidden-disclosure assertions passed, but its later East
+physical portal started at interior x=2 in a width-9 region. The boundary-exit
+validator correctly returned `NotBoundaryExit`, surfaced as `InvalidLocation`.
+The correction leaves the stair assertions intact and moves the observer to
+boundary x=8 before adding the rotated physical portal. No production validator
+or privacy assertion was weakened; the corrected fixture passed in the same
+147-method simulation checkpoint. This is a new fixture error, not a stale approved oracle
+or a production topology defect.
+
+### Intentional performance first-red and preflight boundaries
+
+Six further methods reached their intended operation-count assertions once each:
+
+- `perception::contract_tests::one_observation_builds_each_projection_location_index_once`;
+- `observation::tests::warm_observation_reuses_its_geometry_projection_indexes`;
+- `awareness::tests::awareness_reconciliation_projects_actor_rows_without_full_observations`;
+- `awareness::tests::attack_awareness_capture_and_application_do_not_build_full_observations`;
+- `awareness::tests::unchanged_attack_listener_reuses_physical_hearing_geometry`;
+- `combat::contact::tests::warm_attack_available_reuses_scene_and_revalidates_contact`.
+
+These **6 methods / 6 intentional red executions** establish new optimization
+acceptance, not six additional discovered bugs. In that ten-method selection,
+three semantic controls passed and the separate portal fixture above failed.
+All six passed after the refactor in the 147-method simulation checkpoint.
+These behavioral checks deliberately used a task-local opt-level 0 override with
+debug assertions and overflow checks retained. They are not release performance
+evidence or default-profile hosted qualification.
+
+Three independent preflight causes prevented later checks, with **0 test methods /
+0 failed method executions** each:
+
+1. The new benchmark attempted `LowerHex` formatting on an unsupported digest
+   array at three source sites. One compilation root and one failed Cargo check,
+   not three bugs. Explicit byte formatting corrected it; the matching later
+   example check passed (exit 0, unchanged inputs), as did the baseline release
+   build. Those build results are not additional test-method passes.
+2. The shared-scene refactor left an unused `adapt::observation` wrapper, rejected
+   by `-D warnings`. One development preflight root and one failed Clippy command;
+   one slice adapter replaced the wrapper and all callers were updated. The
+   combined simulation/server test-target Clippy retry passed.
+3. The new fixture used manual `% 2 == 0` parity, rejected by current Clippy.
+   Equivalent `is_multiple_of(2)` corrected the example-only lint failure; the
+   targeted example check passed. No behavioral test ran in this failed step.
+
+
+The sustained-activity follow-up has separate reconstructed causality evidence:
+two new `test_active_mob_driver.ActivityEvidence` methods reject a hidden middle
+gap and missing late/canonical/all-AI coverage. An isolated exact pre-sustained
+driver passed the positive boundary fixtures but failed both intended rejection
+assertions; the current driver passed the same methods and the complete 18-method
+driver owner. This establishes a new harness acceptance-gap correction, not a
+game defect or an originally recorded checked-tree first-red. The corresponding
+three offline Rust proof tests passed in the selected server library checkpoint.
+
+One executor transport replacement interrupted a local behavioral compilation.
+No terminal receipt or test result existed; it is infrastructure-only, not a
+failed test method. After checking unchanged source, available Cargo locks and
+no compiler/linker process, the exact command retry passed. A separate local
+cohort wrapper initially named a nonexistent receipt: zero tests executed; the
+corrected invocation reused the verified binary and all 147 selected methods
+passed. Neither interruption nor invocation error adds a production defect.
+
+The first simulation feedback wrapper said "Cargo failed", but its underlying
+build finished successfully and five tests then failed at the accounting
+assertions above. Do not count that wrapper status as an additional compiler root.
+Documentation preflight caught two maintenance roots in two methods (one failed
+execution each): the new versioned workload was missing from the explicit
+workload-identifier registry, and new command examples used development-local
+paths forbidden by the guide policy. The registry now names only the actual
+workload format; examples use an explicitly chosen output-directory variable.
+No version or local-evidence check is disabled. The corrected 19-method documentation
+checkpoint passed with unchanged inputs.
+
+Raw local logs remain uncommitted; the bounded counts here summarize inspected
+receipts, not repository-lifetime failure rates or exhaustive CI qualification.
+
+
+### Raw World-fact cache follow-up
+
+At the first-wave head `472d9f680417e9e10f1b4e29523e2c70aa72a310`, one new
+operation-count method,
+`observation::tests::warm_observation_reuses_raw_world_facts_but_projects_fresh_entities`,
+passed its nonempty fixture and fresh-projection controls, then failed because the
+second unchanged observation rebuilt raw facts (2 builds versus 1 expected).
+This is **1 intentional optimization first-red method / 1 execution**, not an
+additional discovered gameplay defect. The bounded raw-fact cache keeps complete
+World identity and exact scene/emitter evidence while projecting disclosure,
+contact, live door clearance, terminal policy and hallucination fresh.
+
+A preflight caught **1 internal test-helper compatibility root / 0 executed test
+methods**: removing the old concealment wrapper missed an independent awareness
+witness. A test-only wrapper delegates to the same canonical predicate; the
+existing assertion was not changed. The coherent formatting, simulation test-target
+and affected benchmark Clippy retry passed with unchanged inputs. No claim of a
+production behavior failure follows from that compile-only result.
+
+A separate executor interruption left the first no-link session without a terminal
+receipt. Source and Cargo locks were checked before exact-command recovery;
+that retry passed. This infrastructure interruption is not a failed test method.
+
+The green checkpoint passed all six new witnesses plus one existing raw-world
+hazard method, then 151 remaining affected contracts from the same verified
+executable: **158 unique methods, 158 passing executions**. The retained tests
+cover portal/body/contact disclosure, fresh hallucination, actor/item privacy and
+branch isolation; eviction now also checks release of raw cached payloads. These
+checks use the task-local opt-level 0 profile with assertions and overflow checks,
+not release timing or default-profile hosted qualification. Server/integration
+and real-process final-head qualification remain pending; their earlier passes
+are not silently relabeled as coverage of this changed simulation dependency.
+
+The first-wave real headless smoke remains failed: throughput was 0.472 Hz and
+source-free restart exceeded its unchanged 30-second limit after successful save
+and inspection. A protected-copy diagnostic later restarted in 8.664 seconds;
+the earlier failure remains unreproduced and unresolved, not waived. Ordinary
+saved-action p95 passed its 8 ms budget, but the larger case exceeded the 33 ms
+maximum at both baseline and head. These negative acceptance results are not
+counted as discovered implementation roots without a causal diagnosis.
+
+### Exact decision-geometry reuse follow-up
+
+At head `da492247cfb57a6043a2a39e826d983bc57b371a`,
+`observation::tests::decision_reuses_witnessed_geometry_but_refreshes_disclosure`
+passed its nonempty, identical-view, exact-sight and newly placed item controls,
+then failed at the intended work assertion: three scene builds versus one.
+This is **1 intentional optimization first-red method / 1 execution**, not a
+new discovered gameplay defect. The fix shares the ordinary exact-witness
+geometry lookup while projecting current entities, knowledge and effects anew.
+
+The bounded review updated existing operation-count fixtures to explicitly
+measure either a cold construction or a warmed lookup. Action, route, tactile
+privacy and precommit-plan assertions remain exact. These were proactive
+contract updates, not observed stale-test failures; no failed-test count is
+invented for them. The geometry invalidation fixture additionally compares
+fresh decision sight and observations after chart, body, orientation and death
+changes against the uncached computation.
+
+The green checkpoint passed the new regression and 160 affected methods from
+the same verified executable: **161 unique methods / 161 passing executions**.
+The integration checkpoint passed the warmed finite-supply boundary plus 20
+affected public integration methods (21 unique methods). A local selection
+preparation typo caused one driver failure before any method executed; correcting
+the selection reused the same binary and did not change assertions.
+
+This task-local opt-level 0 evidence preserves assertions and overflow checks;
+it is neither release timing nor exhaustive/default-profile hosted qualification.
+
+### Shared cell-array follow-up
+
+The first new copy-count test exposed **1 new-fixture setup root / 1 method /
+1 failed execution**, not a production defect: the standard two-room fixture
+contains a door and therefore failed its own feature-free positive precondition.
+The existing bare-chamber fixture is the correct positive control. No copy-saving
+proof was claimed from that setup failure. A prematurely launched green no-link
+check was allowed to finish with frozen inputs; original instrumented Vec
+production was then restored for the corrected causal red. This avoidable extra
+preflight is recorded rather than presented as useful regression evidence.
+
+The corrected positive fixture passed its full-view, fresh actor/item and
+stable geometry controls, then failed at the intended copy assertion: 190
+`CellView` rows copied versus zero. This is **1 intentional optimization
+first-red method / 1 execution**, separate from the setup failure above. The
+new regression then passed with shared arrays, independent caller edits and
+exactly-once projection detachment accounting.
+
+The passing no-link preflight covers simulation/server test targets and the
+benchmark. Its production and consumer input hashes exactly match the green
+implementation; the sole subsequent difference is the corrected existing fixture
+call in the new test, compiled in the causal red and green runs. That bounded
+reuse avoids another identical production lint build; it is not mislabeled as
+an exact-tree Clippy pass. The existing public integration tests passed at the
+separate geometry-only checkpoint; they are not relabeled as fresh COW evidence.
+
+The final focused library checkpoint passed **162 unique methods / 162 passing
+executions** from one verified executable, including live door/trap and
+hallucinated-stair detachment with unchanged retained snapshots. The next
+integration evidence is the combined release workload and real headless process;
+final-main affected integration/server qualification remains required. These
+selected local checks are not exhaustive hosted assurance.
+
+## Immutable disclosure and boundary work: local checkpoint, 27 October 2026
+
+The instrumented pre-change checkpoint preserves production behavior at
+`45c723dc435d21f0e46b9dbe4d1138f42c8b8e77`. Four new regressions reached their
+intended assertions after positive state/privacy/replay controls:
+
+- `control_scrolls::tests::absent_ground_scare_clears_only_eligible_receipts_and_preserves_earned_flee`: eight unnecessary neighborhood probes, expected zero.
+- `control_scrolls::tests::unchanged_present_scare_contact_does_not_copy_shared_actors`: two actor payload copies for an unchanged contact transition, expected zero.
+- `creature_view::tests::fresh_observations_do_not_copy_owned_personal_inspection_collections`: four owned stat expansions for four fresh observations, expected zero; demanded wire materialization remains positive.
+- `engine::observation_reuse_tests::action_projection_reuses_settled_readiness_without_revising_disclosure`: eight observer-local scheduler scans after one settled action, expected zero; full observations, tie ordering and exact replay controls passed.
+
+These are four deliberately introduced performance first-red methods/executions,
+not newly discovered independent correctness defects. Two additional new tests
+failed setup because their shared fixture supplies starting equipment, contrary
+to a new empty-item-store assertion. That is one new-fixture assumption root /
+two methods / two failed executions, not stale existing coverage. Their correction
+asserts the actual no-ground-scare precondition without deleting equipment or
+relaxing state/error assertions. The same absent-feature cause already has the
+first-red evidence above, so no redundant old-source link was added.
+
+The first green no-link preflight caught one missed existing consumer migration:
+`deep_population_atomicity_tests::assert_original_admission` still accessed
+owned `hit_dice` fields directly on the new immutable facts type. Two E0609
+diagnostics belong to one stale-test API-migration root / one failed preflight /
+zero executed tests. Explicit demand materialization preserves both existing
+251-HD assertions. No production behavior was weakened.
+
+The green checkpoint passed **59 unique methods / 59 executions**: 25 simulation
+library, 26 server library and 8 integration owners. Both corrected fixture methods
+and all four intended-red methods passed. No-link Clippy (simulation/server
+libraries, tests and active workload example), formatting and architecture checks
+passed. The first architecture invocation had an unset tooling PATH and never ran
+Cargo metadata; the correctly configured retry passed. This is a setup error, not
+a production or stale-test defect. Release timing, real-process throughput and
+final-main/hosted qualification remain pending; no 5 Hz success is claimed.
+
+The documentation check then caught one genuine portability error in this new
+review: a citation to ignored, machine-local receipts.
+`test_guides_do_not_cite_local_only_evidence` failed once; the report now states
+source identities and aggregate evidence without presenting private local paths
+as repository references. This is one documentation defect / one method / one
+failed execution, not a stale-test failure. The assertion was unchanged.
+
+
+## 2026-10-27: preparation and witnessed projection components
+
+Three intended first-red performance regressions exposed unnecessary work, not
+new gameplay defects: non-due preparation checks made four owned snapshots,
+identical streaming geometry made eight body queries, and unchanged full/reference
+views repeated two actor classifications. Due-only snapshots and exact existing
+scene/visibility witnesses remove that work while preserving dynamic disclosure.
+The focused checkpoint covers preparation interruption/overflow/ordered riders,
+streaming witnesses, rejected branches, event proofs and server revision privacy.
+
+The initial combined run completed all 61 simulation methods before its server
+compile was interrupted without a terminal receipt. The resumed driver first
+encountered the abandoned verifier lock; no test ran on that attempt. Free Cargo
+locks, unchanged source hashes and the unavailable prior session established the
+interruption; the stale lock was preserved and only the remaining owners resumed.
+These are infrastructure failures, not production or stale-test roots.
+The completed checkpoint passed 78 unique methods: 61 simulation library,
+13 server library and 4 simulation integration methods. Clippy preflight passed.
+These are focused local checks, not hosted or exhaustive qualification; release
+measurement of this batch remains pending.
+
+## 2026-10-28: canonical reach geometry and empty ground work
+
+Two intended first-red performance contracts failed on the unchanged implementation:
+`combat::contact::tests::warm_contact_endpoints_reuse_source_geometry_but_resolve_live_target`
+resolved 12 body cells rather than four fresh target cells, and
+`item_store::tests::empty_ground_index_skips_scene_probes_without_losing_carried_items`
+performed eight ground lookups rather than zero. Both positive fixtures passed
+before their work-count assertions. One linked simulation artifact qualified both
+reds. These are planned optimization regressions, not two newly discovered gameplay
+defects or stale-test failures. The cheap green preflight caught one new implementation API mistake: the existing
+`RegionMap` has no `is_empty` method (one E0599 diagnostic, zero executed tests).
+The fix checks its first indexed entry without adding an index or changing behavior.
+This is a compile-time implementation defect, not stale coverage.
+Canonical contact geometry remains the only route
+algorithm; cold-oracle/live-state and carried/ground mutation witnesses are retained.
+The completed focused checkpoint passed 52 unique methods: 35 simulation library,
+13 server library and four simulation integration methods. Both intended reds and
+the live combat/death/rejected-world witness passed. No-link Clippy passed after
+the API correction. These are focused local results, not hosted/full qualification;
+release measurement of this batch is pending.
+
+
+## 2026-10-28: per-actor snapshot ownership
+
+One deliberate first-red performance contract,
+`actor_store::tests::shared_actor_edit_copies_only_touched_payload_and_retains_snapshot`,
+observed three actor payload copies for one edit in a retained three-actor snapshot,
+where the intended bound is one. Positive original/candidate value assertions
+passed before that count assertion. This is planned optimization work, not a
+new gameplay defect or a stale-test failure. Two existing copy-accounting tests
+are deliberately updated to distinguish copied actor payloads from copied shared
+map handles; their isolation and owned return-value assertions remain strict.
+Weak-only disassociation, unique removal/replacement, indexed mutation, rollback,
+visibility and checkpoint witnesses are included in the focused checkpoint.
+
+One preflight invocation repeated `--lib` and Cargo rejected the command before
+compilation or tests. This is one driver error, zero test methods and zero stale
+fixture failures; the corrected command removes the duplicate argument.
+The focused checkpoint passed 29 unique methods: 19 simulation library, six
+server library and four simulation integration methods. Clippy preflight passed.
+The later release smoke measured 2.115 moves/sec, still below 5/sec; no full or
+hosted pass is claimed.
+
+## 2026-10-28: change-driven commit facts
+
+The deliberate first-red
+`event_history::tests::commit_event_facts_match_rich_authority_without_materialization`
+passed positive identity, receipt, restore and candidate-isolation assertions,
+then observed one rich Observation where the intended commit-only path needs
+zero. This is a planned performance contract, not a new gameplay defect.
+
+One new fixture/oracle error was caught in
+`event_history::tests::commit_event_facts_keep_hidden_identity_and_reject_stale_or_wrong_owner`:
+the adjacent invisible source correctly retains tactile Contact authority for
+its victim, while the new assertion incorrectly expected no caster identity.
+The corrected witness requires exactly Contact (not Creature) and the exact
+source ID, while the third-party proof stays empty. Count: one fixture root,
+one method, one failed execution; zero stale existing-test failures and zero
+production defects. A second new fixture error requested 100 actors from the
+small diagnostic constructor, which accepts at most eight; setup failed before
+any behavior assertion. The corrected fixture explicitly distributes five
+validated positions over each of twenty rooms. This is one additional fixture
+root/method/failed execution, still zero stale existing-test failures. The
+interrupted server link hit the disk guard; a subsequent retry found its abandoned
+verification lock. Both are infrastructure outcomes before tests, not product
+failures; obsolete debug executables were removed and the proven-abandoned lock
+cleared before retry. The no-link check also caught a new test's private Engine
+field access before any test ran; it now uses the existing checkpoint encoder
+and simulation restore instead of widening production visibility.
+
+The simulation checkpoint passed 40 event/receipt/boundary methods plus three
+reused exact preparation, map-memory and historical-plan witnesses. The new
+awareness work-count test passed semantic Game/contact/RNG equality and proved
+a real visibility-triggered rescan, then deliberately failed at one unnecessary
+actor payload copy versus zero. The source-local guard skips only an identical
+contact assignment; it does not skip scans or contests. Its green and the server
+integration checkpoint passed. The corrected server first-red then
+passed full observation/revision/replay equivalence and failed at exactly 100
+rich observations for one local move across the 100-actor fixture, above its
+bounded affected-observer budget. The actual server map-adapter fixed-point
+witness passed in the same qualified binary.
+
+The wired checkpoint passed all 13 selected server methods and 54 of 55
+simulation methods. One existing awareness work-count assertion still expected
+two expensive classifications after exact classification sharing had reduced
+that to one; its identity/contact/alert/RNG and zero-rich-view assertions passed.
+The fixture now explicitly starts its scene cache cold and requires exactly one
+classification with an unchanged visibility witness. This is **one stale existing
+test root, one method and one failed execution**, not a product defect. Its
+focused rerun passed; no unrelated production change was made for it. A no-link
+preflight caught private cache-field access in the new cold-cache setup; the
+fixture now resets through the existing Default implementation. That compile
+error was not an executed test failure. The combined checkpoint qualifies 68
+unique methods (13 server, 55 simulation), reusing the 67 earlier passes across
+only the test-body/prose correction. Clippy passed on the production changes.
+Release measurements subsequently reached 2.937 moves/sec (still below 5/sec);
+hosted CI is not claimed.
+
+One additional stale-validator root was caught by all four head-side ordinary
+benchmark validations: `validate_work` still required exactly two rich views
+per actor, contradicting the intentional boundary-proof fast path. The fix
+requires all proof fields together, strict integer counts, exact observer
+coverage and bounded fallback/map materialization; absent proof fields retain
+the legacy contract. Its positive proof fixture reproduced the intended red,
+39 Python tests passed, and all eight retained base/head raw runs revalidated.
+Count: one validator root, four failed validations, no product defect. A first
+revalidation command incorrectly selected the phase-D case subset; that was a
+driver flag error and is retained separately, not counted as a stale test.
+No benchmark or Rust build was repeated.
+
+## 2026-10-28: independent input authority and admitted operands
+
+Two deliberate first-red witnesses establish the changed contracts. The wire
+fixture first validates its InputContext, then fails because the old Act schema
+requires `expected_revision`. The human-operand test admits a natural attack,
+equips a different weapon and reaches the intended failure: the queued Default
+attack selected that new item. These are explicit semantic changes, not newly
+discovered violations of the previous contract. The three causal regressions now pass in focused green qualification. A third causal witness commits a real origin
+change and fails because the unconnected runtime registry still holds the old
+basis; per-commit publication hooks are now enabled for green validation.
+
+Cheap preflights caught two newly authored InputBasis mistakes (an interior doc
+comment and wrapping an already typed ItemId), then passed after correction.
+The coherent server preflight caught 23 remaining compile errors in integration
+fixtures still using the removed wire field or old decoded shape. These are
+migration completeness errors before any affected test executed, not 23 failing
+tests or product defects. A later all-target preflight found one additional
+map-return fixture with the obsolete wire field; that was corrected along with
+an unused fixture actor parameter, and the server preflight passed. A read audit also caught a historical wire fixture from revision 52
+being edited instead of the current v64 source; the historical fixture was
+restored exactly. The provisional current fixture was subsequently replaced
+by genuine final-server process recording; historical fixtures remain unchanged.
+
+The first focused green run exposed two stale assertions after the approved
+contract change: `engine::wire_request::tests::durable_wire_retry_resolves_before_a_taken_item_or_revision_is_checked`
+still expected `StaleRevision` when resolving an unavailable item as a new
+request, although the wire action no longer carries a display revision. Its
+same-request durable retry and fresh unavailable-target assertions both passed;
+the final expectation is now `InvalidAction`, with no removed safeguards.
+`wire::current_wire_protocol_revision_is_explicitly_pinned` still pinned 64
+rather than the new 65. Count for this checkpoint: two stale roots, two distinct
+methods, two failed executions; both targeted green reruns passed. The other 24
+selected server methods, 11 selected simulation methods, and 290 protocol
+integration methods passed. These counts do not constitute whole-package or CI
+qualification.
+
+The local multi-target runner initially omitted client-common's required
+`test-support` feature; compilation failed before any common test executed.
+The corrected owner passed all five selected methods, and four ASCII socket
+methods passed. The server integration link twice crossed the disk headroom
+guard; the owned run was stopped, obsolete archived build artifacts were
+removed with manifests preserved, and only the unfinished target was resumed.
+Stale wrapper lock refusals performed no additional builds or test executions.
+The three selected integration methods then passed. These are harness/resource
+interruptions, not product defects or stale test assertions.
+
+The documentation check also found the Hello example and several appearance
+handoff references still using the prior wire revision. The example is updated,
+while historical handoff prose now describes its original introduction without
+presenting an obsolete revision as current. A historical fixture filename in
+this ledger was rephrased to avoid the guide's reserved ruleset-name syntax.
+This is one documentation maintenance finding, one failing method
+(`DocumentationTests.test_documents_do_not_mention_other_versions`), one
+execution; not a production defect or a stale test assertion.
+
+Actual-process coverage found one genuine implementation defect in this local
+input-authority change: the new private operand/control generations also
+participated in spectator readiness numbering. Spectators have no command
+permissions, so owner operand/control changes must not become spectator
+authority-numbering signals. The input basis already excludes private charges
+and reservations; no private-item-value leak was established. The existing regression
+`IntentionProcesses.test_readiness_is_authoritative_across_control_changes_and_simulation_execution`
+failed at its exact spectator invariant (revision 4 instead of 0); the other 11
+selected process methods passed. This is one development production-defect root,
+one failing method, one failed execution, not a stale expected value. The fix
+excludes spectators from those private generations while retaining controller
+ABA protection; the focused real-inventory/control-ABA regression, three related input-context
+methods and two existing owner authority/exhaustion regressions pass. The exact
+previously failing actual-process case now passes against the rebuilt server,
+and the final real wire recording succeeds. The unchanged client/bootstrap
+artifacts retain their explicit earlier-build provenance. Pre-fix performance/recording evidence is retained as pre-fix, not
+relabeled final-head qualification.
+
+The later frozen-baseline ordinary comparison encountered three additional
+executions of the already recorded old boundary-accounting validator failure;
+this is the same validator root, not three new defects. Seven complete raw runs
+validated under the current oracle without rerunning, and only the final run
+interrupted by the disk guard was replaced. The replacement is not temporally
+adjacent to its paired head sample. All eight complete runs validate structurally,
+but the ordinary maximum-latency budget still fails; validation is not a claim
+that the performance target passed.
+
+### Typed dependency evidence checkpoint (2026-10-28)
+
+The first cheap preflight caught two implementation/lint issues: the local
+Rust toolchain deprecated `AtomicU64::fetch_update`, and an item before-location
+fact was not yet consumed. The checked allocator now uses a compatible CAS loop;
+old/new carrier dependencies are explicitly invalidated. A read audit also
+removed strong global identity handles that would unnecessarily retain COW
+payloads; these were review findings, not behavioral test discoveries.
+
+A new internal region-index invariant test was accidentally inserted twice by
+the coordinator and helper before the preflight source snapshot. The compiler
+rejected the duplicate name. The exact duplicate was removed, and sole source
+application ownership clarified. This is one new-test setup/coordination error,
+not a stale existing expectation or a product failure. No broad tier was run.
+
+Four exact causal witnesses failed at their intended assertions before enabling
+the preparation/region/observer paths and fixing empty-source bucket lifetime.
+All four now pass. The bucket regression is one new implementation invariant
+defect discovered in review and confirmed by an internal two-item-row test, not
+an observed valid published-game failure. Explicit contributor counts fix it.
+The unchanged red binary also passed 28 store/ancestry/weak-root/cold-index
+invariants; final selected green passed 159 simulation and 17 server methods.
+
+The first coherent green run passed all four causal tests and 154 other selected
+simulation methods. One existing awareness test still required a full perception
+rescan after any global visibility change. That is the implementation detail
+this batch intentionally removes: remote-disjoint changes can now carry a
+certified unchanged classification. The test retains exact Game/contact/RNG and
+no-COW assertions, and now requires every eligible observer to be covered by
+one rebuilt or certified classification and the newly recorded awareness
+boundary to contain all eligible observers. This is one stale-test-maintenance
+root, one failing method, one failed execution. It is not counted as a product
+bug or a waived failure. The updated test passes, as do all other selected methods.
+
+The selected server runner initially named the spectator test under the generic
+module rather than its actual nested owner. One first server test passed before
+selector resolution stopped the runner. Resolving the exact registered names
+then reused the same verified binary for all 17 selected methods; no rebuild.
+This was a selector-driver error, not a test or production failure.
+
+### Simplifying the dependency experiment
+
+The broader typed-dependency cohort passed its focused contracts but did not
+establish a matched throughput gain: active-cycle medians were 316.458 ms before
+and 317.027 ms after, with 16 samples per side. The real headless run completed
+3.029 moves/second, below the unchanged five-per-second goal. Region pin spans
+improved, while availability and observer proof work did not demonstrate enough
+benefit to justify their complexity. Instrumented scope timings are diagnostic,
+not additive estimates or a reason to discard noisy samples.
+
+The next cohort removes positive availability-proof caching and general observer
+delta reuse, keeping region contribution ownership and exhaustive empty-residency
+classification. Four availability-proof-only tests and two observer-delta-only
+tests are removed with those mechanisms, not counted as lost gameplay contracts;
+existing canonical availability, target/payment/lifecycle, perception/privacy,
+rollback and replay tests remain. The awareness test again uses its original
+canonical-rescan assertion because that implementation is restored. The prior
+stale-test failure remains recorded above rather than erased from the ledger.
+The genuine empty-source bucket lifetime regression remains mandatory.
+The simplified cohort passes 153 selected simulation and 17 server methods.
+A disk-headroom guard interrupted the server test link before any server test
+ran. Existing simulation evidence was retained; obsolete debug CLI executables
+were removed with hashes recorded, and only the unfinished server target was
+resumed. No release baseline, library cache or source was removed, and this
+resource interruption is not a gameplay defect or stale-test failure.
+
 ## Add the next useful finding
 
 One compact row or paragraph per diagnosed cause is enough:
@@ -404,3 +955,305 @@ One compact row or paragraph per diagnosed cause is enough:
 Use the findings to improve fixture update lists, cheap preflights and affected
 owner selection. They are not a reason to remove strict assertions, security
 coverage, unique boundary witnesses or required native CI.
+
+### Canonical map projection and socket latency checkpoint
+
+Focused development distinguishes intentional causal failures from new test or
+runner setup mistakes. Restoring legacy rich-map work, old-side classification,
+and TCP batching makes the corresponding new work/socket assertions fail; these
+are deliberate first-red witnesses, not newly discovered gameplay defects.
+
+Two setup roots were corrected: the all-target client lint command initially
+omitted the existing `test-support` feature, and the new map oracle requested two
+units of a non-stackable ordinary item. The latter failed with `InvalidQuantity`
+before its intended assertion and is not causal optimization evidence. One
+runner initially summarized that setup failure too broadly as an intended red;
+its exact assertion evidence was subsequently checked and that one method was
+rerun with quantity one. Neither case is counted as a stale existing test or a
+production defect; successful independent evidence was preserved.
+
+Two existing observation-reuse methods still assumed map acquisition eagerly
+created a rich view after every action. They failed at zero-additional-view count
+assertions, while all selected map/disclosure/replay/rollback checks passed.
+The revised witnesses count exactly the missing views, require each to materialize
+once, and continue requiring repeated reads to reuse the identical boundary.
+This is one stale-oracle root, two distinct failing methods and two observed
+failed executions, separate from the new fixture setup error above.
+
+### Boundary derivation follow-up accounting
+
+A source audit found that the newly separated intention-derivation duration was
+serialized in command profiles but omitted from their exclusive-duration sum.
+The ordinary latency report therefore left that duration in its unattributed
+bucket. This did not change total latency, game behavior or acceptance budgets;
+the retained 123.724 ms tail contained only 0.002283 ms of intention derivation.
+The sum and report fields now include each narrow boundary phase, with a focused
+unit assertion for exact once-only accounting. This is an audit-found diagnostic
+defect, not a defect credited to a previously failing test. Existing timing
+receipts remain unchanged; no new stale-test failure is inferred from this audit.
+
+### Borrowed growth-retry ownership follow-up
+
+The new shared/unique allocation-identity witness passed and demonstrated the
+old mutable no-op detachment versus retained ownership after a borrowed retry
+decision. Thirteen other selected simulation methods also passed. This is causal
+refactor evidence, not a claimed historical first-red production defect.
+
+One newly authored pending-recovery-context method failed its positive fixture:
+the creature had no contextual recovery source, so canonical normalization
+correctly retained `Known { sensed_hostile: false }` instead of the test's expected
+`true`. The corrected fixture provides and asserts that capability and the actual
+recovery period before exercising context success and error ordering; its
+focused rerun passed. This is one new-fixture root, one distinct
+method and one failed execution, not a stale test following an approved contract
+change and not a production defect. Successful independent evidence is retained;
+only the corrected method and unfinished targets need new execution.
+
+A disk guard later interrupted only the unfinished server test compilation.
+All successful simulation evidence was preserved. Inactive duplicate artifacts
+and obsolete library variants were cleaned with recorded hashes; the server-only
+resume passed all six selected methods. This is an infrastructure interruption,
+not an additional failed test method or a production/stale-test defect.
+
+
+### Causal/display separation: preflight accounting
+
+The protocol66/archive64 migration deliberately changes display revision ownership,
+snapshot identities and event delivery. Static preflight found unupdated test and
+benchmark constructors (required snapshot fields, formerly-Copy bases, private
+causal guards and removed revision-map internals). These are compile-time fixture
+maintenance, not observed failed gameplay methods. The initial package-selection
+error was a driver/workspace setup issue; helper visibility, a stale annotation
+argument and one Clippy signature warning were development integration errors.
+No stale-method execution count is inferred from these compiler diagnostics.
+
+Source review also identified two semantic development defects before execution:
+legacy tick/value narration gates could duplicate old receipts or omit identical
+same-tick new receipts, and post-commit outcome projection failure could leave a
+live stream without its committed event. Causal batch/suffix capture and explicit
+stream disconnection address those respectively. Focused tests retain legacy
+counterexamples and exact expected outcomes; these are audit-found issues, not
+credited as historical failures caught by an already-running test suite.
+The 68 recorder-driver unit methods passed; this does not qualify Rust behavior
+or the performance goal.
+
+The first focused Rust pass passed both protocol methods and 27 common-client
+methods. Three newly authored outcome-stream methods failed before their intended
+assertions because their positive fixture read the not-yet-recorded wire66 golden.
+The fixture is now independently constructed and validated, removing that circular
+qualification dependency. This is one new-fixture/setup root, three distinct
+methods and three failed executions, not three gameplay defects or stale existing
+tests. The 29 successful methods are preserved; only these three and unfinished
+targets are selected for the resume.
+
+### Causal/display separation: ordered text exchange resume
+
+The focused green-resume pass had **one failing method execution**:
+`turns::an_exchange_of_blows_is_told_in_order_and_a_death_ends_it`.
+Its actual passage stopped at preparation instead of the expected interrupted
+exchange and HP loss. Diagnosis established two overlapping roots, not two
+executions:
+
+- **One stale existing-script root / one distinct method:** the script sent an
+  Immediate Ack for admitted Act work and changed only visual `ready`, leaving
+  authoritative Readiness open. Settlement correctly trusted that purported
+  completed immediate request. The script now sends Admitted, Started, closed
+  Readiness, its unchanged ordered outcomes, Resolved, then reopened Readiness.
+  No expected prose or production permission checks were weakened.
+- **One development production narration regression:** `Chronicler::outcome`
+  ignored the disclosed `OwnAction.basic_attack` flag, rendering generic ability
+  preparation instead of the existing basic-attack phrase. It now uses that
+  flag, not an ability ID/name heuristic. The new focused method
+  `engine::chronicle::tests::outcome_preparation_prose_uses_disclosed_basic_flag_not_ability_name`
+  compares new and legacy beats for both flag values with a renamed ability.
+
+Both issues were exposed by the same original execution. Fixes are staged;
+no green rerun is claimed here, and the newly added witness has not yet run.
+
+The new basic-flag unit witness subsequently **passed** and is preserved without
+rerunning. The existing exchange method had a **second failed execution**, this
+time while validating its reconstructed queued stream before any prose assertion.
+The first fixture correction had omitted the Queued intention update: an Admitted
+receipt does not populate `ClientState.intentions`, so a first-seen Started update
+correctly failed `InconsistentState`. The script now emits Queued before Started,
+with the same exact intention/entry identity. This is an incomplete correction of
+the same stale-script root (one distinct existing method, now two failed
+executions), not an additional production defect or another failure of the
+successful basic-flag witness. No further rerun result is claimed here.
+
+The first focused server pass preserved 22 successful methods and exposed two
+new/migrated test-setup errors (two methods, two failed executions): the new
+frozen-creature inspection fixture used a bare two-room actor without inspectable
+creature state, and the migrated broadcast ownership assertion compared a retained
+server Arc to an independently decoded wire Arc. The inspection witness now uses
+the existing authored mob-arena fixture and still requires actual live damage;
+the ownership witness retains the original server Arc and checks both pointer
+stability and equality with the received picture. Neither correction changes
+production behavior or weakens frozen-picture semantics. Reruns pending.
+
+The corrected frozen-inspection and broadcast-ownership witnesses and original
+text exchange subsequently passed; 69 unique focused Rust methods were green
+before pre-PR cleanup. An environment interruption killed one remainder compile;
+its orphaned verify lock caused a setup-only retry failure and was preserved and
+cleared after confirming the owned tool session was gone. Neither is a failed
+behavioral method.
+
+Independent review then found a genuine pending-pause ownership regression:
+fallible observer capture after `mem::take` could lose the current and unvisited
+actors' required suspensions. The fix retains each obligation until suspension
+and pause succeed, with a two-actor capture-failure/retry witness. This is an
+audit-found defect, not credited as an already-executed test catch. The same
+review found Observe flush could precede live reads, foreign outcome self-target
+was not checked, and live client state could masquerade as a reset Snapshot.
+Targeted causal fault witnesses accompany that coherent cleanup; no green rerun
+is claimed until its focused receipt completes.
+
+The first cleanup behavioral pass preserved 34 successful common-client methods,
+including blocked-flush ordered delivery and foreign-self rejection. The newly
+authored sequence-cancellation witness failed setup validation because it set
+active preparation without its required remaining duration. Its positive fixture
+now supplies that duration and validates OutcomeFacts before reduction. This is
+one new-fixture method/one failed execution, not a production behavior defect.
+
+The cleanup resume passed the corrected sequence fixture, seven text methods,
+and 19 of 21 selected server methods. Two remaining setup/expectation failures
+were not gameplay defects: a migrated cold test indexed a view cache that is now
+legitimately lazy, and a new round-trip test expected Wizard shorthand spelling
+instead of its established canonical JSON encoding. The former still requires
+no stale disclosed plan in any retained cache and exact final knowledge/privacy;
+the latter checks requested display basis and exact decoded saved operands.
+These are two failed methods/executions, recorded separately from production bugs.
+
+The two remaining cleanup expectation corrections passed. Across preserved
+cleanup receipts, all 63 selected methods pass. The 69 earlier phase21 successes
+remain separate evidence; overlapping methods are not double-counted as new
+coverage. No release or performance qualification is implied by these checks.
+
+### Demand-driven picture harness and compact semantic follow-up
+
+The first real headless run exposed one stale driver contract: it treated a new
+ready notification as evidence that the retained picture had also refreshed.
+With separate outcomes and pictures, this compared the old center to the
+completed move's destination. Count one stale driver root and one failed
+actual-process execution, not a failed movement. The corrected driver waits for
+both next readiness and a newer picture, then retains the exact destination
+assertion. A fresh but wrong destination still fails. Restart equality compares
+all disclosed contents and branch/history while excluding only attachment-local
+picture identity and generation. Twenty pure driver tests passed; the second
+actual-process run completed with save/restart equality. Its measured throughput
+still missed the target and is not presented as a test success for performance.
+
+The compact semantic-input follow-up passed four protocol methods and thirteen
+server methods. Its independent review found an ownership regression before
+release: canonical visual fallback was repeated per recipient rather than
+shared per observing actor. This was audit-found, not credited as a test-caught
+bug. The correction uses one transient per-actor picture pair; the existing
+one/eight/thirty-two-watcher witness now checks zero adaptations for unchanged
+pictures and exactly two for changed pictures, regardless of watcher count.
+The corrected thirteen server methods and scoped Clippy passed. The protocol
+methods were unaffected and reused, not rerun or counted twice.
+
+One selector-registration error stopped a remainder dispatcher before running
+methods; it was corrected from the built binary's actual test listing and reused
+that binary. An interrupted executor and a later disk guard interrupted compiler
+owners, not gameplay tests. Their incomplete receipts were retained; completed
+checks were reused. Exact obsolete artifacts were reclaimed, with protected
+binaries and hashes retained, before resuming only the unfinished target. These
+are harness/infrastructure incidents, not additional stale gameplay test methods.
+
+The documentation gate caught one genuine documentation defect in this report:
+a guide cited a local-only receipt path. The published prose now contains the
+measurements and limitations directly, rather than a nonportable evidence link.
+This was one failed documentation method/execution, not a stale test failure.
+
+### Current-main integration of causal presentation
+
+The integrated no-link preflight caught one stale test assertion introduced by
+combining the staff feature with the input-authority migration: the text staff
+command test still constructed `Command::Act.expected_revision`, a removed field.
+The text parser now returns the unchanged exact item/aim action; the connection
+owns input authority. Removing only that obsolete expected field preserves all
+staff capability, charge-independence and aim assertions. This is one stale-test
+root/method and one failed preflight, not a production staff defect.
+
+The recorder audit also exposed two remaining stale harness contracts from
+separating causal outcomes and pictures. `act` could return a new lifecycle or
+readiness frame with the old picture; a focused fake-stream first-red failed
+at the intended old-versus-new picture assertions (two methods, five subtest
+assertions). The harness now tracks the actual ordered visual-dirty signal and
+finishes only already-demanded picture work; causal-only outcomes do not wait
+for a picture or issue reset requests. Lifecycle and paid-pause selection remain
+unchanged. Positive tests cover picture-before-lifecycle and no-queued replies.
+Cross-attachment discovery/amulet comparisons now exclude only picture identity
+and generation; all disclosed mechanics stay exact, with a negative comparator
+witness for changed tick/health. These are stale harness expectations, not new
+production movement or objective defects; actual recorder qualification follows.
+
+The first integrated wire recording captured a real fragmented snapshot but
+failed its required explicit-save cleanup under an artificial 512-byte frame
+budget. Current contextual control replies can exceed that old budget (captured
+admission envelopes were 554–557 bytes); deliberately undersized non-snapshot
+frames disconnect by contract. Fresh and resumed-save probes both failed at512
+and passed at1024. The recorder now uses1024, still requires an actual snapshot
+part and asserts its encoded size stays within that limit. Production budgets,
+backpressure behavior and cleanup requirements are unchanged. This is one stale
+fixture-budget root and one failed recorder execution, with the separate bounded
+probes retained—not evidence of a successfully recorded fixture yet.
+
+The next recorder pass reached advancement and exposed one more caller of the
+same stale-picture completion assumption: it explicitly waited for queued work
+to leave admission, then immediately issued picture-bound inspection. It now
+finishes already-demanded picture delivery before that inspection; the original
+active-respec assertion and query remain unchanged. This is one additional stale
+caller/method execution under the existing causal/picture harness root.
+
+Recording then reached a Text device case whose pickup assertion expected the
+old debug event label `Taken`, although committed outcomes now render canonical
+prose (`You pick up ...`). The downstream exact inventory, tick, charge and RNG
+assertions remain. A source audit batched the same obsolete pickup/wait labels
+in affected process tests rather than discovering each through a separate run.
+One actual recorder execution failed at this stale Text-label root; source-only
+corrections elsewhere are not counted as additional test failures.
+
+The recorder source audit found anonymous utility-event selectors still reading
+visual deltas rather than committed Outcome combat facts. The focused pure
+first-red had five intended assertion failures across ten selected methods;
+the corrected selection passed all ten. Capture now retains the actual ordered
+Outcome; identity, target, applied-result and hidden-ability rejection assertions
+are unchanged, and visual payloads are explicitly rejected as event sources.
+No production wire sample was synthesized. This is a stale event-source fixture
+root detected before reaching that branch of the actual recorder.
+
+The fourth recorder run passed earlier cases and reached growth diagnostics.
+Its second inspection reused the wizard's old frozen picture: private growth
+credit need not dirty that picture, so the report correctly lacked the newer
+record. New diagnostic inspections now explicitly request a fresh wizard picture;
+continuation paging is untouched. Exact effect, build, held-XP and RNG assertions
+remain. The same four recorder diagnostic entry points were corrected together.
+One actual growth-case execution failed at this stale inspection-basis root.
+
+The fifth recorder pass reached Detection but the unchanged 8 GiB disk guard
+stopped it after repeated background map pages produced roughly540 MiB of full
+headless diagnostic-state logs. This is an infrastructure interruption, not a
+failed gameplay method. The Detection clients now opt into existing compact
+background diagnostics: raw messages and hydration status remain exact, while
+repeated derived-state copies are omitted. After hydration, a local Inspect
+provides the full memory for the unchanged content assertion, without a server
+Snapshot/reset. A focused helper witness verifies both compact and already-full
+paths and forbids an unnecessary request on the latter. Failed logs are retained
+in hash-verified compressed archives; no production budget or workload is reduced.
+
+A second recording attempt reached the same disk guard despite compact background
+diagnostics; full demanded pictures still made the large Detection lifecycle log
+substantial. Both interruptions are one resource-headroom root cause, not two
+gameplay failures. Completed release-example executables and failed logs were
+hash-verified into compressed archives to provide sufficient recording headroom.
+
+The final recorder completed after headroom recovery; no production thresholds
+were changed. The archive writer's initial local selector used a source-file
+module name rather than its registered `storage::schema::scenario` path. The
+nonempty-test guard rejected the zero-test run. The compiled binary was reused
+with its hash and actual `--list` paths verified; seven exact checks then passed.
+This is a local driver-selection error, not a production defect or a passing test.
+Read-only audit also found two benchmark examples selecting an older wire fixture;
+both now select the current fixture and their existing contract tests pass.

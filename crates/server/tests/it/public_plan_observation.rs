@@ -34,12 +34,12 @@ fn record(engine: &Engine) -> tor_protocol::PublicPlanObservationView {
         .expect("paid ordinary result must reach its observer")
 }
 fn observe_preparation(engine: &mut Engine) {
-    let expected_revision = engine.revision(OBSERVER).unwrap();
+    let expected_revision = engine.causal_boundary(OBSERVER).unwrap();
     support::submit(
         engine,
         OBSERVER,
         Command::AdmitIntention {
-            expected_revision,
+            expected_boundary: expected_revision,
             action: action("fixture_observe_plan", SUBJECT),
         },
     )

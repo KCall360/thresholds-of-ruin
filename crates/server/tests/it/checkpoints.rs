@@ -12,7 +12,7 @@ fn wait(engine: &mut Engine, id: &str) -> tor_server::CommandResult {
             id,
             &engine.branch().clone(),
             Command::Act {
-                expected_revision: engine.revision(ActorId(1)).unwrap(),
+                expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
                 action: Action::Wait,
             },
         )
@@ -45,7 +45,7 @@ fn checkpoint_size_and_action_io_do_not_scale_with_retained_history() {
                 "capture",
                 &engine.branch().clone(),
                 Command::Act {
-                    expected_revision: engine.revision(ActorId(1)).unwrap(),
+                    expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
                     action: Action::Wait,
                 },
             )
@@ -123,7 +123,7 @@ fn checkpoint_preserves_queued_admissions_across_both_full_retained_windows() {
                 &format!("admit-{id}"),
                 &branch,
                 Command::AdmitIntention {
-                    expected_revision: engine.revision(actor).unwrap(),
+                    expected_boundary: engine.causal_boundary(actor).unwrap(),
                     action: Action::Wait,
                 },
             )
@@ -140,7 +140,8 @@ fn checkpoint_preserves_queued_admissions_across_both_full_retained_windows() {
                 id,
                 &branch,
                 Command::Wizard {
-                    expected_revision: engine.revision(ActorId(1)).unwrap(),
+                    display_basis: None,
+                    expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
                     operation: WizardOperation::Teleport {
                         actor: ActorId(1),
                         position: Position {
@@ -168,13 +169,13 @@ fn checkpoint_preserves_queued_admissions_across_both_full_retained_windows() {
                 &branch,
                 Command::CancelIntention {
                     step: None,
-                    expected_revision: engine.revision(ActorId(1)).unwrap(),
+                    expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
                     admission: roots[&ActorId(1)].clone(),
                 },
             )
             .unwrap();
         let command = Command::AdmitIntention {
-            expected_revision: engine.revision(ActorId(1)).unwrap(),
+            expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
             action: Action::Wait,
         };
         let result = engine
@@ -210,7 +211,7 @@ fn checkpoint_preserves_queued_admissions_across_both_full_retained_windows() {
             &branch,
             Command::CancelIntention {
                 step: None,
-                expected_revision: engine.revision(ActorId(2)).unwrap(),
+                expected_boundary: engine.causal_boundary(ActorId(2)).unwrap(),
                 admission: roots[&ActorId(2)].clone(),
             },
         )
@@ -285,7 +286,7 @@ fn checkpoint_preserves_queued_admissions_across_both_full_retained_windows() {
             &branch,
             Command::CancelIntention {
                 step: None,
-                expected_revision: restored.revision(ActorId(3)).unwrap(),
+                expected_boundary: restored.causal_boundary(ActorId(3)).unwrap(),
                 admission: roots[&ActorId(3)].clone(),
             },
         )
@@ -327,7 +328,7 @@ fn checkpoint_rotates_replay_tail_without_losing_history_or_retry_results() {
             "first",
             &branch,
             Command::Act {
-                expected_revision: 0,
+                expected_boundary: 0,
                 action: Action::Wait,
             },
         )
@@ -343,7 +344,7 @@ fn checkpoint_rotates_replay_tail_without_losing_history_or_retry_results() {
                 "first",
                 &branch,
                 Command::Act {
-                    expected_revision: 1,
+                    expected_boundary: 1,
                     action: Action::Wait
                 }
             )
@@ -394,7 +395,8 @@ fn checkpoints_preserve_private_notes_forks_and_the_complete_rewind_window() {
             "teleport",
             &engine.branch().clone(),
             Command::Wizard {
-                expected_revision: engine.revision(ActorId(1)).unwrap(),
+                display_basis: None,
+                expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
                 operation: WizardOperation::Teleport {
                     actor: ActorId(1),
                     position: Position {
@@ -415,15 +417,17 @@ fn checkpoints_preserve_private_notes_forks_and_the_complete_rewind_window() {
             "rewind",
             &engine.branch().clone(),
             Command::Wizard {
-                expected_revision: engine.revision(ActorId(1)).unwrap(),
+                display_basis: None,
+                expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
                 operation: WizardOperation::Rewind {
                     target: Some(target.entry.id.clone()),
                 },
             },
         )
         .unwrap();
+    let issued_note = engine.presentation_boundary();
     engine
-        .command(
+        .command_at_presentation(
             "player",
             "test",
             ActorId(1),
@@ -431,13 +435,14 @@ fn checkpoints_preserve_private_notes_forks_and_the_complete_rewind_window() {
             &engine.branch().clone(),
             Command::Annotate {
                 anchor: Anchor::State {
-                    revision: engine.revision(ActorId(1)).unwrap(),
+                    snapshot: tor_protocol::SnapshotId("issued-checkpoint-note".into()),
                 },
                 text: "private checkpoint note".into(),
                 source: ClientSource::User,
                 audience: Audience::Private,
                 category: AnnotationCategory::Note,
             },
+            &issued_note,
         )
         .unwrap();
     for n in 0..8 {
@@ -482,7 +487,7 @@ fn checkpoints_preserve_private_notes_forks_and_the_complete_rewind_window() {
                     "first",
                     &original,
                     Command::Act {
-                        expected_revision: 0,
+                        expected_boundary: 0,
                         action: Action::Wait
                     }
                 )
@@ -490,7 +495,7 @@ fn checkpoints_preserve_private_notes_forks_and_the_complete_rewind_window() {
                 .duplicate
         );
         engine.enable_wizard().unwrap();
-        let revision = engine.revision(ActorId(1)).unwrap();
+        let revision = engine.causal_boundary(ActorId(1)).unwrap();
         assert!(engine
             .command(
                 "player",
@@ -499,7 +504,8 @@ fn checkpoints_preserve_private_notes_forks_and_the_complete_rewind_window() {
                 "expired",
                 &engine.branch().clone(),
                 Command::Wizard {
-                    expected_revision: revision,
+                    display_basis: None,
+                    expected_boundary: revision,
                     operation: WizardOperation::Rewind {
                         target: Some(first.entry.id.clone())
                     }
@@ -514,7 +520,8 @@ fn checkpoints_preserve_private_notes_forks_and_the_complete_rewind_window() {
                 "retained",
                 &engine.branch().clone(),
                 Command::Wizard {
-                    expected_revision: revision,
+                    display_basis: None,
+                    expected_boundary: revision,
                     operation: WizardOperation::Rewind {
                         target: Some(target.entry.id.clone()),
                     },

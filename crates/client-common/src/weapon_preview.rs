@@ -37,7 +37,7 @@ impl WeaponPreview {
             };
         Ok(Self {
             projectile_binding,
-            context: state.snapshot().reply_context(),
+            context: state.reply_context(),
             action,
             request_id: None,
             preview: None,
@@ -68,7 +68,7 @@ impl WeaponPreview {
     }
     pub fn current(&self, state: &ClientState) -> bool {
         state.has_control()
-            && state.snapshot().reply_context() == self.context
+            && state.reply_context() == self.context
             && self
                 .projectile_binding
                 .as_ref()
@@ -343,7 +343,7 @@ mod tests {
             .accept(&state, &state.reply_context(), "preview", &response)
             .unwrap();
         for change in 0..5 {
-            let mut snapshot = state.snapshot();
+            let mut snapshot = state.reset_snapshot().unwrap();
             match change {
                 0 => {
                     snapshot.has_control = false;

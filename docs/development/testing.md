@@ -751,13 +751,35 @@ Ordinary application artifacts deliberately exclude benchmark examples. Full
 Windows shards and selected assurance lanes use a separate, profile-specific
 locked build phase for the examples required by their independently selected
 test IDs, before Python workers start.
-Full Windows shard 1 currently needs the eight maintained examples; selected
+Full Windows shard 1 currently needs the nine maintained examples; selected
 lanes build only their actual owners' subset, and tooling-only lanes build none.
 The phase is required in the plan and receipt, runs without competing test-worker
 builds, and stays within the existing job budget. Each owner's original build
 check still runs (normally a no-op), resolves Cargo's reported executable, and
 retains all runtime limits and report assertions. Binary transport does not make
 this compilation cost disappear or qualify benchmark execution by itself.
+
+The active-mob workload adds two real-process owners in
+`scripts/test_performance_process.py`, both in `PerformanceProcesses`:
+
+- `test_active_mob_producer_proves_all_live_regions_and_replay` runs
+  `active_mob_bench --steps 8` and validates the complete 100-AI/20-region report,
+  exact movement count and replay/storage proof, without a wall-clock target gate.
+- `test_active_mob_headless_smoke_preserves_activity_and_source_free_restart`
+  runs stock server/headless applications for 16 paced moves and four burst moves,
+  requiring actual movement, private population/activity proof, explicit save,
+  source-free restart equality and cleanup. It never asserts the 60-second
+  release load target. Explicit correctness smoke may use debug artifacts; full
+  load acceptance remains release-only.
+
+Both IDs map to the same deduplicated `active_mob_bench` prerequisite. Each owner
+still resolves Cargo's reported example path independently of the ordinary
+application bundle. Pure driver/report tests cover incomplete or passive
+populations, timing and provenance validation, and causal failure/cleanup
+receipts; these are not substitutes for the real-process owners. See the
+[active-mob guide](performance.md#active-mob-workload) for timing boundaries,
+finite smoke liveness budgets and release acceptance limits. No existing
+process deadline, test selection or coverage exclusion is relaxed.
 
 Service contracts belong to the Rust partitions: their wrapper uses the exact
 host executable emitted by the successful Cargo test command. Python partitions'

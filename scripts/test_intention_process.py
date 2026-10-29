@@ -62,8 +62,7 @@ class IntentionProcesses(ProcessTestCase):
         for source in [initial, released, reacquired, watched]:
             denied = self.request(player, {
                 "type": "command", "context": source["input_context"], "branch": reset["branch"],
-                "command": {"type": "act", "expected_revision": reset["state"]["revision"],
-                            "action": {"type": "wait"}}})
+                "command": {"type": "act", "action": {"type": "wait"}}})
             self.assertTrue(denied["error"].startswith("StaleContext:"), denied["error"])
             self.assertEqual(denied["state"], initial["state"])
             self.assertEqual(denied["history"], initial["history"])
@@ -322,7 +321,7 @@ class IntentionProcesses(ProcessTestCase):
         self.assertEqual(restored["state"], accepted["state"])
         def change(client, frame, operation, target=identity):
             return self.request(client, {"type": "command", "context": frame["input_context"], "branch": frame["branch"],
-                "command": {"type": operation, "expected_revision": frame["state"]["revision"],
+                "command": {"type": operation,
                             "intention": target, **({"step": None} if operation == "cancel_intention" else {})}})
         observer, seen = self.client(WIZARD_TOKEN, observe=True, actor=2)
         denied = change(observer, seen, "resume_intention")

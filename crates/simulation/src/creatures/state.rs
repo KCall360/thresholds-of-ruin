@@ -483,6 +483,9 @@ impl CreatureState {
     pub fn derived(&self) -> &DerivedCreature {
         &self.derived
     }
+    pub(super) fn derived_snapshot(&self) -> Shared<DerivedCreature> {
+        self.derived.clone()
+    }
     pub fn health(&self) -> Health {
         self.health
     }
@@ -1091,6 +1094,23 @@ impl CreatureState {
             })
     }
 
+    /// Decide through a shared borrow before a caller obtains mutable COW access.
+    /// Keep the fallible growth check ahead of the changed-input comparisons.
+    pub(crate) fn growth_retry_required_after_fold(
+        &self,
+        before: &Self,
+    ) -> Result<bool, CreatureStateError> {
+        let pending_context = matches!(self.recovery_context, RecoveryContext::Pending { .. })
+            && self.recovery_context != before.recovery_context;
+        Ok(pending_context
+            || (self.growth_pending()?
+                && (self.earned_progress.earned_xp() != before.earned_progress.earned_xp()
+                    || self.build_epoch != before.build_epoch
+                    || self.extra_sources != before.extra_sources
+                    || self.equipment != before.equipment
+                    || self.restorable_losses != before.restorable_losses)))
+    }
+
     /// Converge after new XP or an authoritative source fold changed.
     /// Timer values, damage and reads do not retry an unchanged obstruction.
     pub(crate) fn retry_growth_after_fold(
@@ -1099,16 +1119,9 @@ impl CreatureState {
         mut context: impl FnMut(u64) -> Result<RecoveryContext, CreatureStateError>,
     ) -> Result<RebuildOutcome, CreatureStateError> {
         let mut outcome = RebuildOutcome::default();
-        let pending_context = matches!(self.recovery_context, RecoveryContext::Pending { .. })
-            && self.recovery_context != before.recovery_context;
-        if pending_context
-            || (self.growth_pending()?
-                && (self.earned_progress.earned_xp() != before.earned_progress.earned_xp()
-                    || self.build_epoch != before.build_epoch
-                    || self.extra_sources != before.extra_sources
-                    || self.equipment != before.equipment
-                    || self.restorable_losses != before.restorable_losses))
-        {
+        if self.growth_retry_required_after_fold(before)? {
+            let pending_context = matches!(self.recovery_context, RecoveryContext::Pending { .. })
+                && self.recovery_context != before.recovery_context;
             let mut candidate = self.clone();
             if pending_context {
                 let RecoveryContext::Pending { base_period } = candidate.recovery_context else {
@@ -2091,6 +2104,94 @@ mod compiled_tests {
         )
         .unwrap();
         assert_eq!(creature.derived(), &fresh);
+    }
+
+    #[test]
+    fn growth_retry_pending_context_preserves_callback_order_and_error_atomicity() {
+        let mut species = crate::test_creatures::species();
+        species.modifiers.push(Modifier {
+            cancellable: false,
+            scope: Scope::WhileNoSensedHostile,
+            op: ModifierOp::Add {
+                stat: Stat::HealthRecoveryPeriodPercent,
+                value: -25,
+            },
+        });
+        let before = CreatureState::new(crate::test_creatures::build(species)).unwrap();
+        assert!(before.derived.contextual_health_recovery());
+        assert!(!before.health.dead());
+        let base_period = before.health_recovery.base_period();
+        let mut pending = before.clone();
+        pending.recovery_context = RecoveryContext::Pending { base_period };
+        assert!(pending.recovery_context_valid_at(Some(0), 0));
+        assert!(pending.growth_retry_required_after_fold(&before).unwrap());
+        let snapshot = pending.clone();
+        let mut calls = Vec::new();
+        assert_eq!(
+            pending.retry_growth_after_fold(&before, |period| {
+                calls.push(period);
+                Err(CreatureStateError::Inconsistent)
+            }),
+            Err(CreatureStateError::Inconsistent)
+        );
+        assert_eq!(calls, [base_period]);
+        assert_eq!(pending, snapshot, "failed context resolution is atomic");
+        calls.clear();
+        pending
+            .retry_growth_after_fold(&before, |period| {
+                calls.push(period);
+                Ok(RecoveryContext::Known {
+                    sensed_hostile: true,
+                })
+            })
+            .unwrap();
+        assert_eq!(calls, [base_period]);
+        assert_eq!(
+            pending.recovery_context,
+            RecoveryContext::Known {
+                sensed_hostile: true
+            }
+        );
+        assert!(!pending.growth_retry_required_after_fold(&pending).unwrap());
+
+        // An unchanged record still performs the fallible growth check. A new
+        // pending context, however, must reach its callback before that check.
+        let build = before.build();
+        let mut invalid = CreatureState::new(
+            CreatureBuild::new(
+                build.content().clone(),
+                build.species_id().clone(),
+                crate::progression::HdLedger::seeded(vec![crate::progression::HdSource::Racial], 7)
+                    .unwrap(),
+                ManaBinding::Intellect,
+                [Skill::Deception, Skill::Persuasion],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(invalid.build.personal_health_root_seed(), Some(7));
+        assert!(!invalid.health.dead());
+        assert!(invalid.build.ledger().entries().len() < crate::limits::HIT_DICE);
+        assert!(invalid.build.ruleset().document().growth.threshold_per_tier > 1);
+        invalid.earned_progress =
+            crate::earned_growth::EarnedProgress::new(crate::HdCount(u64::MAX), 0);
+        let prior = invalid.clone();
+        assert_eq!(
+            invalid.growth_retry_required_after_fold(&prior),
+            Err(CreatureStateError::Growth(
+                crate::earned_growth::GrowthError::Arithmetic
+            ))
+        );
+        invalid.recovery_context = RecoveryContext::Pending {
+            base_period: invalid.health_recovery.base_period(),
+        };
+        assert!(invalid.recovery_context_valid_at(Some(0), 0));
+        assert!(invalid.growth_retry_required_after_fold(&prior).unwrap());
+        assert_eq!(
+            invalid.retry_growth_after_fold(&prior, |_| Err(CreatureStateError::Inconsistent)),
+            Err(CreatureStateError::Inconsistent),
+            "pending context resolves before fallible growth validation"
+        );
     }
 
     #[test]

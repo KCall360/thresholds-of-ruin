@@ -231,13 +231,14 @@ async fn clients_receive_updates_without_polling_and_can_transfer_control() {
             ..
         }
     ));
+    // Capture the previously disclosed command generation, not a presentation revision.
+    let stale_context = ascii.input_context();
     text.request(
         "take",
         Request::Command {
             context: text.input_context(),
             branch: initial.branch.clone(),
             command: Command::Act {
-                expected_revision: 0,
                 action: Action::Take {
                     item: initial.state.observation.ground_items[0].item.id,
                     quantity: None,
@@ -264,10 +265,9 @@ async fn clients_receive_updates_without_polling_and_can_transfer_control() {
         .request(
             "stale",
             Request::Command {
-                context: ascii.input_context(),
+                context: stale_context,
                 branch: initial.branch,
                 command: Command::Act {
-                    expected_revision: 0,
                     action: Action::Wait,
                 },
             },
@@ -276,7 +276,7 @@ async fn clients_receive_updates_without_polling_and_can_transfer_control() {
     assert!(matches!(
         receive(&mut ascii).await,
         ServerMessage::Error {
-            code: ErrorCode::StaleRevision,
+            code: ErrorCode::StaleContext,
             ..
         }
     ));
@@ -299,7 +299,9 @@ async fn private_annotations_stream_to_same_user_across_frontends_but_not_other_
             context: text.input_context(),
             branch: initial.branch.clone(),
             command: Command::Annotate {
-                anchor: Anchor::State { revision: 0 },
+                anchor: Anchor::State {
+                    snapshot: initial.state.snapshot.clone(),
+                },
                 text: "My private plan".into(),
                 source: ClientSource::User,
                 audience: Audience::Private,
@@ -337,7 +339,9 @@ async fn private_annotations_stream_to_same_user_across_frontends_but_not_other_
             service.annotate_backend(
                 ActorId(1),
                 "simulation",
-                Anchor::State { revision: 0 },
+                Anchor::State {
+                    snapshot: SnapshotId("backend-explanation".into()),
+                },
                 AnnotationCategory::Explanation,
                 "A rare explanation.",
             )
@@ -458,7 +462,9 @@ async fn reconnect_recovers_history_and_duplicate_receipts_without_rebroadcast()
         context: first.input_context(),
         branch: snapshot.branch,
         command: Command::Annotate {
-            anchor: Anchor::State { revision: 0 },
+            anchor: Anchor::State {
+                snapshot: snapshot.state.snapshot.clone(),
+            },
             text: "Keep this".into(),
             source: ClientSource::Frontend,
             audience: Audience::Private,
@@ -523,7 +529,9 @@ async fn spectator_authority_denies_all_mutations_even_same_user_receipt_retries
         context: player.input_context(),
         branch: initial.branch.clone(),
         command: Command::Annotate {
-            anchor: Anchor::State { revision: 0 },
+            anchor: Anchor::State {
+                snapshot: initial.state.snapshot.clone(),
+            },
             text: "Private plan".into(),
             source: ClientSource::User,
             audience: Audience::Private,
@@ -572,7 +580,6 @@ async fn spectator_authority_denies_all_mutations_even_same_user_receipt_retries
                 context: spectator.input_context(),
                 branch: initial.branch.clone(),
                 command: Command::Act {
-                    expected_revision: 0,
                     action: Action::SetDoor {
                         door: tor_protocol::DoorTarget::from_digest([0; 32]),
                         open: false,
@@ -588,7 +595,6 @@ async fn spectator_authority_denies_all_mutations_even_same_user_receipt_retries
                 context: spectator.input_context(),
                 branch: initial.branch,
                 command: Command::Act {
-                    expected_revision: 0,
                     action: Action::Wait,
                 },
             },
@@ -651,7 +657,6 @@ async fn reconnect_retries_a_taken_target_before_old_context_and_fresh_resolutio
         context: player.input_context(),
         branch: initial.branch.clone(),
         command: Command::Act {
-            expected_revision: initial.state.revision,
             action: Action::Take {
                 item,
                 quantity: None,
@@ -727,7 +732,6 @@ async fn reconnect_retries_a_taken_target_before_old_context_and_fresh_resolutio
                 context: resumed.input_context(),
                 branch: snapshot.branch.clone(),
                 command: Command::Act {
-                    expected_revision: state.revision,
                     action: Action::Take {
                         item,
                         quantity: None,
@@ -789,7 +793,6 @@ async fn spectators_receive_each_accepted_action_once_with_identical_disclosed_s
             context: player.input_context(),
             branch: initial.branch.clone(),
             command: Command::Act {
-                expected_revision: revision as u64,
                 action: action.clone(),
             },
         };
@@ -826,7 +829,6 @@ async fn spectators_receive_each_accepted_action_once_with_identical_disclosed_s
                 context: player.input_context(),
                 branch: initial.branch.clone(),
                 command: Command::Act {
-                    expected_revision: 3,
                     action: Action::Move {
                         direction: Direction::Up,
                     },
@@ -983,7 +985,6 @@ async fn deltas_follow_each_attachments_last_observation_across_control_and_rese
                     context: player_state.input_context(),
                     branch: player_state.branch().clone(),
                     command: Command::Act {
-                        expected_revision: player_state.state().revision,
                         action: Action::Wait,
                     },
                 },

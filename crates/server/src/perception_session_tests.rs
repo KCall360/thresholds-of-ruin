@@ -203,7 +203,7 @@ impl Wire {
                     "fixture-drop",
                     &engine.branch().clone(),
                     crate::journal::Command::Act {
-                        expected_revision: engine.revision(OWNER).unwrap(),
+                        expected_boundary: engine.causal_boundary(OWNER).unwrap(),
                         action,
                     },
                 )
@@ -217,7 +217,8 @@ impl Wire {
                     "fixture-place-owner",
                     &engine.branch().clone(),
                     crate::journal::Command::Wizard {
-                        expected_revision: engine.revision(OWNER).unwrap(),
+                        display_basis: None,
+                        expected_boundary: engine.causal_boundary(OWNER).unwrap(),
                         operation: crate::journal::WizardOperation::Teleport {
                             actor: OWNER,
                             position: crate::journal::Position {
@@ -313,10 +314,7 @@ impl Wire {
         Request::Command {
             context: snapshot.reply_context().input,
             branch: snapshot.branch.clone(),
-            command: Command::Act {
-                expected_revision: snapshot.state.revision,
-                action,
-            },
+            command: Command::Act { action },
         }
     }
 
