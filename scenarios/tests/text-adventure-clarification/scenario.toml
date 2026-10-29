@@ -1,5 +1,5 @@
 # Ordinary authored scenario; validate after every edit.
-format = 35
+format = 36
 id = "text-adventure-clarification"
 version = "1.0"
 ruleset = "rules.toml"

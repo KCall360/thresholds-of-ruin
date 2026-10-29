@@ -626,6 +626,16 @@ Initial and later entries both discard the whole candidate on construction,
 identity, decision-capacity or Store failure; legal-cell exhaustion alone remains
 a placement skip. Query, preload, revisit, ascent and restart never grant stock.
 
+Scenario capabilities switch shared mechanics on or off for one scenario; no
+mechanic is removed from the engine. `npc_stair_traversal` is required inside a
+`[capabilities]` table. `owner_advancement` and `corpses` may be omitted and then
+keep the engine default, enabled. With `owner_advancement = false` the server
+refuses owner purchases, future-source and Intellect choices and respec, before
+any preview work; growth then follows only authored rows. With `corpses = false`
+an ordinary death leaves no corpse item and allocates no item identity, while
+carried items still drop at the death location. The compiled and saved policy
+records all three switches explicitly. Unknown switches reject compilation.
+
 The optional `npc_stair_traversal` capability defaults to allowing NPC stairs.
 When false, only the selected declared player character can voluntarily traverse
 an abstract stair; this role does not change with connections, control transfer
@@ -1025,7 +1035,17 @@ A creature recipe may declare `future_growth = { kind = "selected", source =
 "authored" }`. Omitted authoring defaults to disabled; persisted recipes require
 the policy explicitly. Controller identity never selects a future source.
 NPCs grow only when their recipe explicitly enables a future source. Invalid
-class references reject package compilation. Changing the selected future source
+class references reject package compilation.
+
+A recipe with `restoration = "authored"` and `future_growth = { kind =
+"authored" }` may add `growth_schedule`, a list of Hit Die rows in the same shape
+as `hit_dice`. Each earned threshold grows the next scheduled row with its
+purchases and attribute choice; when the schedule is exhausted, earned XP is
+held. A drained scheduled row regrows with the same choices. The complete
+schedule is checked at compilation as if every row were owned, so an unfunded,
+over-cap or ineligible row rejects the package. `hit_dice` plus the schedule
+must fit the 256-HD limit. Body-package characters keep the scheduled rows as
+future personal Hit Dice; see [the Rogue tuning plan](../plans/rogue-tuning.md). Changing the selected future source
 does not replace an authored lost-HD restoration source or choices.
 
 Actor records keep species/template IDs, owned advancement choices and mutable

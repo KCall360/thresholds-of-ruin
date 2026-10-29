@@ -813,7 +813,10 @@ or class source, or `authored` using their restoration plan. Control ownership
 never enables NPC growth. Earning a threshold immediately adds the next HD when
 the declared source is available, preserving the original ordinal Health stream.
 An authored ordinal restores its saved source and choices; ChooseAgain creates
-an empty purchased-choice slot. Existing ordinary previews spend those points.
+an empty purchased-choice slot. An authored plan may extend past the current
+Hit Dice as a growth schedule: the next new HD then takes that row's source and
+choices, including for body-package characters, whose future rows are keyed by
+the next personal HD identity. Existing ordinary previews spend those points.
 The owner can preview and confirm a different future source through the same
 authenticated branch/reset/BuildEpoch contracts as other advancement.
 

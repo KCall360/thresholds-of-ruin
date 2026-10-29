@@ -35,7 +35,7 @@ fn overview() -> Value {
         "growth":{"body_package_hit_dice":null,"highest_applied_tier":"2","restorable_hit_dice":"0","restoration_blocker":null,"highest_earned_tier":"2","peak_threat":"2","held_xp":"0","earned_xp":"0","spent_xp":"0","next_threshold":"100","future":{"kind":"disabled"}},
         "timings":{"purchase_recovery":"0","respec_prepare":"600","respec_recovery":"0","received_loss_interval":"600","provisional":true},
         "ration":{"supply":{"id":"ration","name":"Ration"},"quantity":"1","access":"carried_only"},
-        "received_loss_remaining":"0","perceived_threat":false,"ready":true,"other_preparation":false,"respec":null}})
+        "received_loss_remaining":"0","perceived_threat":false,"ready":true,"other_preparation":false,"locked":false,"respec":null}})
 }
 fn summary() -> Value {
     json!({"kind":"summary","value":{"strength_acquired":0,
@@ -237,6 +237,7 @@ fn owner_advancement_named_map_contract_rejects_ordered_positional_aliases() {
                 "perceived_threat",
                 "ready",
                 "other_preparation",
+                "locked",
                 "respec",
             ],
         ),
@@ -1173,4 +1174,22 @@ fn owned_growth_disclosure_separates_personal_tiers_from_authored_body_loss_capa
         decode_response(&unowned.to_string()).is_err(),
         "unowned loss bound remains personal applied tier"
     );
+}
+
+#[test]
+fn locked_overview_is_never_ready_or_respeccing() {
+    let mut good = overview_page();
+    let value = &mut good["page"]["entries"][0]["value"];
+    value["locked"] = json!(true);
+    value["ready"] = json!(false);
+    decode_response(&good.to_string()).expect("locked build without owner choices");
+    let mut ready = good.clone();
+    ready["page"]["entries"][0]["value"]["ready"] = json!(true);
+    assert!(decode_response(&ready.to_string()).is_err());
+    let mut missing = good.clone();
+    missing["page"]["entries"][0]["value"]
+        .as_object_mut()
+        .unwrap()
+        .remove("locked");
+    assert!(decode_response(&missing.to_string()).is_err());
 }

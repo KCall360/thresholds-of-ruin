@@ -164,7 +164,7 @@ The first CI runs of the independent 3D workflow failed on both platforms:
   it. The 7 affected Rust tests and 4 affected process tests pass locally.
 
 Main then took baleful polymorph (#198) as its own protocol bump. Merging it
-renumbered the worn list to **protocol 64**: main's recorded wire sample
+renumbered the worn list to wire revision **64**: main's recorded wire sample
 stays as it is, and this branch records a new one for the worn list. An actor's view keeps main's
 current body asset, so a polymorphed creature shows its active form. Polymorph
 unequips gear its new form cannot wear and keeps it carried, so the worn list,

@@ -37,6 +37,11 @@ pub const MAX_RETAINED_DECISIONS: usize = 1_000_000;
 #[serde(deny_unknown_fields)]
 pub struct ScenarioCapabilities {
     pub npc_stair_traversal: bool,
+    /// Owner purchases, future-source choices, Intellect choices and respec.
+    /// Disabled scenarios grow only through authored future rows.
+    pub owner_advancement: bool,
+    /// Ordinary deaths leave a corpse item; carried items still drop.
+    pub corpses: bool,
 }
 impl<'de> Deserialize<'de> for ScenarioCapabilities {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -44,10 +49,14 @@ impl<'de> Deserialize<'de> for ScenarioCapabilities {
         #[serde(deny_unknown_fields)]
         struct Fields {
             npc_stair_traversal: bool,
+            owner_advancement: bool,
+            corpses: bool,
         }
         let fields: Fields = crate::bounded::named_map(deserializer)?;
         Ok(Self {
             npc_stair_traversal: fields.npc_stair_traversal,
+            owner_advancement: fields.owner_advancement,
+            corpses: fields.corpses,
         })
     }
 }
@@ -56,6 +65,8 @@ impl Default for ScenarioCapabilities {
     fn default() -> Self {
         Self {
             npc_stair_traversal: true,
+            owner_advancement: true,
+            corpses: true,
         }
     }
 }
@@ -1285,6 +1296,9 @@ impl Game {
             selected_character,
         };
         Ok(())
+    }
+    pub fn scenario_capabilities(&self) -> &ScenarioCapabilities {
+        &self.scenario_policy.capabilities
     }
     pub(crate) fn can_use_abstract_stairs(&self, id: ActorId) -> bool {
         !self.actors[&id].locomotion().levitating
@@ -3148,6 +3162,7 @@ mod tests {
         game.configure_scenario_policy(
             ScenarioCapabilities {
                 npc_stair_traversal: false,
+                ..Default::default()
             },
             Some(ActorId(1)),
         )

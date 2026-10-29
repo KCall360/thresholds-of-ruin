@@ -71,6 +71,7 @@ fn overview() -> AdvancementOverview {
         perceived_threat: false,
         ready: true,
         other_preparation: false,
+        locked: false,
         respec: None,
     }
 }

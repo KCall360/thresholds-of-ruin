@@ -1818,3 +1818,168 @@ fn authored_restoration_reunites_six_lawful_physical_receipts_without_forging_bi
         assert!(serde_json::from_value::<super::record::BuildRecord>(bad).is_err());
     }
 }
+
+fn scheduled_fixture() -> CreatureBuild {
+    let (seed, base, _, _) = fixture();
+    let warrior = HdSource::Class(ClassId::new("warrior").unwrap());
+    let ledger = HdLedger::seeded(vec![HdSource::Racial, warrior.clone()], 42).unwrap();
+    let train = |skill| HdChoices {
+        purchase_highwater: 0,
+        purchases: vec![AdvancementPurchase {
+            id: None,
+            pool: crate::content_ids::PointPoolId::new("advancement").unwrap(),
+            selection: PurchaseSelection::SkillRank(skill),
+        }],
+        attribute: None,
+    };
+    let choices = vec![HdChoices::default(), train(Skill::Lore)];
+    let mut plan: Vec<_> = ledger
+        .entries()
+        .iter()
+        .zip(&choices)
+        .map(|(die, choices)| PlannedAdvancement {
+            source: die.source(),
+            choices: choices.clone(),
+        })
+        .collect();
+    for skill in [Skill::Athletics, Skill::Perception] {
+        plan.push(PlannedAdvancement {
+            source: warrior.clone(),
+            choices: train(skill),
+        });
+    }
+    let mut build = CreatureBuild::from_recorded_body_package(
+        seed.content().clone(),
+        base,
+        seed.initial_attributes(),
+        ledger,
+        seed.binding(),
+        BuildAdvancement {
+            starting_skills: *seed.starting_skills(),
+            choices,
+            restoration: RestorationPolicy::Authored(plan),
+        },
+        42,
+    )
+    .unwrap();
+    build
+        .set_future_growth(crate::earned_growth::FutureGrowth::Authored {})
+        .unwrap();
+    build
+}
+
+fn trained(build: &CreatureBuild, index: usize) -> Vec<PurchaseSelection> {
+    build.choices()[index]
+        .purchases
+        .iter()
+        .map(|purchase| purchase.selection.clone())
+        .collect()
+}
+
+#[test]
+fn authored_growth_schedule_grows_scheduled_rows_in_order_then_holds_xp() {
+    let build = scheduled_fixture();
+    let warrior = HdSource::Class(ClassId::new("warrior").unwrap());
+    assert_eq!(build.ledger().entries().len(), 2);
+    assert_eq!(
+        build.next_authored_restoration_source(),
+        Some(warrior.clone())
+    );
+    let encoded = serde_json::to_vec(&super::record::BuildRecord::capture(&build)).unwrap();
+    let decoded: super::record::BuildRecord = serde_json::from_slice(&encoded).unwrap();
+    assert_eq!(decoded.restore(build.content().clone()).unwrap(), build);
+
+    let mut state = CreatureState::new(build).unwrap();
+    state.award_xp(100).unwrap();
+    assert_eq!(state.build().ledger().entries().len(), 3);
+    assert_eq!(state.build().ledger().entries()[2].source(), warrior);
+    assert_eq!(
+        trained(state.build(), 2),
+        [PurchaseSelection::SkillRank(Skill::Athletics)]
+    );
+    assert_eq!(state.build().unspent_points(), 0);
+
+    // A grown scheduled row and a not-yet-grown row both survive a saved record.
+    let encoded = serde_json::to_vec(&super::record::BuildRecord::capture(state.build())).unwrap();
+    let decoded: super::record::BuildRecord = serde_json::from_slice(&encoded).unwrap();
+    assert_eq!(
+        &decoded.restore(state.build().content().clone()).unwrap(),
+        state.build()
+    );
+
+    state.award_xp(10_000).unwrap();
+    assert_eq!(state.build().ledger().entries().len(), 4);
+    assert_eq!(
+        trained(state.build(), 3),
+        [PurchaseSelection::SkillRank(Skill::Perception)]
+    );
+    assert_eq!(state.build().next_authored_restoration_source(), None);
+    assert!(
+        state.earned_progress().held_xp() > 0,
+        "an exhausted schedule retains XP"
+    );
+}
+
+#[test]
+fn drained_scheduled_row_regrows_with_its_scheduled_purchase() {
+    let mut state = CreatureState::new(scheduled_fixture()).unwrap();
+    state.award_xp(100).unwrap();
+    let grown = state.build().ledger().entries()[2].clone();
+    state.drain_latest_hit_die().unwrap();
+    assert_eq!(state.build().ledger().entries().len(), 2);
+    state.award_xp(10_000).unwrap();
+    assert_eq!(state.build().ledger().entries()[2], grown);
+    assert_eq!(
+        trained(state.build(), 2),
+        [PurchaseSelection::SkillRank(Skill::Athletics)]
+    );
+    assert_eq!(
+        trained(state.build(), 3),
+        [PurchaseSelection::SkillRank(Skill::Perception)]
+    );
+}
+
+#[test]
+fn inadmissible_growth_schedule_rejects_the_whole_build() {
+    let (seed, base, _, _) = fixture();
+    let warrior = HdSource::Class(ClassId::new("warrior").unwrap());
+    let ledger = HdLedger::seeded(vec![HdSource::Racial, warrior.clone()], 42).unwrap();
+    let mut plan = vec![
+        PlannedAdvancement {
+            source: HdSource::Racial,
+            choices: HdChoices::default(),
+        },
+        PlannedAdvancement {
+            source: warrior.clone(),
+            choices: HdChoices::default(),
+        },
+    ];
+    // Two purchases cannot be funded by one scheduled class point.
+    let purchase = |skill| AdvancementPurchase {
+        id: None,
+        pool: crate::content_ids::PointPoolId::new("advancement").unwrap(),
+        selection: PurchaseSelection::SkillRank(skill),
+    };
+    plan.push(PlannedAdvancement {
+        source: warrior,
+        choices: HdChoices {
+            purchase_highwater: 0,
+            purchases: vec![purchase(Skill::Athletics), purchase(Skill::Perception)],
+            attribute: None,
+        },
+    });
+    assert!(CreatureBuild::from_recorded_body_package(
+        seed.content().clone(),
+        base,
+        seed.initial_attributes(),
+        ledger,
+        seed.binding(),
+        BuildAdvancement {
+            starting_skills: *seed.starting_skills(),
+            choices: vec![HdChoices::default(), HdChoices::default()],
+            restoration: RestorationPolicy::Authored(plan),
+        },
+        42,
+    )
+    .is_err());
+}

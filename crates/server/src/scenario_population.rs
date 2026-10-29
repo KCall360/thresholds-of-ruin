@@ -65,6 +65,15 @@ impl<'a> PopulationBirthValidation<'a> {
 #[serde(deny_unknown_fields)]
 pub struct ScenarioCapabilities {
     pub npc_stair_traversal: bool,
+    /// Omitted switches keep the engine default: enabled.
+    #[serde(default = "enabled")]
+    pub owner_advancement: bool,
+    #[serde(default = "enabled")]
+    pub corpses: bool,
+}
+
+fn enabled() -> bool {
+    true
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -918,13 +927,14 @@ impl Package {
     }
 
     fn capabilities(&self) -> runtime::ScenarioCapabilities {
-        runtime::ScenarioCapabilities {
-            npc_stair_traversal: self
-                .manifest
-                .capabilities
-                .as_ref()
-                .is_none_or(|capabilities| capabilities.npc_stair_traversal),
-        }
+        self.manifest.capabilities.as_ref().map_or_else(
+            runtime::ScenarioCapabilities::default,
+            |capabilities| runtime::ScenarioCapabilities {
+                npc_stair_traversal: capabilities.npc_stair_traversal,
+                owner_advancement: capabilities.owner_advancement,
+                corpses: capabilities.corpses,
+            },
+        )
     }
 
     fn population_plan(

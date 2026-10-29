@@ -1551,7 +1551,7 @@ fn checkpoint_cannot_inject_scenario_policy_into_a_nonpackage_game() {
     let engine = Engine::memory(Scenario::two_room(42)).unwrap();
     let disk = Checkpoint::capture(&engine).encode("no-population", 0);
     let mut saved = serde_json::to_value(disk).unwrap();
-    let injected = json!({"capabilities":{"npc_stair_traversal":false},"selected_character":1});
+    let injected = json!({"capabilities":{"npc_stair_traversal":false,"owner_advancement":true,"corpses":true},"selected_character":1});
     saved["game"]["scenario_policy"] = injected.clone();
     for boundary in saved["boundaries"].as_array_mut().unwrap() {
         boundary["game"]["scenario_policy"] = injected.clone();

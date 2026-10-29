@@ -6,15 +6,15 @@ record accepted work that is not yet complete. “Implemented” describes code 
 this tree, not a promise that every related product or performance goal is closed.
 Every change still requires the [testing policy](development/testing.md).
 
-**Current formats:** protocol **64**, save format **63**, scenario format **35**, ruleset
-**`interactions-v56`**, scenario validator **`tor-scenario-47`**. Unsupported
+**Current formats:** protocol **65**, save format **64**, scenario format **36**, ruleset
+**`interactions-v56`**, scenario validator **`tor-scenario-48`**. Unsupported
 protocol/save/rules identities are rejected rather than migrated. Current private
 creature records also require explicit Health roll policy, stable HD/purchase
 ownership, body snapshots and pending-return state; authored packages may
 explicitly register body forms and eligibility. Other current guides refer here
 instead of copying these identities.
 
-The independent compiled inputs use RulesInput **26**, ContentPackage **32** and
+The independent compiled inputs use RulesInput **26**, ContentPackage **33** and
 RegionInput **9**. Physical TORB/TORJ/TORR framing stays at **6** and TORC at **1**;
 rooms **2**, grid-rooms **1** and world-family **1** are unchanged. The independent
 arena run report is **`tor-arena-run-v5`**; its enclosing batch/matrix/search
@@ -156,8 +156,8 @@ destinations; live weighted stock and kits remain unchanged. Personal restoratio
 must distinguish empty-choice `ChooseAgain` from original-choice `Authored`, with
 stable purchase high-water marks and authored package restoration.
 
-Current application writers validate all 44 packages and produce protocol 64 and
-save 61 fixtures without altering historical formats. Ordinary paid
+Current application writers validate every package and produce current-protocol
+and save fixtures without altering historical formats. Ordinary paid
 `ChooseAgain` purchase/drain/XP restoration now has corresponding first-red and
 green process evidence; retained Authored attribute receipts have a separate
 explicitly privileged-builder witness. Aggregate qualification remains a release
@@ -677,10 +677,10 @@ checks do not replace the current
   ASCII map/look/inventory redraw on palette changes and recover safely.
   Shared creature seeds and captured corpse appearance support the optional,
   independently maintained [3D prototype](../crates/client-3d/README.md).
-  Protocol 64 adds each disclosed creature's visibly worn weapons and armour,
+  Wire revision 64 added each disclosed creature's visibly worn weapons and armour,
   and the observer's own, as a bounded `worn` list. That list is projected after
   observer disclosure and carries no more than the items show on the ground; see
-  the [first slice](plans/appearance-composition-contract.md#implemented-first-slice-protocol-64).
+  the [first slice](plans/appearance-composition-contract.md#implemented-first-slice-wire-revision-64).
   Text examination and the ASCII look line name the visible gear. The 3D client
   dresses bodies from it: each of Rogue's eight body armours now has its own
   asset and torso recipe, following the maintainer's style guide.
@@ -829,7 +829,12 @@ Local graphical waivers were not passes; they did not remove required CI coverag
 Work beyond the accepted 256-HD guard, including exact-row deep storage and
 disclosure paging, remains deferred rather than a prerequisite for functional Rogue.
 The [Rogue plan](plans/rogue.md) defines the adaptation and dependency order;
-the proposed [tuning plan](plans/rogue-tuning.md) orders calibration milestones.
+the [tuning plan](plans/rogue-tuning.md) orders calibration milestones. Its
+milestone 1 adds scenario capability switches for owner advancement and
+corpses, authored growth schedules, and the separate Rogue-only
+[`rogue` package](play/rogue.md#rogue-only-scenario) with one locked build; the
+starter `rogue-exploration` package is unchanged. Numerical calibration remains
+open.
 Rogue species are built through the [progression plan](plans/progression.md)'s
 advancement ledger, edge rules, regeneration and strike sequences; each of its
 phases still needs separate approval.

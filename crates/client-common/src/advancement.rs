@@ -6,6 +6,8 @@ use tor_protocol::*;
 const STALE: &str = "Advancement preview is stale. Open advancement and explicitly preview again.";
 pub const HELP: &str = "overview | ledger | balances | skills | talents | expertises | intellect-expertises | next | previous\nsource racial | source class <class ID>\nintellect-expertise <threshold> <expertise ID>\npurchase <HD> <pool ID> <skill|talent|expertise> <ID> [form <form ID>]\nremove <HD> <purchase number> | replace <HD> <purchase number> <pool ID> <skill|talent|expertise> <ID> [form <form ID>]\ndetails <summary|removed|refunds|balances|skills|talents|expertises|conditions>\nsupplies | confirm [using carried|<name or #item>] | resume | cancel\nHD and purchase numbers start at 1. Choices preview first; only confirm commits.";
 
+/// Shown when the scenario grows this build automatically.
+const LOCKED: &str = "This scenario applies your build automatically at each new Hit Die; purchases and respec are unavailable.";
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AdvancementInput {
     Overview,
@@ -578,6 +580,9 @@ impl AdvancementPages {
             .as_ref()
             .ok_or("Preview one exact proposal before confirming.")?;
         let overview = self.overview().ok_or("Open advancement first.")?;
+        if overview.locked {
+            return Err(LOCKED.into());
+        }
         if !overview.ready || overview.other_preparation || overview.respec.is_some() {
             return Err("Finish or cancel existing work and wait out recovery first; use resume for paused respec.".into());
         }
@@ -845,6 +850,9 @@ fn render_entry(entry: &AdvancementEntry, rows: &mut Vec<String>) {
                 None => {}
             }
             rows.push(format!("Future growth: {}. Provisional XP policy. Use source racial or source class <class ID> to preview a change.", future_growth_label(&value.growth.future)));
+            if value.locked {
+                rows.push(LOCKED.into());
+            }
             rows.push(format!("Ready: {}; perceived danger: {}; received-loss quiet remaining: {} active ticks; other preparation: {}", value.ready, value.perceived_threat, value.received_loss_remaining, value.other_preparation));
             rows.push(format!("{}Timing: purchase recovery {}; respec preparation {}, recovery {}; received-loss quiet interval {} active ticks", if value.timings.provisional { "Provisional " } else { "" }, value.timings.purchase_recovery, value.timings.respec_prepare, value.timings.respec_recovery, value.timings.received_loss_interval));
             rows.push(format!("Respec needs {} {} ({}): {:?}. Availability is checked by the server.", value.ration.quantity, value.ration.supply.name, value.ration.supply.id, value.ration.access));

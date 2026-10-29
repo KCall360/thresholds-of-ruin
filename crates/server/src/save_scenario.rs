@@ -443,6 +443,8 @@ struct UniqueRetrieval {
 #[serde(remote = "source::ScenarioCapabilities", deny_unknown_fields)]
 struct ScenarioCapabilities {
     npc_stair_traversal: bool,
+    owner_advancement: bool,
+    corpses: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -2506,6 +2508,8 @@ struct BuildSpec {
     binding: String,
     #[serde(with = "mapped")]
     hit_dice: Vec<crate::creature_authoring::Advancement>,
+    #[serde(with = "mapped")]
+    growth_schedule: Vec<crate::creature_authoring::Advancement>,
     templates: Vec<String>,
 }
 
@@ -4508,7 +4512,7 @@ struct ContentPackage {
     #[serde(with = "mapped")]
     index: source::RegionIndex,
 }
-const CONTENT_PACKAGE_FORMAT: u32 = 32;
+const CONTENT_PACKAGE_FORMAT: u32 = 33;
 pub(crate) fn check_metadata_capacity(package: &source::Package) -> Result<(), crate::Failure> {
     let bytes = serde_json::to_vec(&Borrowed(package)).map_err(|_| storage_failure())?;
     if bytes.len() > MAX_SAVE_METADATA_BYTES {

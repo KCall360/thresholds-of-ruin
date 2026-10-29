@@ -1593,8 +1593,12 @@ impl Game {
                     })
                     .expect("carried item from current inventory index");
             }
-            self.next_item_id = death.next_item_id;
-            self.items.insert(death.corpse, death.body);
+            // Without corpses the body item is discarded unallocated; dropped
+            // inventory keeps the body's location and motion either way.
+            if self.scenario_capabilities().corpses {
+                self.next_item_id = death.next_item_id;
+                self.items.insert(death.corpse, death.body);
+            }
             self.on_actor_death(id)?;
             if let Some(award) = death.award {
                 // Capture after death/claim retirement: never overwrite the
@@ -2918,6 +2922,98 @@ mod growth_tests {
             }
         );
         work
+    }
+
+    fn configured(capabilities: crate::floor_activation::ScenarioCapabilities) -> Game {
+        let mut game = game();
+        game.configure_scenario_policy(capabilities, None).unwrap();
+        game
+    }
+
+    #[test]
+    fn disabled_corpses_leave_no_body_item_but_still_kill_and_award() {
+        let mut game = configured(crate::floor_activation::ScenarioCapabilities {
+            corpses: false,
+            ..Default::default()
+        });
+        let next = game.next_item_id;
+        let before = game
+            .creature(ActorId(1))
+            .unwrap()
+            .earned_progress()
+            .earned_xp();
+        game.apply(fatal(ActorId(1), ActorId(2))).unwrap();
+        assert!(game.creature(ActorId(2)).unwrap().health().dead());
+        assert!(game
+            .items
+            .iter()
+            .all(|(_, item)| item.spec.class != crate::ItemClass::Corpse));
+        assert_eq!(game.next_item_id, next, "no item identity is allocated");
+        assert!(
+            game.creature(ActorId(1))
+                .unwrap()
+                .earned_progress()
+                .earned_xp()
+                > before
+        );
+
+        let mut ordinary = game_for_corpse_comparison();
+        ordinary.apply(fatal(ActorId(1), ActorId(2))).unwrap();
+        assert!(ordinary
+            .items
+            .iter()
+            .any(|(_, item)| item.spec.class == crate::ItemClass::Corpse));
+    }
+
+    fn game_for_corpse_comparison() -> Game {
+        configured(Default::default())
+    }
+
+    #[test]
+    fn locked_owner_advancement_refuses_previews_and_actions_without_changes() {
+        let mut game = configured(crate::floor_activation::ScenarioCapabilities {
+            owner_advancement: false,
+            ..Default::default()
+        });
+        let owner = ActorId(1);
+        let basis = crate::player_advancement::AdvancementBasis {
+            actor: owner,
+            branch: "main".into(),
+            stream: "owner".into(),
+            reset: 0,
+            build_epoch: game.creature(owner).unwrap().build_epoch(),
+        };
+        assert_eq!(
+            game.preview_player_growth_source(owner, &basis, &GrowthSource::Racial {})
+                .map(|_| ()),
+            Err(GameError::AdvancementLocked)
+        );
+        let before = game.clone();
+        assert_eq!(
+            game.act(
+                owner,
+                crate::Action::ChooseGrowthSource {
+                    basis,
+                    source: GrowthSource::Racial {},
+                },
+            )
+            .map(|_| ()),
+            Err(GameError::AdvancementLocked)
+        );
+        assert_eq!(game, before);
+        // The default policy reaches ordinary validation instead of the lock.
+        let ordinary = configured(Default::default()).preview_player_growth_source(
+            owner,
+            &crate::player_advancement::AdvancementBasis {
+                actor: owner,
+                branch: "main".into(),
+                stream: "owner".into(),
+                reset: 0,
+                build_epoch: before.creature(owner).unwrap().build_epoch(),
+            },
+            &GrowthSource::Racial {},
+        );
+        assert!(!matches!(ordinary, Err(GameError::AdvancementLocked)));
     }
 
     #[test]

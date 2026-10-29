@@ -42,7 +42,10 @@ Overview contains a required `growth` record: `highest_earned_tier`, `peak_threa
 `held_xp`, `earned_xp`, `spent_xp`, `next_threshold` and `future`. Counts,
 threat, XP prices and counters are unsigned decimal strings and satisfy earned = spent + held. Future policy
 is explicitly tagged `disabled`, `selected` (with `source`), or `authored`.
-These are owner-only descriptive facts. Source changes use the same retained
+Overview also has a required `locked` boolean. It is true when the scenario
+disables owner advancement: the build grows only along its authored schedule,
+`ready` is false, no respec is in progress, and the server refuses every
+purchase, source, Intellect and respec request. These are owner-only descriptive facts. Source changes use the same retained
 preview, ordinary admission, strict save adapters and receipt precedence as
 purchases; they preserve authored restoration choices. Zero-based owners are
 canonical unsigned decimal strings below the 64-bit maximum, so the corresponding
@@ -316,7 +319,7 @@ of this wire representation.
 The first frame authenticates and declares a frontend label:
 
 ```json client-message
-{"type":"hello","protocol":64,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":65,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and

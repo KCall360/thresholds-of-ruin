@@ -18,13 +18,12 @@ The route arm named `production` is the explicit, frozen preactivation E/S sourc
 snapshot at `8d09063840c51aa4189b146c287829102856b279`, with an explicitly recorded
 adaptation for the current scenario format. Its ordinary population remains two
 emus and two snakes. The source-only fixture
-`scripts/fixtures/rogue-earned-baseline-v27` retains exact package inputs and its
+`scripts/fixtures/rogue-earned-baseline-v28` retains exact package inputs and its
 current bundled-rule source hash. Its latest source-only transition advances
-the scenario header from 34 to 35 and the bundled import from its prior pinned
-identity to current `interactions-v56` for seeded item forms and physical charged
-devices.
-The [prior source receipt](../../scripts/fixtures/rogue-earned-baseline-v26/source.json)
-and [current transition receipt](../../scripts/fixtures/rogue-earned-baseline-v27/format-transition.json)
+only the scenario header from 35 to 36 for scenario capability switches and
+growth schedules; the bundled `interactions-v56` import is unchanged.
+The [prior source receipt](../../scripts/fixtures/rogue-earned-baseline-v27/source.json)
+and [current transition receipt](../../scripts/fixtures/rogue-earned-baseline-v28/format-transition.json)
 retain the exact old/new identities and hashes; their historical proof is not
 rewritten. The dependency digest attests to actual bundled source bytes, not a
 compiler certificate. No body-package enrollment, two-HD player kit, treasure-room stages, darts,

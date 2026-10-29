@@ -341,7 +341,8 @@ fn validate(
     choices: &[HdChoices],
 ) -> Result<(), BuildError> {
     if let PersonalRestorationPolicy::Authored(plan) = &body.personal_restoration {
-        if plan.len() as u64 != body.birth_personal_count {
+        // Birth receipts are followed by any authored future schedule.
+        if (plan.len() as u64) < body.birth_personal_count {
             return Err(BuildError::InvalidOwnership);
         }
         for (ordinal, (id, declared)) in plan.iter().enumerate() {
@@ -349,13 +350,20 @@ fn validate(
                 return Err(BuildError::InvalidOwnership);
             }
             let owner = HdOwner::Personal { id: *id };
-            let (die, retained_choices) = ledger
+            let Some((die, retained_choices)) = ledger
                 .entries()
                 .iter()
                 .zip(choices)
                 .chain(body.drained.iter().map(|row| (&row.hit_die, &row.choices)))
                 .find(|(die, _)| die.owner() == Some(&owner))
-                .ok_or(BuildError::InvalidOwnership)?;
+            else {
+                // Only a scheduled row that has not been grown yet may be absent.
+                if id.0.get() <= body.birth_personal_count || id.0.get() < body.next_personal_id {
+                    return Err(BuildError::InvalidOwnership);
+                }
+                declared.choices.validate_purchase_ids(Some(&owner))?;
+                continue;
+            };
             if die.source() != declared.source
                 || declared.choices.purchase_highwater > retained_choices.purchase_highwater
             {

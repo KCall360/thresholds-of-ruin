@@ -65,63 +65,56 @@ exposes, from the [Rogue rules](../research/rogue-5.4.4/rules.md) and
 | Engine adaptation | Kept as the accepted TOR form | Ticks, 3d6 checks and edge, sight, persistent floors, paired stairs, NPC stair policy |
 | Not in Rogue | Disabled for Rogue, kept in the engine | Bandages and Bind Wounds, ration respec, free purchase choice, Mage class and paid techniques, corpses (Rogue monsters leave none), nutrition cost of regeneration |
 
-Content that only Rogue's scenario authors, such as the bandage floor stage,
-bandage entries in birth pools and the Mage preset, is edited out of the Rogue
-package. That is a content change, not an engine removal.
+The tuned scenario is a separate package, `scenarios/rogue`. The
+`rogue-exploration` starter slice keeps its Warrior/Mage presets, bandages and
+free choices for the tests and play that rely on them. The new package shares
+its catalog by copy; [`test_rogue_profile_content.py`](../../scripts/test_rogue_profile_content.py)
+lists every intentional difference, so later tuning diverges deliberately.
 
 ## Scenario mechanics profile
 
-A new strict scenario section lists named mechanics with `enabled` or
-`disabled`, and the player build lock. Each name has an engine default equal to
-today's behavior, so other scenarios, the arena and test fixtures are unchanged.
-Unknown names are rejected. Disabling is enforced by the server: admission
-refuses the action, generation and death never create the content, and clients
-show only what the server discloses.
+Milestone 1 is implemented. Scenarios switch shared mechanics through the
+existing `[capabilities]` table; omitted switches keep the engine default, and
+compiled and saved policy records every switch. The server enforces each one:
 
-Initial entries:
+| Mechanic | Mechanism | Default | Rogue |
+| --- | --- | --- | --- |
+| Owner advancement (purchases, source and Intellect choices, respec) | `owner_advancement` capability | enabled | disabled |
+| Corpses | `corpses` capability | enabled | disabled |
+| Bind Wounds | existing `default_abilities` rules override | granted | not granted |
+| Food-drought guarantee | capability, milestone 4 | disabled | enabled |
 
-| Mechanic | Default | Rogue |
-| --- | --- | --- |
-| `universal_care` (Bind Wounds) | enabled | disabled |
-| `respec` | enabled | disabled |
-| `corpses` | enabled | disabled |
-| `food_drought_guarantee` | disabled | enabled |
-| Player build | selected | locked to the scheduled path |
-
-Where an existing validated rules override already expresses a choice, such as
-removing `bind_wounds` from `default_abilities` or setting nutrition
-regeneration rates to zero, the profile records that override instead of adding
-a second switch. Numeric knobs stay numeric.
-
-This adds scenario and save state, so it needs a format decision. Tests:
-compiler validation of defaults, unknown and conflicting entries; unit and
-integration refusal for each disabled mechanic; an actual-process case showing a
-disabled action is unavailable in Rogue and still works in a scenario that
-enables it. Rogue tests that exercise Bind Wounds, respec, the Mage preset or
-corpses move to fixtures that enable them, so no shared coverage is lost.
+Respec is an owner replacement, so `owner_advancement` covers it rather than a
+second switch. Where an existing validated rules override already expresses a
+choice, the package uses it instead of a new switch; numeric knobs, such as the
+nutrition cost of regeneration, stay numeric and are tuned in milestone 6.
+The advancement overview discloses `locked`, so clients explain why choices are
+unavailable instead of offering them.
 
 ## The reference PC and its fixed upgrade path
 
-Rogue has one adventurer and no level-up choices, so the scenario has one
+Rogue has one adventurer and no level-up choices, so `scenarios/rogue` has one
 preset whose build advances automatically. That build is the reference every
 other element is tuned against.
 
-- **Start.** A human Warrior-class adventurer with Rogue's
-  [starting state](../research/rogue-5.4.4/rules.md#r01--run-goal-and-starting-state):
-  +1/+1 mace, +1 ring mail, +1 short bow, 25–39 arrows and one ration, all known.
-  Rogue's 12 HP and Strength 16 map to the starting HD and attributes.
-- **Each level.** One class HD whose Health roll approximates Rogue's +1d10,
-  plus one scheduled purchase that approximates Rogue's level-based accuracy
-  and saving-throw growth, for example weapon skill ranks. The schedule is a
-  table from HD to purchase.
-- **The lock.** A scheduled `future_growth` kind applies the authored row at the
-  earned-HD boundary, reusing the per-HD `hit_dice[].purchases` form that
-  monster actors already author. Player purchase and replacement operations are
-  refused; clients show the applied build. A drained HD that is regained
-  reapplies the same row.
-- **Tests.** Unit and integration for schedule application, refusal, drain and
-  regrowth; journal and checkpoint restart and replay; an actual-process run
-  that earns HD 2 and HD 3 and shows the scheduled purchases.
+- **Start.** A human with one racial body HD and one Warrior HD, carrying
+  Rogue's [starting kit](../research/rogue-5.4.4/rules.md#r01--run-goal-and-starting-state):
+  mace, ring mail, shortbow, 32 arrows (the midpoint of Rogue's 25–39) and one
+  ration, all known. The mace and ring mail keep the starter values; Rogue's +1
+  bow, 12 HP and Strength 16 mappings are milestone 6 tuning.
+- **Each level.** One Warrior HD (d10, like Rogue's +1d10) plus the next row of
+  `growth_schedule`. Seventeen rows buy one skill rank each, interleaving melee,
+  ranged, Athletics and Discipline ranks to the cap of five; three later rows
+  add Health only, for 20 rows matching Rogue's experience table.
+- **The lock.** `restoration = "authored"`, `future_growth = { kind =
+  "authored" }` and `owner_advancement = false`. The schedule is checked at
+  compilation as if every row were owned. A drained row regrows with its
+  scheduled purchase; an exhausted schedule holds earned XP.
+- **Tests.** Simulation unit tests cover scheduled growth, saved records with
+  grown and ungrown rows, drain and regrowth, inadmissible schedules, corpses and
+  the lock; protocol tests cover `locked`; actual-process tests cover a locked
+  kill that grows its scheduled row and leaves no corpse, the Rogue package's
+  start, and compiler rejections.
 
 Because the build is fixed, the reference PC for a depth is simply the scheduled
 build at the level Rogue's player is expected to have reached there.
@@ -227,7 +220,7 @@ period as part of the same fit.
 
 | Milestone | Delivers | Format change |
 | --- | --- | --- |
-| 1 | Mechanics profile and build lock; Rogue's single preset and profile; inventory of moved tests | Yes |
+| 1 | Implemented: capability switches, growth schedules and the `scenarios/rogue` package | Yes: protocol 65, save 64, scenario 36 |
 | 2 | Reference model, targets script, run summary and campaign harness | No |
 | 3 | Species encounter tuning, all 26, in waves | No |
 | 4 | Food distribution and drought guarantee | Yes |

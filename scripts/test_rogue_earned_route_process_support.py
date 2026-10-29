@@ -1548,13 +1548,13 @@ class RouteResumeHardeningTests(unittest.TestCase):
             else:
                 self.assertEqual(current, old, name)
 
-    def test_current_baseline_v27_changes_only_item_form_format_and_rules_identity(self):
+    def test_current_baseline_v28_changes_only_scenario_format(self):
         import hashlib
         import tomllib
         from arena_evaluation import files
         from process_harness import ROOT
-        snapshot = ROOT / 'scripts/fixtures/rogue-earned-baseline-v27'
-        previous = ROOT / 'scripts/fixtures/rogue-earned-baseline-v26'
+        snapshot = ROOT / 'scripts/fixtures/rogue-earned-baseline-v28'
+        previous = ROOT / 'scripts/fixtures/rogue-earned-baseline-v27'
         transition_bytes = (snapshot / 'format-transition.json').read_bytes()
         transition = json.loads(transition_bytes)
         source = json.loads((snapshot / 'source.json').read_text())
@@ -1563,9 +1563,9 @@ class RouteResumeHardeningTests(unittest.TestCase):
         self.assertEqual((transition['previous_snapshot'], transition['current_snapshot']),
                          (previous.name, snapshot.name))
         self.assertEqual((transition['previous_scenario_format'], transition['current_scenario_format']),
-                         (34, 35))
+                         (35, 36))
         self.assertEqual((transition['previous_ruleset'], transition['current_ruleset']),
-                         ('interactions-v55', 'interactions-v56'))
+                         ('interactions-v56', 'interactions-v56'))
         self.assertEqual(transition['previous_source_sha256'],
                          hashlib.sha256((previous / 'source.json').read_bytes()).hexdigest())
         for name in ('package_inputs', 'rules_dependencies', 'reference'):
@@ -1578,12 +1578,11 @@ class RouteResumeHardeningTests(unittest.TestCase):
         self.assertIn('compiler and route qualification pending', source['reference'])
         self.assertIn('source bytes only', transition['only_transformation'])
         self.assertIn('No maze_rooms or room_omissions policy', transition['only_transformation'])
-        self.assertIn('spear throwing, item forms, staves', transition['only_transformation'])
+        self.assertIn('scenario capability switches, growth schedules', transition['only_transformation'])
         self.assertEqual(transition['retained_fixture_reference'],
-                         'c759fb9714c5449934354d7e19668a08df7aa469:scripts/fixtures/rogue-earned-baseline-v26')
+                         'cf7c4498520263cd98b38f033458c9d984f7ad46:scripts/fixtures/rogue-earned-baseline-v27')
         self.assertEqual(transition['current_rules_dependencies'], source['rules_dependencies'])
-        self.assertEqual(source['rules_dependencies'], {
-            'interactions-v56': '6c4c3eb331a1567c50e1fed30fa59fd37f69f6d2413d829be49a0253748b5f80'})
+        self.assertEqual(source['rules_dependencies'], prior['rules_dependencies'])
         bundled = ROOT / 'crates/simulation/data/default-ruleset.toml'
         self.assertEqual(hashlib.sha256(bundled.read_bytes()).hexdigest(),
                          source['rules_dependencies']['interactions-v56'])
@@ -1592,21 +1591,17 @@ class RouteResumeHardeningTests(unittest.TestCase):
             current = (snapshot / 'package' / name).read_bytes()
             old = (previous / 'package' / name).read_bytes()
             if name == 'scenario.toml':
-                self.assertTrue(old.startswith(b'format = 34\n'))
-                self.assertEqual(current, old.replace(b'format = 34\n', b'format = 35\n', 1))
+                self.assertTrue(old.startswith(b'format = 35\n'))
+                self.assertEqual(current, old.replace(b'format = 35\n', b'format = 36\n', 1))
                 current_source, prior_source = map(tomllib.loads, (current.decode(), old.decode()))
-                self.assertEqual(current_source.pop('format'), 35)
-                self.assertEqual(prior_source.pop('format'), 34)
+                self.assertEqual(current_source.pop('format'), 36)
+                self.assertEqual(prior_source.pop('format'), 35)
                 self.assertEqual(current_source, prior_source)
-                self.assertTrue(all('maze_rooms' not in recipe and 'room_omissions' not in recipe
-                                    for recipe in current_source['generation_recipes'].values()))
-            elif name == 'rules.toml':
-                self.assertEqual(old.count(b'interactions-v55'), 1)
-                self.assertEqual(current, old.replace(b'interactions-v55', b'interactions-v56', 1))
+                self.assertNotIn('owner_advancement', current_source.get('capabilities', {}))
             else:
                 self.assertEqual(current, old, name)
         loader = (ROOT / 'scripts/test_rogue_earned_route_process.py').read_text()
-        self.assertIn("'production': ROOT / 'scripts/fixtures/rogue-earned-baseline-v27'", loader)
+        self.assertIn("'production': ROOT / 'scripts/fixtures/rogue-earned-baseline-v28'", loader)
 
     def test_artifact_capacity_is_infrastructure_not_controller_failure(self):
         self.assertEqual(classify_failure(ValueError('JSON artifact exceeds bounded size')),
