@@ -1647,3 +1647,17 @@ the exact page count, expertise, payment, recovery and source-free restart check
 The full affected process passes. This adds one stale method/root, not a transport
 or gameplay defect. Both new Linux debug Python shard jobs also completed
 successfully; aggregate exact-coverage proof and final-head CI remain separate gates.
+
+Windows debug's native bump fixture reached and verified native input, recovery
+and unchanged resource balances, then failed its raw private `combat inspect`
+query with `StaleContext`. The fixture now uses the existing explicit pre-query
+Observe helper, without retrying an action or weakening the exact owned-melee
+trace and narration checks. A direct-caller audit found four equivalent new-report
+openings in natural-attack, equipped-weapon, replay and data-only ruleset tests;
+those now refresh too, while backward paging and deliberate stale-capability
+queries retain their existing basis. This is one repeated stale-fixture root,
+one observed failing method and four proactively corrected methods, not a new
+gameplay defect. All four affected non-native processes pass (22.816 seconds),
+as does the helper's refresh-once/no-retry regression. The exact native case
+still requires hosted qualification: local X11 lacks xdotool; no local native
+pass or waiver is claimed. Production source and binaries are unchanged.

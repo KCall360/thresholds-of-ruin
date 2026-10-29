@@ -1335,6 +1335,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
         frames = [json.loads(line) for line in wizard.transcript[start:] if line.startswith("{")]
         if not any(completed(frame) for frame in frames):
             self.frame(wizard, completed)
+        self.assertIsNone(self.request(wizard, {"type": "observe"})["error"])
         report = query("combat inspect", "combat_diagnostics")
         records = list(report["records"])
         while records and int(records[0]["sequence"]) > int(report["captured"]) - report["retained"] + 1:
@@ -1458,6 +1459,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
         # The target may retaliate under its own engagement policy. Check the
         # two selected actor/target resolutions without treating that as a third
         # player attack or suppressing the target's ordinary behavior.
+        self.assertIsNone(self.request(wizard, {"type": "observe"})["error"])
         records = [record for record in query("combat inspect")["records"]
                    if record["actor"] == "1" and record["target"] == "2"]
         self.assertEqual(len(records), 2)
@@ -1585,6 +1587,7 @@ class CombatDiagnosticsProcesses(ProcessTestCase):
         self.assertTrue(fresh["enabled"])
         self.assertEqual(fresh["records"], [])
         step()
+        self.assertIsNone(self.request(wizard, {"type": "observe"})["error"])
         replay_report = query("combat inspect")
         first = int(replay_report["records"][0]["sequence"])
         while first > int(replay_report["dropped"]) + 1:

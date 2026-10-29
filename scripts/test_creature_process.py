@@ -729,7 +729,7 @@ class NativeCreatureAbilityProcesses(ProcessTestCase):
             self.assertEqual(resource(completed, pool)["balance"], resource(initial, pool)["balance"])
             self.assertEqual(resource(completed, pool)["reserved"], 0)
         offset = len(wizard.transcript)
-        self.assertFalse(self.command(wizard, {"type": "wizard", "command": "combat inspect"}).get("error"))
+        self.wizard_command(wizard, "combat inspect")
         messages = [json.loads(line).get("message") for line in wizard.transcript[offset:] if line.startswith("{")]
         reports = [message["report"] for message in messages if message and message["type"] == "combat_diagnostics"]
         self.assertEqual(len(reports), 1)

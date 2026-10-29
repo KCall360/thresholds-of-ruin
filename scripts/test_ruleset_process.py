@@ -270,6 +270,7 @@ melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, stri
                    and frame["state"]["observation"]["ready"]
                    and int(frame["state"]["observation"]["tick"]) > 0
                    and frame["state"]["observation"]["combat"]["preparation_remaining"] is None)
+        self.assertIsNone(self.request(wizard, {"type": "observe"})["error"])
         record = next(record for record in report("combat inspect", "combat_diagnostics")["records"]
                       if record["ability"]["id"] == "fixture_sweep")
         self.assertEqual(sum(effect["amount"] for effect in record["outcome"]["effects"]
