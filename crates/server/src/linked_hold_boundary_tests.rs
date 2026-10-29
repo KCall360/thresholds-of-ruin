@@ -96,7 +96,7 @@ fn command(engine: &mut Engine, actor: ActorId, id: &str, command: Command) -> C
 fn wait(engine: &mut Engine, serial: usize) {
     let actor = engine.next_actor().expect("ordinary external turn");
     let request = Command::Act {
-        expected_revision: engine.revision(actor).unwrap(),
+        expected_boundary: engine.causal_boundary(actor).unwrap(),
         action: Action::Wait,
     };
     command(engine, actor, &format!("wait-{serial}"), request);
@@ -109,7 +109,7 @@ pub(super) fn establish(engine: &mut Engine) {
 pub(super) fn establish_with_holders(engine: &mut Engine, holders: &[ActorId]) {
     for &actor in holders {
         let request = Command::AdmitIntention {
-            expected_revision: engine.revision(actor).unwrap(),
+            expected_boundary: engine.causal_boundary(actor).unwrap(),
             action: Action::UseAbility {
                 id: tor_simulation::content_ids::AbilityId::new("fixture_linked_hold").unwrap(),
                 invocation: crate::actions::AbilityInvocation {
@@ -148,7 +148,7 @@ fn escape_admission_and_resolution_storage_failures_preserve_exact_links_rng_and
         let chosen = holds[usize::from(!move_attempt)].id;
         let remaining = holds[usize::from(move_attempt)];
         let escape = Command::AdmitIntention {
-            expected_revision: engine.revision(ActorId(1)).unwrap(),
+            expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
             action: if move_attempt {
                 Action::Move {
                     direction: Direction::West,
@@ -177,7 +177,7 @@ fn escape_admission_and_resolution_storage_failures_preserve_exact_links_rng_and
                     crossing = Some((
                         actor,
                         Command::Act {
-                            expected_revision: engine.revision(actor).unwrap(),
+                            expected_boundary: engine.causal_boundary(actor).unwrap(),
                             action: Action::Wait,
                         },
                     ));
@@ -204,7 +204,7 @@ fn escape_admission_and_resolution_storage_failures_preserve_exact_links_rng_and
         let game = rejected.game.clone();
         let exact = authority(&game);
         let archive = serde_json::to_value(&rejected.archive).unwrap();
-        let revisions = rejected.revisions.clone();
+        let causal_position = rejected.archive.records.len();
         let receipts = rejected.receipts.clone();
         let pending = rejected.game.preparation(SimActor(1)).cloned();
         let status = rejected.save_status();
@@ -252,7 +252,7 @@ fn escape_admission_and_resolution_storage_failures_preserve_exact_links_rng_and
             assert_eq!(rejected.game.linked_holds(SimActor(1)), holds);
             assert_eq!(rejected.game.preparation(SimActor(1)).cloned(), pending);
             assert_eq!(serde_json::to_value(&rejected.archive).unwrap(), archive);
-            assert_eq!(rejected.revisions, revisions);
+            assert_eq!(rejected.archive.records.len(), causal_position);
             assert_eq!(rejected.receipts, receipts);
             assert_eq!(
                 rejected.save_status().accepted_sequence,

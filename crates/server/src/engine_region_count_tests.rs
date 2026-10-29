@@ -146,7 +146,8 @@ fn descriptor_region_counts_follow_materialized_lifecycle_and_survive_restart() 
                 "depth-two",
                 &engine.branch().clone(),
                 Command::Wizard {
-                    expected_revision: engine.revision(ActorId(1)).unwrap(),
+                    display_basis: None,
+                    expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
                     operation: WizardOperation::Teleport {
                         actor: ActorId(1),
                         position: Position {

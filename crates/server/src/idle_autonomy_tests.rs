@@ -264,7 +264,7 @@ fn every_rogue_species_uses_its_own_default_door_permission() {
             .observe(Actor(3))
             .unwrap()
             .visible_cells
-            .into_iter()
+            .iter()
             .filter_map(|cell| cell.door)
             .find(|state| state.id == door)
             .unwrap();
@@ -614,7 +614,7 @@ fn idle_round(engine: &mut Engine, request: &str) {
             request,
             &engine.branch().clone(),
             Command::Act {
-                expected_revision: engine.revision(ActorId(1)).unwrap(),
+                expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
                 action: Action::Wait,
             },
         )
@@ -689,7 +689,8 @@ fn default_enrollment_and_visited_history_survive_source_free_durable_reopen_and
                 "retain-roaming-history",
                 &engine.branch().clone(),
                 Command::Wizard {
-                    expected_revision: engine.revision(ActorId(1)).unwrap(),
+                    display_basis: None,
+                    expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
                     operation: WizardOperation::SetPlaceHint {
                         position: crate::journal::Position {
                             region: 1,
@@ -741,7 +742,8 @@ fn default_enrollment_and_visited_history_survive_source_free_durable_reopen_and
                 "rewind-default-roaming",
                 &resumed.branch().clone(),
                 Command::Wizard {
-                    expected_revision: resumed.revision(ActorId(1)).unwrap(),
+                    display_basis: None,
+                    expected_boundary: resumed.causal_boundary(ActorId(1)).unwrap(),
                     operation: WizardOperation::Rewind {
                         target: Some(marker.entry.id),
                     },

@@ -149,6 +149,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let mut phase_totals = std::collections::BTreeMap::<&str, f64>::new();
                 let mut navigation_refreshes = 0;
                 let mut sequence = 0;
+                let mut previous = engine.state(player)?;
                 for turn in 0..history + 64 {
                     let decision_start = Instant::now();
                     let (actor, action) =
@@ -196,7 +197,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             )
                         };
                     let decision_ms = decision_start.elapsed().as_secs_f64() * 1000.;
-                    let revision = engine.revision(actor)?;
+                    let revision = engine.causal_boundary(actor)?;
                     let start = Instant::now();
                     let (_, profile) = if let Some(action) = action {
                         engine.command_profiled(
@@ -206,7 +207,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             &turn.to_string(),
                             &engine.branch().clone(),
                             Command::Act {
-                                expected_revision: revision,
+                                expected_boundary: revision,
                                 action,
                             },
                         )?
@@ -230,10 +231,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         ai_times.push(decision_ms);
                     }
                     let state = engine.state(player)?;
-                    if state.revision == app.state.as_ref().unwrap().state().revision {
+                    if state == previous {
                         continue;
                     }
+                    previous = state;
                     sequence += 1;
+                    // Direct Engine diagnostics issue their own fixture pictures;
+                    // internal state revision zero is not a display generation.
+                    let mut state =
+                        engine.state_at(&engine.presentation_boundary(), player, sequence)?;
+                    state.snapshot = tor_protocol::SnapshotId(format!("bench-picture-{sequence}"));
                     let update = tor_protocol::StreamUpdate {
                         context: fixture_context(),
                         actor: player,

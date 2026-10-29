@@ -54,7 +54,7 @@ class ScenarioSourceProcesses(ProcessTestCase):
         shutil.rmtree(package / "catalog")
         self.server()
         _, restored = self.client()
-        self.assertEqual(restored["state"], ready["state"])
+        self.assertDisclosedStateEqual(restored["state"], ready["state"])
         self.assertEqual(restored["history"], ready["history"])
 
     def test_duplicate_namespace_and_include_failures_are_atomic(self):

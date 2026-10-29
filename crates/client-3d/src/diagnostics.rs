@@ -154,7 +154,7 @@ pub(super) fn capture(
         "advancement": game.as_ref().filter(|game| game.screen == Some(crate::screen::Screen::Advancement)).map(|game| serde_json::json!({
             "lines": game.advancement, "typed": game.typed,
         })),
-        "screen": game.as_ref().and_then(|game| game.screen).map(|screen| format!("{screen:?}")),
+        "screen": game.as_ref().and_then(|game| game.screen.as_ref()).map(|screen| format!("{screen:?}")),
         // The open screen as drawn, and the line being typed on it.
         "screen_text": screen_text,
         "typed": typed,

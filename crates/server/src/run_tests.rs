@@ -40,7 +40,7 @@ fn setup(service: &mut Service, client: &mut Connection, operation: &str) {
             context: service.input_context(client.id).unwrap(),
             branch: service.engine.branch().clone(),
             command: Command::Wizard {
-                expected_revision: service.engine.revision(ActorId(1)).unwrap(),
+                expected_revision: service.reply_context(client.id).unwrap().revision,
                 operation: operation.into(),
             },
         },
@@ -56,10 +56,27 @@ fn fixture() -> (Service, Connection) {
     let mut client = connect(&mut service, AccessRole::Wizard);
     setup(&mut service, &mut client, "room 3 8 1 1 Corridor");
     setup(&mut service, &mut client, "teleport 1 3 0 0 0");
+    service.handle(client.id, "fixture-picture".into(), Request::Observe);
+    drain(&mut client);
     (service, client)
 }
 fn start(service: &mut Service, client: &mut Connection, x: i32) -> Request {
-    let state = service.engine.state(ActorId(1)).unwrap();
+    service.handle(client.id, "travel-picture".into(), Request::Observe);
+    drain(client);
+    let request = travel_request(service, client.id, x);
+    service.handle(client.id, "travel".into(), request.clone());
+    assert!(!drain(client)
+        .iter()
+        .any(|m| matches!(m, ServerMessage::Error { .. })));
+    request
+}
+fn travel_request(service: &Service, id: u64, x: i32) -> Request {
+    let state = service.clients[&id]
+        .last_observation
+        .as_ref()
+        .unwrap()
+        .state
+        .clone();
     let destination = state
         .observation
         .visible_cells
@@ -68,19 +85,14 @@ fn start(service: &mut Service, client: &mut Connection, x: i32) -> Request {
         .unwrap()
         .key
         .clone();
-    let request = Request::Command {
-        context: service.input_context(client.id).unwrap(),
+    Request::Command {
+        context: service.input_context(id).unwrap(),
         branch: service.engine.branch().clone(),
         command: Command::Travel {
             expected_revision: state.revision,
             destination,
         },
-    };
-    service.handle(client.id, "travel".into(), request.clone());
-    assert!(!drain(client)
-        .iter()
-        .any(|m| matches!(m, ServerMessage::Error { .. })));
-    request
+    }
 }
 
 #[test]
@@ -254,6 +266,7 @@ fn startup_cancellation_storage_failure_preserves_saved_travel_for_retry() {
         let actor = ActorId(1);
         let mut engine = Engine::open_with_policy(&path, scenario.clone(), policy.clone()).unwrap();
         let before = engine.state(actor).unwrap();
+        let before_boundary = engine.causal_boundary(actor).unwrap();
         let destination = before
             .observation
             .visible_cells
@@ -270,7 +283,8 @@ fn startup_cancellation_storage_failure_preserves_saved_travel_for_retry() {
                 "journey",
                 &engine.branch().clone(),
                 crate::journal::Command::Travel {
-                    expected_revision: before.revision,
+                    display_basis: None,
+                    expected_boundary: before_boundary,
                     destination: destination.clone(),
                 },
             )
@@ -346,12 +360,11 @@ fn commands_during_a_journey_are_busy_and_leave_it_running() {
     let Command::Travel { destination, .. } = command else {
         unreachable!()
     };
-    let revision = service.engine.revision(ActorId(1)).unwrap();
+    let revision = service.engine.causal_boundary(ActorId(1)).unwrap();
     for (id, command) in [
         (
             "act",
             Command::Act {
-                expected_revision: revision,
                 action: Action::Wait,
             },
         ),
@@ -385,7 +398,10 @@ fn commands_during_a_journey_are_busy_and_leave_it_running() {
         (status.phase, &status.id),
         (TravelPhase::Active, &travel_id)
     );
-    assert_eq!(service.engine.revision(ActorId(1)).unwrap(), revision);
+    assert_eq!(
+        service.engine.causal_boundary(ActorId(1)).unwrap(),
+        revision
+    );
     service.run_until_blocked();
     assert_eq!(
         service.travel_status[&ActorId(1)].phase,
@@ -586,16 +602,14 @@ fn second_player(service: &mut Service, client: &mut Connection, x: i32) -> Conn
 }
 
 fn act(service: &mut Service, client: &mut Connection, actor: ActorId, action: Action) {
+    assert_eq!(service.clients[&client.id].actor, Some(actor));
     service.handle(
         client.id,
         uuid::Uuid::new_v4().to_string(),
         Request::Command {
             context: service.input_context(client.id).unwrap(),
             branch: service.engine.branch().clone(),
-            command: Command::Act {
-                expected_revision: service.engine.revision(actor).unwrap(),
-                action,
-            },
+            command: Command::Act { action },
         },
     );
     let messages = drain(client);
@@ -672,23 +686,26 @@ fn another_players_action_can_interrupt_a_waiting_journey() {
 fn stale_unknown_and_wrong_branch_requests_are_atomic() {
     let (mut service, mut client) = fixture();
     let before = service.engine.state(ActorId(1)).unwrap();
+    let display_revision = service.reply_context(client.id).unwrap().revision;
     let known = before.observation.visible_cells[0].key.clone();
     for (branch, revision, destination, code) in [
         (
             service.engine.branch().clone(),
-            before.revision,
+            display_revision,
             "unknown".into(),
             ErrorCode::InvalidAction,
         ),
         (
             service.engine.branch().clone(),
-            before.revision - 1,
+            // Old issued pictures remain valid capabilities; use an unissued
+            // generation to exercise stale-context rejection deliberately.
+            display_revision + 1,
             known.clone(),
-            ErrorCode::StaleRevision,
+            ErrorCode::StaleContext,
         ),
         (
             BranchId("wrong".into()),
-            before.revision,
+            display_revision,
             known,
             ErrorCode::WrongBranch,
         ),
@@ -705,9 +722,13 @@ fn stale_unknown_and_wrong_branch_requests_are_atomic() {
                 },
             },
         );
-        assert!(drain(&mut client).iter().any(
-            |m| matches!(m, ServerMessage::Error { code: received, .. } if *received == code)
-        ));
+        let messages = drain(&mut client);
+        assert!(
+            messages.iter().any(
+                |m| matches!(m, ServerMessage::Error { code: received, .. } if *received == code)
+            ),
+            "{messages:?}"
+        );
         assert_eq!(service.engine.state(ActorId(1)).unwrap(), before);
         assert!(service.travels.is_empty());
     }
@@ -758,7 +779,8 @@ fn rewind_to_retained_pending_travel_settles_restored_work_before_snapshot() {
             "retain-pending-travel",
             &service.engine.branch().clone(),
             crate::journal::Command::Wizard {
-                expected_revision: service.engine.revision(actor).unwrap(),
+                display_basis: None,
+                expected_boundary: service.engine.causal_boundary(actor).unwrap(),
                 operation: crate::developer::parse_wizard("place 3 7 0 0 on").unwrap(),
             },
         )
@@ -797,12 +819,15 @@ fn rewind_to_retained_pending_travel_settles_restored_work_before_snapshot() {
 
 #[test]
 fn slow_controller_during_start_cannot_resurrect_travel_on_observers() {
-    let (mut service, mut controller) = fixture();
+    let (mut service, controller) = fixture();
     let mut observer = connect(&mut service, AccessRole::Spectator);
     for i in 0..QUEUE {
         service.handle(controller.id, format!("fill-{i}"), Request::Snapshot);
     }
-    start(&mut service, &mut controller, 7);
+    // Snapshot resets the attachment context. Read the final issued basis
+    // without requesting another picture or draining the deliberately full queue.
+    let request = travel_request(&service, controller.id, 7);
+    service.handle(controller.id, "travel".into(), request);
     assert!(controller.close.borrow().is_some());
     let statuses: Vec<_> = drain(&mut observer)
         .into_iter()
@@ -916,7 +941,7 @@ fn slow_spectator_pauses_the_journey_until_dropped_and_reconnects_at_committed_s
     let ServerMessage::Snapshot { snapshot, .. } = drain(&mut replacement).pop().unwrap() else {
         panic!("replacement snapshot");
     };
-    assert_eq!(*snapshot.state, service.engine.state(ActorId(1)).unwrap());
+    crate::assert_disclosed_state_eq(&snapshot.state, &service.engine.state(ActorId(1)).unwrap());
     assert_eq!(snapshot.travel.unwrap().completed_steps, 1);
     assert!(!snapshot.has_control);
     service.run_until_blocked();
@@ -925,19 +950,35 @@ fn slow_spectator_pauses_the_journey_until_dropped_and_reconnects_at_committed_s
         TravelPhase::Arrived
     );
     assert_eq!(service.travel_status[&ActorId(1)].completed_steps, 7);
-    let observations = drain(&mut replacement)
+    let outcomes: Vec<_> = drain(&mut replacement)
         .into_iter()
-        .filter(|m| {
-            matches!(m, ServerMessage::Update { update } if matches!(
-                update.body,
-                UpdateBody::Observation { .. } | UpdateBody::ObservationDelta { .. }
-            ))
+        .filter_map(|message| match message {
+            ServerMessage::Update { update } => match update.body {
+                UpdateBody::Outcome {
+                    event: Some(entry), ..
+                } if matches!(entry.content, HistoryContent::Action { .. }) => Some(entry),
+                _ => None,
+            },
+            _ => None,
         })
-        .count();
+        .collect();
     assert_eq!(
-        observations, 6,
-        "every remaining step reaches the spectator"
+        outcomes.len(),
+        6,
+        "every remaining causal action reaches the spectator"
     );
+    for (index, entry) in outcomes.iter().enumerate() {
+        assert_eq!(entry.actor, ActorId(1));
+        assert_eq!(entry.tick, 100 * (index as u64 + 1));
+        assert!(
+            matches!(&entry.content, HistoryContent::Action { event, .. }
+            if matches!(event.as_ref(), tor_protocol::Event::Moved { .. }))
+        );
+    }
+    service.handle(replacement.id, "final-picture".into(), Request::Observe);
+    assert!(drain(&mut replacement).iter().any(|m| matches!(m,
+        ServerMessage::Update { update } if matches!(update.body,
+            UpdateBody::Observation { .. } | UpdateBody::ObservationDelta { .. }))));
 }
 
 /// The runner, over its mailbox: a spectator that never reads is dropped

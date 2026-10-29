@@ -9,7 +9,7 @@ fn acknowledgement_loss_and_restart_recover_the_original_receipt() {
     let mut engine = Engine::open(&path, Scenario::two_room(42)).unwrap();
     let branch = engine.branch().clone();
     let command = Command::Act {
-        expected_revision: 0,
+        expected_boundary: 0,
         action: Action::Wait,
     };
     let accepted = engine
@@ -47,7 +47,7 @@ fn acknowledgement_loss_and_restart_recover_the_original_receipt() {
             "lost-ack",
             &branch,
             Command::Act {
-                expected_revision: 1,
+                expected_boundary: 1,
                 action: Action::Wait,
             },
         )
@@ -68,7 +68,7 @@ fn damaged_journals_fail_closed_without_overwriting_evidence() {
             "one",
             &engine.branch().clone(),
             Command::Act {
-                expected_revision: 0,
+                expected_boundary: 0,
                 action: Action::Wait,
             },
         )

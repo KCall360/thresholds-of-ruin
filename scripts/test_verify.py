@@ -123,7 +123,8 @@ class Selection(unittest.TestCase):
                     self.assertEqual(len(builds), 1 if shard == 1 else 0)
                     if shard == 1:
                         self.assertEqual(steps[-2], builds[0])
-                        self.assertEqual(builds[0][1][6:21:2], ['combat_bench', 'horizon-profile', 'item_bench',
+                        self.assertEqual([builds[0][1][i + 1] for i, arg in enumerate(builds[0][1]) if arg == '--example'],
+                                         ['active_mob_bench', 'combat_bench', 'horizon-profile', 'item_bench',
                                          'latency_bench', 'physics_bench', 'place_bench', 'rogue_bench', 'scenario_bench'])
                         self.assertEqual('--release' in builds[0][1], profile == 'release')
                         self.assertNotIn('--examples', builds[0][1])
@@ -1042,7 +1043,7 @@ class CiWorkflowContract(unittest.TestCase):
 
     def test_every_job_and_artifact_has_platform_profile_and_partition_identity(self):
         profiles, windows = self.job("profiles"), self.job("windows_python")
-        self.assertIn("name: Rust (${{ matrix.os }}, ${{ matrix.profile }}, ${{ matrix.partition }})", profiles)
+        self.assertIn("format('python shard {0}', matrix.shard)", profiles)
         self.assertIn("name: verification-${{ matrix.os }}-${{ matrix.profile }}-${{ matrix.partition }}", profiles)
         self.assertIn("format('python shard {0}', matrix.shard)", windows)
         self.assertIn("format('-shard-{0}', matrix.shard)", windows)
@@ -1229,6 +1230,21 @@ class CiPythonShardPlanning(unittest.TestCase):
                 for stage in ('build-process-debug', 'build-tools', 'python-debug'):
                     self.assertIn(stage, text)
 
+    def test_linux_debug_shard_option_belongs_to_runner_inside_xvfb(self):
+        for index in (1, 2):
+            with self.subTest(index=index), patch.object(verify.subprocess, 'run') as commands, \
+                    patch.object(verify, 'free_memory_gb', return_value=8), \
+                    patch.object(verify.sys, 'platform', 'linux'), \
+                    patch.dict(os.environ, {}, clear=True), redirect_stdout(StringIO()) as output:
+                commands.return_value.stdout = json.dumps(metadata())
+                self.assertEqual(verify.main(['full', '--ci-profile', 'debug', '--ci-partition', 'python',
+                                             '--ci-python-shard', str(index), '--dry-run']), 0)
+                text = output.getvalue()
+                self.assertIn('xvfb-run -a -s', text)
+                self.assertIn(f'test_runner.py --ci-python-shard {index}', text)
+                self.assertNotIn('xvfb-run -a --ci-python-shard', text)
+                self.assertIn('discover -s scripts -p test_*.py -v', text)
+
     def test_actual_debug_shard_stage_supplies_profile_from_cleared_environment(self):
         class ReachedPythonStage(Exception): pass
         seen = []
@@ -1279,8 +1295,8 @@ class CiPythonShardPlanning(unittest.TestCase):
                 self.assertEqual(raised.exception.code, 2)
                 commands.assert_not_called()
 
-    def test_shards_reject_non_windows_before_constructing_xvfb_command(self):
-        with patch.object(verify.sys, 'platform', 'linux'), patch.object(verify.subprocess, 'run') as commands, \
+    def test_shards_reject_unsupported_platform_before_constructing_command(self):
+        with patch.object(verify.sys, 'platform', 'darwin'), patch.object(verify.subprocess, 'run') as commands, \
                 redirect_stderr(StringIO()):
             with self.assertRaises(SystemExit) as raised:
                 verify.main(['full', '--ci-profile', 'release', '--ci-partition', 'python', '--ci-python-shard', '1'])

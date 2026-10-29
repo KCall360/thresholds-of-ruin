@@ -920,7 +920,10 @@ class RogueChecks:
         server = self.server("--checkpoint-interval", 1, seed=None)
         player, reopened = self.client(omit_memory=True)
         for field in ("state", "history", "branch"):
-            self.assertEqual(reopened[field], before[field])
+            if field == "state":
+                self.assertDisclosedStateEqual(reopened[field], before[field])
+            else:
+                self.assertEqual(reopened[field], before[field])
         # Sequence is attachment-local; simulation tick spans reconnects.
         self.assertEqual(reopened["cursor"]["tick"], before["cursor"]["tick"])
         (self.directory / f"{label}-cursors.json").write_text(
@@ -1274,7 +1277,7 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
         self.assertEqual(ledger[0]["value"]["selection"], {
             "kind": "talent_form", "talent": "evocation_initiate", "form": "spark_lance_cold"})
         spectator, watched = self.client(SPECTATOR_TOKEN, observe=True, actor=2)
-        self.assertEqual(watched["state"], current["state"])
+        self.assertDisclosedStateEqual(watched["state"], current["state"])
         denied = self.command(spectator, {"type": "advancement", "command": "overview"})
         self.assertIsNotNone(denied["error"])
         self.flush_save(actor=2)
@@ -1286,7 +1289,7 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
         # cleanup's explicit durability barrier needs this known actor identity.
         self.server(seed=None, save_actor=2)
         player, reopened = self.client(actor=2)
-        self.assertEqual(reopened["state"], current["state"])
+        self.assertDisclosedStateEqual(reopened["state"], current["state"])
         self.assertEqual(self.overview(player)["growth"], selected["growth"])
         self.assertEqual(self.rows(player, "ledger"), ledger)
         self.assertEqual(carried_stock(reopened, "ration"), 1)
@@ -1464,7 +1467,7 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
         # its real population must then survive recovery from the journal tail.
         server = self.server("--checkpoint-interval", 0, seed=None)
         player, reopened = self.client(omit_memory=True)
-        self.assertEqual(reopened["state"], before["state"])
+        self.assertDisclosedStateEqual(reopened["state"], before["state"])
         self.assertEqual(self.private_receipts(), initial_receipts)
         entered = self.settled_action(player, {"type": "move", "direction": "down"})
         self.assertTrue(underfoot(entered["state"])["stairs_up"])
@@ -1488,7 +1491,7 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
         # the current checkpoint needed by the exact-authority transport seal.
         server = self.server("--checkpoint-interval", 1, seed=None)
         player, reopened = self.client(omit_memory=True)
-        self.assertEqual(reopened["state"], before["state"])
+        self.assertDisclosedStateEqual(reopened["state"], before["state"])
         self.assertEqual(self.private_receipts(), entered_receipts)
         returned = self.settled_action(player, {"type": "move", "direction": "up"})
         self.assertEqual(underfoot(returned["state"])["key"], departure_key)
@@ -1544,7 +1547,7 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
         server.stop()
         self.server("--checkpoint-interval", 64, seed=None)
         player, reopened = self.client(omit_memory=True)
-        self.assertEqual(reopened["state"], current["state"])
+        self.assertDisclosedStateEqual(reopened["state"], current["state"])
         self.assertEqual(carried_stock(reopened, "ration"), 0)
         self.assertEqual(carried_stock(reopened, "bandage"), 4)
         self.assertEqual(self.overview(player)["points"], {"earned": "2", "spent": "1", "unspent": "1"})
@@ -1591,7 +1594,7 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
         server.stop()
         self.server(seed=None)
         player, reopened = self.client(omit_memory=True, compact_background=True)
-        self.assertEqual(reopened["state"], current["state"])
+        self.assertDisclosedStateEqual(reopened["state"], current["state"])
         self.assertTrue(observation(reopened)["combat"]["dead"])
         self.assertTrue(observation(reopened)["combat"]["terminal"])
         denied = self.act(player, {"type": "wait"})

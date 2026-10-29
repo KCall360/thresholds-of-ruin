@@ -18,7 +18,7 @@ from process_work_budget import ProcessWorkBudget
 from rogue_roster_package import PRODUCTION, encounter_sources, unrelated_fallback
 from scalar_wire import u64
 from status_condition_package import combat, observation
-from rogue_test_support import disclosed_frames, resolved_events
+from rogue_test_support import disclosed_frames, resolved_events, decision_boundary
 
 
 def mechanism_package(test, species):
@@ -108,10 +108,6 @@ class RogueCorrosionRayProcesses(ProcessTestCase):
 
     def decision_snapshots(self, clients, attempts=24):
         """Read one held external-input boundary without advancing gameplay."""
-        def progress(frame):
-            return (frame["cursor"], frame["state"]["revision"], frame["readiness"],
-                    frame["intentions"])
-
         for _ in range(attempts):
             frames = tuple(self.snapshot(client) for client in clients)
             for frame in frames:
@@ -133,9 +129,10 @@ class RogueCorrosionRayProcesses(ProcessTestCase):
                 self.assertIsNone(frames[index]["error"])
             confirmed = self.snapshot(clients[owner])
             self.assertIsNone(confirmed["error"])
-            # Cursor sequence and readiness revisions are attachment-local.
-            # Confirm only the same actor across the intervening peer reads.
-            if (progress(confirmed) == progress(frames[owner])
+            # Snapshot issuance changes transport/display generations even at
+            # rest. All disclosed payload and causal permissions must remain
+            # exact for this actor across the intervening peer reads.
+            if (decision_boundary(confirmed) == decision_boundary(frames[owner])
                     and all(observation(frame)["tick"] == observation(confirmed)["tick"]
                             for frame in frames)):
                 return tuple(confirmed if index == owner else frame
@@ -166,7 +163,7 @@ class RogueCorrosionRayProcesses(ProcessTestCase):
         server = self.server(scenario=unrelated_fallback(self), seed=None)
         reopened = [self.client(actor=actor) for actor in (1, 3)]
         for (_, after), prior in zip(reopened, before):
-            self.assertEqual(after["state"], prior["state"])
+            self.assertDisclosedStateEqual(after["state"], prior["state"])
             self.assertEqual(after["history"], prior["history"])
         for client, _ in reopened:
             client.stop()
@@ -303,7 +300,8 @@ class RogueMechanismSnapshotTests(unittest.TestCase):
                     "tick": str(tick), "ready": ready,
                     "combat": {"dead": terminal, "terminal": terminal}}},
                 "readiness": {"revision": str(sequence), "admission": admission},
-                "intentions": list(intentions), "error": None}
+                "intentions": list(intentions), "history": [], "branch": "branch",
+                "has_control": True, "error": None}
 
     def test_mixed_ticks_are_reread_before_predicate_without_spending_a_decision(self):
         from unittest.mock import Mock, patch

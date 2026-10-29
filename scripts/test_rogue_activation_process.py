@@ -204,7 +204,7 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
         # Repeated observations and save barriers are not fresh entry or wake.
         for _ in range(3):
             observed = self.request(player, {"type": "snapshot"})
-            self.assertEqual(observed["state"], initial["state"])
+            self.assertDisclosedStateEqual(observed["state"], initial["state"])
         self.assertEqual(self.private_receipts(actor=selected), receipts)
         # One ordinary action creates a real journal/checkpoint tail. Births are
         # outside initial sight, so this is a receipt test, not an all-hit duel.
@@ -366,7 +366,7 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
         server = self.server("--checkpoint-interval", checkpoint_interval, "--regions", 2,
                              seed=None, save_actor=selected)
         player, restored = self.client(actor=selected)
-        self.assertEqual(restored["state"], before["state"])
+        self.assertDisclosedStateEqual(restored["state"], before["state"])
         self.assertEqual(restored["history"], before["history"])
         self.assertEqual(self.private_receipts(actor=selected), receipts)
         self.assertEqual(inspect_save(self.save)["scenario"]["package"]["selected"], selected)

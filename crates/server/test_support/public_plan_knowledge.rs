@@ -11,7 +11,7 @@ fn act(engine: &mut Engine, actor: ActorId, action: Action) {
             &new_id().0,
             &engine.branch().clone(),
             Command::Act {
-                expected_revision: engine.revision(actor).unwrap(),
+                expected_boundary: engine.causal_boundary(actor).unwrap(),
                 action,
             },
         )
@@ -132,7 +132,7 @@ fn public_plan_already_known_completion_adds_no_observer_projection_work() {
             "known-completion",
             &engine.branch().clone(),
             Command::Act {
-                expected_revision: engine.revision(actor).unwrap(),
+                expected_boundary: engine.causal_boundary(actor).unwrap(),
                 action: Action::Wait,
             },
         )
@@ -192,7 +192,7 @@ fn public_plan_failed_storage_admission_discards_wait_knowledge_and_receipt() {
         )
         .unwrap();
     let before = engine.game.clone();
-    let revision = engine.revision(ActorId(1)).unwrap();
+    let revision = engine.causal_boundary(ActorId(1)).unwrap();
     let counts = engine.profile_counts();
     let receipts = engine.receipts.len();
     for _ in 0..2 {
@@ -204,7 +204,7 @@ fn public_plan_failed_storage_admission_discards_wait_knowledge_and_receipt() {
                 "rejected-knowledge",
                 &engine.branch().clone(),
                 Command::Act {
-                    expected_revision: revision,
+                    expected_boundary: revision,
                     action: Action::Wait,
                 },
             )
@@ -212,7 +212,7 @@ fn public_plan_failed_storage_admission_discards_wait_knowledge_and_receipt() {
         assert_eq!(error.code, ErrorCode::StorageFailure);
         assert_eq!(engine.game, before);
         assert!(!knows(&engine.game, ActorId(1), "slow_plan"));
-        assert_eq!(engine.revision(ActorId(1)).unwrap(), revision);
+        assert_eq!(engine.causal_boundary(ActorId(1)).unwrap(), revision);
         assert_eq!(engine.profile_counts(), counts);
         assert_eq!(engine.receipts.len(), receipts);
     }
@@ -363,7 +363,9 @@ fn host_completion_with_existing_observer() -> (Engine, Candidate, ActorId) {
     assert_slow_plan_completion(&candidate.game);
     let view = candidate.revision_view(ActorId(3)).unwrap();
     assert!(
-        candidate.game.event_observation_pending(&view.event_proof),
+        candidate
+            .game
+            .event_observation_pending(&cold_event_proof(&candidate.game, ActorId(3))),
         "the existing observer must retain a valid event-time proof"
     );
     assert!(
@@ -372,7 +374,14 @@ fn host_completion_with_existing_observer() -> (Engine, Candidate, ActorId) {
     );
     (engine, candidate, last_actor.unwrap())
 }
-fn discloses_slow_plan(view: &RevisionView) -> bool {
+// The oracle captures the exact current event-time receipt proof independently
+// of the runtime presentation cache; that cache need not retain unused proofs.
+fn cold_event_proof(game: &Game, actor: ActorId) -> tor_simulation::EventObservation {
+    game.observe_event_shared_scene(SimActor(actor.0))
+        .unwrap()
+        .2
+}
+fn discloses_slow_plan(view: &CachedObservation) -> bool {
     view.observation.combat.as_ref().is_some_and(|combat| combat.events.iter().any(|event| matches!(event,
         tor_simulation::combat::DisclosedCombatEvent::Ability { id, .. } if id.as_str() == "slow_plan")))
 }
@@ -419,7 +428,9 @@ fn assert_late_acquisition_cannot_learn(host: bool) {
     assert!(candidate.game.has_actor(SimActor(3)));
     let view = candidate.revision_view(ActorId(3)).unwrap();
     assert!(!discloses_slow_plan(&view));
-    assert!(!candidate.game.event_observation_pending(&view.event_proof));
+    assert!(!candidate
+        .game
+        .event_observation_pending(&cold_event_proof(&candidate.game, ActorId(3))));
     commit_streaming_wait(&mut engine, candidate, ActorId(1));
     assert!(!discloses_slow_plan(
         &engine.revision_view(ActorId(3)).unwrap()
@@ -441,7 +452,7 @@ fn public_plan_pre_transition_proof_does_not_license_an_occluded_final_view() {
     let transient = Arc::new(candidate.revision_view(ActorId(3)).unwrap());
     assert!(candidate
         .game
-        .event_observation_pending(&transient.event_proof));
+        .event_observation_pending(&cold_event_proof(&candidate.game, ActorId(3))));
     assert!(!discloses_slow_plan(&transient));
     candidate.observations.insert(ActorId(3), transient);
     for y in 0..3 {
@@ -473,10 +484,16 @@ fn public_plan_pre_transition_proof_does_not_license_an_occluded_final_view() {
     assert!(!discloses_slow_plan(
         &candidate.revision_view(ActorId(3)).unwrap()
     ));
-    assert!(!discloses_slow_plan(&candidate.observations[&ActorId(3)]));
+    assert!(
+        candidate
+            .observations
+            .get(&ActorId(3))
+            .is_none_or(|view| !discloses_slow_plan(view)),
+        "a cached view, when retained, must not preserve the transient disclosure"
+    );
     assert!(!candidate
         .game
-        .event_observation_pending(&candidate.observations[&ActorId(3)].event_proof));
+        .event_observation_pending(&cold_event_proof(&candidate.game, ActorId(3))));
     commit_streaming_wait(&mut engine, candidate, actor);
     assert!(!knows(&engine.game, ActorId(3), "slow_plan"));
 }
@@ -511,7 +528,7 @@ fn admit(engine: &mut Engine, actor: ActorId, action: Action) {
             &new_id().0,
             &engine.branch().clone(),
             Command::AdmitIntention {
-                expected_revision: engine.revision(actor).unwrap(),
+                expected_boundary: engine.causal_boundary(actor).unwrap(),
                 action,
             },
         )
@@ -1502,7 +1519,7 @@ fn pay_growth_observation(engine: &mut Engine) {
                 id,
                 &engine.branch().clone(),
                 Command::AdmitIntention {
-                    expected_revision: engine.revision(ActorId(actor)).unwrap(),
+                    expected_boundary: engine.causal_boundary(ActorId(actor)).unwrap(),
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new(id).unwrap(),
                         invocation: crate::journal::AbilityInvocation {
@@ -1527,7 +1544,7 @@ fn pay_growth_observation(engine: &mut Engine) {
 }
 fn growth_finisher(engine: &Engine) -> Command {
     Command::Act {
-        expected_revision: engine.revision(ActorId(1)).unwrap(),
+        expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
         action: Action::UseAbility {
             id: tor_simulation::content_ids::AbilityId::new("growth_finisher").unwrap(),
             invocation: crate::journal::AbilityInvocation {
@@ -1618,12 +1635,13 @@ fn earned_growth_keeps_paid_unknown_plan_frozen_while_learning_own_grant_and_res
         assert_eq!(restored.game, complete);
         assert!(finish_growth(&mut restored, "earned-fatal", command).duplicate);
         restored.enable_wizard().unwrap();
-        let revision = restored.revision(ActorId(1)).unwrap();
+        let revision = restored.causal_boundary(ActorId(1)).unwrap();
         finish_growth(
             &mut restored,
             "rewind-growth",
             Command::Wizard {
-                expected_revision: revision,
+                display_basis: None,
+                expected_boundary: revision,
                 operation: crate::journal::WizardOperation::Rewind { target: None },
             },
         );
@@ -1670,7 +1688,7 @@ fn earned_growth_store_refusal_rolls_back_death_paid_record_knowledge_and_receip
         )
         .unwrap();
     let before = engine.game.clone();
-    let revision = engine.revision(ActorId(1)).unwrap();
+    let revision = engine.causal_boundary(ActorId(1)).unwrap();
     let counts = engine.profile_counts();
     let receipts = engine.receipts.len();
     for _ in 0..2 {
@@ -1686,7 +1704,7 @@ fn earned_growth_store_refusal_rolls_back_death_paid_record_knowledge_and_receip
             .unwrap_err();
         assert_eq!(failure.code, ErrorCode::StorageFailure);
         assert_eq!(engine.game, before);
-        assert_eq!(engine.revision(ActorId(1)).unwrap(), revision);
+        assert_eq!(engine.causal_boundary(ActorId(1)).unwrap(), revision);
         assert_eq!(engine.profile_counts(), counts);
         assert_eq!(engine.receipts.len(), receipts);
         assert!(!knows(&engine.game, ActorId(1), "slow_plan"));

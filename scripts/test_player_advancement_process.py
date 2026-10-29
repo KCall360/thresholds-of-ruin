@@ -462,7 +462,7 @@ class PlayerAdvancementProcesses(ProcessTestCase):
             self.assertIn("Starting skills", text.command("advancement"))
             self.assertIn("Server error InvalidAction: Advancement is unavailable",
                           text.command("advancement purchase 1 discipline " + invalid))
-            self.assertEqual(self.request(observer, {"type": "snapshot"})["state"], unspent["state"])
+            self.assertDisclosedStateEqual(self.request(observer, {"type": "snapshot"})["state"], unspent["state"])
         observer.stop()
         self.assertIn("Starting skills", text.command("advancement"))
         preview = text.command("advancement purchase 1 discipline talent evocation_initiate form spark_lance_fire")
@@ -611,7 +611,7 @@ class PlayerAdvancementProcesses(ProcessTestCase):
         self.assertEqual(sum(row["value"]["spent"] for row in remaining), 98)
         self.assertEqual(self.rows(player, "details talents"), [])
         current = self.request(player, {"type": "snapshot"})
-        self.assertEqual(current["state"], initial["state"])
+        self.assertDisclosedStateEqual(current["state"], initial["state"])
         self.assertGreater(measured["pages"], 250)
         self.assertLessEqual(measured["maximum"], 32 * 1024)
         self.assertLessEqual(measured["rows"], 32)
@@ -669,7 +669,8 @@ class PlayerAdvancementNativeProcesses(ProcessTestCase):
         removed = command("details removed")
         self.assertIn("Steady Foundation", " ".join(removed["advancement_rows"]))
         self.assertIn("Foundation Followthrough", " ".join(removed["advancement_rows"]))
-        self.assertEqual(removed["state"], initial["state"])
+        self.assertEqual(removed["state"], opened["state"])
+        self.assertDisclosedStateEqual(removed["state"], initial["state"])
         picker = command("confirm")
         self.assertIsNotNone(picker["supply_selection"])
         ground = next(row for row in picker["supply_selection"]["candidates"] if not row["carried"])
@@ -697,7 +698,7 @@ class PlayerAdvancementNativeProcesses(ProcessTestCase):
         # presented it. Use the controller's own settled stream before querying
         # its new owner page; ordinary UI input may still work during preparation.
         settled = self.ascii_frame(window, lambda frame:
-            frame["state"] == current["state"] and not frame["busy"]
+            frame["state"]["observation"] == current["state"]["observation"] and not frame["busy"]
             and observation(frame)["ready"]
             and not observation(frame)["combat"]["preparation_active"]
             and not any(row["phase"] in ("queued", "started")
@@ -706,7 +707,7 @@ class PlayerAdvancementNativeProcesses(ProcessTestCase):
         self.assertTrue(settled["connected"])
         shown = command("overview")
         self.assertTrue(shown["window_open"])
-        self.assertEqual(shown["state"], current["state"])
+        self.assertDisclosedStateEqual(shown["state"], current["state"])
         closed = press("Escape", "escape")
         self.assertFalse(closed["advancement_open"])
 

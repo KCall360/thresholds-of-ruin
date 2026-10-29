@@ -55,7 +55,7 @@ fn history_actions_preserve_the_tagged_wire_shape_and_validate_event_payload() {
 
 #[test]
 fn current_wire_protocol_revision_is_explicitly_pinned() {
-    assert_eq!(PROTOCOL_VERSION, 64);
+    assert_eq!(PROTOCOL_VERSION, 66);
 }
 
 #[test]
@@ -63,8 +63,7 @@ fn error_scope_distinguishes_transport_unattached_and_disclosed_host_errors_stri
     for scope in [
         serde_json::json!({"type":"transport"}),
         serde_json::json!({"type":"unattached"}),
-        serde_json::json!({"type":"attached", "context": {
-            "input":{"stream":{"stream":"attachment","epoch":"1"},"readiness_revision":"2"},
+        serde_json::json!({"type":"attached", "context": {"snapshot":"fixture", "input":{"stream":{"stream":"attachment","epoch":"1"},"readiness_revision":"2"},
             "actor":"1","branch":"current","cursor":{"sequence":"3","tick":"0"},"revision":"0" }}),
     ] {
         let value = serde_json::json!({"type":"error","scope":scope,"request_id":null,"code":"invalid_request","message":"Rejected"});
@@ -110,13 +109,12 @@ fn successful_replies_require_the_current_disclosed_context() {
 
 #[test]
 fn reply_context_requires_current_attachment_state_and_rejects_implicit_fields() {
-    let context = serde_json::json!({
-        "input": {"stream": {"stream": "attachment", "epoch": "3"}, "readiness_revision": "8"},
+    let context = serde_json::json!({"snapshot":"fixture", "input": {"stream": {"stream": "attachment", "epoch": "3"}, "readiness_revision": "8"},
         "actor": "2", "branch": "current", "cursor": {"sequence": "17", "tick": "20"}, "revision": "9",
     });
     let decoded: ReplyContext = serde_json::from_value(context.clone()).unwrap();
     assert_eq!(serde_json::to_value(&decoded).unwrap(), context);
-    let fields = ["input", "actor", "branch", "cursor", "revision"];
+    let fields = ["snapshot", "input", "actor", "branch", "cursor", "revision"];
     assert_eq!(context.as_object().unwrap().len(), fields.len());
     let positional: Vec<_> = fields.iter().map(|field| context[*field].clone()).collect();
     assert!(serde_json::from_value::<ReplyContext>(serde_json::json!(positional)).is_err());
@@ -140,15 +138,58 @@ fn reply_context_requires_current_attachment_state_and_rejects_implicit_fields()
 }
 
 #[test]
+fn gameplay_commands_use_input_context_not_display_revision() {
+    let context = serde_json::json!({
+        "stream": {"stream": "attachment", "epoch": "2"},
+        "readiness_revision": "7"
+    });
+    assert!(serde_json::from_value::<InputContext>(context.clone()).is_ok());
+    for command in [
+        serde_json::json!({"type": "act", "action": {"type": "wait"}}),
+        serde_json::json!({"type": "resume_intention", "intention": "admission"}),
+        serde_json::json!({"type": "cancel_intention", "intention": "admission", "step": null}),
+    ] {
+        let frame = serde_json::json!({"type": "command", "context": context,
+                                      "branch": "main", "command": command});
+        let decoded = serde_json::from_value::<Request>(frame.clone());
+        assert!(
+            decoded.is_ok(),
+            "gameplay must not require a display revision: {decoded:?}"
+        );
+        assert_eq!(serde_json::to_value(decoded.unwrap()).unwrap(), frame);
+        let mut old_wire = frame.clone();
+        old_wire["command"]["expected_revision"] = serde_json::json!("3");
+        assert!(
+            serde_json::from_value::<Request>(old_wire).is_err(),
+            "obsolete display-version authority is not silently accepted"
+        );
+        let mut missing_context = frame;
+        missing_context.as_object_mut().unwrap().remove("context");
+        assert!(serde_json::from_value::<Request>(missing_context).is_err());
+    }
+    // This migration is deliberately not a blanket removal from other commands.
+    for command in [
+        serde_json::json!({"type": "travel", "expected_revision": "3", "destination": "place"}),
+        serde_json::json!({"type": "wizard", "expected_revision": "3", "operation": "example"}),
+    ] {
+        assert!(serde_json::from_value::<Command>(command.clone()).is_ok());
+        let mut missing_revision = command;
+        missing_revision
+            .as_object_mut()
+            .unwrap()
+            .remove("expected_revision");
+        assert!(serde_json::from_value::<Command>(missing_revision).is_err());
+    }
+}
+
+#[test]
 fn queued_intention_controls_round_trip_opaque_identity_and_reject_extra_authority() {
     for command in [
         Command::ResumeIntention {
-            expected_revision: 7,
             intention: IntentionId("admission".into()),
         },
         Command::CancelIntention {
             step: None,
-            expected_revision: 7,
             intention: IntentionId("admission".into()),
         },
     ] {
@@ -235,15 +276,15 @@ fn spectators_are_not_permitted_wizard_commands() {
 
 #[test]
 fn clients_cannot_claim_backend_authorship_or_supply_an_author() {
-    let forged = r#"{"type":"annotate","anchor":{"type":"state","revision":"0"},"text":"spoiler","source":"backend"}"#;
+    let forged = r#"{"type":"annotate","anchor":{"type":"state","snapshot":"fixture"},"text":"spoiler","source":"backend"}"#;
     assert!(serde_json::from_str::<Command>(forged).is_err());
-    let forged = r#"{"type":"annotate","anchor":{"type":"state","revision":"0"},"text":"spoiler","author":{"type":"backend","component":"simulation"}}"#;
+    let forged = r#"{"type":"annotate","anchor":{"type":"state","snapshot":"fixture"},"text":"spoiler","author":{"type":"backend","component":"simulation"}}"#;
     assert!(serde_json::from_str::<Command>(forged).is_err());
 }
 
 #[test]
 fn user_notes_default_to_private_and_round_trip_as_plain_text() {
-    let source = r#"{"type":"annotate","anchor":{"type":"state","revision":"0"},"text":"<script>not executable</script>\nlook"}"#;
+    let source = r#"{"type":"annotate","anchor":{"type":"state","snapshot":"fixture"},"text":"<script>not executable</script>\nlook"}"#;
     let command: Command = serde_json::from_str(source).unwrap();
     assert!(matches!(
         command,
@@ -367,6 +408,7 @@ fn protocol_22_says_whose_move_it_is_where_the_exit_is_and_where_names_came_from
 fn gameplay_acceptance_has_a_typed_receipt_and_an_opaque_intention_identity() {
     let response = ServerMessage::Ack {
         context: ReplyContext {
+            snapshot: tor_protocol::SnapshotId("fixture".into()),
             input: InputContext {
                 stream: StreamContext {
                     stream: StreamId("attachment".into()),
@@ -410,6 +452,7 @@ fn gameplay_acceptance_has_a_typed_receipt_and_an_opaque_intention_identity() {
 fn immediate_completion_is_distinct_from_admitted_gameplay() {
     let response = ServerMessage::Ack {
         context: ReplyContext {
+            snapshot: tor_protocol::SnapshotId("fixture".into()),
             input: InputContext {
                 stream: StreamContext {
                     stream: StreamId("attachment".into()),
@@ -452,7 +495,7 @@ fn readiness_is_required_and_does_not_accept_extra_authority() {
     let samples: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/wire-v64.json"
+            "/tests/fixtures/wire-v66.json"
         ))
         .expect("regenerate current wire samples"),
     )
@@ -488,7 +531,7 @@ fn readiness_is_required_and_does_not_accept_extra_authority() {
 fn a_command_requires_the_stream_and_readiness_context_it_was_built_from() {
     let request = serde_json::json!({
         "type": "command", "branch": "branch-1",
-        "command": {"type": "act", "expected_revision": "0", "action": {"type": "wait"}}
+        "command": {"type": "act", "action": {"type": "wait"}}
     });
     assert!(
         serde_json::from_value::<Request>(request.clone()).is_err(),

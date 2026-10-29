@@ -22,7 +22,7 @@ fn observation(revision: u64, assets: &[&str]) -> StateView {
         })
         .collect();
     serde_json::from_value(serde_json::json!({
-        "wizard_game":false,"revision":revision.to_string(),"observation":{
+        "snapshot":format!("fixture-{revision}"), "wizard_game":false,"revision":revision.to_string(),"observation":{
             "actor":"1","self_target":tor_protocol::ActorTarget::from_digest([1; 32]),"tick":revision.to_string(),"position":{"x":0,"y":0,"z":0},"places":[],
             "visible_cells":cells,"ground_items":[],"inventory":[],"charts":[],"linked_holds":[],"visible_actors":[],"ready":true
         }
@@ -61,6 +61,7 @@ async fn receive(server: &mut Server) -> Option<ClientMessage> {
                             server,
                             ServerMessage::MapPage {
                                 context: ReplyContext {
+                                    snapshot: query.base.snapshot.clone(),
                                     input: InputContext {
                                         stream: query.context.clone(),
                                         readiness_revision: 0,
@@ -75,7 +76,7 @@ async fn receive(server: &mut Server) -> Option<ClientMessage> {
                                     transfer: request_id.clone(),
                                     actor: ActorId(1),
                                     branch: query.branch.clone(),
-                                    base: query.base,
+                                    base: query.base.clone(),
                                     window: query.window,
                                     start: 0,
                                     page: 0,
@@ -133,6 +134,7 @@ fn palette(
 ) -> ServerMessage {
     ServerMessage::Palette {
         context: ReplyContext {
+            snapshot: tor_protocol::SnapshotId(format!("fixture-{disclosed}")),
             input: InputContext {
                 stream: super::stream_context(0),
                 readiness_revision: 0,

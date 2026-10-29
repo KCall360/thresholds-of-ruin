@@ -105,11 +105,14 @@ jobs:
           command: check ${{ matrix.checks }}
 
   profiles:
-    name: Rust (${{ matrix.os }}, ${{ matrix.profile }}, ${{ matrix.partition }})
+    name: Rust (${{ matrix.os }}, ${{ matrix.profile }}, ${{ matrix.shard && format('python shard {0}', matrix.shard) || matrix.partition }})
     needs: scope
     outputs:
+      linux_debug_shard_1: ${{ steps.execution_attempt.outputs.linux_debug_shard_1 }}
+      linux_debug_shard_2: ${{ steps.execution_attempt.outputs.linux_debug_shard_2 }}
       toolchain_linux_debug_rust: ${{ steps.toolchain.outputs.toolchain_linux_debug_rust }}
-      toolchain_linux_debug_python: ${{ steps.toolchain.outputs.toolchain_linux_debug_python }}
+      toolchain_linux_debug_python_shard_1: ${{ steps.toolchain.outputs.toolchain_linux_debug_python_shard_1 }}
+      toolchain_linux_debug_python_shard_2: ${{ steps.toolchain.outputs.toolchain_linux_debug_python_shard_2 }}
       toolchain_linux_release_rust: ${{ steps.toolchain.outputs.toolchain_linux_release_rust }}
       toolchain_linux_release_python: ${{ steps.toolchain.outputs.toolchain_linux_release_python }}
       toolchain_windows_debug_rust: ${{ steps.toolchain.outputs.toolchain_windows_debug_rust }}
@@ -132,12 +135,25 @@ jobs:
         profile: [debug, release]
         partition: [rust, python]
         exclude:
+          - os: ubuntu-latest
+            profile: debug
+            partition: python
           - os: windows-latest
             profile: debug
             partition: python
           - os: windows-latest
             profile: release
             partition: python
+        # Only the timed-out Linux debug inventory needs two isolated owners.
+        include:
+          - os: ubuntu-latest
+            profile: debug
+            partition: python
+            shard: 1
+          - os: ubuntu-latest
+            profile: debug
+            partition: python
+            shard: 2
     steps:
       - name: Checkout exact source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -201,7 +217,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python scripts/verify.py full --ci-profile ${{ matrix.profile }} --ci-partition ${{ matrix.partition }}
+        run: python scripts/verify.py full --ci-profile ${{ matrix.profile }} --ci-partition ${{ matrix.partition }} ${{ matrix.shard && format('--ci-python-shard {0}', matrix.shard) || '' }}
       - name: Require fresh complete partition execution
         if: always()
         shell: bash
@@ -212,16 +228,22 @@ jobs:
         id: toolchain
         if: success() && !cancelled()
         shell: bash
-        run: python scripts/ci_postmerge.py toolchain --role ${{ runner.os == 'Linux' && 'linux' || 'windows' }}_${{ matrix.profile }}_${{ matrix.partition }}
+        run: python scripts/ci_postmerge.py toolchain --role ${{ runner.os == 'Linux' && 'linux' || 'windows' }}_${{ matrix.profile }}_${{ matrix.partition }}${{ matrix.shard && format('_shard_{0}', matrix.shard) || '' }}
       - name: Preserve verification logs
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: verification-${{ matrix.os }}-${{ matrix.profile }}-${{ matrix.partition }}-attempt-${{ github.run_attempt }}
+          name: verification-${{ matrix.os }}-${{ matrix.profile }}-${{ matrix.partition }}${{ matrix.shard && format('-shard-{0}', matrix.shard) || '' }}-attempt-${{ github.run_attempt }}
           path: .local/verify/
           include-hidden-files: true
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Record successful Linux debug shard attempt
+        id: execution_attempt
+        if: success() && !cancelled() && matrix.shard
+        shell: bash
+        run: echo "linux_debug_shard_${{ matrix.shard }}=$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
 
   windows_binaries:
     name: Full applications (windows-latest, ${{ matrix.profile }})
@@ -842,6 +864,20 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
+      - name: Select successful full Linux debug execution cohort
+        id: linux_cohort
+        if: matrix.os == 'ubuntu-latest' && needs.scope.outputs.docs_only == 'false' && needs.scope.outputs.mode == 'full'
+        env:
+          PROFILES: ${{ toJSON(needs.profiles) }}
+        run: python scripts/ci_python_shards.py --linux-debug-cohort --current-attempt "$GITHUB_RUN_ATTEMPT" --source-sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID"
+      - name: Require both complete Linux debug Python shards
+        if: matrix.os == 'ubuntu-latest' && needs.scope.outputs.docs_only == 'false' && needs.scope.outputs.mode == 'full'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download "$GITHUB_RUN_ID" --name verification-ubuntu-latest-debug-python-shard-1-attempt-${{ steps.linux_cohort.outputs.origin_attempt }} --dir .local/shard-coverage/linux-debug/1
+          gh run download "$GITHUB_RUN_ID" --name verification-ubuntu-latest-debug-python-shard-2-attempt-${{ steps.linux_cohort.outputs.origin_attempt }} --dir .local/shard-coverage/linux-debug/2
+          python scripts/ci_python_shards.py --profile debug --directory .local/shard-coverage/linux-debug --source-sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --origin-attempt "${{ steps.linux_cohort.outputs.origin_attempt }}"
       - name: Select successful full Windows execution cohort
         id: windows_cohort
         shell: bash

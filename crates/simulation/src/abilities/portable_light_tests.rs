@@ -729,3 +729,44 @@ fn torch_observer_sight_removal_and_expiry_invalidate_map_with_steady_fuel() {
         .any(|cell| cell.location == at(5)));
     assert!(game.map_disclosure_changed_since(&before, ActorId(2)));
 }
+
+#[test]
+fn raw_world_facts_follow_portable_light_without_ambient_world_mutation() {
+    let (mut game, item, _) = equipped(1000, 2);
+    let observer = ActorId(2);
+    let target = game.actors[&observer].location;
+    let dark = game.observe(observer).unwrap();
+    assert!(
+        !dark
+            .visible_cells
+            .iter()
+            .find(|cell| cell.location == target)
+            .unwrap()
+            .lit
+    );
+    let world = game.world.weak_identity();
+    game.set_item_light(item, true).unwrap();
+    game.teleport(OWNER, at(4)).unwrap();
+    let bright = game.observe(observer).unwrap();
+    assert!(
+        bright
+            .visible_cells
+            .iter()
+            .find(|cell| cell.location == target)
+            .unwrap()
+            .lit
+    );
+    game.set_item_light(item, false).unwrap();
+    assert!(
+        !game
+            .observe(observer)
+            .unwrap()
+            .visible_cells
+            .iter()
+            .find(|cell| cell.location == target)
+            .unwrap()
+            .lit
+    );
+    assert!(world.matches(&game.world));
+    assert_eq!(game.world.is_lit(target), Some(false));
+}

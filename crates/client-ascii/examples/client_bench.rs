@@ -8,7 +8,7 @@ fn snapshot(count: usize) -> Snapshot {
     serde_json::from_value(serde_json::json!({
         "readiness":{"revision":"0","admission":false,"resume":[],"cancel":[]},"context":{"stream":"fixture-attachment","epoch":"0"},"actor":"1","branch":"client-bench","cursor":{"sequence":"0","tick":"0"},
         "intentions":[],"travel":null,"has_control":true,"history":{"entries":[],"older_before":null},
-        "state":{"wizard_game":false,"revision":"0","observation":{"charts":[],"linked_holds":[],
+        "state":{"snapshot":"fixture-snapshot","wizard_game":false,"revision":"0","observation":{"charts":[],"linked_holds":[],
             "actor":"1","self_target":ActorTarget::from_digest([1; 32]),"tick":"0","position":{"x":0,"y":0,"z":0},
             "places":[],"visible_cells":(0..count).map(|i| serde_json::json!({
                 "key":i.to_string(),"position":{"x":(i%49) as i32-24,"y":((i/49)%25) as i32-12,"z":(i/1225) as i32},
@@ -127,6 +127,8 @@ fn main() {
                 for _ in 0..burst {
                     let client = app.state.as_mut().unwrap();
                     view.revision += 1;
+                    view.snapshot =
+                        tor_protocol::SnapshotId(format!("fixture-display-{}", view.revision));
                     view.observation.tick += 1;
                     if narration {
                         let open = view.revision % 2 == 1;

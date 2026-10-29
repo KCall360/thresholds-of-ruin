@@ -755,10 +755,13 @@ fn finite_ai_preflight_reuses_its_one_disclosed_decision_scene() {
     game.configure_ai(actor, tor_simulation::ai::AiProfile::general())
         .unwrap();
     game.admit_ai_intention(actor).unwrap();
+    // An ordinary read explicitly warms geometry; finite preflight must
+    // refresh disclosure without reconstructing that unchanged scene.
+    game.observe(actor).unwrap();
     let before = tor_simulation::diagnostics::work_counts();
     game.execute_next_intention().unwrap().outcome.unwrap();
     let after = tor_simulation::diagnostics::work_counts();
-    assert_eq!(after.decision_scenes - before.decision_scenes, 1);
+    assert_eq!(after.decision_scenes - before.decision_scenes, 0);
     assert_eq!(
         after.ai_precommit_ordinary_scenes - before.ai_precommit_ordinary_scenes,
         0

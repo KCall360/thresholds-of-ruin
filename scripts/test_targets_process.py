@@ -94,7 +94,7 @@ class TargetProcesses(ProcessTestCase):
 
         server = self.server('--checkpoint-interval', 1, wizard=True)
         player, restored = self.client()
-        self.assertEqual(restored['state'], rewound['state'])
+        self.assertDisclosedStateEqual(restored['state'], rewound['state'])
         wizard = self.wizard()
         self.wizard_command(wizard, 'item tablet 1 1 1 0')
         current = self.request(player, {'type': 'snapshot'})
@@ -114,7 +114,7 @@ class TargetProcesses(ProcessTestCase):
         player.stop(); wizard.stop(); server.stop()
         self.server(wizard=True)
         _, continued = self.client()
-        self.assertEqual(continued['state'], taken['state'])
+        self.assertDisclosedStateEqual(continued['state'], taken['state'])
 
     def test_disclosed_actor_handle_drives_queued_attack_and_history(self):
         self.server(scenario="dungeon-loop", seed=None)
@@ -163,7 +163,7 @@ class TargetProcesses(ProcessTestCase):
         server.stop()
         self.server()
         _, restored = self.client()
-        self.assertEqual(restored["state"], taken["state"])
+        self.assertDisclosedStateEqual(restored["state"], taken["state"])
 
     def test_a_handle_from_another_save_rejects_without_admitting_work(self):
         server = self.server()

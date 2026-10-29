@@ -232,7 +232,7 @@ fn remembered_door_reachability_never_grants_a_current_action() {
 
 #[test]
 fn an_elevated_hostiles_click_attacks_its_exact_target_instead_of_moving() {
-    let mut snapshot = super::projection::state().snapshot();
+    let mut snapshot = super::projection::state().reset_snapshot().unwrap();
     snapshot.has_control = true;
     snapshot.readiness.admission = true;
     let observation = &mut Arc::make_mut(&mut snapshot.state).observation;

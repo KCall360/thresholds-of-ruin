@@ -48,7 +48,7 @@ fn racial_growth_generated_destination_capacity_is_retryable_after_replay() {
     walk_to_port(&mut engine, 275, "down");
     let before = full_authority(&engine);
     let command = Command::Act {
-        expected_revision: engine.revision(ActorId(1)).unwrap(),
+        expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
         action: Action::Move {
             direction: Direction::Down,
         },
@@ -157,7 +157,7 @@ fn direct_population_identity_exhaustion_preserves_all_entry_authority_on_retry(
     let mut engine = identity_exhaustion_engine();
     let before = full_authority(&engine);
     let command = Command::Act {
-        expected_revision: engine.revision(ActorId(1)).unwrap(),
+        expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
         action: Action::Move {
             direction: Direction::Down,
         },

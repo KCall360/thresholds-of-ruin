@@ -86,6 +86,18 @@ impl Step {
     /// Observable assertions also used by server harness tests. Internal region
     /// coordinates belong only in authoritative tests, never in client driving.
     pub fn verify(&self, before: &StateView, after: &StateView, accepted: bool) {
+        if accepted {
+            assert!(
+                after.revision > before.revision,
+                "{} failed to advance",
+                self.label
+            );
+        }
+        self.verify_effect(before, after, accepted);
+    }
+    /// Semantic checks for direct Engine workloads whose pictures have no issued generation.
+    /// The caller separately checks its authoritative causal boundary.
+    pub fn verify_effect(&self, before: &StateView, after: &StateView, accepted: bool) {
         assert!(
             known_expected(&self.expected),
             "{}: unknown expected outcome",
@@ -97,11 +109,6 @@ impl Step {
             return;
         }
         assert!(accepted, "{} unexpectedly rejected", self.label);
-        assert!(
-            after.revision > before.revision,
-            "{} failed to advance",
-            self.label
-        );
         let center = |s: &StateView| {
             s.observation
                 .visible_cells

@@ -126,7 +126,7 @@ bands = [{ depth = { kind = "open", minimum = 3 }, choices = [{ archetype = "mar
 
         server = self.server("--checkpoint-interval", 64, scenario=unrelated_fallback(self), seed=None)
         player, resumed = self.client(omit_memory=True)
-        self.assertEqual(resumed["state"], before["state"])
+        self.assertDisclosedStateEqual(resumed["state"], before["state"])
         self.assertEqual(resumed["history"], before["history"])
         self.assertEqual(self.private_receipts(), second)
         state = explore_to_stairs(self, player, resumed["state"])
@@ -233,7 +233,10 @@ def restart_omission_transport(test, controller, sweep, server, player, fallback
     player, reopened = test.client(omit_memory=True)
     test.assertIsNone(reopened["error"])
     for field in ("state", "history", "branch"):
-        test.assertEqual(reopened[field], before[field], field)
+        if field == "state":
+            test.assertDisclosedStateEqual(reopened[field], before[field])
+        else:
+            test.assertEqual(reopened[field], before[field])
     test.assertEqual(reopened["cursor"]["tick"], before["cursor"]["tick"])
     test.assertEqual(test.private_receipts(), receipts)
     test.flush_save()
@@ -337,7 +340,7 @@ class OmittedRoomTopologyProcess(ProcessTestCase):
         fallback = unrelated_fallback(self)
         server = self.server("--checkpoint-interval", 1, scenario=fallback, seed=None)
         player, current = self.client(omit_memory=True)
-        self.assertEqual(current["state"], before["state"])
+        self.assertDisclosedStateEqual(current["state"], before["state"])
         self.assertEqual(current["history"], before["history"])
         self.assertEqual(self.private_receipts(), first)
 
@@ -462,7 +465,7 @@ class RogueStarterProcess(ProcessTestCase):
                                      seed=None, save_actor=selected)
                 player, resumed = self.client(actor=selected)
                 self.assertEqual(self.assert_starter(resumed), inventory)
-                self.assertEqual(resumed["state"], before["state"])
+                self.assertDisclosedStateEqual(resumed["state"], before["state"])
                 self.assertEqual(resumed["history"], before["history"])
                 player.stop()
                 server.stop()
@@ -504,11 +507,12 @@ class OmissionTransportCallerTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            frame = {"error": None, "state": {"all": [1, 2]}, "history": [{"sequence": 7}],
+            frame = {"error": None, "state": {"all": [1, 2], "revision": "1", "snapshot": "first"}, "history": [{"sequence": 7}],
                      "branch": "unchanged", "cursor": {"tick": "900"}}
             harness = SimpleNamespace(directory=root, processes=[], save=root / "save.db")
             for name in ("assertIsNone", "assertIsNotNone", "assertTrue", "assertFalse", "assertEqual"):
                 setattr(harness, name, getattr(self, name))
+            harness.assertDisclosedStateEqual = lambda actual, expected: ProcessTestCase.assertDisclosedStateEqual(harness, actual, expected)
             originals = {}
 
             def process(kind):
@@ -540,6 +544,8 @@ class OmissionTransportCallerTests(unittest.TestCase):
             reopened_frame = copy.deepcopy(frame)
             if mismatch == "cursor":
                 reopened_frame["cursor"]["tick"] = "901"
+            elif mismatch == "state":
+                reopened_frame["state"]["all"] = [1, 3]
             elif mismatch and mismatch not in ("authority", "sweep"):
                 reopened_frame[mismatch] = "changed"
             def client(**kwargs):

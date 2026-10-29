@@ -88,8 +88,8 @@ class PlaceHintProcesses(ProcessTestCase):
         self.assertEqual(len(marked), 1)
         key = marked[0]["key"]
         self.assertEqual(marked[0]["position"], {"x": 1, "y": 0, "z": 0})
-        shown = self.ascii_frame(ascii_client, lambda f: f["state"]["revision"] == visited["state"]["revision"])
-        self.assertEqual(shown["state"], visited["state"])
+        shown = self.ascii_frame(ascii_client, lambda f: f["state"]["observation"] == visited["state"]["observation"])
+        self.assertDisclosedStateEqual(shown["state"], visited["state"])
         for forbidden in ("region", "portal", "Hidden authoring name"):
             self.assertNotIn(forbidden, json.dumps(visited))
         self.flush_save()
@@ -113,7 +113,7 @@ class PlaceHintProcesses(ProcessTestCase):
         self.server(wizard=True)
         wizard = self.wizard()
         observer, resumed = self.client(SPECTATOR_TOKEN)
-        self.assertEqual(resumed["state"], refreshed["state"])
+        self.assertDisclosedStateEqual(resumed["state"], refreshed["state"])
         self.wizard_command(wizard, "rewind initial")
         rewound = self.request(observer, {"type": "snapshot"})
         self.assertNotEqual(rewound["branch"], resumed["branch"])

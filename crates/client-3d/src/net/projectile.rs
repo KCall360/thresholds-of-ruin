@@ -81,10 +81,7 @@ pub(super) async fn step(
             publish(tx, Event::Projectile(None))?;
             return match chosen.action(state, direction) {
                 Ok(action) => {
-                    let request = state.command_request(Command::Act {
-                        expected_revision: state.state().revision,
-                        action,
-                    });
+                    let request = state.command_request(Command::Act { action });
                     transact(connection, request, tx).await
                 }
                 Err(reason) => publish(tx, Event::Status(reason)),

@@ -16,16 +16,63 @@ def disclosed_frames(player, start):
                 yield frame
 
 
-def resolved_events(frames, before, identity, target):
+def ordered_combat_events(frames, *, after=None):
+    """Read each actual Outcome once, preserving fact order and equal-valued hits.
+
+    Pictures/ACKs may repeat prior presentation, but are never event authority.
+    The optional baseline is a causal cursor on this exact attachment, not a
+    display generation. Actor handles are never matched across attachments.
+    """
+    seen = {}
     for frame in frames:
-        # An acknowledgement can repeat the preceding attempt's combat event.
-        if int(frame["state"]["revision"]) <= int(before["state"]["revision"]):
+        message = frame.get("message") or {}
+        if message.get("type") != "update":
             continue
-        for event in frame["state"]["observation"]["combat"]["events"]:
-            if (event["type"] == "ability" and event["ability"]["id"] == identity
-                    and event["caster"] == before["state"]["observation"]["self_target"]
-                    and event["target"] == target and event["strike"] == 0):
-                yield event
+        update = message["update"]
+        body = update["body"]
+        if body["type"] != "outcome":
+            continue
+        context = update["context"]
+        if after is not None:
+            baseline = after["input_context"]["stream"]
+            # Snapshot resets advance epoch, not attachment identity or causal
+            # sequence. A later issued picture must not hide an actual outcome.
+            if (context["stream"] != baseline["stream"]
+                    or u64(context["epoch"]) < u64(baseline["epoch"])
+                    or update["branch"] != after["branch"]
+                    or body["facts"]["self_target"] != after["state"]["observation"]["self_target"]):
+                raise AssertionError("Combat receipts crossed their baseline attachment or branch")
+            if u64(update["cursor"]["sequence"]) <= u64(after["cursor"]["sequence"]):
+                continue
+        key = (context["stream"], context["epoch"], update["cursor"]["sequence"])
+        if key in seen:
+            if seen[key] != update:
+                raise AssertionError("Conflicting Outcome payloads share one stream cursor")
+            continue
+        seen[key] = update
+        for fact in body["facts"]["facts"]:
+            if fact["kind"] == "combat":
+                yield fact["event"]
+
+
+def decision_boundary(frame):
+    """Exact disclosed/causal state, excluding only picture/transport issuance.
+
+    Snapshot reads themselves change stream sequence and display capabilities;
+    payload, history, tick, control and live action permissions must stay exact.
+    """
+    state = {key: value for key, value in frame["state"].items()
+             if key not in ("snapshot", "revision")}
+    return (state, frame["cursor"]["tick"], frame["readiness"], frame["intentions"],
+            frame["history"], frame["branch"], frame["has_control"])
+
+
+def resolved_events(frames, before, identity, target):
+    for event in ordered_combat_events(frames, after=before):
+        if (event["type"] == "ability" and event["ability"]["id"] == identity
+                and event["caster"] == before["state"]["observation"]["self_target"]
+                and event["target"] == target and event["strike"] == 0):
+            yield event
 
 
 def assert_room_gold_receipt(test, stage, depth):

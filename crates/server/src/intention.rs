@@ -7,30 +7,23 @@ pub(super) fn admitted_work_matches(work: tor_simulation::IntentionWork, action:
 
 /// Private lifecycle work can change disclosed preparation/readiness without a turn.
 /// Use the same comparison during execution and recovery, retaining the new views.
-pub(super) fn preparation_revision_updates(
+pub(super) fn validate_preparation_observers(
     before: &Game,
     after: &Game,
     actor: ActorId,
-    revisions: &mut Revisions,
-) -> Result<BTreeMap<ActorId, Arc<RevisionView>>, Failure> {
+) -> Result<(), Failure> {
     if before.preparation(SimActor(actor.0)) == after.preparation(SimActor(actor.0)) {
-        return Ok(BTreeMap::new());
+        return Ok(());
     }
-    let mut observations = BTreeMap::new();
-    for (&observer, revision) in revisions.iter_mut() {
-        if !after.has_actor(SimActor(observer.0)) {
-            continue;
-        }
-        let old = revision_view(before, observer)?;
-        let new = revision_view(after, observer)?;
-        if new != old {
-            *revision = revision
-                .checked_add(1)
-                .ok_or_else(|| Failure::new(ErrorCode::InvalidAction, "Revision exhausted"))?;
-        }
-        observations.insert(observer, Arc::new(new));
+    for observer in before.loaded_actor_ids().filter(|id| after.has_actor(*id)) {
+        before
+            .validate_observer_projection(observer)
+            .map_err(|_| invalid_archive())?;
+        after
+            .validate_observer_projection(observer)
+            .map_err(|_| invalid_archive())?;
     }
-    Ok(observations)
+    Ok(())
 }
 use crate::journal::{IntentionChange, IntentionEnd, IntentionEndKind};
 
@@ -53,6 +46,189 @@ pub(super) fn apply_intention_change(
     .map_err(|_| Failure::new(ErrorCode::InvalidAction, "Intention is unavailable"))
 }
 
+/// One boundary-owned derivation; no retained cache or change to journal ordering.
+#[derive(Default)]
+pub(super) struct IntentionChanges {
+    pub suspensions: Vec<crate::journal::IntentionSuspension>,
+    pub ends: Vec<IntentionEnd>,
+    pub actor_visits: usize,
+    pub candidate_visits: usize,
+    pub event_visits: usize,
+}
+
+pub(super) fn derive_intention_changes(
+    before: &Game,
+    after: &Game,
+    entry: &JournalEntry,
+    same_branch: bool,
+) -> IntentionChanges {
+    let _span = tor_simulation::diagnostics::spans::span("intention_derivation");
+    let mut changes = IntentionChanges::default();
+    if !same_branch {
+        return changes;
+    }
+    // Keep independent owners for the two rules: even malformed/reused IDs must
+    // retain each old ordered-map insertion/overwrite behavior during recovery.
+    let mut candidates = BTreeMap::new();
+    for actor in before.loaded_actor_ids() {
+        changes.actor_visits += 1;
+        if let Some(preparation) = before.preparation(actor) {
+            if let Some(intention) = preparation.intention {
+                let row = candidates.entry(intention).or_insert((None, None));
+                row.1 = Some(actor);
+                if preparation.active {
+                    row.0 = Some(actor);
+                }
+            }
+        }
+    }
+    let current = match &entry.content {
+        JournalContent::IntentionStarted { intention, .. }
+        | JournalContent::IntentionContinued { intention, .. } => {
+            let actor = SimActor(entry.actor.0);
+            candidates.insert(*intention, (Some(actor), Some(actor)));
+            Some(*intention)
+        }
+        JournalContent::IntentionFailed { intention, .. }
+        | JournalContent::IntentionContinuationFailed { intention, .. }
+        | JournalContent::IntentionChanged {
+            intention,
+            change: IntentionChange::Cancelled | IntentionChange::Escaped { .. },
+            ..
+        } => {
+            candidates.entry(*intention).or_insert((None, None)).1 = Some(SimActor(entry.actor.0));
+            Some(*intention)
+        }
+        _ => None,
+    };
+    for (intention, (suspension_owner, end_owner)) in candidates {
+        changes.candidate_visits += 1;
+        if let Some(actor) = suspension_owner {
+            if after.preparation(actor).is_some_and(|preparation| {
+                !preparation.active && preparation.intention == Some(intention)
+            }) && !matches!(entry.content, JournalContent::IntentionChanged {
+                intention: changed, change: IntentionChange::Suspended, ..
+            } if changed == intention)
+            {
+                changes
+                    .suspensions
+                    .push(crate::journal::IntentionSuspension {
+                        actor: ActorId(actor.0),
+                        intention,
+                    });
+            }
+        }
+        if let Some(actor) = end_owner {
+            // Ordinary queued work has no same-identity preparation in a detached
+            // record. Its explicit cancellation is terminal even while unloaded.
+            let cancelled_queue = matches!(&entry.content, JournalContent::IntentionChanged {
+                intention: id, change: IntentionChange::Cancelled | IntentionChange::Escaped { .. }, .. } if *id == intention)
+                && before.pending_intention(actor).is_some_and(|queued| {
+                    queued.id == intention
+                        && !matches!(
+                            queued.work,
+                            tor_simulation::IntentionWork::ResumePreparation { .. }
+                        )
+                })
+                && after.pending_intention(actor).is_none();
+            if after
+                .preparation(actor)
+                .is_some_and(|p| p.intention == Some(intention))
+                || (!cancelled_queue
+                    && !after.has_actor(actor)
+                    && after.known_actor_region(actor).is_some())
+            {
+                continue;
+            }
+            let resolved = after.combat_events().iter().any(|event| {
+                changes.event_visits += 1;
+                match event {
+                    tor_simulation::combat::CombatEvent::EscapeResolved {
+                        actor: owner,
+                        intention: Some(id),
+                        ..
+                    }
+                    | tor_simulation::combat::CombatEvent::RespecCompleted {
+                        actor: owner,
+                        intention: Some(id),
+                        ..
+                    } => *owner == actor && *id == intention,
+                    tor_simulation::combat::CombatEvent::EscapeResolved {
+                        intention: None, ..
+                    } => false,
+                    tor_simulation::combat::CombatEvent::RespecCompleted {
+                        intention: None,
+                        ..
+                    } => false,
+                    tor_simulation::combat::CombatEvent::SequenceEnded {
+                        actor: owner,
+                        intention: Some(id),
+                        reason: tor_simulation::combat::SequenceEnd::Completed,
+                    } => *owner == actor && *id == intention,
+                    tor_simulation::combat::CombatEvent::Resolved { .. }
+                    | tor_simulation::combat::CombatEvent::SequenceEnded { .. } => false,
+                    tor_simulation::combat::CombatEvent::ItemRefused {
+                        actor: owner,
+                        intention: Some(id),
+                        ..
+                    }
+                    | tor_simulation::combat::CombatEvent::ItemCurseBlocked {
+                        actor: owner,
+                        intention: Some(id),
+                        ..
+                    }
+                    | tor_simulation::combat::CombatEvent::ItemCompleted {
+                        actor: owner,
+                        intention: Some(id),
+                        ..
+                    } => *owner == actor && *id == intention,
+                    tor_simulation::combat::CombatEvent::ItemRefused {
+                        intention: None, ..
+                    }
+                    | tor_simulation::combat::CombatEvent::ItemCurseBlocked {
+                        intention: None,
+                        ..
+                    }
+                    | tor_simulation::combat::CombatEvent::ItemCompleted {
+                        intention: None, ..
+                    }
+                    | tor_simulation::combat::CombatEvent::Interrupted { .. }
+                    | tor_simulation::combat::CombatEvent::Died { .. } => false,
+                }
+            });
+            let immediate = current == Some(intention)
+                && matches!(&entry.content,
+                JournalContent::IntentionStarted { action, .. } if !action.is_prepared());
+            let replaced = current != Some(intention)
+                && entry.actor.0 == actor.0
+                && matches!(&entry.content, JournalContent::Action { action, .. }
+                    | JournalContent::IntentionStarted { action, .. } if !matches!(action, Action::Wait));
+            changes.ends.push(IntentionEnd { actor: ActorId(actor.0), intention, kind: if resolved || immediate {
+                IntentionEndKind::Resolved
+            } else if replaced || matches!(&entry.content, JournalContent::IntentionChanged {
+                intention: id, change: IntentionChange::Cancelled | IntentionChange::Escaped { .. }, .. } if *id == intention) {
+                IntentionEndKind::Cancelled
+            } else { IntentionEndKind::Failed } });
+        }
+    }
+    // Existing gameplay/replay tests also exercise an independent pre-refactor
+    // oracle. Production performs only the fused derivation.
+    #[cfg(test)]
+    {
+        assert_eq!(
+            changes.suspensions,
+            derive_intention_suspensions(before, after, entry, same_branch)
+        );
+        assert_eq!(
+            changes.ends,
+            derive_intention_ends(before, after, entry, same_branch)
+        );
+        assert_eq!(changes.actor_visits, before.loaded_actor_ids().count());
+    }
+    changes
+}
+
+#[cfg(test)]
 pub(super) fn derive_intention_suspensions(
     before: &Game,
     after: &Game,
@@ -98,6 +274,7 @@ pub(super) fn derive_intention_suspensions(
         .collect()
 }
 
+#[cfg(test)]
 pub(super) fn derive_intention_ends(
     before: &Game,
     after: &Game,
@@ -515,7 +692,12 @@ impl Engine {
         let unavailable = || Failure::new(ErrorCode::InvalidAction, "Intention is unavailable");
         let source = self.history_index.find(admission).ok_or_else(unavailable)?;
         let admitted = &self.archive.records[source].entry;
-        let JournalContent::IntentionAdmitted { intention, action } = &admitted.content else {
+        let JournalContent::IntentionAdmitted {
+            intention,
+            action,
+            human_operands,
+        } = &admitted.content
+        else {
             return Err(unavailable());
         };
         let original = adapt::action(action);
@@ -525,6 +707,7 @@ impl Engine {
             .is_some_and(|queued| {
                 queued.id == *intention
                     && queued.origin == tor_simulation::IntentionOrigin::Human
+                    && queued.human_operands.as_ref() == Some(human_operands)
                     && admitted_work_matches(queued.work.clone(), action)
             });
         let preparation_matches = candidate
@@ -557,13 +740,7 @@ impl Engine {
         } else {
             apply_intention_change(&mut candidate.game, actor, intention, change)?;
         }
-        let observations = preparation_revision_updates(
-            &self.game,
-            &candidate.game,
-            actor,
-            &mut candidate.revisions,
-        )?;
-        candidate.observations.extend(observations);
+        validate_preparation_observers(&self.game, &candidate.game, actor)?;
         Ok(JournalContent::IntentionChanged {
             admission: admission.clone(),
             intention,
@@ -576,7 +753,26 @@ impl Engine {
         branch: &BranchId,
         phase: IntentionPhase,
     ) -> Option<IntentionStatus> {
-        let entry = &self.archive.records[self.history_index.intention_admission(id)?].entry;
+        self.status_for_intention_at(id, branch, phase, None)
+    }
+
+    fn status_for_intention_at(
+        &self,
+        id: tor_simulation::IntentionId,
+        branch: &BranchId,
+        phase: IntentionPhase,
+        incoming: Option<&JournalEntry>,
+    ) -> Option<IntentionStatus> {
+        let entry = if let Some(entry) = incoming.filter(|entry| {
+            matches!(
+                &entry.content,
+                JournalContent::IntentionAdmitted { intention, .. } if *intention == id
+            )
+        }) {
+            entry
+        } else {
+            &self.archive.records[self.history_index.intention_admission(id)?].entry
+        };
         if !matches!(entry.content, JournalContent::IntentionAdmitted { .. }) {
             return None;
         }
@@ -592,18 +788,34 @@ impl Engine {
     /// Derived actor permissions contain only journal-filtered opaque identities;
     /// Session applies controller/role policy and assigns the transport revision.
     pub(crate) fn input_readiness(&self, actor: ActorId) -> tor_protocol::Readiness {
-        let input = self.game.intention_input(SimActor(actor.0));
-        let terminal = self.game.run_outcome().terminal;
+        self.input_readiness_at(&self.game, self.branch(), actor, None)
+    }
+
+    pub(super) fn input_readiness_at(
+        &self,
+        game: &Game,
+        branch: &BranchId,
+        actor: ActorId,
+        incoming: Option<&JournalEntry>,
+    ) -> tor_protocol::Readiness {
+        let input = game.intention_input(SimActor(actor.0));
+        let terminal = game.run_outcome().terminal;
         let mut readiness = tor_protocol::Readiness {
             revision: 0,
-            admission: input.slot_available && self.alive(actor) && !self.is_ai(actor) && !terminal,
+            admission: input.slot_available
+                && game.alive(SimActor(actor.0))
+                && !game.is_ai(SimActor(actor.0))
+                && !terminal,
             resume: Vec::new(),
             cancel: Vec::new(),
         };
         for control in input.controls() {
-            let Some(status) =
-                self.status_for_intention(control.intention, self.branch(), IntentionPhase::Queued)
-            else {
+            let Some(status) = self.status_for_intention_at(
+                control.intention,
+                branch,
+                IntentionPhase::Queued,
+                incoming,
+            ) else {
                 continue;
             };
             if control.can_resume && !terminal {
@@ -617,8 +829,17 @@ impl Engine {
     }
 
     pub(crate) fn pending_intentions(&self, actor: ActorId) -> Vec<IntentionStatus> {
-        self.game
-            .intention_input(SimActor(actor.0))
+        self.pending_intentions_at(&self.game, self.branch(), actor, None)
+    }
+
+    pub(super) fn pending_intentions_at(
+        &self,
+        game: &Game,
+        branch: &BranchId,
+        actor: ActorId,
+        incoming: Option<&JournalEntry>,
+    ) -> Vec<IntentionStatus> {
+        game.intention_input(SimActor(actor.0))
             .controls()
             .filter_map(|control| {
                 let phase = match control.state {
@@ -627,7 +848,7 @@ impl Engine {
                     tor_simulation::IntentionControlState::Started => IntentionPhase::Started,
                     tor_simulation::IntentionControlState::Paused => IntentionPhase::Paused,
                 };
-                self.status_for_intention(control.intention, self.branch(), phase)
+                self.status_for_intention_at(control.intention, branch, phase, incoming)
             })
             .collect()
     }
@@ -959,13 +1180,7 @@ impl Engine {
                 if let Some(failure) = Failure::simulation_failure(error) {
                     return Err(failure);
                 }
-                let observations = preparation_revision_updates(
-                    &self.game,
-                    &candidate.game,
-                    actor,
-                    &mut candidate.revisions,
-                )?;
-                candidate.observations.extend(observations);
+                validate_preparation_observers(&self.game, &candidate.game, actor)?;
                 if continuation {
                     JournalContent::IntentionContinuationFailed {
                         admission,

@@ -426,7 +426,10 @@ impl Game {
     ) -> Result<Vec<(ItemClaimRef, u64)>, GameError> {
         self.allocate_items(plan, true)
     }
-    fn physical_item_allocation(&self, plan: &Plan) -> Result<Vec<(ItemClaimRef, u64)>, GameError> {
+    pub(crate) fn physical_item_allocation(
+        &self,
+        plan: &Plan,
+    ) -> Result<Vec<(ItemClaimRef, u64)>, GameError> {
         self.allocate_items(plan, false)
     }
     fn allocate_items(
@@ -758,6 +761,16 @@ impl Game {
         {
             return false;
         }
+        self.preparation_items_valid_after_shape(preparation, allow_detached)
+    }
+    /// The caller has checked payment shape, directly or through progress_valid.
+    /// Keep preparation_items_valid as the complete validator for all other paths.
+    pub(crate) fn preparation_items_valid_after_shape(
+        &self,
+        preparation: &Preparation,
+        allow_detached: bool,
+    ) -> bool {
+        let _span = crate::diagnostics::spans::span("preparation_item_validation");
         if preparation.item_payment.refs().is_empty() {
             return true;
         }

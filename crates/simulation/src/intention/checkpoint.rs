@@ -104,6 +104,7 @@ mod tests {
             state: IntentionState::Queued,
             movement_context: None,
             terminal_exit_context: None,
+            human_operands: Some(crate::HumanOperandBinding::empty()),
         }
     }
 

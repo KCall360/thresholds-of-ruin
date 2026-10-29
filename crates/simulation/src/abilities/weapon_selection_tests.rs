@@ -4601,3 +4601,43 @@ fn standalone_rolled_payload_combines_instance_and_other_equipment_bonuses_once(
         crate::damage::DamageAmount::Rolled(crate::dice::DicePool::new(1, 3, 4).unwrap())
     );
 }
+
+#[test]
+fn human_default_natural_operand_does_not_become_newly_equipped_weapon() {
+    let mut game = fixture(|_| {});
+    let owner = ActorId(1);
+    let action = crate::Action::UseAbility {
+        id: basic(),
+        invocation: AbilityInvocation::actor_target(ActorId(2)),
+        supplies: crate::supplies::SupplySelection::Carried,
+    };
+    let admission = game
+        .admit_intention(owner, action.clone(), crate::IntentionOrigin::Human)
+        .unwrap();
+    let binding = game
+        .pending_intention(owner)
+        .unwrap()
+        .human_operands
+        .clone()
+        .unwrap();
+    equip(&mut game, 0, false);
+    assert_eq!(
+        game.pending_intention(owner).unwrap().work,
+        crate::IntentionWork::Action(action)
+    );
+    assert_eq!(
+        game.pending_intention(owner)
+            .unwrap()
+            .human_operands
+            .as_ref(),
+        Some(&binding)
+    );
+    game.actors.get_mut(&ActorId(2)).unwrap().ready_at = game.tick;
+    let execution = game.execute_next_intention().unwrap();
+    assert_eq!(execution.intention.id, admission);
+    assert!(
+        execution.outcome.is_err(),
+        "admitted natural attack must not select the new item"
+    );
+    assert!(game.preparation(owner).is_none());
+}

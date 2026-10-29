@@ -119,7 +119,7 @@ class CheckpointProcesses(CheckpointFixture, ProcessTestCase):
         self.write_checkpoint(checkpoint)
         server = self.server(scenario=package, seed=None)
         player, resumed = self.client()
-        self.assertEqual(resumed["state"], saved["state"])
+        self.assertDisclosedStateEqual(resumed["state"], saved["state"])
         player.stop()
         server.stop()
         checkpoint = self.read_checkpoint()
@@ -222,7 +222,7 @@ class CheckpointProcesses(CheckpointFixture, ProcessTestCase):
         for frame in (saved, resumed):
             # The checkpoint-tail fixture has an ordinary body, not a creature.
             self.assertNotIn("combat", frame["state"]["observation"])
-        self.assertEqual(resumed["state"], saved["state"])
+        self.assertDisclosedStateEqual(resumed["state"], saved["state"])
         self.assertEqual(resumed["history"], saved["history"])
         for _ in range(3):
             continued = self.act(player, {"type": "wait"})
@@ -262,11 +262,22 @@ class NativeCheckpointProcesses(CheckpointFixture, ProcessTestCase):
         player, _ = self.text_client()
         spectator = self.launch("tor-client-ascii", ["--connect", self.address, "--automation"],
             token=SPECTATOR_TOKEN)
-        self.ascii_frame(spectator, lambda f: f["state"] is not None)
+        initial = self.ascii_frame(spectator, lambda f: f["state"] is not None)
+        def waits(frame):
+            return [entry for entry in (frame.get("history") or [])
+                    if entry["actor"] == initial["state"]["observation"]["actor"]
+                    and entry["content"].get("event") == {"type": "waited"}]
         for n in range(1, 10):
             player.command("wait")
-            saved = self.ascii_frame(spectator,
-                lambda f: f["state"]["observation"]["tick"] == str(n*100))
+            saved = self.ascii_frame(spectator, lambda f: len(waits(f)) == n)
+            self.assertEqual([int(entry["tick"]) for entry in waits(saved)], list(range(0, n * 100, 100)))
+            self.assertEqual(len({entry["id"] for entry in waits(saved)}), n)
+        self.assertEqual(saved["state"], initial["state"], "pure waits preserve the issued picture")
+        fresh = self.launch("tor-client-ascii", ["--connect", self.address, "--automation"], token=SPECTATOR_TOKEN)
+        current = self.ascii_frame(fresh, lambda f: f["state"] is not None)
+        self.assertEqual(current["history"], saved["history"])
+        self.assertEqual(current["state"]["observation"]["tick"], "900")
+        fresh.stop()
         self.assertIn("Done.", player.command("save"))
         with sqlite3.connect(self.save) as db:
             self.assertEqual(db.execute("SELECT sequence FROM checkpoint").fetchone()[0], 16)
@@ -279,11 +290,12 @@ class NativeCheckpointProcesses(CheckpointFixture, ProcessTestCase):
         resumed = self.ascii_frame(spectator, lambda f: f["state"] is not None)
         for frame in (saved, resumed):
             self.assertNotIn("combat", frame["state"]["observation"])
-        self.assertEqual(resumed["state"], saved["state"])
+        self.assertDisclosedStateEqual(resumed["state"], current["state"])
         self.assertEqual(resumed["history"], saved["history"])
         player.command("wait")
-        self.ascii_frame(spectator,
-            lambda f: f["state"]["observation"]["tick"] == "1000")
+        advanced = self.ascii_frame(spectator, lambda f: len(waits(f)) == 10)
+        self.assertEqual([int(entry["tick"]) for entry in waits(advanced)], list(range(0, 1000, 100)))
+        self.assertEqual(len({entry["id"] for entry in waits(advanced)}), 10)
 
 
 

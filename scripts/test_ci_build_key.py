@@ -104,7 +104,7 @@ class RecipeKeyTests(unittest.TestCase):
             examples = [row for row in rows if '--example' in row['command']]
             self.assertEqual(len(examples), 1, 'Explicit maintained-example recipe must be keyed')
             command = ['cargo', 'build', '-p', 'tor-server', '--locked',
-                       '--example', 'combat_bench', '--example', 'horizon-profile', '--example', 'item_bench',
+                       '--example', 'active_mob_bench', '--example', 'combat_bench', '--example', 'horizon-profile', '--example', 'item_bench',
                        '--example', 'latency_bench', '--example', 'physics_bench', '--example', 'place_bench',
                        '--example', 'rogue_bench', '--example', 'scenario_bench']
             if profile == 'release': command.append('--release')

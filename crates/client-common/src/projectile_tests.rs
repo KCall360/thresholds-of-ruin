@@ -62,7 +62,7 @@ fn state() -> ClientState {
             })
             .collect(),
     });
-    ClientState::from_snapshot(serde_json::from_value(serde_json::json!({"readiness":{"revision":"0","admission":true,"resume":[],"cancel":[]},"context":{"stream":"fixture","epoch":"0"},"actor":"1","branch":"main","cursor":{"sequence":"0","tick":"0"},"has_control":true,"intentions":[],"history":{"entries":[],"older_before":null},"state":{"wizard_game":false,"revision":"1","observation":view}})).unwrap()).unwrap()
+    ClientState::from_snapshot(serde_json::from_value(serde_json::json!({"readiness":{"revision":"0","admission":true,"resume":[],"cancel":[]},"context":{"stream":"fixture","epoch":"0"},"actor":"1","branch":"main","cursor":{"sequence":"0","tick":"0"},"has_control":true,"intentions":[],"history":{"entries":[],"older_before":null},"state":{"snapshot":"fixture", "wizard_game":false,"revision":"1","observation":view}})).unwrap()).unwrap()
 }
 fn menu(state: &ClientState) -> ProjectileMenu {
     ProjectileMenu::new(state, "fixture_projectile").unwrap()
@@ -95,11 +95,11 @@ fn accept(
 ) {
     let page = page(menu, choices, next);
     menu.bind_request(id).unwrap();
-    menu.accept(state, &state.snapshot().reply_context(), id, &page)
+    menu.accept(state, &state.reply_context(), id, &page)
         .unwrap();
 }
 fn changed(state: &ClientState, change: impl FnOnce(&mut Snapshot)) -> ClientState {
-    let mut snapshot = state.snapshot();
+    let mut snapshot = state.reset_snapshot().unwrap();
     change(&mut snapshot);
     ClientState::from_snapshot(snapshot).unwrap()
 }
@@ -107,10 +107,10 @@ fn changed(state: &ClientState, change: impl FnOnce(&mut Snapshot)) -> ClientSta
 #[test]
 fn replies_bind_request_full_context_and_complete_query_without_mutating_state() {
     let state = state();
-    let before = state.snapshot();
+    let before = state.session().clone();
     let mut menu = menu(&state);
     let page = page(&menu, vec![source(2)], None);
-    let context = state.snapshot().reply_context();
+    let context = state.reply_context();
     assert!(menu.accept(&state, &context, "page", &page).is_err());
     menu.bind_request("page").unwrap();
     assert!(menu.bind_request("another").is_err());
@@ -158,7 +158,7 @@ fn replies_bind_request_full_context_and_complete_query_without_mutating_state()
         menu.accept(&state, &context, "page", &page).is_err(),
         "duplicate reply is not a new page"
     );
-    assert_eq!(state.snapshot(), before);
+    assert_eq!(state.session().clone(), before);
 }
 #[test]
 fn empty_filtered_page_and_full_page_remain_navigable_in_both_directions() {
@@ -190,7 +190,7 @@ fn empty_filtered_page_and_full_page_remain_navigable_in_both_directions() {
 #[test]
 fn launcher_selection_binds_ammunition_query_and_final_closed_delivery() {
     let state = state();
-    let before = state.snapshot();
+    let before = state.session().clone();
     let mut menu = menu(&state);
     let launcher = EquippedProjectileWeapon {
         item: item(1),
@@ -222,20 +222,10 @@ fn launcher_selection_binds_ammunition_query_and_final_closed_delivery() {
         },
     };
     assert!(menu
-        .accept(
-            &state,
-            &state.snapshot().reply_context(),
-            "ammunition",
-            &wrong
-        )
+        .accept(&state, &state.reply_context(), "ammunition", &wrong)
         .is_err());
-    menu.accept(
-        &state,
-        &state.snapshot().reply_context(),
-        "ammunition",
-        &exact,
-    )
-    .unwrap();
+    menu.accept(&state, &state.reply_context(), "ammunition", &exact)
+        .unwrap();
     assert_eq!(menu.choose(&state, 0).unwrap(), None);
     assert_eq!(menu.step(), Step::Direction);
     assert_eq!(
@@ -252,7 +242,7 @@ fn launcher_selection_binds_ammunition_query_and_final_closed_delivery() {
             supplies: SupplySelection::Carried
         }
     );
-    assert_eq!(state.snapshot(), before);
+    assert_eq!(state.session().clone(), before);
 }
 #[test]
 fn source_socket_inventory_ability_and_authority_changes_invalidate_every_stage() {
@@ -315,7 +305,7 @@ fn source_socket_inventory_ability_and_authority_changes_invalidate_every_stage(
         assert!(!waiting.current(&changed), "change {field}");
         assert!(waiting
             .clone()
-            .accept(&changed, &changed.snapshot().reply_context(), "page", &page)
+            .accept(&changed, &changed.reply_context(), "page", &page)
             .is_err());
         assert!(!selected.current(&changed));
         assert!(selected.action(&changed, Direction::North).is_err());
@@ -376,17 +366,12 @@ fn exact_preview_owns_projectile_terms_and_rejects_changed_source_direction_or_s
             wrong.ability = "other".into();
         }
         assert!(gate
-            .accept(&state, &state.snapshot().reply_context(), "preview", &wrong)
+            .accept(&state, &state.reply_context(), "preview", &wrong)
             .is_err());
         assert!(gate.clone().confirm(&state).is_err());
     }
-    gate.accept(
-        &state,
-        &state.snapshot().reply_context(),
-        "preview",
-        &response,
-    )
-    .unwrap();
+    gate.accept(&state, &state.reply_context(), "preview", &response)
+        .unwrap();
     let rows = gate.lines().join(" ");
     assert!(rows.contains("731 ticks"));
     assert!(rows.contains("229 ticks"));

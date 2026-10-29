@@ -60,6 +60,80 @@ impl Messages {
         }
     }
 
+    /// Compose ordered event-time lines without consulting a stale visual view.
+    pub fn absorb_outcome(
+        &mut self,
+        lines: &[Line],
+        tick: u64,
+        status: Option<&tor_protocol::OutcomeStatusFacts>,
+    ) {
+        self.absorb_outcome_with_underfoot(lines, tick, status, None);
+    }
+
+    pub fn absorb_outcome_with_underfoot(
+        &mut self,
+        lines: &[Line],
+        tick: u64,
+        status: Option<&tor_protocol::OutcomeStatusFacts>,
+        underfoot: Option<&tor_protocol::OutcomeUnderfoot>,
+    ) {
+        for line in lines {
+            match &line.basic_attack {
+                Some(BasicAttack::Preparing) => continue,
+                Some(BasicAttack::Resolved {
+                    target,
+                    outcome: AbilityOutcome::Applied,
+                }) => {
+                    self.push(format!("You hit {target}."));
+                    continue;
+                }
+                Some(BasicAttack::Resolved {
+                    target,
+                    outcome: AbilityOutcome::Miss,
+                }) => {
+                    self.push(format!("You miss {target}."));
+                    continue;
+                }
+                _ => {}
+            }
+            match &line.topic {
+                // Movement is shown by the demanded map and underfoot narration.
+                // A routine move must not itself stop a directional run.
+                Topic::Own(Event::Moved { .. }) => {
+                    if let Some(contents) = underfoot {
+                        self.here_outcome(contents);
+                    }
+                }
+                Topic::Own(Event::Waited) | Topic::LostSight(_) | Topic::Pacing => {}
+                Topic::Status => {
+                    if let Some(status) = status {
+                        if status.victory {
+                            self.push(if status.terminal {
+                                "Victory! This run has ended."
+                            } else {
+                                "Victory! You may continue exploring."
+                            });
+                        } else if status.dead {
+                            self.push("This run has ended.");
+                        }
+                    }
+                }
+                Topic::Finished => self.finish(&line.text),
+                Topic::Noticed(actor) => {
+                    let returning = self
+                        .sightings
+                        .get(actor)
+                        .is_some_and(|seen| tick.saturating_sub(*seen) < SIGHTING_TICKS);
+                    if !returning {
+                        self.push(&line.text);
+                    }
+                    self.sightings.insert(*actor, tick);
+                }
+                _ => self.push(&line.text),
+            }
+        }
+    }
+
     /// Compose one observation's narrated lines into this turn.
     pub fn absorb(&mut self, lines: &[Line], view: &Observation) {
         for line in lines {
@@ -156,8 +230,31 @@ impl Messages {
         }
     }
 
+    /// This turn's sentences as one paragraph.
     /// What's underfoot after a move, as NetHack reports it.
-    fn here(&mut self, view: &Observation) {
+    fn here_outcome(&mut self, contents: &tor_protocol::OutcomeUnderfoot) {
+        use tor_protocol::OutcomeUnderfootFeature;
+        match contents.items.as_slice() {
+            [] => {}
+            [item] => self.push(format!(
+                "You see here {}.",
+                crate::item_phrase(&item.name, item.quantity)
+            )),
+            _ => self.push("There are several objects here."),
+        }
+        match &contents.feature {
+            Some(OutcomeUnderfootFeature::Object { name }) => {
+                self.push(format!("You see here {}.", crate::item_phrase(name, 1)))
+            }
+            Some(OutcomeUnderfootFeature::StairsDown) => {
+                self.push("There is a staircase down here.")
+            }
+            Some(OutcomeUnderfootFeature::StairsUp) => self.push("There is a staircase up here."),
+            None => {}
+        }
+    }
+
+    pub fn here(&mut self, view: &Observation) {
         let items: Vec<_> = view
             .ground_items
             .iter()
@@ -192,7 +289,6 @@ impl Messages {
         }
     }
 
-    /// This turn's sentences as one paragraph.
     pub fn text(&self) -> String {
         self.turn
             .iter()
@@ -295,4 +391,90 @@ pub fn word_wrap(text: &str, width: usize) -> Vec<String> {
         rows.push(row);
     }
     rows
+}
+
+#[cfg(test)]
+mod outcome_tests {
+    use super::*;
+
+    fn status(dead: bool, victory: bool, terminal: bool) -> tor_protocol::OutcomeStatusFacts {
+        tor_protocol::OutcomeStatusFacts {
+            hp: 35,
+            max_hp: 37,
+            dead,
+            victory,
+            terminal,
+            sequence: None,
+            preparation_remaining: Some(41),
+            preparation_active: false,
+            recovery_remaining: 0,
+        }
+    }
+
+    #[test]
+    fn outcome_status_keeps_hp_in_status_line_but_preserves_terminal_messages() {
+        let line = Line {
+            topic: Topic::Status,
+            text: "HP 35/37 — Attack preparation: 41 ticks remaining (interrupted).".into(),
+            basic_attack: None,
+        };
+        for (facts, expected) in [
+            (status(false, false, false), ""),
+            (status(true, false, true), "This run has ended."),
+            (status(false, true, true), "Victory! This run has ended."),
+            (
+                status(false, true, false),
+                "Victory! You may continue exploring.",
+            ),
+        ] {
+            let mut messages = Messages::default();
+            messages.absorb_outcome(std::slice::from_ref(&line), 7, Some(&facts));
+            assert_eq!(messages.text(), expected);
+            assert!(!messages.text().contains("HP "));
+        }
+    }
+
+    #[test]
+    fn routine_move_outcome_does_not_stop_a_directional_run() {
+        let mut messages = Messages::default();
+        messages.absorb_outcome(
+            &[Line {
+                topic: Topic::Own(Event::Moved {
+                    direction: tor_protocol::Direction::East,
+                }),
+                text: "You move east.".into(),
+                basic_attack: None,
+            }],
+            100,
+            None,
+        );
+        assert!(messages.text().is_empty());
+        messages.push("You see here a stone tablet.");
+        assert_eq!(messages.text(), "You see here a stone tablet.");
+    }
+
+    #[test]
+    fn outcome_messages_use_event_time_text_without_a_visual_view() {
+        let mut messages = Messages::default();
+        messages.absorb_outcome(
+            &[
+                Line {
+                    topic: Topic::Own(Event::Moved {
+                        direction: tor_protocol::Direction::North,
+                    }),
+                    text: "You move north.".into(),
+                    basic_attack: None,
+                },
+                Line {
+                    topic: Topic::Status,
+                    text: "This run has ended.".into(),
+                    basic_attack: None,
+                },
+            ],
+            7,
+            Some(&status(true, false, true)),
+        );
+        assert!(!messages.text().contains("You move north."));
+        assert!(messages.text().contains("This run has ended."));
+    }
 }

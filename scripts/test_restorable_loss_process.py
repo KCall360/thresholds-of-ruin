@@ -25,7 +25,7 @@ class RestorableLossProcesses(LossHelpers, ProcessTestCase):
         self.assertEqual(losses(shown), losses(changed))
         self.assertFalse(shown["has_control"])
         for _ in range(3):
-            self.assertEqual(self.snapshot(player)["state"], changed["state"])
+            self.assertDisclosedStateEqual(self.snapshot(player)["state"], changed["state"])
             self.assertIsNone(self.command(player, {"type": "inspect"})["error"])
         self.assertEqual(checkpoint(self, player), saved)
         player.stop(); spectator.stop(); server.stop()
@@ -34,7 +34,7 @@ class RestorableLossProcesses(LossHelpers, ProcessTestCase):
                 shutil.rmtree(path) if path.is_dir() else path.unlink()
         self.server("--checkpoint-interval", 1, seed=None)
         player, restored = self.client()
-        self.assertEqual(restored["state"], changed["state"])
+        self.assertDisclosedStateEqual(restored["state"], changed["state"])
         self.assertEqual(checkpoint(self, player), saved)
         item = self.restoration_item(restored)
         self.assertIsNone(self.act(player, {"type": "drink", "item": item})["error"])
@@ -93,7 +93,7 @@ class RestorableLossProcesses(LossHelpers, ProcessTestCase):
         player.stop()
         text, _ = self.text_client()
         self.assertIn("Restorable losses: Strength 1, maximum Health 1", text.command("stats"))
-        self.assertIn("ItemStarted", text.command("drink fixture restoration"))
+        self.assertIn("You begin to drink the fixture restoration.", text.command("drink fixture restoration"))
         self.assertNotIn("Restorable losses:", text.command("stats"))
 
 
@@ -121,7 +121,7 @@ class RestorableHitDieProcesses(LossHelpers, ProcessTestCase):
         self.server("--checkpoint-interval", 1, seed=None)
         player, reopened = self.client()
         self.assertEqual(checkpoint(self, player), saved)
-        self.assertEqual(reopened["state"], drained["state"])
+        self.assertDisclosedStateEqual(reopened["state"], drained["state"])
         item = self.restoration_item(reopened)
         self.assertIsNone(self.act(player, {"type": "drink", "item": item})["error"])
         final = self.finish(player)
@@ -143,7 +143,7 @@ class RestorableHitDieProcesses(LossHelpers, ProcessTestCase):
         player.stop()
         text, _ = self.text_client()
         self.assertIn("Restorable losses: Hit Dice 1", text.command("stats"))
-        self.assertIn("ItemStarted", text.command("drink fixture restoration"))
+        self.assertIn("You begin to drink the fixture restoration.", text.command("drink fixture restoration"))
         self.assertNotIn("Restorable losses:", text.command("stats"))
 
 

@@ -43,9 +43,15 @@ async fn next_non_map_frame(
 
 /// Snapshot includes permissions, history and all authoritative live fields;
 /// appearance stores retain their own assertions independently of bookkeeping.
-fn visible_model(state: &ClientState) -> (Snapshot, Vec<RememberedCell>, Vec<RememberedMapCell>) {
+fn visible_model(
+    state: &ClientState,
+) -> (
+    tor_client_common::ClientSessionState,
+    Vec<RememberedCell>,
+    Vec<RememberedMapCell>,
+) {
     (
-        state.snapshot(),
+        state.session().clone(),
         state.memory().cloned().collect(),
         state.map_memory().map(|cell| cell.appearance()).collect(),
     )
@@ -534,7 +540,6 @@ async fn a_sequence_gap_requests_a_snapshot_without_replaying_input_or_losing_pe
             context: client.state.input_context(),
             branch: client.state.branch().clone(),
             command: Command::Act {
-                expected_revision: 0,
                 action: Action::Wait
             }
         })
@@ -722,7 +727,9 @@ async fn oversized_outgoing_requests_are_rejected_without_poisoning_the_connecti
         .unwrap();
     let before = client.state.clone();
     let request = client.state.command_request(Command::Annotate {
-        anchor: Anchor::State { revision: 0 },
+        anchor: Anchor::State {
+            snapshot: tor_protocol::SnapshotId("fixture-0".into()),
+        },
         text: "x".repeat(16 * 1024),
         audience: Audience::Actor,
         source: ClientSource::User,
@@ -828,6 +835,7 @@ async fn fragmented_response_depth_limit_rejects_before_state_changes_or_repair(
             attach_scripted(&mut server, &initial).await;
             let mut state = Arc::unwrap_or_clone(initial.state.clone());
             state.revision = 1;
+            state.snapshot = tor_protocol::SnapshotId(format!("fixture-{}", state.revision));
             state.observation.tick = 1;
             let update = ServerMessage::Update {
                 update: Box::new(StreamUpdate {

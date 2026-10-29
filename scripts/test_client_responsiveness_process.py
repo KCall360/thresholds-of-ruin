@@ -21,13 +21,18 @@ class ClientResponsivenessProcesses(ProcessTestCase):
         window = self.launch("tor-client-ascii", ["--connect", self.address, "--report-frames"])
         initial = self.ascii_frame(window, lambda f: f["has_control"] and not f["busy"])
         tick = int(initial["state"]["observation"]["tick"])
+        initial_entries = {entry["id"] for entry in initial["history"]}
         with sqlite3.connect(self.save) as db:
             sequence = db.execute("SELECT max(sequence) FROM (SELECT sequence FROM journal UNION ALL SELECT sequence FROM history)").fetchone()[0]
         key = self.native_keys(window)
         with self.held_save_writer() as barrier:
             key("period", True)
             try:
-                acted = self.ascii_frame(window, lambda f: int(f["state"]["observation"]["tick"]) == tick + 100 and not f["busy"])
+                acted = self.ascii_frame(window, lambda f: not f["busy"] and any(
+                    entry["id"] not in initial_entries
+                    and entry["actor"] == initial["state"]["observation"]["actor"]
+                    and entry["content"].get("event") == {"type": "waited"}
+                    and int(entry["tick"]) == tick for entry in (f["history"] or [])))
             finally:
                 key("period", False)
             barrier.wait()
@@ -80,7 +85,7 @@ class ClientResponsivenessProcesses(ProcessTestCase):
         # Keep the full state/history workload without repeated diagnostic map memory.
         player, _ = self.client(omit_memory=True)
         window = self.launch("tor-client-ascii", ["--connect", self.address, "--observe", "--report-frames"])
-        self.ascii_frame(window, lambda f: f["state"] is not None and not f["busy"])
+        initial_picture = self.ascii_frame(window, lambda f: f["state"] is not None and not f["busy"])
         key = self.native_keys(window)
         first_completed = threading.Event()
         request_in_flight = threading.Event()
@@ -128,23 +133,43 @@ class ClientResponsivenessProcesses(ProcessTestCase):
                 self.assertFalse(burst.done(), "actual gameplay must continue until modal presentation")
                 # A second client positively observes further server execution
                 # while that modal remains open, independent of input latency.
-                opened_tick = int(opened["state"]["observation"]["tick"])
-                progressed = self.frame(observer, lambda f:
-                    int(f["state"]["observation"]["tick"]) > opened_tick)
-                self.assertGreater(int(progressed["state"]["observation"]["tick"]), opened_tick)
+                own_actor = opened["state"]["observation"]["actor"]
+                def own_waits(frame):
+                    return [entry for entry in (frame.get("history") or [])
+                            if entry["actor"] == own_actor
+                            and entry["content"].get("event") == {"type": "waited"}]
+                opened_waits = own_waits(opened)
+                self.assertTrue(opened_waits, "original consumer received committed gameplay")
+                opened_tick = int(opened_waits[-1]["tick"])
+                progressed = self.frame(observer, lambda f: bool(own_waits(f))
+                    and int(own_waits(f)[-1]["tick"]) > opened_tick)
+                self.assertGreater(int(own_waits(progressed)[-1]["tick"]), opened_tick)
                 modal_presented.set()
                 final, actions = burst.result(timeout=120)
             finally:
                 stop_producer.set()
                 modal_presented.set()
         self.assertEqual(final["state"]["observation"]["tick"], str(actions * 100))
-        presented = opened if opened["state"]["observation"]["tick"] == str(actions * 100) else self.ascii_frame(
-            window, lambda f: f["state"]["observation"]["tick"] == str(actions * 100))
-        self.assertEqual(presented["state"], final["state"])
+        final_action = own_waits(final)[-1]
+        self.assertEqual(int(final_action["tick"]), (actions - 1) * 100)
+        def delivered_final(frame):
+            return bool(own_waits(frame)) and own_waits(frame)[-1]["id"] == final_action["id"]
+        presented = opened if delivered_final(opened) else self.ascii_frame(window, delivered_final)
+        # The original live consumer delivered every retained causal entry in order.
+        # Pure waits need no new picture: preserve its exact issued picture, not
+        # a fabricated picture with an advanced tick.
+        self.assertEqual(presented["state"], initial_picture["state"])
         self.assertEqual(presented["history"], final["history"])
         self.assertEqual(len(presented["history"]), 100)
+        self.assertEqual(len({entry["id"] for entry in presented["history"]}), 100)
         self.assertTrue(presented["connected"])
         self.assertLessEqual(presented["profile"]["network_events"], 16)
+        # Separately verify that a fresh real native attachment renders the current
+        # authoritative payload. This is not a claim that the old picture advanced.
+        fresh = self.launch("tor-client-ascii", ["--connect", self.address, "--observe", "--report-frames"])
+        current = self.ascii_frame(fresh, lambda f: f["state"] is not None and not f["busy"])
+        self.assertDisclosedStateEqual(current["state"], final["state"])
+        self.assertEqual(current["history"], final["history"])
         self.assertIsNone(self.request(player, {"type":"save"})["error"])
         with sqlite3.connect(self.save) as db:
             self.assertEqual(db.execute("SELECT sequence FROM checkpoint").fetchone()[0], actions * 2)

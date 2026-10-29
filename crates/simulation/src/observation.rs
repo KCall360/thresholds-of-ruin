@@ -1,4 +1,7 @@
-use std::collections::BTreeSet;
+use std::{
+    collections::BTreeSet,
+    sync::{Arc, OnceLock},
+};
 use tor_world::{Direction, Location, Position, Region, RegionId};
 
 use crate::{ActorId, Game, GameError, ItemId, ItemLocation};
@@ -23,25 +26,374 @@ pub(crate) struct ActorSceneWitness {
 
 /// Derived actor scenes for observations and streaming pins. Shared across
 /// candidate clones, bounded, omitted from saves and ignored by simulation equality.
-#[derive(Clone, Debug)]
-struct CachedScene {
+/// Rich disclosure and authority are always current. Actor classifications may
+/// share immutable storage only under the exact visibility epoch and scene proof.
+#[derive(Debug)]
+pub(crate) struct CachedScene {
     witness: SceneWitness,
-    cells: Vec<tor_world::SightCell>,
-    sight: Vec<tor_world::SightCell>,
-    // Lazy: streaming and observations do not pay for an unused supply index.
-    locations: Option<BTreeSet<Location>>,
+    cells: Arc<Vec<tor_world::SightCell>>,
+    sight: Arc<Vec<tor_world::SightCell>>,
+    // Preserve independent laziness/accounting for supply-membership queries.
+    locations: OnceLock<BTreeSet<Location>>,
+    projection: OnceLock<ProjectionIndexes>,
+    hearing: OnceLock<BTreeSet<Location>>,
+    streaming: OnceLock<(BTreeSet<RegionId>, Vec<RegionId>)>,
+    contact: std::sync::Mutex<Option<SourceContactGeometry>>,
+    classifications: std::sync::Mutex<Option<ClassifiedActors>>,
+    raw_world: std::sync::Mutex<Option<Arc<RawWorldFacts>>>,
 }
+
+/// Geometric endpoints only: current combat/life and target body remain live.
+#[derive(Debug)]
+struct SourceContactGeometry {
+    world: tor_world::SharedIdentity<tor_world::World>,
+    locations: Arc<BTreeSet<Location>>,
+}
+
+/// Only canonical actor-reference classifications and resolved bodies, never
+/// health, hostility, events, inventory, cosmetic views or mutable actors.
+#[derive(Debug)]
+struct ClassifiedActors {
+    visibility: u64,
+    projection: Arc<crate::perception::PerceptionProjection>,
+}
+
+#[derive(Debug)]
+struct ProjectionIndexes {
+    cells: BTreeSet<Location>,
+    eyes: BTreeSet<Location>,
+    occurrences: BTreeSet<(Location, u8)>,
+}
+
 impl CachedScene {
-    fn contains(&mut self, at: Location) -> bool {
+    fn new(
+        witness: SceneWitness,
+        cells: Vec<tor_world::SightCell>,
+        sight: Vec<tor_world::SightCell>,
+    ) -> Self {
+        Self {
+            witness,
+            cells: Arc::new(cells),
+            sight: Arc::new(sight),
+            locations: OnceLock::new(),
+            projection: OnceLock::new(),
+            hearing: OnceLock::new(),
+            streaming: OnceLock::new(),
+            contact: std::sync::Mutex::new(None),
+            classifications: std::sync::Mutex::new(None),
+            raw_world: std::sync::Mutex::new(None),
+        }
+    }
+
+    /// The caller checks living combat presence before consulting geometry.
+    /// Use the canonical physical endpoint enumeration, not a target decision
+    /// or selected hit witness. Arbitrary scenes and placements never enter here.
+    pub(crate) fn contact_locations(
+        &self,
+        game: &Game,
+        source: ActorId,
+    ) -> Arc<BTreeSet<Location>> {
+        if let Some(locations) = self
+            .contact
+            .lock()
+            .expect("contact geometry")
+            .as_ref()
+            .filter(|entry| entry.world.matches(&game.world))
+            .map(|entry| entry.locations.clone())
+        {
+            return locations;
+        }
+        // Physical contact may depend on World facts narrower perception does
+        // not track. Nonowning identity prevents retaining entire old Worlds;
+        // one payload per bounded scene replaces, rather than accumulates, versions.
+        let locations = Arc::new(game.melee_contact_locations_in_scene(source, &self.cells, None));
+        *self.contact.lock().expect("contact geometry") = Some(SourceContactGeometry {
+            world: game.world.weak_identity(),
+            locations: locations.clone(),
+        });
+        locations
+    }
+
+    pub(crate) fn classified_actors(
+        &self,
+        game: &Game,
+        observer: ActorId,
+    ) -> Result<Arc<crate::perception::PerceptionProjection>, GameError> {
+        let visibility = game.actors.visibility_epoch();
+        let cached = self
+            .classifications
+            .lock()
+            .expect("actor classifications")
+            .as_ref()
+            .filter(|facts| facts.visibility == visibility)
+            .map(|facts| facts.projection.clone());
+        if let Some(cached) = cached {
+            return Ok(cached);
+        }
+        // This scene proves world, emitters, observer body/chart and senses.
+        // VisibilityInputs tracks every classify_body input, including actor
+        // presence/life, body, invisibility, sight and guise recognition. It
+        // intentionally invalidates more broadly than these reference facts.
+        // Do not reuse this component for arbitrary/placement scenes.
+        let indexes = self.projection();
+        let projection = Arc::new(game.perception_projection_in_cells(
+            observer,
+            &self.cells,
+            &indexes.cells,
+            &indexes.eyes,
+            None,
+        )?);
+        *self.classifications.lock().expect("actor classifications") = Some(ClassifiedActors {
+            visibility,
+            projection: projection.clone(),
+        });
+        Ok(projection)
+    }
+
+    fn raw_world_facts(&self, game: &Game) -> Arc<RawWorldFacts> {
+        let cached = self
+            .raw_world
+            .lock()
+            .expect("raw World facts")
+            .as_ref()
+            .filter(|facts| facts.world.matches(&game.world))
+            .cloned();
+        if let Some(cached) = cached {
+            return cached;
+        }
+        // The scene payload already proves exact geometry and emitter inputs.
+        // Its raw facts need the complete World identity as well: hints and
+        // concealed metadata need not invalidate the narrower scene witness.
+        // Never hold a cache lock while building facts or projecting disclosure.
+        let facts = Arc::new(RawWorldFacts::capture(game, self));
+        *self.raw_world.lock().expect("raw World facts") = Some(facts.clone());
+        facts
+    }
+
+    fn projection(&self) -> &ProjectionIndexes {
+        self.projection.get_or_init(|| ProjectionIndexes {
+            cells: crate::perception::projection_locations(&self.cells),
+            eyes: crate::perception::projection_locations(&self.sight),
+            occurrences: self
+                .cells
+                .iter()
+                .map(|cell| (cell.location, cell.rotation))
+                .collect(),
+        })
+    }
+
+    pub(crate) fn projection_cells(&self) -> &BTreeSet<Location> {
+        &self.projection().cells
+    }
+
+    pub(crate) fn shared_cells(&self) -> Arc<Vec<tor_world::SightCell>> {
+        self.cells.clone()
+    }
+
+    fn hearing_locations(&self, game: &Game) -> &BTreeSet<Location> {
+        self.hearing.get_or_init(|| {
+            let actor = &self.witness.actor;
+            // Sound uses the reference position and frame, not the body's eye.
+            let scene = game.world.eye_scene(actor.location, actor.orientation, 6);
+            crate::diagnostics::hearing_scene(scene.len());
+            scene
+                .into_iter()
+                .filter(|cell| cell.physical)
+                .map(|cell| cell.location)
+                .collect()
+        })
+    }
+
+    fn contains(&self, at: Location) -> bool {
         self.locations
-            .get_or_insert_with(|| {
+            .get_or_init(|| {
                 crate::diagnostics::scene_membership_cells(self.cells.len());
                 self.cells.iter().map(|cell| cell.location).collect()
             })
             .contains(&at)
     }
 }
-type SceneEntries = std::collections::BTreeMap<ActorId, CachedScene>;
+
+// Raw World-derived templates only. Observer knowledge, physical interaction,
+// terminal policy and hallucination are deliberately absent from this payload.
+#[derive(Debug)]
+struct RawWorldFacts {
+    world: tor_world::SharedIdentity<tor_world::World>,
+    cells: tor_world::Shared<Vec<CellView>>,
+    features: Vec<RawFeature>,
+    exits: Vec<ExitView>,
+    open_cells: BTreeSet<Location>,
+}
+
+#[derive(Debug)]
+struct RawFeature {
+    index: usize,
+    door: Option<tor_world::Door>,
+    secret: bool,
+    door_base: bool,
+    trap: Option<(u64, tor_world::TrapFamily)>,
+}
+
+const VIEW_EXIT_DIRECTIONS: [Direction; 6] = [
+    Direction::North,
+    Direction::East,
+    Direction::South,
+    Direction::West,
+    Direction::Up,
+    Direction::Down,
+];
+
+impl RawWorldFacts {
+    fn capture(game: &Game, snapshot: &CachedScene) -> Self {
+        let indexes = snapshot.projection();
+        crate::diagnostics::raw_world_facts(indexes.occurrences.len());
+        let portable_lit = game.portable_lit_cells();
+        let mut features = Vec::new();
+        let cells = indexes
+            .occurrences
+            .iter()
+            .enumerate()
+            .map(|(index, &(location, frame))| {
+                let door = game.world.door(location);
+                let secret = game.world.secret_door(location).is_some();
+                let trap = game
+                    .world
+                    .trap(location)
+                    .map(|trap| (trap.id, trap.kind.family()));
+                if door.is_some() || secret || trap.is_some() {
+                    features.push(RawFeature {
+                        index,
+                        door,
+                        secret,
+                        door_base: door.is_some_and(|door| {
+                            game.world.door_location(door.id) == Some(location)
+                        }),
+                        trap,
+                    });
+                }
+                CellView {
+                    object_presentation: None,
+                    lit: game.world.is_lit(location) == Some(true)
+                        || portable_lit.contains(&location),
+                    frame,
+                    door: None,
+                    trap: None,
+                    door_reachable: false,
+                    door_secret: false,
+                    door_approaches: Vec::new(),
+                    material: match game.world.terrain(location) {
+                        Some(tor_world::Terrain::Solid(material)) => material.name(),
+                        _ if game.world.is_chamber(location.region) => "",
+                        _ => "stone",
+                    },
+                    location,
+                    wall: game.world.is_wall(location),
+                    place_hint: game.world.has_place_hint(location),
+                }
+            })
+            .collect();
+        let open_cells: BTreeSet<_> = indexes
+            .cells
+            .iter()
+            .copied()
+            .filter(|location| !game.world.is_wall(*location))
+            .collect();
+        let exits = open_cells
+            .iter()
+            .flat_map(|&location| {
+                VIEW_EXIT_DIRECTIONS
+                    .into_iter()
+                    .filter(move |direction| {
+                        let stair = game.world.is_stair(location, *direction);
+                        stair
+                            || (!matches!(direction, Direction::Up | Direction::Down)
+                                && game.world.passage(location, *direction).is_some())
+                    })
+                    .map(move |direction| ExitView {
+                        location,
+                        direction,
+                    })
+            })
+            .collect();
+        Self {
+            world: game.world.weak_identity(),
+            cells: tor_world::Shared::new(cells),
+            features,
+            exits,
+            open_cells,
+        }
+    }
+
+    fn project(
+        &self,
+        game: &Game,
+        observer: ActorId,
+        scene: &[tor_world::SightCell],
+    ) -> (tor_world::Shared<Vec<CellView>>, Vec<ExitView>) {
+        let actor = &game.actors[&observer];
+        let mut cells = self.cells.clone();
+        let contacts = std::cell::OnceCell::new();
+        for feature in &self.features {
+            let cell = &mut observation_cells_mut(&mut cells)[feature.index];
+            let concealed = game.door_concealed(observer, feature.door, feature.secret);
+            cell.door = (!concealed).then_some(feature.door).flatten();
+            cell.door_secret = cell.door.is_some() && feature.secret;
+            if concealed {
+                cell.wall = true;
+                cell.material = "stone";
+            }
+            if cell.door.is_some() && feature.door_base {
+                cell.door_reachable = game.door_reachable_from(actor.location, cell.location);
+                cell.door_approaches = game.disclosed_door_approaches(scene, cell.location);
+            }
+            cell.trap = feature
+                .trap
+                .filter(|(id, _)| {
+                    game.feature_known(observer, tor_world::ConcealedFeatureId::Trap(*id))
+                })
+                .map(|(id, family)| TrapView {
+                    id,
+                    family: game
+                        .feature_family_known(observer, tor_world::ConcealedFeatureId::Trap(id))
+                        .then_some(family),
+                    reachable: contacts
+                        .get_or_init(|| game.trap_contacts_in_scene(observer, scene))
+                        .contains(&cell.location),
+                });
+        }
+        let mut exits = self.exits.clone();
+        if let Some(policy) = game
+            .unique_retrieval_policy()
+            .filter(|policy| policy.protagonist == observer)
+        {
+            let terminal = ExitView {
+                location: policy.exit.at,
+                direction: policy.exit.direction,
+            };
+            if let Some(rank) = VIEW_EXIT_DIRECTIONS
+                .iter()
+                .position(|direction| *direction == terminal.direction)
+                .filter(|_| self.open_cells.contains(&terminal.location))
+            {
+                let index = exits.partition_point(|exit| {
+                    (
+                        exit.location,
+                        VIEW_EXIT_DIRECTIONS
+                            .iter()
+                            .position(|direction| *direction == exit.direction)
+                            .expect("static exit direction"),
+                    ) < (terminal.location, rank)
+                });
+                if exits.get(index) != Some(&terminal) {
+                    exits.insert(index, terminal);
+                }
+            }
+        }
+        (cells, exits)
+    }
+}
+
+type SceneEntries = std::collections::BTreeMap<ActorId, Arc<CachedScene>>;
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ActorScenes(std::sync::Arc<std::sync::Mutex<SceneEntries>>);
 
@@ -284,6 +636,17 @@ pub struct CellView {
     pub place_hint: bool,
 }
 
+/// Mutate only an observation-owned projection, never a retained raw template.
+/// Shared-handle clones copy no rows; the first actual COW detachment does.
+pub(crate) fn observation_cells_mut(
+    cells: &mut tor_world::Shared<Vec<CellView>>,
+) -> &mut Vec<CellView> {
+    if cells.is_shared() {
+        crate::diagnostics::observation_cells_copied(cells.len());
+    }
+    cells
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MotionView {
     pub velocity: [i64; 3],
@@ -306,7 +669,8 @@ pub struct Observation {
     pub asset: Option<String>,
     /// What the observer visibly wears and holds, as onlookers see it.
     pub worn: Vec<WornView>,
-    pub visible_cells: Vec<CellView>,
+    /// Immutable raw cells may share storage; edits detach this view's copy.
+    pub visible_cells: tor_world::Shared<Vec<CellView>>,
     pub ground_items: Vec<GroundItemView>,
     pub apparent_objects: Vec<crate::perception::ApparentObjectView>,
     pub inventory: Vec<ItemView>,
@@ -315,11 +679,33 @@ pub struct Observation {
     pub known_places: Vec<KnownPlace>,
 }
 
+/// Ordinary map-learning appearance facts, without inventory, combat or charts.
+/// Shares the canonical projection and cosmetic policy with full Observation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MapObservation {
+    pub visible_cells: tor_world::Shared<Vec<CellView>>,
+    pub ground_items: Vec<GroundItemView>,
+    pub exits: Vec<ExitView>,
+}
+
+/// Minimal fresh ordinary actor-reference rows, without cosmetic or item facts.
+/// Duplicate body rows and their canonical order match full Observation exactly.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ActorReferenceRow {
+    pub id: ActorId,
+    pub disclosure: crate::perception::ActorDisclosure,
+}
+
+pub(crate) struct ActorReferenceObservation {
+    pub location: Location,
+    pub visible_actors: Vec<ActorReferenceRow>,
+}
+
 /// One decision's disclosure plus the original illuminated eye-relative cells.
 /// Tactile awareness and projected stair landings never become sight targeting.
 pub(crate) struct DecisionSnapshot {
     pub view: Observation,
-    pub sight: Vec<tor_world::SightCell>,
+    pub sight: Arc<Vec<tor_world::SightCell>>,
 }
 
 #[derive(Clone, Copy)]
@@ -330,118 +716,354 @@ enum ScenePurpose {
 
 impl Game {
     pub(crate) fn decision_snapshot(&self, id: ActorId) -> Result<DecisionSnapshot, GameError> {
-        let mut sight = Vec::new();
-        let disclosed = self.compute_scene_for(
-            id,
-            ScenePurpose::Decision,
-            &mut |cells: &[tor_world::SightCell]| sight.extend_from_slice(cells),
-        )?;
-        let view = self.observe_in_scene(id, &disclosed, &sight)?;
-        self.cache_scene(id, &disclosed, &sight)?;
-        Ok(DecisionSnapshot { view, sight })
+        let snapshot = self.scene_snapshot_shared_for(id, ScenePurpose::Decision)?;
+        // Geometry and exactly witnessed classifications may be shared. Rich
+        // entities, knowledge, effects and decision-visible facts remain fresh.
+        let view = self.observe_in_snapshot(id, &snapshot)?;
+        Ok(DecisionSnapshot {
+            view,
+            sight: snapshot.sight.clone(),
+        })
     }
 
     /// A free read using bounded exact three-dimensional sight through rotated
     /// portals, with ambient lighting and body-local awareness.
     /// Neither querying nor seeing through a portal counts as visiting a place.
     pub fn observe(&self, id: ActorId) -> Result<Observation, GameError> {
-        self.observe_scene(id).map(|(view, _)| view)
+        self.observe_cached_scene(id).map(|(view, _)| view)
     }
 
-    /// Construct disclosure and its exact projected scene together. Callers can
-    /// reuse the scene without repeating sight or door-approach queries.
+    /// Construct fresh disclosure and return independently owned scene cells.
+    /// Backend consumers that retain immutable geometry use `observe_shared_scene`.
     pub fn observe_scene(
         &self,
         id: ActorId,
     ) -> Result<(Observation, Vec<tor_world::SightCell>), GameError> {
-        // Residency planning may already have resolved this exact geometry
-        // and actor chart. Entity/readiness disclosure is still rebuilt below.
-        let (scene, sight) = self.scene_snapshot(id)?;
-        let view = self.observe_in_scene(id, &scene, &sight)?;
-        Ok((view, scene))
+        let (view, scene) = self.observe_shared_scene(id)?;
+        crate::diagnostics::scene_cells_copied(scene.len());
+        Ok((view, (*scene).clone()))
     }
 
-    fn observe_in_scene(
+    /// Fresh disclosure with shared geometry and exactly witnessed classifications.
+    /// A caller that mutates its Arc-owned Vec must first detach its own copy.
+    pub fn observe_shared_scene(
         &self,
         id: ActorId,
-        scene: &[tor_world::SightCell],
-        sight: &[tor_world::SightCell],
+    ) -> Result<(Observation, Arc<Vec<tor_world::SightCell>>), GameError> {
+        let (view, snapshot) = self.observe_cached_scene(id)?;
+        Ok((view, snapshot.shared_cells()))
+    }
+
+    pub(crate) fn observe_cached_scene(
+        &self,
+        id: ActorId,
+    ) -> Result<(Observation, Arc<CachedScene>), GameError> {
+        let snapshot = self.scene_snapshot_shared(id)?;
+        let view = self.observe_in_snapshot(id, &snapshot)?;
+        Ok((view, snapshot))
+    }
+
+    /// Recompute current actor disclosure, borrowing only exact cached geometry.
+    pub(crate) fn observe_actor_references(
+        &self,
+        id: ActorId,
+    ) -> Result<ActorReferenceObservation, GameError> {
+        let snapshot = self.scene_snapshot_shared(id)?;
+        self.observe_actor_references_in_snapshot(id, &snapshot)
+    }
+
+    /// Same ordinary classifier/row ordering at a caller's exact immutable scene.
+    pub(crate) fn observe_actor_references_in_snapshot(
+        &self,
+        id: ActorId,
+        snapshot: &CachedScene,
+    ) -> Result<ActorReferenceObservation, GameError> {
+        let indexes = snapshot.projection();
+        let perceived = snapshot.classified_actors(self, id)?;
+        let location = self
+            .actors
+            .get(&id)
+            .ok_or(GameError::UnknownActor)?
+            .location;
+        let visible_actors =
+            self.project_actor_rows(id, &indexes.cells, &perceived, |id, disclosure, _| {
+                move |_| ActorReferenceRow { id, disclosure }
+            });
+        crate::diagnostics::actor_reference_vector(visible_actors.len());
+        Ok(ActorReferenceObservation {
+            location,
+            visible_actors,
+        })
+    }
+
+    /// One canonical row filter/order shared by rich and reference-only views.
+    /// The per-subject mapper is constructed once, preserving worn-view work.
+    fn project_actor_rows<'a, T, F>(
+        &'a self,
+        observer: ActorId,
+        cells: &BTreeSet<Location>,
+        perceived: &crate::perception::PerceptionProjection,
+        mut project: impl FnMut(ActorId, crate::perception::ActorDisclosure, &'a crate::Actor) -> F,
+    ) -> Vec<T>
+    where
+        F: FnMut(Location) -> T,
+    {
+        let mut rows = Vec::new();
+        for (&subject, perceived) in perceived {
+            let actor = &self.actors[&subject];
+            let Some(locations) =
+                self.projected_actor_locations(observer, subject, cells, perceived)
+            else {
+                continue;
+            };
+            let mut project = project(subject, perceived.disclosure, actor);
+            for at in locations {
+                rows.push(project(at));
+            }
+        }
+        rows
+    }
+
+    /// The exact ordinary row-existence rule, shared with event authority.
+    /// A classification alone is insufficient: its body must produce a row,
+    /// and an observer's own anchor is never such a row.
+    fn projected_actor_locations<'a>(
+        &'a self,
+        observer: ActorId,
+        subject: ActorId,
+        cells: &'a BTreeSet<Location>,
+        perceived: &'a crate::perception::PerceivedActor,
+    ) -> Option<impl Iterator<Item = Location> + 'a> {
+        if !self.actors[&subject].alive() || perceived.disclosure.reference().is_none() {
+            return None;
+        }
+        let anchor = self.actors[&observer].location;
+        Some(perceived.body.iter().filter_map(move |&(at, _)| {
+            (cells.contains(&at) && (subject != observer || at != anchor)).then_some(at)
+        }))
+    }
+
+    /// Query canonical ordinary reference authority without materializing rows.
+    /// Callers supply one current classification and its exact scene cells.
+    pub(crate) fn projected_actor_reference(
+        &self,
+        observer: ActorId,
+        subject: ActorId,
+        cells: &BTreeSet<Location>,
+        projection: &crate::perception::PerceptionProjection,
+    ) -> Option<crate::perception::ActorReferenceKind> {
+        let perceived = projection.get(&subject)?;
+        self.projected_actor_locations(observer, subject, cells, perceived)?
+            .next()?;
+        perceived.disclosure.reference()
+    }
+
+    pub(crate) fn attack_sound_alert(
+        &self,
+        listener: ActorId,
+        source: Location,
+        impact: Option<Location>,
+    ) -> Result<Option<Location>, GameError> {
+        let snapshot = self.scene_snapshot_shared(listener)?;
+        let heard = snapshot.hearing_locations(self);
+        Ok(if heard.contains(&source) {
+            Some(source)
+        } else {
+            impact.filter(|at| heard.contains(at))
+        })
+    }
+
+    /// Internal dependency membership includes apparent objects and concealed
+    /// bodies, not merely actors for which a client reference can be minted.
+    pub(crate) fn observation_depends_on_any(
+        &self,
+        observer: ActorId,
+        subjects: &BTreeSet<ActorId>,
+    ) -> Result<bool, GameError> {
+        if subjects.is_empty() {
+            return Ok(false);
+        }
+        let scene = self.scene_snapshot_shared(observer)?;
+        Ok(scene
+            .classified_actors(self, observer)?
+            .keys()
+            .any(|id| subjects.contains(id)))
+    }
+
+    /// Validate fallible observer projection inputs without constructing a view.
+    /// This does not capture event authority or update observation knowledge.
+    pub fn validate_observer_projection(&self, observer: ActorId) -> Result<(), GameError> {
+        self.validate_observation_projection_inputs(observer)?;
+        self.validate_event_observation_capacity(observer)
+    }
+
+    /// Fallible rich-projection checks not performed by minimal event facts.
+    /// Keep this list adjacent to the canonical projection below.
+    pub(crate) fn validate_observation_projection_inputs(
+        &self,
+        id: ActorId,
+    ) -> Result<(), GameError> {
+        let actor = self.actors.get(&id).ok_or(GameError::UnknownActor)?;
+        self.world
+            .region(actor.location.region)
+            .ok_or(GameError::InvalidLocation)?;
+        let validate_slot = |slot| {
+            self.content
+                .rules
+                .equipment_slot(slot)
+                .map(|_| ())
+                .ok_or(GameError::Rule(
+                    crate::abilities::RuleError::InvalidDefinition,
+                ))
+        };
+        for slot in &actor.anatomy.slots {
+            validate_slot(slot)?;
+        }
+        // An empty scene selects precisely the carried-item bucket.
+        for (_, item) in self.items.perceived(id, &BTreeSet::new()) {
+            if let Some(equipment) = &item.spec.equipment {
+                validate_slot(&equipment.slot)?;
+            }
+        }
+        self.projected_hallucination(id)?;
+        Ok(())
+    }
+
+    fn project_item_identity<'a>(
+        &self,
+        id: ActorId,
+        item: &'a crate::Item,
+        eyes: &BTreeSet<Location>,
+    ) -> (bool, bool, &'a str, Option<SupplyView>) {
+        let actor = &self.actors[&id];
+        let identified = if item.corpse.is_some() {
+            actor.knowledge.contains(&item.spec.identity)
+                || match item.location {
+                    ItemLocation::Carried(owner) => owner == id,
+                    ItemLocation::Ground(location) => eyes.contains(&location),
+                }
+        } else {
+            !item.spec.concealed || actor.knowledge.contains(&item.spec.identity)
+        };
+        let anonymous_corpse = item.corpse.is_some() && !identified;
+        let name = if identified {
+            &item.spec.name
+        } else if anonymous_corpse {
+            "corpse"
+        } else {
+            &item.spec.appearance
+        };
+
+        let known_supply = identified
+            .then(|| item.spec.supply.as_ref())
+            .flatten()
+            .and_then(|supply| self.content.rules.supply(supply))
+            .map(|supply| SupplyView {
+                id: supply.id.clone(),
+                name: supply.name.clone(),
+            });
+        (identified, anonymous_corpse, name, known_supply)
+    }
+
+    fn project_ground_item(
+        &self,
+        id: ActorId,
+        item_id: ItemId,
+        item: &crate::Item,
+        location: Location,
+        eyes: &BTreeSet<Location>,
+    ) -> GroundItemView {
+        let (identified, anonymous_corpse, name, known_supply) =
+            self.project_item_identity(id, item, eyes);
+        GroundItemView {
+            presentation: None,
+            corpse: identified.then(|| item.corpse.clone()).flatten(),
+            class: item.spec.class,
+            description: item_description(name),
+            id: item_id,
+            name: name.to_owned(),
+            quantity: item.quantity,
+            appearance: if anonymous_corpse {
+                "corpse".into()
+            } else {
+                item.spec.appearance.clone()
+            },
+            identified,
+            supply_reachable: known_supply.is_some() && self.touches_supply(id, location),
+            known_supply,
+            known_currency: identified.then_some(item.spec.currency).flatten(),
+            location,
+            asset: (!anonymous_corpse)
+                .then(|| item.spec.asset.clone())
+                .flatten(),
+        }
+    }
+
+    /// Synchronous canonical appearance projection for committed map learning.
+    /// This does not acquire event receipts or prepare detection charts.
+    pub fn observe_map_shared_scene(
+        &self,
+        id: ActorId,
+    ) -> Result<(MapObservation, Arc<Vec<tor_world::SightCell>>), GameError> {
+        self.validate_observation_projection_inputs(id)?;
+        let snapshot = self.scene_snapshot_shared(id)?;
+        let indexes = snapshot.projection();
+        let mut ground_items = Vec::new();
+        for (item_id, item) in self.items.perceived(id, &indexes.cells) {
+            if let ItemLocation::Ground(location) = item.location {
+                if indexes.cells.contains(&location) {
+                    crate::diagnostics::item_view(item.spec.concealed);
+                    ground_items.push(self.project_ground_item(
+                        id,
+                        item_id,
+                        item,
+                        location,
+                        &indexes.eyes,
+                    ));
+                }
+            }
+        }
+        let (visible_cells, exits) =
+            snapshot
+                .raw_world_facts(self)
+                .project(self, id, &snapshot.cells);
+        let mut view = MapObservation {
+            visible_cells,
+            ground_items,
+            exits,
+        };
+        self.apply_hallucinated_map_presentation(id, &mut view, &snapshot.sight)?;
+        self.validate_event_observation_capacity(id)?;
+        Ok((view, snapshot.shared_cells()))
+    }
+
+    fn observe_in_snapshot(
+        &self,
+        id: ActorId,
+        snapshot: &CachedScene,
     ) -> Result<Observation, GameError> {
+        let _diagnostic_span = crate::diagnostics::spans::span("observe_projection");
         crate::diagnostics::observation();
         let actor = self.actors.get(&id).ok_or(GameError::UnknownActor)?;
-        let cells = scene
-            .iter()
-            .map(|cell| cell.location)
-            .collect::<BTreeSet<_>>();
+        let scene = snapshot.cells.as_slice();
+        let sight = snapshot.sight.as_slice();
+        let ProjectionIndexes { cells, eyes, .. } = snapshot.projection();
         let visible = |location: Location| cells.contains(&location);
-        let eyes: BTreeSet<_> = sight.iter().map(|cell| cell.location).collect();
-        let perceived = self.perception_projection(id, scene, sight)?;
-        let door_base = |location: Location| {
-            self.disclosed_door(id, location)
-                .is_some_and(|door| self.world.door_location(door.id) == Some(location))
-        };
-        // A location can occur in several frames and at several distances;
-        // each (location, frame) pair is disclosed once. Floors and ceilings
-        // are ordinary seen solid cells, derived by clients.
-        let occurrences: BTreeSet<_> = scene.iter().map(|c| (c.location, c.rotation)).collect();
-        let trap_contacts = std::cell::OnceCell::new();
+        let perceived = snapshot.classified_actors(self, id)?;
         let mut ground_items = Vec::new();
         let mut inventory = Vec::new();
         let mut item_interactions = Vec::new();
-        for (item_id, item) in self.items.perceived(id, &cells) {
+        for (item_id, item) in self.items.perceived(id, cells) {
             crate::diagnostics::item_view(item.spec.concealed);
-            let identified = if item.corpse.is_some() {
-                actor.knowledge.contains(&item.spec.identity)
-                    || match item.location {
-                        ItemLocation::Carried(owner) => owner == id,
-                        ItemLocation::Ground(location) => eyes.contains(&location),
-                    }
-            } else {
-                !item.spec.concealed || actor.knowledge.contains(&item.spec.identity)
-            };
-            let anonymous_corpse = item.corpse.is_some() && !identified;
-            let name = if identified {
-                &item.spec.name
-            } else if anonymous_corpse {
-                "corpse"
-            } else {
-                &item.spec.appearance
-            };
-
-            let known_supply = identified
-                .then(|| item.spec.supply.as_ref())
-                .flatten()
-                .and_then(|supply| self.content.rules.supply(supply))
-                .map(|supply| SupplyView {
-                    id: supply.id.clone(),
-                    name: supply.name.clone(),
-                });
-            match item.location {
-                ItemLocation::Ground(location) if visible(location) => {
-                    ground_items.push(GroundItemView {
-                        presentation: None,
-                        corpse: identified.then(|| item.corpse.clone()).flatten(),
-                        class: item.spec.class,
-                        description: item_description(name),
-                        id: item_id,
-                        name: name.to_owned(),
-                        quantity: item.quantity,
-                        appearance: if anonymous_corpse {
-                            "corpse".into()
-                        } else {
-                            item.spec.appearance.clone()
-                        },
-                        identified,
-                        supply_reachable: known_supply.is_some()
-                            && self.touches_supply(id, location),
-                        known_supply,
-                        known_currency: identified.then_some(item.spec.currency).flatten(),
-                        location,
-                        asset: (!anonymous_corpse)
-                            .then(|| item.spec.asset.clone())
-                            .flatten(),
-                    });
+            if let ItemLocation::Ground(location) = item.location {
+                if visible(location) {
+                    ground_items.push(self.project_ground_item(id, item_id, item, location, eyes));
                 }
+                continue;
+            }
+            let (identified, anonymous_corpse, name, known_supply) =
+                self.project_item_identity(id, item, eyes);
+            match item.location {
                 ItemLocation::Carried(owner) if owner == id => {
                     if item.spec.equipment.is_some()
                         || item.spec.projectile.is_some()
@@ -583,7 +1205,8 @@ impl Game {
                     ))
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let portable_lit = self.portable_lit_cells();
+        let raw_world = snapshot.raw_world_facts(self);
+        let (visible_cells, exits) = raw_world.project(self, id, scene);
         let mut view = Observation {
             linked_holds: self.linked_holds(id),
             interactions: (!actor.anatomy.slots.is_empty()
@@ -652,122 +1275,36 @@ impl Game {
                     })
                 })
                 .collect(),
-            visible_cells: occurrences
-                .iter()
-                .map(|&(location, frame)| CellView {
-                    object_presentation: None,
-                    lit: self.world.is_lit(location) == Some(true)
-                        || portable_lit.contains(&location),
-                    frame,
-                    door: self.disclosed_door(id, location),
-                    door_secret: self.disclosed_door(id, location).is_some()
-                        && self.world.secret_door(location).is_some(),
-                    trap: self
-                        .world
-                        .trap(location)
-                        .filter(|trap| {
-                            self.feature_known(id, tor_world::ConcealedFeatureId::Trap(trap.id))
-                        })
-                        .map(|trap| TrapView {
-                            id: trap.id,
-                            family: self
-                                .feature_family_known(
-                                    id,
-                                    tor_world::ConcealedFeatureId::Trap(trap.id),
-                                )
-                                .then(|| trap.kind.family()),
-                            reachable: trap_contacts
-                                .get_or_init(|| self.trap_contacts_in_scene(id, scene))
-                                .contains(&location),
-                        }),
-                    // A tall door is one door: only its base cell is offered
-                    // for interaction, so it isn't reachable twice.
-                    door_reachable: door_base(location)
-                        && self.door_reachable_from(actor.location, location),
-                    door_approaches: if door_base(location) {
-                        self.disclosed_door_approaches(scene, location)
-                    } else {
-                        vec![]
-                    },
-                    material: match self.world.terrain(location) {
-                        _ if self.concealed_door_wall(id, location) => "stone",
-                        Some(tor_world::Terrain::Solid(material)) => material.name(),
-                        _ if self.world.is_chamber(location.region) => "",
-                        _ => "stone", // Cosmetic fallback for raw diagnostic regions.
-                    },
-                    location,
-                    wall: self.world.is_wall(location) || self.concealed_door_wall(id, location),
-                    place_hint: self.world.has_place_hint(location),
-                })
-                .collect(),
+            visible_cells,
             inventory,
-            visible_actors: perceived
-                .iter()
-                .filter(|(other, perceived)| {
-                    self.actors[other].alive() && perceived.disclosure.reference().is_some()
-                })
-                .flat_map(|(other_id, perceived)| {
-                    let other_id = *other_id;
-                    let other = &self.actors[&other_id];
-                    let disclosure = perceived.disclosure;
+            visible_actors: self.project_actor_rows(
+                id,
+                cells,
+                &perceived,
+                |other_id, disclosure, other| {
                     let worn = if disclosure == crate::perception::ActorDisclosure::Creature {
                         self.worn_view(other)
                     } else {
                         Vec::new()
                     };
-                    perceived
-                        .body
-                        .iter()
-                        .copied()
-                        .filter(move |(at, _)| {
-                            visible(*at) && (other_id != id || *at != actor.location)
-                        })
-                        .map(move |(location, _)| ActorView {
-                            presentation: None,
-                            disclosure,
-                            name: if disclosure == crate::perception::ActorDisclosure::Creature {
-                                projected_actor_name(actor, other).to_owned()
-                            } else {
-                                String::new()
-                            },
-                            id: other_id,
-                            location,
-                            asset: (disclosure == crate::perception::ActorDisclosure::Creature)
-                                .then(|| other.current_body_asset())
-                                .flatten(),
-                            worn: worn.clone(),
-                        })
-                })
-                .collect(),
-            exits: cells
-                .iter()
-                .flat_map(|&location| {
-                    [
-                        Direction::North,
-                        Direction::East,
-                        Direction::South,
-                        Direction::West,
-                        Direction::Up,
-                        Direction::Down,
-                    ]
-                    .into_iter()
-                    .filter(move |direction| {
-                        self.world.passage(location, *direction).is_some()
-                            || self.world.is_stair(location, *direction)
-                            || self.is_terminal_exit(id, location, *direction)
-                    })
-                    .map(move |direction| ExitView {
+                    move |location| ActorView {
+                        presentation: None,
+                        disclosure,
+                        name: if disclosure == crate::perception::ActorDisclosure::Creature {
+                            projected_actor_name(actor, other).to_owned()
+                        } else {
+                            String::new()
+                        },
+                        id: other_id,
                         location,
-                        direction,
-                    })
-                })
-                .filter(|exit| {
-                    !self.world.is_wall(exit.location)
-                        && (!matches!(exit.direction, Direction::Up | Direction::Down)
-                            || self.world.is_stair(exit.location, exit.direction)
-                            || self.is_terminal_exit(id, exit.location, exit.direction))
-                })
-                .collect(),
+                        asset: (disclosure == crate::perception::ActorDisclosure::Creature)
+                            .then(|| other.current_body_asset())
+                            .flatten(),
+                        worn: worn.clone(),
+                    }
+                },
+            ),
+            exits,
             known_places: actor
                 .visited
                 .iter()
@@ -788,22 +1325,22 @@ impl Game {
 
     /// Closed undiscovered entrances disclose the same solid appearance as the wall.
     /// Opening remains one shared physical world change for every observer.
+    // Retain the direct concealment witness used by the independent awareness tests.
+    #[cfg(test)]
     fn concealed_door_wall(&self, actor: ActorId, location: Location) -> bool {
-        self.world.secret_door(location).is_some()
-            && self.world.door(location).is_some_and(|door| {
+        self.door_concealed(
+            actor,
+            self.world.door(location),
+            self.world.secret_door(location).is_some(),
+        )
+    }
+
+    fn door_concealed(&self, actor: ActorId, door: Option<tor_world::Door>, secret: bool) -> bool {
+        secret
+            && door.is_some_and(|door| {
                 !door.open
                     && !self.feature_known(actor, tor_world::ConcealedFeatureId::Door(door.id))
             })
-    }
-
-    pub(crate) fn disclosed_door(
-        &self,
-        actor: ActorId,
-        location: Location,
-    ) -> Option<tor_world::Door> {
-        (!self.concealed_door_wall(actor, location))
-            .then(|| self.world.door(location))
-            .flatten()
     }
 
     fn trap_contacts_in_scene(
@@ -945,20 +1482,15 @@ impl Game {
         sight: &[tor_world::SightCell],
     ) -> Result<(), GameError> {
         let witness = self.scene_witness(id)?;
-        crate::diagnostics::scene_cells_copied(scene.len());
+        crate::diagnostics::scene_cells_copied(scene.len() + sight.len());
         self.insert_scene(
             id,
-            CachedScene {
-                witness,
-                cells: scene.to_vec(),
-                sight: sight.to_vec(),
-                locations: None,
-            },
+            Arc::new(CachedScene::new(witness, scene.to_vec(), sight.to_vec())),
         );
         Ok(())
     }
 
-    fn insert_scene(&self, id: ActorId, scene: CachedScene) {
+    fn insert_scene(&self, id: ActorId, scene: Arc<CachedScene>) {
         let mut cache = self.lifecycle.scenes.0.lock().expect("actor scene cache");
         if cache.len() >= 512 && !cache.contains_key(&id) {
             cache.pop_first();
@@ -986,86 +1518,61 @@ impl Game {
     }
 
     /// Geometry and exact eye sight share one cache witness and one computation.
+    /// The mutex is released before any projection, index construction or nested read.
+    pub(crate) fn scene_snapshot_shared(&self, id: ActorId) -> Result<Arc<CachedScene>, GameError> {
+        self.scene_snapshot_shared_for(id, ScenePurpose::Ordinary)
+    }
+
+    fn scene_snapshot_shared_for(
+        &self,
+        id: ActorId,
+        purpose: ScenePurpose,
+    ) -> Result<Arc<CachedScene>, GameError> {
+        let witness = self.scene_witness(id)?;
+        let cached = {
+            let cache = self.lifecycle.scenes.0.lock().expect("actor scene cache");
+            cache
+                .get(&id)
+                .filter(|cached| cached.witness == witness)
+                .cloned()
+        };
+        if let Some(cached) = cached {
+            return Ok(cached);
+        }
+        let mut sight = Vec::new();
+        let scene =
+            self.compute_scene_for(id, purpose, &mut |cells: &[tor_world::SightCell]| {
+                sight.extend_from_slice(cells)
+            })?;
+        // Move fresh arrays into shared ownership. No element clone is needed.
+        let snapshot = Arc::new(CachedScene::new(witness, scene, sight));
+        self.insert_scene(id, snapshot.clone());
+        Ok(snapshot)
+    }
+
     pub(crate) fn scene_snapshot(
         &self,
         id: ActorId,
     ) -> Result<(Vec<tor_world::SightCell>, Vec<tor_world::SightCell>), GameError> {
-        let witness = self.scene_witness(id)?;
-        if let Some(cached) = self
-            .lifecycle
-            .scenes
-            .0
-            .lock()
-            .expect("actor scene cache")
-            .get(&id)
-        {
-            if cached.witness == witness {
-                return Ok((cached.cells.clone(), cached.sight.clone()));
-            }
-        }
-        let mut sight = Vec::new();
-        let scene = self.compute_scene(id, &mut |cells: &[tor_world::SightCell]| {
-            sight.extend_from_slice(cells)
-        })?;
-        self.cache_scene(id, &scene, &sight)?;
-        Ok((scene, sight))
+        let snapshot = self.scene_snapshot_shared(id)?;
+        crate::diagnostics::scene_cells_copied(snapshot.cells.len() + snapshot.sight.len());
+        Ok(((*snapshot.cells).clone(), (*snapshot.sight).clone()))
     }
 
-    /// Streaming consumes the same result as observations, without requesting
-    /// another actor scene when all perception inputs remain unchanged.
+    /// Streaming's compatibility result owns only disclosed cells; eye sight stays shared.
     pub(crate) fn streaming_scene(
         &self,
         id: ActorId,
     ) -> Result<Vec<tor_world::SightCell>, GameError> {
-        let witness = self.scene_witness(id)?;
-        if let Some(cached) = self
-            .lifecycle
-            .scenes
-            .0
-            .lock()
-            .expect("actor scene cache")
-            .get(&id)
-        {
-            if cached.witness == witness {
-                crate::diagnostics::scene_cells_copied(cached.cells.len());
-                return Ok(cached.cells.clone());
-            }
-        }
-        self.scene(id)
+        let snapshot = self.scene_snapshot_shared(id)?;
+        crate::diagnostics::scene_cells_copied(snapshot.cells.len());
+        Ok((*snapshot.cells).clone())
     }
 
     /// Ordinary disclosed-location membership. Physical contact is a separate gate.
     pub(crate) fn scene_contains(&self, id: ActorId, at: Location) -> Result<bool, GameError> {
         crate::diagnostics::scene_membership_lookup();
-        let witness = self.scene_witness(id)?;
-        if let Some(cached) = self
-            .lifecycle
-            .scenes
-            .0
-            .lock()
-            .expect("actor scene cache")
-            .get_mut(&id)
-        {
-            if cached.witness == witness {
-                return Ok(cached.contains(at));
-            }
-        }
-        // Do not copy the projected array merely to ask a membership question.
-        // A rejected candidate may have populated this shared cache with a
-        // different witness; replace that derived entry from this Game's inputs.
-        let mut sight = Vec::new();
-        let cells = self.compute_scene(id, &mut |cells: &[tor_world::SightCell]| {
-            sight.extend_from_slice(cells)
-        })?;
-        let mut cached = CachedScene {
-            witness,
-            cells,
-            sight,
-            locations: None,
-        };
-        let contains = cached.contains(at);
-        self.insert_scene(id, cached);
-        Ok(contains)
+        Ok(self.scene_snapshot_shared(id)?.contains(at))
     }
 
     fn compute_scene(
@@ -1269,6 +1776,32 @@ impl Game {
         result
     }
 
+    /// The geometry-only pair used by streaming; live relationship pins are
+    /// deliberately computed by the settlement pass, not retained here.
+    pub(crate) fn streaming_actor_regions(
+        &self,
+        id: ActorId,
+    ) -> (BTreeSet<RegionId>, Vec<RegionId>) {
+        let compute = || (self.reach_regions(id), self.perception_scene_regions(id));
+        let cached = self.scene_witness(id).ok().and_then(|witness| {
+            self.lifecycle
+                .scenes
+                .0
+                .lock()
+                .expect("actor scene cache")
+                .get(&id)
+                .filter(|snapshot| snapshot.witness == witness)
+                .cloned()
+        });
+        // Never manufacture a scene solely for streaming or retain live pins.
+        // The existing scene witness proves body, senses, world and emitters;
+        // it deliberately over-invalidates this narrower geometric component.
+        match cached {
+            Some(snapshot) => snapshot.streaming.get_or_init(compute).clone(),
+            None => compute(),
+        }
+    }
+
     /// Load-only geometry dependencies for exactly the actor scene above.
     /// Disclosure remains the merged scene; loading a blocker is not seeing it.
     pub(crate) fn perception_scene_regions(&self, id: ActorId) -> Vec<RegionId> {
@@ -1373,6 +1906,1019 @@ mod tests {
     }
 
     #[test]
+    fn streaming_geometry_reuses_scene_witness_without_rebuilding_body_queries() {
+        let (game, actor) = membership_fixture();
+        game.scene_snapshot_shared(actor).unwrap();
+        let expected = (
+            game.reach_regions(actor),
+            game.perception_scene_regions(actor),
+        );
+        assert_eq!(game.streaming_actor_regions(actor), expected);
+        let before = crate::diagnostics::work_counts().body_cells;
+        for _ in 0..4 {
+            assert_eq!(game.streaming_actor_regions(actor), expected);
+        }
+        assert_eq!(
+            crate::diagnostics::work_counts().body_cells - before,
+            0,
+            "an identical scene witness must reuse its geometric streaming queries"
+        );
+    }
+
+    #[test]
+    fn unchanged_actor_classification_is_shared_by_full_and_reference_views() {
+        let (game, actor) = membership_fixture();
+        let expected = game.observe(actor).unwrap();
+        let before = crate::diagnostics::work_counts().perception_projections;
+        assert_eq!(game.observe(actor).unwrap(), expected);
+        let references = game.observe_actor_references(actor).unwrap();
+        assert_eq!(
+            references.visible_actors,
+            expected
+                .visible_actors
+                .iter()
+                .map(|row| ActorReferenceRow {
+                    id: row.id,
+                    disclosure: row.disclosure,
+                })
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            crate::diagnostics::work_counts().perception_projections - before,
+            0,
+            "complete and reference views share immutable classification, not later state"
+        );
+    }
+
+    #[test]
+    fn streaming_geometry_checks_candidate_body_and_world_before_reuse() {
+        let (game, actor) = membership_fixture();
+        let retained = game.scene_snapshot_shared(actor).unwrap();
+        let original = game.streaming_actor_regions(actor);
+        let mut candidate = game.clone();
+        candidate.set_wall(at(1, 1, 0), true).unwrap();
+        candidate.actors.get_mut(&actor).unwrap().orientation = 1;
+        let expected = (
+            candidate.reach_regions(actor),
+            candidate.perception_scene_regions(actor),
+        );
+        assert_eq!(candidate.streaming_actor_regions(actor), expected);
+        assert!(Arc::ptr_eq(
+            &retained,
+            &game.scene_snapshot_shared(actor).unwrap()
+        ));
+        assert_eq!(game.streaming_actor_regions(actor), original);
+        let changed = candidate.scene_snapshot_shared(actor).unwrap();
+        assert!(!Arc::ptr_eq(&retained, &changed));
+        assert_eq!(candidate.streaming_actor_regions(actor), expected);
+        let before = crate::diagnostics::work_counts().body_cells;
+        assert_eq!(candidate.streaming_actor_regions(actor), expected);
+        assert_eq!(crate::diagnostics::work_counts().body_cells, before);
+    }
+
+    #[test]
+    fn classification_reuse_keeps_health_time_items_and_rejected_branches_fresh() {
+        use crate::perception::contract_fixtures::{fixture_with, OWNER, SUBJECT};
+        let mut game = fixture_with(&[], &[], |_, owner, _| {
+            owner.modifiers.push(crate::rules::Modifier {
+                cancellable: false,
+                scope: crate::rules::Scope::Always,
+                op: crate::rules::ModifierOp::Set {
+                    stat: crate::rules::Stat::Health,
+                    value: 100,
+                },
+            });
+        });
+        let original = game.observe(OWNER).unwrap();
+        let scene = game.scene_snapshot_shared(OWNER).unwrap();
+        let classifications = scene.classified_actors(&game, OWNER).unwrap();
+        assert!(game.health(OWNER).unwrap().0 > 1, "nonlethal fixture");
+        let visibility = game.actors.visibility_epoch();
+        crate::test_creatures::injure(&mut game, OWNER, 1).unwrap();
+        game.tick += 1;
+        let item = game
+            .place_item(game.actors[&OWNER].location, "fresh fact".into())
+            .unwrap();
+        assert_eq!(game.actors.visibility_epoch(), visibility);
+        assert!(Arc::ptr_eq(
+            &classifications,
+            &scene.classified_actors(&game, OWNER).unwrap()
+        ));
+        let fresh = game.observe(OWNER).unwrap();
+        assert_eq!(fresh.tick, original.tick + 1);
+        assert_eq!(
+            fresh.combat.as_ref().unwrap().hp,
+            original.combat.as_ref().unwrap().hp - 1
+        );
+        assert!(fresh.ground_items.iter().any(|row| row.id == item));
+        let oracle = |game: &Game| {
+            let mut uncached = game.clone();
+            uncached.lifecycle.scenes = ActorScenes::default();
+            uncached.observe(OWNER).unwrap()
+        };
+        assert_eq!(fresh, oracle(&game));
+        let mut rejected = game.clone();
+        crate::test_creatures::injure(&mut rejected, SUBJECT, u32::MAX).unwrap();
+        assert!(!rejected.alive(SUBJECT));
+        let absent = rejected.observe(OWNER).unwrap();
+        assert!(absent.visible_actors.iter().all(|row| row.id != SUBJECT));
+        assert_eq!(absent, oracle(&rejected));
+        assert_eq!(
+            game.observe(OWNER).unwrap(),
+            fresh,
+            "rejected epoch cannot poison retained facts"
+        );
+        assert_eq!(
+            original.tick + 1,
+            fresh.tick,
+            "retained values remain immutable"
+        );
+    }
+
+    #[test]
+    fn complete_observations_retain_personal_facts_without_expanding_inspection() {
+        use crate::perception::contract_fixtures::{OWNER, SUBJECT};
+        let mut game = crate::hallucination::tests::named_fixture(&[]);
+        let original = game.clone();
+        let expected_stats = game.creature(OWNER).unwrap().own_stats();
+        let before = crate::diagnostics::work_counts();
+        let (view, scene, _) = game.observe_event_shared_scene(OWNER).unwrap();
+        let (repeated, same_scene, _) = game.observe_event_shared_scene(OWNER).unwrap();
+        assert_eq!(view, repeated);
+        assert_eq!(scene, same_scene);
+        assert!(view.visible_actors.iter().any(|row| row.id == SUBJECT));
+        let captured = crate::diagnostics::work_counts();
+        assert_eq!(
+            captured.own_stats_materializations,
+            before.own_stats_materializations
+        );
+        assert_eq!(
+            captured.own_stats_static_entries_copied,
+            before.own_stats_static_entries_copied
+        );
+        let retained_stats = view.combat.as_ref().unwrap().own_stats.as_ref().unwrap();
+        assert_eq!(retained_stats.materialize(), expected_stats);
+        assert_eq!(
+            crate::diagnostics::work_counts().own_stats_materializations,
+            captured.own_stats_materializations + 1
+        );
+        assert_eq!(game, original);
+        game.apply_condition(
+            OWNER,
+            &crate::hallucination_clock::integration_tests::condition(),
+            OWNER,
+            1000,
+        )
+        .unwrap();
+        let changed = game.observe(OWNER).unwrap();
+        assert_ne!(changed, view);
+        assert_eq!(
+            changed
+                .visible_actors
+                .iter()
+                .find(|row| row.id == SUBJECT)
+                .unwrap()
+                .name,
+            "cosmetic c"
+        );
+        assert_ne!(
+            changed
+                .combat
+                .as_ref()
+                .unwrap()
+                .own_stats
+                .as_ref()
+                .unwrap()
+                .materialize(),
+            expected_stats
+        );
+        assert_eq!(retained_stats.materialize(), expected_stats);
+        assert_eq!(original.observe(OWNER).unwrap(), view);
+        assert_eq!(game.rules_rng, original.rules_rng);
+    }
+
+    fn assert_direct_references_match_rows(game: &Game, observer: ActorId) {
+        let snapshot = game.scene_snapshot_shared(observer).unwrap();
+        let rows = game
+            .observe_actor_references_in_snapshot(observer, &snapshot)
+            .unwrap();
+        let projection = snapshot.classified_actors(game, observer).unwrap();
+        for subject in game.loaded_actor_ids() {
+            let expected = rows
+                .visible_actors
+                .iter()
+                .find(|row| row.id == subject)
+                .and_then(|row| row.disclosure.reference());
+            assert_eq!(
+                game.projected_actor_reference(
+                    observer,
+                    subject,
+                    snapshot.projection_cells(),
+                    &projection,
+                ),
+                expected,
+                "direct authority must match canonical rows for {subject:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn actor_reference_rows_share_canonical_body_order_and_exclude_self_anchor() {
+        use crate::perception::contract_fixtures::{fixture_with_height, OWNER, SUBJECT};
+        use crate::perception::ActorDisclosure::Creature;
+        let mut game = fixture_with_height(&[], &[], 2, |_, _, _| {});
+        for id in [OWNER, SUBJECT] {
+            game.set_body(
+                id,
+                crate::BodySpec {
+                    cells: vec![[0, 0, 0], [0, 0, 1]],
+                    eye: [0, 0, 1],
+                    mass: 80,
+                },
+            )
+            .unwrap();
+        }
+        let full = game.observe(OWNER).unwrap();
+        let before = crate::diagnostics::work_counts();
+        let references = game.observe_actor_references(OWNER).unwrap();
+        assert_eq!(references.location, game.actors[&OWNER].location);
+        // One own upper-body row, then the subject's two body rows. The own
+        // anchor is excluded even though its location is ordinarily disclosed.
+        assert_eq!(
+            references.visible_actors,
+            vec![
+                ActorReferenceRow {
+                    id: OWNER,
+                    disclosure: Creature
+                },
+                ActorReferenceRow {
+                    id: SUBJECT,
+                    disclosure: Creature
+                },
+                ActorReferenceRow {
+                    id: SUBJECT,
+                    disclosure: Creature
+                },
+            ]
+        );
+        assert_eq!(
+            references.visible_actors,
+            full.visible_actors
+                .iter()
+                .map(|row| ActorReferenceRow {
+                    id: row.id,
+                    disclosure: row.disclosure
+                })
+                .collect::<Vec<_>>()
+        );
+        let after = crate::diagnostics::work_counts();
+        assert_eq!(after.observations, before.observations);
+        assert_eq!(
+            after.perception_projections - before.perception_projections,
+            0
+        );
+        assert_direct_references_match_rows(&game, OWNER);
+    }
+
+    #[test]
+    fn actor_reference_rows_preserve_anonymous_hidden_and_guised_authority() {
+        use crate::perception::contract_fixtures::{at, fixture, guise, OWNER, SUBJECT};
+        use crate::perception::{ActorDisclosure, PerceptionValue};
+        let mut invisible = fixture(&[], &[PerceptionValue::Invisible { enabled: true }]);
+        assert_direct_references_match_rows(&invisible, OWNER);
+        let nearby = invisible.observe_actor_references(OWNER).unwrap();
+        assert_eq!(
+            nearby.visible_actors,
+            vec![ActorReferenceRow {
+                id: SUBJECT,
+                disclosure: ActorDisclosure::AnonymousContact,
+            }]
+        );
+        let full = invisible.observe(OWNER).unwrap();
+        assert_eq!(full.visible_actors.len(), 1);
+        assert_eq!(
+            full.visible_actors[0].disclosure,
+            ActorDisclosure::AnonymousContact
+        );
+        invisible.teleport(SUBJECT, at(1, 6, 2)).unwrap();
+        assert_direct_references_match_rows(&invisible, OWNER);
+        assert!(invisible
+            .observe_actor_references(OWNER)
+            .unwrap()
+            .visible_actors
+            .is_empty());
+        assert!(invisible.observe(OWNER).unwrap().visible_actors.is_empty());
+        let detecting = fixture(
+            &[PerceptionValue::SeeInvisible { enabled: true }],
+            &[PerceptionValue::Invisible { enabled: true }],
+        );
+        assert_eq!(
+            detecting
+                .observe_actor_references(OWNER)
+                .unwrap()
+                .visible_actors,
+            vec![ActorReferenceRow {
+                id: SUBJECT,
+                disclosure: ActorDisclosure::Creature
+            }]
+        );
+        assert_direct_references_match_rows(&detecting, OWNER);
+        let guised = fixture(&[], &[guise()]);
+        assert_direct_references_match_rows(&guised, OWNER);
+        assert!(guised
+            .observe_actor_references(OWNER)
+            .unwrap()
+            .visible_actors
+            .is_empty());
+        let full = guised.observe(OWNER).unwrap();
+        assert!(full.visible_actors.is_empty());
+        assert_eq!(full.apparent_objects.len(), 1);
+        assert_eq!(full.apparent_objects[0].subject, SUBJECT);
+    }
+
+    #[test]
+    fn shared_hearing_geometry_keeps_physical_stair_and_source_priority_boundaries() {
+        use crate::perception::contract_fixtures::{at, fixture, OWNER, SUBJECT};
+        let mut game = fixture(&[], &[]);
+        let origin = game.actors[&OWNER].location;
+        let source = game.actors[&SUBJECT].location;
+        let landing = at(2, 2, 2);
+        game.register_named_anchors(
+            RegionId(2),
+            [("hearing_landing".into(), landing.position)].into(),
+        )
+        .unwrap();
+        game.connect_named_stair(
+            origin,
+            Direction::Up,
+            tor_world::NamedAnchor {
+                region: RegionId(2),
+                name: "hearing_landing".into(),
+            },
+        )
+        .unwrap();
+        let snapshot = game.scene_snapshot_shared(OWNER).unwrap();
+        assert!(snapshot
+            .cells
+            .iter()
+            .any(|cell| cell.location == landing && !cell.physical));
+        let expected: BTreeSet<_> = game
+            .world
+            .eye_scene(origin, 0, 6)
+            .into_iter()
+            .filter(|cell| cell.physical)
+            .map(|cell| cell.location)
+            .collect();
+        assert!(!expected.contains(&landing));
+        assert_eq!(snapshot.hearing_locations(&game), &expected);
+        assert_eq!(
+            game.attack_sound_alert(OWNER, source, Some(origin))
+                .unwrap(),
+            Some(source)
+        );
+        assert_eq!(
+            game.attack_sound_alert(OWNER, landing, Some(origin))
+                .unwrap(),
+            Some(origin)
+        );
+        assert_eq!(game.attack_sound_alert(OWNER, landing, None).unwrap(), None);
+    }
+
+    #[test]
+    fn shared_hearing_geometry_is_immutable_across_rejected_candidate_locations() {
+        use crate::perception::contract_fixtures::{at, fixture, OWNER};
+        let game = fixture(&[], &[]);
+        let original = game.clone();
+        let retained = game.scene_snapshot_shared(OWNER).unwrap();
+        let expected = retained.hearing_locations(&game).clone();
+        let mut rejected = game.clone();
+        rejected.teleport(OWNER, at(2, 2, 2)).unwrap();
+        let changed = rejected.scene_snapshot_shared(OWNER).unwrap();
+        let changed_locations = changed.hearing_locations(&rejected);
+        let exact: BTreeSet<_> = rejected
+            .world
+            .eye_scene(at(2, 2, 2), 0, 6)
+            .into_iter()
+            .filter(|cell| cell.physical)
+            .map(|cell| cell.location)
+            .collect();
+        assert_eq!(changed_locations, &exact);
+        assert_ne!(changed_locations, &expected);
+        assert_eq!(retained.hearing_locations(&game), &expected);
+        let before = crate::diagnostics::work_counts();
+        let restored = game.scene_snapshot_shared(OWNER).unwrap();
+        assert_eq!(restored.hearing_locations(&game), &expected);
+        assert_eq!(
+            crate::diagnostics::work_counts().hearing_scene_builds - before.hearing_scene_builds,
+            1
+        );
+        assert_eq!(game, original);
+        assert_eq!(game.rules_rng, rejected.rules_rng);
+    }
+
+    #[test]
+    fn shared_scene_geometry_indexes_initialize_once_per_payload() {
+        let (game, actor) = membership_fixture();
+        let snapshot = game.scene_snapshot_shared(actor).unwrap();
+        assert!(!snapshot.cells.is_empty());
+        assert!(!snapshot.sight.is_empty());
+        assert!(snapshot.projection.get().is_none());
+        let expected_occurrences: BTreeSet<_> = snapshot
+            .cells
+            .iter()
+            .map(|cell| (cell.location, cell.rotation))
+            .collect();
+        let before = crate::diagnostics::work_counts();
+        let indexes = snapshot.projection();
+        assert_eq!(indexes.occurrences, expected_occurrences);
+        let initialized = crate::diagnostics::work_counts();
+        assert_eq!(
+            initialized.projection_location_indexes - before.projection_location_indexes,
+            2
+        );
+        assert_eq!(
+            initialized.projection_location_cells - before.projection_location_cells,
+            snapshot.cells.len() + snapshot.sight.len()
+        );
+        let retained = game.scene_snapshot_shared(actor).unwrap();
+        assert!(Arc::ptr_eq(&snapshot, &retained));
+        assert!(std::ptr::eq(indexes, retained.projection()));
+        assert!(Arc::ptr_eq(&snapshot.cells, &retained.cells));
+        assert!(Arc::ptr_eq(&snapshot.sight, &retained.sight));
+        let reused = crate::diagnostics::work_counts();
+        assert_eq!(
+            reused.projection_location_indexes,
+            initialized.projection_location_indexes
+        );
+        assert_eq!(reused.scene_cells_copied, before.scene_cells_copied);
+    }
+
+    #[test]
+    fn shared_scene_geometry_never_caches_actor_or_item_disclosure() {
+        let (mut game, actor) = membership_fixture();
+        let (before, shared) = game.observe_shared_scene(actor).unwrap();
+        let original = game.clone();
+        let other = game
+            .spawn_actor(at(1, 1, 0), NonZeroU64::new(100).unwrap())
+            .unwrap();
+        let item = game
+            .place_item(at(1, 1, 0), "new shared-scene item".into())
+            .unwrap();
+        let (after, unchanged_geometry) = game.observe_shared_scene(actor).unwrap();
+        assert!(Arc::ptr_eq(&shared, &unchanged_geometry));
+        assert!(before.visible_actors.iter().all(|row| row.id != other));
+        assert!(before.ground_items.iter().all(|row| row.id != item));
+        assert!(after.visible_actors.iter().any(|row| row.id == other));
+        assert!(after.ground_items.iter().any(|row| row.id == item));
+        assert_eq!(original.observe(actor).unwrap(), before);
+        assert_ne!(after, before);
+    }
+
+    #[test]
+    fn shared_scene_eviction_releases_indexes_but_retained_arrays_remain_valid() {
+        let (game, actor) = membership_fixture();
+        let original = game.clone();
+        let snapshot = game.scene_snapshot_shared(actor).unwrap();
+        snapshot.projection();
+        assert!(snapshot.contains(at(1, 0, 0)));
+        assert!(!snapshot.hearing_locations(&game).is_empty());
+        let raw = snapshot.raw_world_facts(&game);
+        let weak_raw = Arc::downgrade(&raw);
+        drop(raw);
+        let retained_cells = snapshot.shared_cells();
+        let expected_cells = (*retained_cells).clone();
+        let weak = Arc::downgrade(&snapshot);
+        // This exercises only the derived cache, not authoritative actor creation.
+        for id in 2..=513 {
+            game.insert_scene(
+                ActorId(id),
+                Arc::new(CachedScene::new(snapshot.witness.clone(), vec![], vec![])),
+            );
+        }
+        {
+            let cache = game.lifecycle.scenes.0.lock().unwrap();
+            assert_eq!(cache.len(), 512);
+            assert!(!cache.contains_key(&actor));
+            assert!(cache.contains_key(&ActorId(2)));
+        }
+        drop(snapshot);
+        assert!(
+            weak_raw.upgrade().is_none(),
+            "eviction also releases raw World facts"
+        );
+        assert!(
+            weak.upgrade().is_none(),
+            "array consumers must not pin cached indexes"
+        );
+        assert_eq!(*retained_cells, expected_cells);
+        let before = crate::diagnostics::work_counts();
+        let rebuilt = game.scene_snapshot_shared(actor).unwrap();
+        assert_eq!(*rebuilt.cells, expected_cells);
+        assert_eq!(crate::diagnostics::work_counts().scenes - before.scenes, 1);
+        let cache = game.lifecycle.scenes.0.lock().unwrap();
+        assert_eq!(cache.len(), 512);
+        assert!(cache.contains_key(&actor));
+        assert!(!cache.contains_key(&ActorId(2)));
+        assert_eq!(game, original);
+    }
+
+    #[test]
+    fn shared_scene_handles_are_immutable_across_rejected_candidate_witnesses() {
+        let (game, actor) = membership_fixture();
+        let original = game.clone();
+        let (before, retained) = game.observe_shared_scene(actor).unwrap();
+        let expected = (*retained).clone();
+        let mut rejected = game.clone();
+        rejected.set_cell_light(at(1, 2, 0), false).unwrap();
+        let (changed, candidate_cells) = rejected.observe_shared_scene(actor).unwrap();
+        assert_ne!(*candidate_cells, expected);
+        assert_ne!(changed, before);
+        assert_eq!(*retained, expected);
+        let (restored_view, restored_cells) = game.observe_shared_scene(actor).unwrap();
+        assert_eq!(restored_view, before);
+        assert_eq!(*restored_cells, expected);
+        assert!(!Arc::ptr_eq(&candidate_cells, &restored_cells));
+        assert_eq!(game, original);
+        assert_eq!(game.rules_rng, rejected.rules_rng);
+    }
+
+    #[test]
+    fn owned_observation_scene_wrapper_copies_only_disclosed_cells() {
+        let (game, actor) = membership_fixture();
+        let (expected_view, shared) = game.observe_shared_scene(actor).unwrap();
+        let before = crate::diagnostics::work_counts();
+        let (view, mut owned) = game.observe_scene(actor).unwrap();
+        assert_eq!(view, expected_view);
+        assert_eq!(owned, *shared);
+        assert_eq!(
+            crate::diagnostics::work_counts().scene_cells_copied - before.scene_cells_copied,
+            shared.len()
+        );
+        owned[0].offset.x += 100;
+        let (_, repeated) = game.observe_shared_scene(actor).unwrap();
+        assert!(Arc::ptr_eq(&shared, &repeated));
+        assert_ne!(owned[0], repeated[0]);
+    }
+
+    #[test]
+    fn raw_world_facts_track_hint_mutation_and_rejected_candidate_without_scene_change() {
+        let (mut game, actor) = membership_fixture();
+        let target = at(1, 1, 0);
+        let baseline = game.observe(actor).unwrap();
+        assert!(
+            !baseline
+                .visible_cells
+                .iter()
+                .find(|cell| cell.location == target)
+                .unwrap()
+                .place_hint
+        );
+        let scene = game.scene_snapshot_shared(actor).unwrap();
+        let original = game.clone();
+        let before = crate::diagnostics::work_counts().raw_world_fact_builds;
+        game.world
+            .set_named_place_hint(target, "fresh hint")
+            .unwrap();
+        assert!(Arc::ptr_eq(
+            &scene,
+            &game.scene_snapshot_shared(actor).unwrap()
+        ));
+        assert!(
+            game.observe(actor)
+                .unwrap()
+                .visible_cells
+                .iter()
+                .find(|cell| cell.location == target)
+                .unwrap()
+                .place_hint
+        );
+        assert_eq!(
+            crate::diagnostics::work_counts().raw_world_fact_builds - before,
+            1
+        );
+        assert_eq!(
+            original.observe(actor).unwrap(),
+            baseline,
+            "candidate-populated raw facts cannot cross the World witness"
+        );
+        drop(original);
+        // A weak-only identity must also detach on mutation without a retained Game.
+        game.world.set_place_hint(target, false).unwrap();
+        assert_eq!(
+            game.observe(actor).unwrap().visible_cells,
+            baseline.visible_cells
+        );
+        assert!(Arc::ptr_eq(
+            &scene,
+            &game.scene_snapshot_shared(actor).unwrap()
+        ));
+    }
+
+    fn raw_feature_fixture() -> (Game, ActorId) {
+        let mut world = World::new(vec![], vec![]).unwrap();
+        world
+            .add_chamber(Region {
+                id: RegionId(1),
+                name: "raw facts".into(),
+                bounds: Extent::new(5, 5, 1).unwrap(),
+            })
+            .unwrap();
+        let mut game = Game::new(world, 42, crate::test_creatures::content());
+        let actor = game
+            .spawn_actor(at(1, 1, 1), NonZeroU64::new(100).unwrap())
+            .unwrap();
+        (game, actor)
+    }
+
+    #[test]
+    fn raw_world_features_keep_discovery_and_trap_family_fresh() {
+        let (mut game, actor) = raw_feature_fixture();
+        let door = at(1, 2, 1);
+        let trap = at(1, 1, 1);
+        // Warm absence before introducing physical features.
+        assert!(game
+            .observe(actor)
+            .unwrap()
+            .visible_cells
+            .iter()
+            .all(|cell| cell.door.is_none() && cell.trap.is_none()));
+        game.world.place_door(door, 77, false, 1).unwrap();
+        game.world
+            .conceal_door(door, tor_world::Concealment { dc: 100 })
+            .unwrap();
+        game.world
+            .place_trap(
+                trap,
+                tor_world::Trap {
+                    id: 88,
+                    dc: 100,
+                    avoidance_dc: None,
+                    kind: tor_world::TrapKind::Rust {
+                        slot: "body_armor".into(),
+                        amount: 1,
+                    },
+                },
+            )
+            .unwrap();
+        let hidden = game.observe(actor).unwrap();
+        let entrance = hidden
+            .visible_cells
+            .iter()
+            .find(|cell| cell.location == door)
+            .unwrap();
+        assert_eq!(
+            (entrance.door, entrance.wall, entrance.material),
+            (None, true, "stone")
+        );
+        assert!(hidden
+            .visible_cells
+            .iter()
+            .find(|cell| cell.location == trap)
+            .unwrap()
+            .trap
+            .is_none());
+        let world = game.world.weak_identity();
+        let scene = game.scene_snapshot_shared(actor).unwrap();
+        let retained_raw = scene.raw_world_facts(&game).cells.clone();
+        let expected_raw = (*retained_raw).clone();
+        let expected_hidden = (*hidden.visible_cells).clone();
+        let before = crate::diagnostics::work_counts().raw_world_fact_builds;
+        // Valid restored actor-owned facts, independent of projection helpers.
+        game.actors.get_mut(&actor).unwrap().discovery = crate::discovery::read_discovery(serde_json::json!([
+            {"feature":{"kind":"door","value":77},"attempted":false,"adjacent_attempted":false,"presence":true,"family":false},
+            {"feature":{"kind":"trap","value":88},"attempted":false,"adjacent_attempted":false,"presence":true,"family":false}
+        ])).unwrap();
+        let before_projection = crate::diagnostics::work_counts().observation_cells_copied;
+        let known = game.observe(actor).unwrap();
+        let copied = crate::diagnostics::work_counts().observation_cells_copied - before_projection;
+        let entrance = known
+            .visible_cells
+            .iter()
+            .find(|cell| cell.location == door)
+            .unwrap();
+        assert_eq!(
+            entrance.door,
+            Some(tor_world::Door {
+                id: 77,
+                open: false,
+                height: 1
+            })
+        );
+        assert!(entrance.door_secret && entrance.door_reachable && !entrance.wall);
+        assert_eq!(
+            known
+                .visible_cells
+                .iter()
+                .find(|cell| cell.location == trap)
+                .unwrap()
+                .trap,
+            Some(TrapView {
+                id: 88,
+                family: None,
+                reachable: true
+            })
+        );
+        assert_eq!(
+            copied,
+            known.visible_cells.len(),
+            "door and trap projection detach the raw cell array exactly once"
+        );
+        assert!(!known.visible_cells.shares_storage(&retained_raw));
+        assert_eq!(*retained_raw, expected_raw);
+        assert_eq!(*hidden.visible_cells, expected_hidden);
+        game.reveal_feature_family(actor, tor_world::ConcealedFeatureId::Trap(88))
+            .unwrap();
+        assert_eq!(
+            game.observe(actor)
+                .unwrap()
+                .visible_cells
+                .iter()
+                .find(|cell| cell.location == trap)
+                .unwrap()
+                .trap,
+            Some(TrapView {
+                id: 88,
+                family: Some(tor_world::TrapFamily::Rust),
+                reachable: true
+            })
+        );
+        assert!(world.matches(&game.world));
+        assert!(Arc::ptr_eq(
+            &scene,
+            &game.scene_snapshot_shared(actor).unwrap()
+        ));
+        assert_eq!(
+            crate::diagnostics::work_counts().raw_world_fact_builds,
+            before
+        );
+        game.world.set_door(door, true);
+        assert!(
+            game.observe(actor)
+                .unwrap()
+                .visible_cells
+                .iter()
+                .find(|cell| cell.location == door)
+                .unwrap()
+                .door
+                .unwrap()
+                .open
+        );
+    }
+
+    #[test]
+    fn raw_world_facts_never_cache_other_actor_door_clearance() {
+        let (mut game, actor) = raw_feature_fixture();
+        let door = at(1, 2, 2);
+        let owner_at = game.actors[&actor].location;
+        game.world.set_wall(at(1, 1, 2), true).unwrap();
+        game.world.place_door(door, 77, true, 1).unwrap();
+        let initial = game.observe(actor).unwrap();
+        let entrance = initial
+            .visible_cells
+            .iter()
+            .find(|cell| cell.location == door)
+            .unwrap();
+        assert!(entrance.door_reachable && entrance.door_approaches.contains(&owner_at));
+        let scene = game.scene_snapshot_shared(actor).unwrap();
+        let world = game.world.weak_identity();
+        let blocker = game
+            .spawn_actor(at(1, 2, 1), NonZeroU64::new(100).unwrap())
+            .unwrap();
+        let blocked = game.observe(actor).unwrap();
+        let entrance = blocked
+            .visible_cells
+            .iter()
+            .find(|cell| cell.location == door)
+            .unwrap();
+        assert!(!entrance.door_reachable && !entrance.door_approaches.contains(&owner_at));
+        assert!(world.matches(&game.world));
+        assert!(Arc::ptr_eq(
+            &scene,
+            &game.scene_snapshot_shared(actor).unwrap()
+        ));
+        game.actors.get_mut(&blocker).unwrap().location = at(1, 4, 4);
+        let reopened = game.observe(actor).unwrap();
+        let entrance = reopened
+            .visible_cells
+            .iter()
+            .find(|cell| cell.location == door)
+            .unwrap();
+        assert!(entrance.door_reachable && entrance.door_approaches.contains(&owner_at));
+        assert_eq!(reopened.visible_cells, initial.visible_cells);
+    }
+
+    #[test]
+    fn warm_observation_reuses_raw_world_facts_but_projects_fresh_entities() {
+        let (mut game, actor) = membership_fixture();
+        let cold = crate::diagnostics::work_counts();
+        let expected = game.observe(actor).unwrap();
+        assert!(
+            !expected.visible_cells.is_empty(),
+            "positive raw projection fixture"
+        );
+        let before = crate::diagnostics::work_counts();
+        assert_eq!(before.raw_world_fact_builds - cold.raw_world_fact_builds, 1);
+        assert_eq!(
+            before.raw_world_fact_cells - cold.raw_world_fact_cells,
+            expected.visible_cells.len()
+        );
+        assert_eq!(game.observe(actor).unwrap(), expected);
+        let after = crate::diagnostics::work_counts();
+        assert_eq!(after.observations - before.observations, 1);
+        assert_eq!(
+            after.perception_projections - before.perception_projections,
+            0
+        );
+        assert_eq!(
+            after.raw_world_fact_builds, before.raw_world_fact_builds,
+            "an unchanged observation must reuse raw World facts, not rebuild them"
+        );
+        assert_eq!(after.raw_world_fact_cells, before.raw_world_fact_cells);
+        let item = game
+            .place_item(at(1, 1, 0), "fresh raw-cache item".into())
+            .unwrap();
+        let changed = game.observe(actor).unwrap();
+        assert!(changed.ground_items.iter().any(|row| row.id == item));
+        assert_eq!(changed.visible_cells, expected.visible_cells);
+        assert_eq!(
+            crate::diagnostics::work_counts().raw_world_fact_builds,
+            before.raw_world_fact_builds
+        );
+    }
+
+    #[test]
+    fn warm_observation_shares_unmodified_cell_views_but_refreshes_entities() {
+        let (mut game, actor) = raw_feature_fixture();
+        let expected = game.observe(actor).unwrap();
+        assert!(
+            !expected.visible_cells.is_empty(),
+            "positive feature-free cell projection fixture"
+        );
+        assert!(expected
+            .visible_cells
+            .iter()
+            .all(|cell| cell.door.is_none() && cell.trap.is_none()));
+        let before = crate::diagnostics::work_counts();
+        assert_eq!(game.observe(actor).unwrap(), expected);
+        let other = game
+            .spawn_actor(at(1, 1, 0), NonZeroU64::new(100).unwrap())
+            .unwrap();
+        let item = game
+            .place_item(at(1, 1, 0), "fresh shared-cell item".into())
+            .unwrap();
+        let fresh = game.observe(actor).unwrap();
+        assert!(expected.visible_actors.iter().all(|row| row.id != other));
+        assert!(expected.ground_items.iter().all(|row| row.id != item));
+        assert!(fresh.visible_actors.iter().any(|row| row.id == other));
+        assert!(fresh.ground_items.iter().any(|row| row.id == item));
+        assert_eq!(fresh.visible_cells, expected.visible_cells);
+        let after = crate::diagnostics::work_counts();
+        assert_eq!(after.observations - before.observations, 2);
+        assert_eq!(
+            after.perception_projections - before.perception_projections,
+            1
+        );
+        assert_eq!(after.scenes, before.scenes);
+        assert_eq!(after.raw_world_fact_builds, before.raw_world_fact_builds);
+        assert_eq!(
+            after.observation_cells_copied - before.observation_cells_copied,
+            0,
+            "feature-free observations must not copy unchanged CellView rows"
+        );
+        assert!(expected.visible_cells.shares_storage(&fresh.visible_cells));
+
+        // An independently retained caller view remains writable without
+        // changing either the raw template or another observer snapshot.
+        let mut edited = fresh.clone();
+        let previous_hint = edited.visible_cells[0].place_hint;
+        edited.visible_cells[0].place_hint = !previous_hint;
+        assert!(!edited.visible_cells.shares_storage(&fresh.visible_cells));
+        assert_eq!(fresh.visible_cells, expected.visible_cells);
+        assert_ne!(edited.visible_cells, expected.visible_cells);
+        assert_eq!(game.observe(actor).unwrap(), fresh);
+
+        // Projection-owned mutations count the first detachment exactly once.
+        let mut projected = fresh.visible_cells.clone();
+        let before_detach = crate::diagnostics::work_counts().observation_cells_copied;
+        observation_cells_mut(&mut projected)[0].place_hint = !previous_hint;
+        let detached = crate::diagnostics::work_counts().observation_cells_copied;
+        assert_eq!(detached - before_detach, fresh.visible_cells.len());
+        observation_cells_mut(&mut projected)[0].place_hint = previous_hint;
+        assert_eq!(
+            crate::diagnostics::work_counts().observation_cells_copied,
+            detached,
+            "further mutations of the unique projection copy no rows"
+        );
+        assert_eq!(projected, expected.visible_cells);
+        assert_eq!(fresh.visible_cells, expected.visible_cells);
+    }
+
+    #[test]
+    fn decision_reuses_witnessed_geometry_but_refreshes_disclosure() {
+        let (mut game, actor) = membership_fixture();
+        let expected = game.observe(actor).unwrap();
+        assert!(!expected.visible_cells.is_empty());
+        let snapshot = game.scene_snapshot_shared(actor).unwrap();
+        let before = crate::diagnostics::work_counts();
+        let decision = game.decision_snapshot(actor).unwrap();
+        assert_eq!(decision.view, expected);
+        assert_eq!(*decision.sight, *snapshot.sight);
+        let item = game
+            .place_item(at(1, 1, 0), "fresh decision item".into())
+            .unwrap();
+        let fresh = game.decision_snapshot(actor).unwrap();
+        assert!(fresh.view.ground_items.iter().any(|row| row.id == item));
+        assert_eq!(fresh.view.visible_cells, expected.visible_cells);
+        let after = crate::diagnostics::work_counts();
+        assert_eq!(
+            after.perception_projections - before.perception_projections,
+            0
+        );
+        assert_eq!(
+            after.scenes, before.scenes,
+            "warm AI decisions must not reconstruct identical witnessed geometry"
+        );
+        assert_eq!(after.raw_world_fact_builds, before.raw_world_fact_builds);
+        assert!(Arc::ptr_eq(&snapshot.sight, &fresh.sight));
+    }
+
+    #[test]
+    fn warm_observation_reuses_its_geometry_projection_indexes() {
+        let (game, actor) = membership_fixture();
+        let expected = game.observe(actor).unwrap();
+        let before = crate::diagnostics::work_counts();
+        assert_eq!(game.observe(actor).unwrap(), expected);
+        let after = crate::diagnostics::work_counts();
+        assert_eq!(after.observations - before.observations, 1);
+        assert_eq!(
+            after.perception_projections - before.perception_projections,
+            0
+        );
+        assert_eq!(
+            after.projection_location_indexes, before.projection_location_indexes,
+            "unchanged scene and eye indexes are already owned by the cached projection"
+        );
+        assert_eq!(
+            after.projection_location_cells,
+            before.projection_location_cells
+        );
+        assert_eq!(
+            after.scene_cells_copied, before.scene_cells_copied,
+            "after complete accounting, fresh disclosure must borrow unchanged geometry"
+        );
+    }
+
+    #[test]
+    fn scene_cache_copy_counter_includes_both_arrays_at_install() {
+        let (game, actor) = membership_fixture();
+        let mut expected_sight = Vec::new();
+        let expected_scene = game
+            .compute_scene(actor, &mut |cells: &[tor_world::SightCell]| {
+                expected_sight.extend_from_slice(cells)
+            })
+            .unwrap();
+        assert!(!expected_scene.is_empty());
+        assert!(!expected_sight.is_empty());
+        game.lifecycle.scenes.0.lock().unwrap().clear();
+        let before = crate::diagnostics::work_counts().scene_cells_copied;
+        let (scene, sight) = game.scene_snapshot(actor).unwrap();
+        assert_eq!(scene, expected_scene);
+        assert_eq!(sight, expected_sight);
+        assert_eq!(
+            crate::diagnostics::work_counts().scene_cells_copied - before,
+            expected_scene.len() + expected_sight.len(),
+            "cache installation clones both independently owned arrays"
+        );
+    }
+
+    #[test]
+    fn scene_cache_copy_counter_includes_warm_snapshot_arrays() {
+        let (game, actor) = membership_fixture();
+        let (expected_scene, expected_sight) = game.scene_snapshot(actor).unwrap();
+        assert!(!expected_scene.is_empty());
+        assert!(!expected_sight.is_empty());
+        let before = crate::diagnostics::work_counts();
+        let (scene, sight) = game.scene_snapshot(actor).unwrap();
+        assert_eq!(scene, expected_scene);
+        assert_eq!(sight, expected_sight);
+        let warm = crate::diagnostics::work_counts();
+        assert_eq!(warm.scenes, before.scenes);
+        assert_eq!(
+            warm.scene_cells_copied - before.scene_cells_copied,
+            expected_scene.len() + expected_sight.len(),
+            "a warm full snapshot clones both cached arrays without building a scene"
+        );
+        assert_eq!(game.streaming_scene(actor).unwrap(), expected_scene);
+        let streamed = crate::diagnostics::work_counts();
+        assert_eq!(streamed.scenes, warm.scenes);
+        assert_eq!(
+            streamed.scene_cells_copied - warm.scene_cells_copied,
+            expected_scene.len(),
+            "streaming clones only disclosed cells, not the unused sight array"
+        );
+    }
+
+    #[test]
     fn scene_build_counters_cover_cold_snapshots_placements_and_decisions() {
         let (game, actor) = membership_fixture();
         let before = crate::diagnostics::work_counts();
@@ -1396,11 +2942,17 @@ mod tests {
         let placed = crate::diagnostics::work_counts();
         assert_eq!(placed.scenes - warm.scenes, 1);
         assert_eq!(placed.ordinary_scenes - warm.ordinary_scenes, 1);
+        game.lifecycle.scenes.0.lock().unwrap().clear();
         game.decision_snapshot(actor).unwrap();
         let decided = crate::diagnostics::work_counts();
         assert_eq!(decided.scenes - placed.scenes, 1);
         assert_eq!(decided.decision_scenes - placed.decision_scenes, 1);
         assert_eq!(decided.ordinary_scenes, placed.ordinary_scenes);
+        game.decision_snapshot(actor).unwrap();
+        let reused = crate::diagnostics::work_counts();
+        assert_eq!(reused.scenes, decided.scenes);
+        assert_eq!(reused.decision_scenes, decided.decision_scenes);
+        assert_eq!(reused.ordinary_scenes, decided.ordinary_scenes);
         assert_eq!(
             decided.scenes - before.scenes,
             decided.ordinary_scenes - before.ordinary_scenes + decided.decision_scenes
@@ -1599,7 +3151,7 @@ mod tests {
         let (game, actor) = membership_fixture();
         assert!(game.scene_contains(actor, at(1, 0, 0)).unwrap());
         let cached = game.lifecycle.scenes.0.lock().unwrap()[&actor].clone();
-        assert!(cached.locations.is_some());
+        assert!(cached.locations.get().is_some());
         // Fill only this derived cache to its bound; no actors or claims are
         // synthesized in authoritative state.
         {
@@ -1659,10 +3211,14 @@ mod tests {
             crate::test_creatures::species(),
         );
         let check = |game: &Game| {
-            assert_eq!(
-                game.observe_scene(actor).unwrap().1,
-                game.compute_scene(actor, &mut |_| {}).unwrap()
-            );
+            let mut sight = Vec::new();
+            let expected = game
+                .compute_scene(actor, &mut |cells| sight.extend_from_slice(cells))
+                .unwrap();
+            let decision = game.decision_snapshot(actor).unwrap();
+            assert_eq!(*decision.sight, sight);
+            assert_eq!(decision.view, game.observe(actor).unwrap());
+            assert_eq!(game.observe_scene(actor).unwrap().1, expected);
         };
         check(&game);
         game.teleport(actor, at(2, 0, 1)).unwrap();

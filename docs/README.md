@@ -48,6 +48,8 @@ rather than treating a historical plan as current behavior.
 - [CI cost baseline](development/ci-cost-baseline.md): measured runner cost, elapsed time and comparison limits
 - [Service contract pilot](development/service-contracts.md): opt-in catalog host, assertion ownership and qualification experiment
 - [Performance](development/performance.md): targets, workloads, comparisons and evidence
+- [Server performance review](development/server-performance-review.md): active-AI findings,
+  measured bottlenecks, refactoring constraints and acceptance boundaries
 - [Arena](development/arena.md): combat diagnostics, evaluation, matrices and search
 - [Bounded ordinary earned-route qualification](development/rogue-earned-route.md)
 - [Wizard tools](development/wizard.md): privilege, inspection, setup and rewind

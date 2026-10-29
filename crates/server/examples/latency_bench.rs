@@ -1,4 +1,6 @@
 //! Performance diagnostics; JSONL raw samples and distributions, no latency gates.
+#[path = "support/benchmark_display.rs"]
+mod benchmark_display;
 use serde_json::json;
 use std::{collections::BTreeMap, hint::black_box, time::Instant};
 use tor_client_ascii::{render::Canvas, App};
@@ -15,6 +17,11 @@ fn phases(p: &CommandProfile) -> BTreeMap<String, f64> {
         ("candidate_capture", p.rollback_capture),
         ("checkpoint_capture", p.checkpoint_capture),
         ("simulation", p.simulation_transition),
+        ("intention_derivation", p.intention_derivation),
+        ("request_validation", p.request_validation),
+        ("map_recording", p.map_recording),
+        ("commit_metadata", p.commit_metadata),
+        ("input_generation", p.input_generation),
         ("navigation", p.navigation_refresh),
         ("perception", p.perception),
         ("revision_comparison", p.revision_detection),
@@ -153,6 +160,12 @@ impl Runner {
         self.attempt += 1;
         let branch = self.engine.branch().clone();
         let history_start = self.engine.profile_counts().0;
+        let before_boundary = self.engine.causal_boundary(actor).unwrap();
+        let observer_before = self.engine.state(ActorId(1)).unwrap();
+        let before_stamp = self
+            .engine
+            .event_history_boundary_at(&self.engine.presentation_boundary())
+            .unwrap();
         let start = Instant::now();
         let result = match &action {
             Some(action) => self.engine.decode_action(actor, action).and_then(|action| {
@@ -163,7 +176,7 @@ impl Runner {
                     &request,
                     &branch,
                     Command::Act {
-                        expected_revision: before.revision,
+                        expected_boundary: self.engine.causal_boundary(actor).unwrap(),
                         action,
                     },
                 )
@@ -186,7 +199,19 @@ impl Runner {
             }
         }
         if let Some(step) = step {
-            step.verify(&before, &after, result.is_ok());
+            let after_boundary = self.engine.causal_boundary(actor).unwrap();
+            if result.is_ok() {
+                assert!(
+                    after_boundary > before_boundary,
+                    "{label} failed to advance causal boundary"
+                );
+            } else {
+                assert_eq!(
+                    after_boundary, before_boundary,
+                    "{label} changed refused boundary"
+                );
+            }
+            step.verify_effect(&before, &after, result.is_ok());
         } else {
             assert!(result.is_ok(), "{label} rejected");
         }
@@ -209,20 +234,66 @@ impl Runner {
         }
         let mut observation_wire = None;
         // Construct outside timing; encode, decode and apply to the same growing client.
-        if let Some(entry) = event.as_ref().filter(|_| {
-            self.engine.revision(ActorId(1)).unwrap()
-                > self.app.state.as_ref().unwrap().state().revision
-        }) {
-            let state = self.engine.state(ActorId(1)).unwrap();
+        if let Some(entry) = event.as_ref() {
+            let observer_after = self.engine.state(ActorId(1)).unwrap();
             self.sequence += 1;
+            let outcome = ServerMessage::Update {
+                update: Box::new(StreamUpdate {
+                    context: fixture_context(),
+                    actor: ActorId(1),
+                    branch: self.engine.branch().clone(),
+                    cursor: StreamCursor {
+                        sequence: self.sequence,
+                        tick: observer_after.observation.tick,
+                    },
+                    body: benchmark_display::outcome(
+                        &observer_before.observation,
+                        &observer_after.observation,
+                        before_stamp,
+                        self.engine
+                            .event_history_boundary_at(&self.engine.presentation_boundary())
+                            .unwrap(),
+                        (actor == ActorId(1)).then(|| {
+                            self.engine
+                                .disclose_entry(entry)
+                                .expect("completed own command has history")
+                        }),
+                    ),
+                }),
+            };
+            let start = Instant::now();
+            let encoded = encode_response(&outcome, None, MAX_RESPONSE_BYTES).unwrap();
+            timings.insert(
+                "outcome_wire_encoding".into(),
+                start.elapsed().as_secs_f64() * 1000.,
+            );
+            let start = Instant::now();
+            let decoded = decode_response(&encoded.text).unwrap();
+            timings.insert(
+                "outcome_wire_decoding".into(),
+                start.elapsed().as_secs_f64() * 1000.,
+            );
+            let ServerMessage::Update { update } = decoded else {
+                panic!("outcome response kind");
+            };
+            let start = Instant::now();
+            self.app.state.as_mut().unwrap().apply(*update).unwrap();
+            timings.insert(
+                "outcome_client_application".into(),
+                start.elapsed().as_secs_f64() * 1000.,
+            );
+        }
+        if let Some(entry) = event.as_ref() {
+            // This diagnostic explicitly requests a picture after each accepted command.
+            // It measures issued display work, not Engine's internal sentinel revision.
+            self.sequence += 1;
+            let generation = self.app.state.as_ref().unwrap().state().revision + 1;
+            let mut state = self
+                .engine
+                .state_at(&self.engine.presentation_boundary(), ActorId(1), generation)
+                .unwrap();
+            state.snapshot = tor_protocol::SnapshotId(format!("latency-picture-{}", self.sequence));
             let tick = state.observation.tick;
-            let event = (actor == ActorId(1)).then(|| {
-                Box::new(
-                    self.engine
-                        .disclose_entry(entry)
-                        .expect("completed command has history"),
-                )
-            });
             let message = ServerMessage::Update {
                 update: Box::new(StreamUpdate {
                     context: fixture_context(),
@@ -234,7 +305,7 @@ impl Runner {
                     },
                     body: UpdateBody::Observation {
                         state: state.into(),
-                        event,
+                        event: None,
                     },
                 }),
             };
@@ -276,6 +347,13 @@ impl Runner {
             self.canvas.draw(black_box(&self.app));
             black_box(&self.canvas.pixels);
             timings.insert("rendering".into(), start.elapsed().as_secs_f64() * 1000.);
+            if actor == ActorId(1) {
+                let expected = self.engine.disclose_entry(entry).unwrap();
+                assert_eq!(
+                    self.app.state.as_ref().unwrap().history().last(),
+                    Some(&expected)
+                );
+            }
         }
         timings.insert("command_call".into(), command_call_ms);
         timings.insert("disclosure_projection".into(), disclosure_projection_ms);
@@ -366,7 +444,7 @@ fn streaming_case(
     println!(
         "{}",
         json!({"kind":"stream","preloading":true,"case":case,"workload":"streaming-v1","regions":halls,"actors":1,
-        "steps_per_cycle":2*STREAM_LEG,"cycles":cycles,"commit":commit,"dirty":dirty,"profile_version":2,"wire_profile_version":2,"region_acquisition_version":1,
+        "steps_per_cycle":2*STREAM_LEG,"cycles":cycles,"commit":commit,"dirty":dirty,"profile_version":3,"observer_work_contract":"causal_facts_demand_display_v1","wire_profile_version":2,"region_acquisition_version":1,
         "platform":std::env::consts::OS,"architecture":std::env::consts::ARCH,
         "build_profile":if cfg!(debug_assertions){"debug"}else{"release"},
         "storage":if durable{"background_sqlite_journal"}else{"memory"},
@@ -535,7 +613,7 @@ fn main() {
                         "{}",
                         json!({"kind":"case","case":case,"regions":regions,"actors":actors,"history_start":history,
             "seed":trace.seed,"trace_version":trace.version,"commit":String::from_utf8_lossy(&commit.stdout).trim(),
-            "dirty":!dirty.success(),"profile_version":2,"wire_profile_version":2,"platform":std::env::consts::OS,"architecture":std::env::consts::ARCH,
+            "dirty":!dirty.success(),"profile_version":3,"observer_work_contract":"causal_facts_demand_display_v1","wire_profile_version":2,"platform":std::env::consts::OS,"architecture":std::env::consts::ARCH,
             "build_profile":if cfg!(debug_assertions){"debug"}else{"release"},"cycles":cycles,"warmup":0,
             "storage":if durable{"background_sqlite_journal"}else{"memory"},"client_observer":1,
             "save_policy":{"target_ms":save_policy.target_interval.as_millis(),"max_ms":save_policy.max_unsaved_age.as_millis(),"idle_ms":save_policy.idle_interval.as_millis(),"queue_bytes":save_policy.max_pending_bytes,"checkpoint_interval":save_policy.checkpoint_interval},
@@ -601,7 +679,7 @@ fn main() {
             "storage":if saved_discovery {"background_sqlite_journal"} else {"memory"},
             "checkpoint_interval":save_policy.checkpoint_interval,
             "trace_version":trace.version,"seed":trace.seed,"commit":String::from_utf8_lossy(&commit.stdout).trim(),
-            "dirty":!dirty.success(),"profile_version":2,"wire_profile_version":2,"build_profile":if cfg!(debug_assertions){"debug"}else{"release"},
+            "dirty":!dirty.success(),"profile_version":3,"observer_work_contract":"causal_facts_demand_display_v1","wire_profile_version":2,"build_profile":if cfg!(debug_assertions){"debug"}else{"release"},
             "cycles":if quick {2} else {regions-1},"platform":std::env::consts::OS,"architecture":std::env::consts::ARCH})
         );
         eprintln!("Starting {case}");

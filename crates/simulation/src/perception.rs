@@ -617,6 +617,7 @@ pub struct ApparentObjectView {
     pub appearance: GuiseAppearance,
 }
 
+#[derive(Debug)]
 pub(crate) struct PerceivedActor {
     pub disclosure: ActorDisclosure,
     pub body: crate::actor_store::BodyCells,
@@ -630,6 +631,13 @@ struct DisclosureInputs<'a> {
     contact: &'a OnceCell<BTreeSet<Location>>,
 }
 pub(crate) type PerceptionProjection = BTreeMap<ActorId, PerceivedActor>;
+
+/// Exact physical-location index for one immutable projection input.
+/// Scene occurrences and illuminated eye cells remain separate inputs.
+pub(crate) fn projection_locations(scene: &[SightCell]) -> BTreeSet<Location> {
+    crate::diagnostics::projection_location_index(scene.len());
+    scene.iter().map(|cell| cell.location).collect()
+}
 
 impl crate::Actor {
     pub(crate) fn perception(&self) -> PerceptionCapabilities {
@@ -868,21 +876,35 @@ impl Game {
         sight: &[SightCell],
         placement: Option<crate::abilities::Placement>,
     ) -> Result<PerceptionProjection, GameError> {
+        let cells = projection_locations(scene);
+        let eyes = projection_locations(sight);
+        self.perception_projection_in_cells(observer, scene, &cells, &eyes, placement)
+    }
+
+    /// Reuse indexes derived from these exact scene and eye-sight inputs. The
+    /// ordinary observation already needs both sets for its own disclosure.
+    /// Keep them distinct: a projected stair landing is not an eye witness.
+    pub(crate) fn perception_projection_in_cells(
+        &self,
+        observer: ActorId,
+        scene: &[SightCell],
+        cells: &BTreeSet<Location>,
+        eyes: &BTreeSet<Location>,
+        placement: Option<crate::abilities::Placement>,
+    ) -> Result<PerceptionProjection, GameError> {
         let owner = self.actors.get(&observer).ok_or(GameError::UnknownActor)?;
         let capabilities = owner.perception();
-        let cells: BTreeSet<_> = scene.iter().map(|cell| cell.location).collect();
-        let eyes: BTreeSet<_> = sight.iter().map(|cell| cell.location).collect();
         let contact = OnceCell::new();
         crate::diagnostics::perception_projection();
         Ok(self
             .actors
-            .perceived(&self.world, &cells)
+            .perceived(&self.world, cells)
             .into_iter()
             .map(|(subject, body)| {
                 let inputs = DisclosureInputs {
                     observer,
                     scene,
-                    eyes: &eyes,
+                    eyes,
                     capabilities: &capabilities,
                     placement,
                     contact: &contact,

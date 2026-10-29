@@ -3,7 +3,7 @@ use tor_protocol::*;
 
 fn catalog() -> Value {
     json!({"type":"creature_catalog", "request_id":"catalog-query",
-        "context":{"input":{"stream":{"stream":"catalog","epoch":"0"},"readiness_revision":"0"},
+        "context":{"snapshot":"catalog-picture","input":{"stream":{"stream":"catalog","epoch":"0"},"readiness_revision":"0"},
             "actor":"1","branch":"main","cursor":{"sequence":"0","tick":"0"},"revision":"0"},
         "page":{"depth":27,"entries":[
             {"selector":"rogue:imp","name":"Imp","details":"Authored imp; racial growth at depth 27"},

@@ -23,46 +23,78 @@ impl std::ops::Deref for RememberedCell {
 /// requested separately; this model retains at most the latest 100 entries.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ClientState {
-    snapshot: Snapshot,
-    stream: ObservationStream,
+    session: ClientSessionState,
     observation_base: ObservationBase,
+    last_visual_change: u64,
     map_memory: crate::map_memory::MapMemory,
     map_hydration: crate::map_hydration::MapHydration,
     narration: Vec<String>,
     narration_lines: Vec<crate::narration::Line>,
 }
 
+/// Live client data is deliberately not a wire `Snapshot`: ordered authority
+/// can advance while its immutable picture remains at an earlier boundary.
+/// Clone this value for comparisons; only `ClientState::reset_snapshot` may
+/// construct a reset envelope, after checking its synchronous invariants.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClientSessionState {
+    metadata: SessionMetadata,
+    stream: ObservationStream,
+    authority: SessionAuthority,
+    picture: Arc<StateView>,
+    history: HistoryPage,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SessionMetadata {
+    context: StreamContext,
+    actor: ActorId,
+    branch: BranchId,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SessionAuthority {
+    readiness: Readiness,
+    intentions: Vec<IntentionStatus>,
+    travel: Option<TravelStatus>,
+    has_control: bool,
+    outcome_status: Option<OutcomeStatusFacts>,
+    character_ready: bool,
+}
+
 impl ClientState {
     pub fn from_snapshot(snapshot: Snapshot) -> Result<Self, StreamError> {
-        if !snapshot.context.is_valid() {
-            return Err(StreamError::WrongStreamContext);
-        }
-        validate_intentions(&snapshot.intentions, snapshot.actor, &snapshot.branch)?;
-        snapshot
-            .state
-            .validate()
-            .map_err(|_| StreamError::InconsistentState)?;
-        if snapshot.actor != snapshot.state.observation.actor
-            || snapshot.cursor.tick != snapshot.state.observation.tick
-        {
-            return Err(StreamError::InconsistentState);
-        }
-        for entry in &snapshot.history.entries {
-            validate_entry(
-                entry,
-                snapshot.actor,
-                &snapshot.branch,
-                snapshot.cursor.tick,
-            )?;
-        }
-        validate_readiness(&snapshot.readiness, &snapshot)?;
+        validate_reset_snapshot(&snapshot)?;
         let mut client = Self {
-            stream: ObservationStream::from_snapshot(snapshot.actor, snapshot.cursor),
+            last_visual_change: snapshot.cursor.sequence,
             observation_base: ObservationBase {
+                snapshot: snapshot.state.snapshot.clone(),
                 cursor: snapshot.cursor,
                 revision: snapshot.state.revision,
             },
-            snapshot,
+            session: ClientSessionState {
+                stream: ObservationStream::from_snapshot(snapshot.actor, snapshot.cursor),
+                metadata: SessionMetadata {
+                    context: snapshot.context,
+                    actor: snapshot.actor,
+                    branch: snapshot.branch,
+                },
+                authority: SessionAuthority {
+                    character_ready: snapshot.state.observation.ready,
+                    outcome_status: snapshot
+                        .state
+                        .observation
+                        .combat
+                        .as_ref()
+                        .map(OutcomeStatusFacts::from),
+                    readiness: snapshot.readiness,
+                    intentions: snapshot.intentions,
+                    travel: snapshot.travel,
+                    has_control: snapshot.has_control,
+                },
+                picture: snapshot.state,
+                history: snapshot.history,
+            },
             map_memory: Default::default(),
             map_hydration: Default::default(),
             narration: Vec::new(),
@@ -104,11 +136,11 @@ impl ClientState {
 
     /// A validated snapshot establishes a new stream boundary atomically.
     pub fn replace_snapshot(&mut self, snapshot: Snapshot) -> Result<(), StreamError> {
-        if snapshot.actor != self.snapshot.actor {
+        if snapshot.actor != self.session.metadata.actor {
             return Err(StreamError::WrongActor);
         }
-        if snapshot.context.stream != self.snapshot.context.stream
-            || snapshot.context.epoch <= self.snapshot.context.epoch
+        if snapshot.context.stream != self.session.metadata.context.stream
+            || snapshot.context.epoch <= self.session.metadata.context.epoch
         {
             return Err(StreamError::WrongStreamContext);
         }
@@ -124,16 +156,16 @@ impl ClientState {
 
     fn remember_view(&mut self) {
         let moved = self.map_memory.observe(
-            &self.snapshot.state.observation,
-            self.snapshot.state.revision,
+            &self.session.picture.observation,
+            self.session.picture.revision,
         );
         let context = self.context().clone();
         let branch = self.branch().clone();
         self.map_hydration.observe(
             context,
-            self.snapshot.actor,
+            self.session.metadata.actor,
             branch,
-            self.observation_base,
+            self.observation_base.clone(),
             moved,
         );
         if self.map_memory.limited {
@@ -195,8 +227,8 @@ impl ClientState {
             self.map_hydration.status.complete = !self.map_memory.needs_window(viewport);
             // Exact current disclosure overlays stale memory, including seen emptiness.
             self.map_memory.overlay(
-                &self.snapshot.state.observation,
-                self.snapshot.state.revision,
+                &self.session.picture.observation,
+                self.session.picture.revision,
             );
             if self.map_memory.limited {
                 self.map_hydration.status.limited = true;
@@ -210,9 +242,9 @@ impl ClientState {
         MapWindow::normal().checked_translate(self.state().observation.position)?;
         Some(crate::MapMemoryUpdate {
             context: self.context().clone(),
-            actor: self.snapshot.actor,
+            actor: self.session.metadata.actor,
             branch: self.branch().clone(),
-            base: self.observation_base,
+            base: self.observation_base.clone(),
             coverage: self.map_memory.coverage,
             cells: self
                 .map_memory()
@@ -226,7 +258,7 @@ impl ClientState {
         update: crate::MapMemoryUpdate,
     ) -> Result<(), StreamError> {
         if update.context != *self.context()
-            || update.actor != self.snapshot.actor
+            || update.actor != self.session.metadata.actor
             || update.branch != *self.branch()
             || update.base != self.observation_base
         {
@@ -236,8 +268,8 @@ impl ClientState {
             self.map_memory
                 .install_snapshot(update.coverage, update.cells);
             self.map_memory.overlay(
-                &self.snapshot.state.observation,
-                self.snapshot.state.revision,
+                &self.session.picture.observation,
+                self.session.picture.revision,
             );
         }
         self.map_hydration.status = update.status;
@@ -248,17 +280,53 @@ impl ClientState {
         Ok(())
     }
 
-    /// Current disclosed stream boundary, excluding connection-local memory.
-    pub fn snapshot(&self) -> Snapshot {
-        self.snapshot.clone()
+    /// Live semantic state and its independently aged picture, never a reset.
+    pub fn session(&self) -> &ClientSessionState {
+        &self.session
+    }
+
+    pub fn actor(&self) -> ActorId {
+        self.session.metadata.actor
+    }
+
+    /// Export a reset only when the picture and authority really share a
+    /// synchronous boundary. Callers must request a fresh server snapshot when
+    /// this fails, not stamp the current cursor onto an older picture.
+    pub fn reset_snapshot(&self) -> Result<Snapshot, StreamError> {
+        let picture_status = self
+            .state()
+            .observation
+            .combat
+            .as_ref()
+            .map(OutcomeStatusFacts::from);
+        if !self.observation_current()
+            || self.outcome_status() != picture_status.as_ref()
+            || self.character_ready() != self.state().observation.ready
+        {
+            return Err(StreamError::InconsistentState);
+        }
+        let snapshot = Snapshot {
+            context: self.context().clone(),
+            actor: self.actor(),
+            branch: self.branch().clone(),
+            cursor: self.cursor(),
+            readiness: self.readiness().clone(),
+            intentions: self.intentions().to_vec(),
+            travel: self.travel().cloned(),
+            has_control: self.has_control(),
+            state: Arc::clone(&self.session.picture),
+            history: self.session.history.clone(),
+        };
+        validate_reset_snapshot(&snapshot)?;
+        Ok(snapshot)
     }
 
     pub fn travel(&self) -> Option<&TravelStatus> {
-        self.snapshot.travel.as_ref()
+        self.session.authority.travel.as_ref()
     }
 
     pub fn intentions(&self) -> &[IntentionStatus] {
-        &self.snapshot.intentions
+        &self.session.authority.intentions
     }
 
     pub fn has_pending_intention(&self) -> bool {
@@ -269,8 +337,22 @@ impl ClientState {
 
     /// Published permissions can briefly lag their causing lifecycle/control
     /// updates. Block input during that boundary instead of inferring availability.
+    /// Whether the character can act now, independently of permission to
+    /// enqueue future work. Ordered pacing facts advance this even while the
+    /// displayed picture is stale; later pictures never rewind causal state.
+    pub fn character_ready(&self) -> bool {
+        self.session.authority.character_ready
+    }
+
     pub fn can_admit_intention(&self) -> bool {
-        self.readiness().admission && validate_readiness(self.readiness(), &self.snapshot).is_ok()
+        self.readiness().admission
+            && validate_readiness(
+                self.readiness(),
+                &self.session.authority.intentions,
+                self.travel(),
+                self.has_control(),
+            )
+            .is_ok()
     }
 
     /// Select queued work before independent preparation, regardless of delivery order.
@@ -302,7 +384,6 @@ impl ClientState {
         }
         let intention = self.permitted_sequence_intention()?.intention.clone();
         Some(self.command_request(Command::CancelIntention {
-            expected_revision: self.state().revision,
             intention,
             step: Some(step),
         }))
@@ -313,13 +394,16 @@ impl ClientState {
     }
 
     fn permitted_sequence_intention(&self) -> Option<&IntentionStatus> {
-        if validate_readiness(self.readiness(), &self.snapshot).is_err()
+        if validate_readiness(
+            self.readiness(),
+            &self.session.authority.intentions,
+            self.travel(),
+            self.has_control(),
+        )
+        .is_err()
             || !self
-                .state()
-                .observation
-                .combat
-                .as_ref()
-                .and_then(|combat| combat.sequence.as_ref())
+                .outcome_status()
+                .and_then(|status| status.sequence.as_ref())
                 .is_some_and(|sequence| sequence.completed > 0)
         {
             return None;
@@ -355,7 +439,14 @@ impl ClientState {
     }
 
     fn permitted_intention(&self, resume: bool) -> Option<&IntentionStatus> {
-        if validate_readiness(self.readiness(), &self.snapshot).is_err() {
+        if validate_readiness(
+            self.readiness(),
+            &self.session.authority.intentions,
+            self.travel(),
+            self.has_control(),
+        )
+        .is_err()
+        {
             return None;
         }
         let selected = self.intention_for_input()?;
@@ -372,15 +463,10 @@ impl ClientState {
 
     fn intention_request(&self, resume: bool) -> Option<Request> {
         let intention = self.permitted_intention(resume)?.intention.clone();
-        let expected_revision = self.state().revision;
         let command = if resume {
-            Command::ResumeIntention {
-                expected_revision,
-                intention,
-            }
+            Command::ResumeIntention { intention }
         } else {
             Command::CancelIntention {
-                expected_revision,
                 intention,
                 step: None,
             }
@@ -389,9 +475,14 @@ impl ClientState {
     }
 
     pub fn state(&self) -> &StateView {
-        &self.snapshot.state
+        &self.session.picture
     }
-    /// Latest observation's prose, derived only from disclosed facts. Not history.
+    /// Latest ordered status, independent of the age of the displayed picture.
+    pub fn outcome_status(&self) -> Option<&OutcomeStatusFacts> {
+        self.session.authority.outcome_status.as_ref()
+    }
+
+    /// Latest outcome prose; visual publication clears it without replaying it.
     pub fn narration(&self) -> &[String] {
         &self.narration
     }
@@ -400,10 +491,10 @@ impl ClientState {
         &self.narration_lines
     }
     pub fn history(&self) -> &[HistoryEntry] {
-        &self.snapshot.history.entries
+        &self.session.history.entries
     }
     pub fn older_before(&self) -> Option<&EntryId> {
-        self.snapshot.history.older_before.as_ref()
+        self.session.history.older_before.as_ref()
     }
     /// Capture at input construction, never restamp queued or retried commands.
     pub fn input_context(&self) -> InputContext {
@@ -416,7 +507,14 @@ impl ClientState {
     /// Capture the disclosed state at a reply boundary without modifying it.
     /// A receipt's original branch or actor is a separate operation identity.
     pub fn reply_context(&self) -> ReplyContext {
-        self.snapshot.reply_context()
+        ReplyContext {
+            input: self.input_context(),
+            actor: self.actor(),
+            branch: self.branch().clone(),
+            cursor: self.cursor(),
+            snapshot: self.state().snapshot.clone(),
+            revision: self.state().revision,
+        }
     }
 
     /// Replies name the complete currently disclosed boundary. Validation never
@@ -425,16 +523,17 @@ impl ClientState {
         if &context.input.stream != self.context() {
             return Err(StreamError::WrongStreamContext);
         }
-        if context.actor != self.snapshot.actor {
+        if context.actor != self.session.metadata.actor {
             return Err(StreamError::WrongActor);
         }
         if &context.branch != self.branch() {
             return Err(StreamError::WrongBranch);
         }
-        if context.cursor != self.snapshot.cursor {
+        if context.cursor != self.cursor() {
             return Err(StreamError::SequenceMismatch);
         }
-        if context.revision != self.state().revision
+        if context.snapshot != self.state().snapshot
+            || context.revision != self.state().revision
             || context.input.readiness_revision != self.readiness().revision
         {
             return Err(StreamError::InconsistentState);
@@ -451,37 +550,43 @@ impl ClientState {
     }
 
     pub fn readiness(&self) -> &Readiness {
-        &self.snapshot.readiness
+        &self.session.authority.readiness
     }
 
     pub fn has_control(&self) -> bool {
-        self.snapshot.has_control
+        self.session.authority.has_control
     }
     pub fn context(&self) -> &StreamContext {
-        &self.snapshot.context
+        &self.session.metadata.context
     }
 
     pub fn branch(&self) -> &BranchId {
-        &self.snapshot.branch
+        &self.session.metadata.branch
     }
+    /// Whether all disclosed picture changes have been materialized. Uses
+    /// stream ordering, not ticks: multiple semantic actions may share a tick.
+    pub fn observation_current(&self) -> bool {
+        self.observation_base.cursor.sequence >= self.last_visual_change
+    }
+
     pub fn observation_base(&self) -> ObservationBase {
-        self.observation_base
+        self.observation_base.clone()
     }
 
     pub fn cursor(&self) -> StreamCursor {
-        self.stream.cursor()
+        self.session.stream.cursor()
     }
 
     pub fn apply(&mut self, update: StreamUpdate) -> Result<(), StreamError> {
-        if update.context != self.snapshot.context {
+        if update.context != self.session.metadata.context {
             return Err(StreamError::WrongStreamContext);
         }
-        if update.branch != self.snapshot.branch {
+        if update.branch != self.session.metadata.branch {
             return Err(StreamError::WrongBranch);
         }
         // Validate ordering separately. Each payload arm completes all fallible
         // checks (including history validation) before publishing any changes.
-        let mut stream = self.stream.clone();
+        let mut stream = self.session.stream.clone();
         stream.accept(update.actor, update.cursor)?;
         let body = match update.body {
             UpdateBody::ObservationDelta { base, state, event } => {
@@ -491,7 +596,7 @@ impl ClientState {
                 UpdateBody::Observation {
                     state: Arc::new(
                         state
-                            .apply(&self.snapshot.state)
+                            .apply(&self.session.picture)
                             .map_err(|_| StreamError::InconsistentState)?,
                     ),
                     event,
@@ -500,35 +605,97 @@ impl ClientState {
             body => body,
         };
         match body {
+            UpdateBody::Outcome {
+                facts,
+                event,
+                visual_changed,
+            } => {
+                // Ordered outcomes advance semantic time independently of the
+                // last requested picture. Historical handles are not live input.
+                if facts.self_target != self.state().observation.self_target {
+                    return Err(StreamError::InconsistentState);
+                }
+                facts
+                    .validate_at(update.cursor.tick)
+                    .map_err(|_| StreamError::InconsistentState)?;
+                if let Some(entry) = event {
+                    if !matches!(
+                        entry.content,
+                        HistoryContent::Action { .. } | HistoryContent::PlaceRenamed { .. }
+                    ) {
+                        return Err(StreamError::InconsistentState);
+                    }
+                    self.remember(*entry, update.cursor.tick)?;
+                }
+                for fact in &facts.facts {
+                    if let tor_protocol::OutcomeFact::Pacing { ready } = fact {
+                        self.session.authority.character_ready = *ready;
+                    }
+                }
+                // Terminal outcomes intentionally omit ordinary pacing prose.
+                // Their semantic status still ends character readiness, without
+                // inventing the separately ordered input-permission update.
+                if facts
+                    .status
+                    .as_ref()
+                    .is_some_and(|status| status.dead || status.terminal)
+                {
+                    self.session.authority.character_ready = false;
+                }
+                self.session.authority.outcome_status = facts.status.clone();
+                if visual_changed {
+                    self.last_visual_change = update.cursor.sequence;
+                }
+                self.narration_lines = crate::narration::outcome_lines(&facts);
+                self.narration = self
+                    .narration_lines
+                    .iter()
+                    .map(|line| line.text.clone())
+                    .collect();
+            }
             UpdateBody::Readiness { readiness } => {
-                if update.cursor.tick != self.snapshot.state.observation.tick
-                    || self.snapshot.readiness.revision.checked_add(1) != Some(readiness.revision)
+                if update.cursor.tick != self.session.stream.cursor().tick
+                    || self.session.authority.readiness.revision.checked_add(1)
+                        != Some(readiness.revision)
                 {
                     return Err(StreamError::InconsistentState);
                 }
-                validate_readiness(&readiness, &self.snapshot)?;
-                self.snapshot.readiness = readiness;
+                validate_readiness(
+                    &readiness,
+                    &self.session.authority.intentions,
+                    self.travel(),
+                    self.has_control(),
+                )?;
+                if readiness.admission
+                    && self
+                        .outcome_status()
+                        .is_some_and(|status| status.dead || status.terminal)
+                {
+                    return Err(StreamError::InconsistentState);
+                }
+                self.session.authority.readiness = readiness;
             }
             UpdateBody::Intention { status } => {
-                if update.cursor.tick != self.snapshot.state.observation.tick
+                if update.cursor.tick != self.session.stream.cursor().tick
                     || !status.valid_context(update.actor, &update.branch)
                 {
                     return Err(StreamError::InconsistentState);
                 }
                 let previous = self
-                    .snapshot
+                    .session
+                    .authority
                     .intentions
                     .iter()
                     .position(|old| old.intention == status.intention);
                 if let Some(index) = previous {
-                    let old = &self.snapshot.intentions[index];
+                    let old = &self.session.authority.intentions[index];
                     if old.entry_id != status.entry_id || !status.phase.can_follow(old.phase) {
                         return Err(StreamError::InconsistentState);
                     }
                 } else if status.phase != IntentionPhase::Queued {
                     return Err(StreamError::InconsistentState);
                 }
-                let mut intentions = self.snapshot.intentions.clone();
+                let mut intentions = self.session.authority.intentions.clone();
                 if let Some(index) = previous {
                     if status.phase.active() {
                         intentions[index] = status;
@@ -539,14 +706,15 @@ impl ClientState {
                     intentions.push(status);
                 }
                 validate_intentions(&intentions, update.actor, &update.branch)?;
-                self.snapshot.intentions = intentions;
+                self.session.authority.intentions = intentions;
             }
             UpdateBody::Travel { status, entry } => {
-                if update.cursor.tick != self.snapshot.state.observation.tick {
+                if update.cursor.tick != self.session.stream.cursor().tick {
                     return Err(StreamError::InconsistentState);
                 }
                 if let Some(previous) = self
-                    .snapshot
+                    .session
+                    .authority
                     .travel
                     .as_ref()
                     .filter(|old| old.id == status.id)
@@ -569,7 +737,7 @@ impl ClientState {
                     }
                     self.remember(*entry, update.cursor.tick)?;
                 }
-                self.snapshot.travel = Some(status);
+                self.session.authority.travel = Some(status);
             }
             UpdateBody::Observation { state, event } => {
                 state
@@ -577,43 +745,28 @@ impl ClientState {
                     .map_err(|_| StreamError::InconsistentState)?;
                 if state.observation.actor != update.actor
                     || state.observation.tick != update.cursor.tick
-                    || state.revision <= self.snapshot.state.revision
+                    || state.revision <= self.session.picture.revision
+                    || state.snapshot == self.session.picture.snapshot
                 {
                     return Err(StreamError::InconsistentState);
                 }
-                let own_action = event.as_ref().and_then(|entry| match &entry.content {
-                    HistoryContent::Action { event, .. } => Some(event.as_ref().clone()),
-                    _ => None,
-                });
-                if let Some(entry) = event {
-                    if !matches!(
-                        entry.content,
-                        HistoryContent::Action { .. } | HistoryContent::PlaceRenamed { .. }
-                    ) {
-                        return Err(StreamError::InconsistentState);
-                    }
-                    self.remember(*entry, update.cursor.tick)?;
+                if event.is_some() {
+                    // Narration and history belong exclusively to ordered outcomes.
+                    return Err(StreamError::InconsistentState);
                 }
-                self.narration_lines = crate::narration::observation_lines(
-                    &self.snapshot.state.observation,
-                    &state.observation,
-                    own_action.as_ref(),
-                );
-                self.narration = self
-                    .narration_lines
-                    .iter()
-                    .map(|line| line.text.clone())
-                    .collect();
+                self.narration_lines.clear();
+                self.narration.clear();
                 self.observation_base = ObservationBase {
+                    snapshot: state.snapshot.clone(),
                     cursor: update.cursor,
                     revision: state.revision,
                 };
-                self.snapshot.state = state;
+                self.session.picture = state;
                 self.remember_view();
             }
             UpdateBody::ObservationDelta { .. } => unreachable!("expanded above"),
             UpdateBody::Annotation { entry } => {
-                if update.cursor.tick != self.snapshot.state.observation.tick
+                if update.cursor.tick != self.session.stream.cursor().tick
                     || !matches!(entry.content, HistoryContent::Annotation { .. })
                 {
                     return Err(StreamError::InconsistentState);
@@ -621,21 +774,25 @@ impl ClientState {
                 self.remember(*entry, update.cursor.tick)?;
             }
             UpdateBody::Control { has_control } => {
-                if update.cursor.tick != self.snapshot.state.observation.tick {
+                if update.cursor.tick != self.session.stream.cursor().tick {
                     return Err(StreamError::InconsistentState);
                 }
-                self.snapshot.has_control = has_control;
+                self.session.authority.has_control = has_control;
             }
         }
-        self.snapshot.cursor = update.cursor;
-        self.stream = stream;
+        self.session.stream = stream;
         Ok(())
     }
 
     fn remember(&mut self, entry: HistoryEntry, tick: u64) -> Result<(), StreamError> {
-        validate_entry(&entry, self.snapshot.actor, &self.snapshot.branch, tick)?;
+        validate_entry(
+            &entry,
+            self.session.metadata.actor,
+            &self.session.metadata.branch,
+            tick,
+        )?;
         if let Some(previous) = self
-            .snapshot
+            .session
             .history
             .entries
             .iter()
@@ -647,11 +804,11 @@ impl ClientState {
                 Err(StreamError::InconsistentState)
             };
         }
-        self.snapshot.history.entries.push(entry);
-        if self.snapshot.history.entries.len() > MAX_HISTORY_PAGE {
-            self.snapshot.history.entries.remove(0);
-            self.snapshot.history.older_before = self
-                .snapshot
+        self.session.history.entries.push(entry);
+        if self.session.history.entries.len() > MAX_HISTORY_PAGE {
+            self.session.history.entries.remove(0);
+            self.session.history.older_before = self
+                .session
                 .history
                 .entries
                 .first()
@@ -659,6 +816,48 @@ impl ClientState {
         }
         Ok(())
     }
+}
+
+fn validate_reset_snapshot(snapshot: &Snapshot) -> Result<(), StreamError> {
+    if !snapshot.context.is_valid() {
+        return Err(StreamError::WrongStreamContext);
+    }
+    validate_intentions(&snapshot.intentions, snapshot.actor, &snapshot.branch)?;
+    snapshot
+        .state
+        .validate()
+        .map_err(|_| StreamError::InconsistentState)?;
+    if snapshot.actor != snapshot.state.observation.actor
+        || snapshot.cursor.tick != snapshot.state.observation.tick
+    {
+        return Err(StreamError::InconsistentState);
+    }
+    for entry in &snapshot.history.entries {
+        validate_entry(
+            entry,
+            snapshot.actor,
+            &snapshot.branch,
+            snapshot.cursor.tick,
+        )?;
+    }
+    validate_readiness(
+        &snapshot.readiness,
+        &snapshot.intentions,
+        snapshot.travel.as_ref(),
+        snapshot.has_control,
+    )?;
+    // A full reset's picture and readiness share one authoritative boundary.
+    if snapshot.readiness.admission
+        && snapshot
+            .state
+            .observation
+            .combat
+            .as_ref()
+            .is_some_and(|combat| combat.dead || combat.terminal)
+    {
+        return Err(StreamError::InconsistentState);
+    }
+    Ok(())
 }
 
 fn validate_intentions(
@@ -704,33 +903,28 @@ fn validate_entry(
     Ok(())
 }
 
-fn validate_readiness(readiness: &Readiness, snapshot: &Snapshot) -> Result<(), StreamError> {
-    if (!snapshot.has_control
+fn validate_readiness(
+    readiness: &Readiness,
+    intentions: &[IntentionStatus],
+    travel: Option<&TravelStatus>,
+    has_control: bool,
+) -> Result<(), StreamError> {
+    // Readiness is input authority. A visual combat record may predate even a
+    // same-tick semantic action, so it cannot veto current admission.
+    if (!has_control
         && (readiness.admission || !readiness.resume.is_empty() || !readiness.cancel.is_empty()))
         || readiness.resume.len() > 2
         || readiness.cancel.len() > 2
         || (readiness.admission
-            && (snapshot
-                .intentions
-                .iter()
-                .any(|status| status.phase.pending())
-                || snapshot
-                    .travel
-                    .as_ref()
-                    .is_some_and(|travel| travel.phase == TravelPhase::Active)
-                || snapshot
-                    .state
-                    .observation
-                    .combat
-                    .as_ref()
-                    .is_some_and(|combat| combat.dead || combat.terminal)))
+            && (intentions.iter().any(|status| status.phase.pending())
+                || travel.is_some_and(|travel| travel.phase == TravelPhase::Active)))
     {
         return Err(StreamError::InconsistentState);
     }
     for (ids, resume) in [(&readiness.resume, true), (&readiness.cancel, false)] {
         for (index, id) in ids.iter().enumerate() {
             if ids[..index].contains(id)
-                || !snapshot.intentions.iter().any(|status| {
+                || !intentions.iter().any(|status| {
                     &status.intention == id
                         && if resume {
                             matches!(
@@ -747,4 +941,473 @@ fn validate_readiness(readiness: &Readiness, snapshot: &Snapshot) -> Result<(), 
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod outcome_stream_tests {
+    use super::*;
+
+    fn client() -> ClientState {
+        // Independent positive fixture: stream contracts must be testable before
+        // a newly versioned live recording is generated.
+        let actor = ActorId(1);
+        let observation = Observation {
+            charts: vec![],
+            self_appearance: None,
+            interactions: None,
+            combat: Some(CombatView {
+                own_stats: None,
+                hp: 10,
+                max_hp: 10,
+                preparation_remaining: None,
+                preparation_active: false,
+                sequence: None,
+                public_plan: None,
+                recovery_remaining: 0,
+                actors: vec![],
+                events: vec![],
+                objective: None,
+                exit: None,
+                victory: false,
+                dead: false,
+                terminal: false,
+            }),
+            motion: None,
+            places: vec![],
+            actor,
+            self_target: ActorTarget::from_digest([1; 32]),
+            linked_holds: vec![],
+            tick: 0,
+            position: Position { x: 0, y: 0, z: 0 },
+            visible_cells: vec![],
+            ground_items: vec![],
+            inventory: vec![],
+            visible_actors: vec![],
+            ready: true,
+        };
+        ClientState::from_snapshot(Snapshot {
+            context: StreamContext {
+                stream: StreamId("outcome-test-stream".into()),
+                epoch: 0,
+            },
+            readiness: Readiness {
+                revision: 0,
+                admission: true,
+                resume: vec![],
+                cancel: vec![],
+            },
+            intentions: vec![],
+            travel: None,
+            actor,
+            branch: BranchId("outcome-test-branch".into()),
+            cursor: StreamCursor {
+                sequence: 0,
+                tick: 0,
+            },
+            state: Arc::new(StateView {
+                snapshot: SnapshotId("outcome-test-initial".into()),
+                wizard_game: false,
+                revision: 1,
+                observation,
+            }),
+            has_control: true,
+            history: HistoryPage {
+                entries: vec![],
+                older_before: None,
+            },
+        })
+        .unwrap()
+    }
+
+    fn update(client: &ClientState, tick: u64, body: UpdateBody) -> StreamUpdate {
+        StreamUpdate {
+            context: client.context().clone(),
+            actor: client.actor(),
+            branch: client.branch().clone(),
+            cursor: StreamCursor {
+                sequence: client.cursor().sequence + 1,
+                tick,
+            },
+            body,
+        }
+    }
+
+    fn outcome(client: &ClientState) -> UpdateBody {
+        UpdateBody::Outcome {
+            facts: OutcomeFacts {
+                self_target: client.state().observation.self_target,
+                actor_names: vec![],
+                status: client.outcome_status().cloned(),
+                facts: vec![OutcomeFact::OwnAction {
+                    event: Event::Waited,
+                    name: None,
+                    underfoot: None,
+                    basic_attack: false,
+                }],
+            },
+            event: None,
+            visual_changed: true,
+        }
+    }
+
+    #[test]
+    fn causal_character_readiness_is_not_queue_admission_or_an_older_picture() {
+        let mut client = client();
+        assert!(client.character_ready());
+        assert!(client.can_admit_intention());
+        let mut body = outcome(&client);
+        let UpdateBody::Outcome { facts, .. } = &mut body else {
+            unreachable!()
+        };
+        facts.facts.push(OutcomeFact::Pacing { ready: false });
+        client.apply(update(&client, 1, body)).unwrap();
+        assert!(!client.character_ready());
+        assert!(
+            client.can_admit_intention(),
+            "explicit queued input remains permitted"
+        );
+        assert!(client.state().observation.ready, "picture can still be old");
+        let mut picture = client.state().clone();
+        picture.snapshot = SnapshotId("delayed-picture".into());
+        picture.revision += 1;
+        picture.observation.tick = 1;
+        client
+            .apply(update(
+                &client,
+                1,
+                UpdateBody::Observation {
+                    state: Arc::new(picture),
+                    event: None,
+                },
+            ))
+            .unwrap();
+        assert!(
+            !client.character_ready(),
+            "picture cannot overwrite causal pacing"
+        );
+        let mut body = outcome(&client);
+        let UpdateBody::Outcome { facts, .. } = &mut body else {
+            unreachable!()
+        };
+        facts.facts.push(OutcomeFact::Pacing { ready: true });
+        client.apply(update(&client, 2, body)).unwrap();
+        assert!(client.character_ready());
+    }
+
+    #[test]
+    fn terminal_status_without_pacing_ends_character_readiness_and_allows_current_reset() {
+        for dead in [false, true] {
+            let mut client = client();
+            let mut picture = client.state().clone();
+            picture.snapshot = SnapshotId("terminal-picture".into());
+            picture.revision += 1;
+            picture.observation.tick = 1;
+            picture.observation.ready = false;
+            let combat = picture.observation.combat.as_mut().unwrap();
+            combat.terminal = true;
+            combat.dead = dead;
+            combat.victory = !dead;
+            if dead {
+                combat.hp = 0;
+            }
+            let mut body = outcome(&client);
+            let UpdateBody::Outcome { facts, .. } = &mut body else {
+                unreachable!()
+            };
+            facts.status = Some(OutcomeStatusFacts::from(&*combat));
+            assert!(!facts
+                .facts
+                .iter()
+                .any(|fact| matches!(fact, OutcomeFact::Pacing { .. })));
+            client.apply(update(&client, 1, body)).unwrap();
+            assert!(!client.character_ready());
+            assert!(
+                client.readiness().admission,
+                "permissions retain their separate boundary"
+            );
+            client
+                .apply(update(
+                    &client,
+                    1,
+                    UpdateBody::Readiness {
+                        readiness: Readiness {
+                            revision: 1,
+                            admission: false,
+                            resume: vec![],
+                            cancel: vec![],
+                        },
+                    },
+                ))
+                .unwrap();
+            client
+                .apply(update(
+                    &client,
+                    1,
+                    UpdateBody::Observation {
+                        state: Arc::new(picture),
+                        event: None,
+                    },
+                ))
+                .unwrap();
+            assert!(client.reset_snapshot().is_ok());
+        }
+    }
+
+    #[test]
+    fn outcomes_advance_authority_without_a_picture_and_pictures_do_not_narrate() {
+        let mut client = client();
+        let visual = client.state().clone();
+        let base = client.observation_base();
+        let tick = client.cursor().tick + 1;
+        let mut body = outcome(&client);
+        let UpdateBody::Outcome { facts, .. } = &mut body else {
+            unreachable!()
+        };
+        let status = facts.status.as_mut().expect("combat fixture");
+        status.max_hp += 1;
+        let expected_status = facts.status.clone();
+        let first = update(&client, tick, body);
+        client.apply(first.clone()).unwrap();
+        assert_eq!(client.outcome_status(), expected_status.as_ref());
+        assert_eq!(client.state(), &visual);
+        assert_eq!(client.observation_base(), base);
+        assert!(!client.observation_current());
+        assert_eq!(client.cursor().tick, tick);
+        assert!(!client.narration_lines().is_empty());
+        let stable = client.clone();
+        assert_eq!(client.apply(first), Err(StreamError::SequenceMismatch));
+        assert_eq!(client, stable);
+        // Control/readiness belong to semantic time, not the old picture's tick.
+        client
+            .apply(update(
+                &client,
+                tick,
+                UpdateBody::Control {
+                    has_control: client.has_control(),
+                },
+            ))
+            .unwrap();
+        let mut readiness = client.readiness().clone();
+        readiness.revision += 1;
+        client
+            .apply(update(&client, tick, UpdateBody::Readiness { readiness }))
+            .unwrap();
+        let mut state = client.state().clone();
+        state.snapshot = SnapshotId("outcome-test-next".into());
+        state.revision += 1;
+        state.observation.tick = tick;
+        client
+            .apply(update(
+                &client,
+                tick,
+                UpdateBody::Observation {
+                    state: Arc::new(state),
+                    event: None,
+                },
+            ))
+            .unwrap();
+        assert!(client.narration_lines().is_empty());
+        assert!(client.narration().is_empty());
+        assert_eq!(client.state().observation.tick, tick);
+        assert_ne!(client.observation_base(), base);
+        assert!(client.observation_current());
+        assert_eq!(
+            client.outcome_status(),
+            expected_status.as_ref(),
+            "a visual publication cannot roll back ordered status"
+        );
+    }
+
+    #[test]
+    fn live_session_cannot_be_exported_as_a_stale_reset() {
+        let mut client = client();
+        let reset = client.reset_snapshot().unwrap();
+        assert_eq!(
+            ClientState::from_snapshot(reset).unwrap().session(),
+            client.session()
+        );
+        let picture = client.state().clone();
+        client
+            .apply(update(&client, client.cursor().tick + 1, outcome(&client)))
+            .unwrap();
+        assert_eq!(client.state(), &picture);
+        assert_eq!(client.reset_snapshot(), Err(StreamError::InconsistentState));
+        assert_eq!(client.reply_context().cursor, client.cursor());
+        assert_eq!(client.reply_context().snapshot, picture.snapshot);
+        let mut current_picture = picture;
+        current_picture.snapshot = SnapshotId("reset-export-current".into());
+        current_picture.revision += 1;
+        current_picture.observation.tick = client.cursor().tick;
+        client
+            .apply(update(
+                &client,
+                client.cursor().tick,
+                UpdateBody::Observation {
+                    state: Arc::new(current_picture),
+                    event: None,
+                },
+            ))
+            .unwrap();
+        assert_eq!(
+            ClientState::from_snapshot(client.reset_snapshot().unwrap())
+                .unwrap()
+                .session(),
+            client.session()
+        );
+    }
+
+    #[test]
+    fn sequence_cancellation_uses_current_outcome_not_stale_picture() {
+        let mut reset = client().reset_snapshot().unwrap();
+        let intention = IntentionId("sequence-owner".into());
+        reset.intentions.push(IntentionStatus {
+            actor: reset.actor,
+            branch: reset.branch.clone(),
+            intention: intention.clone(),
+            entry_id: EntryId("sequence-entry".into()),
+            phase: IntentionPhase::Started,
+        });
+        reset.readiness.admission = false;
+        reset.readiness.cancel.push(intention);
+        let mut client = ClientState::from_snapshot(reset).unwrap();
+        assert!(!client.can_cancel_sequence());
+        let mut body = outcome(&client);
+        let UpdateBody::Outcome { facts, .. } = &mut body else {
+            unreachable!()
+        };
+        let status = facts.status.as_mut().unwrap();
+        status.preparation_active = true;
+        status.preparation_remaining = Some(5);
+        status.sequence = Some(SequenceView {
+            completed: 1,
+            total: 3,
+            next_strike_remaining: 5,
+            cancel_recovery_remaining: 35,
+        });
+        facts.validate_at(client.cursor().tick + 1).unwrap();
+        client
+            .apply(update(&client, client.cursor().tick + 1, body))
+            .unwrap();
+        assert!(client
+            .state()
+            .observation
+            .combat
+            .as_ref()
+            .unwrap()
+            .sequence
+            .is_none());
+        assert!(client.can_cancel_sequence());
+        assert!(client
+            .cancel_intention_with_step_request(Direction::East)
+            .is_some());
+    }
+
+    #[test]
+    fn foreign_outcome_self_target_is_rejected_without_partial_publication() {
+        let mut client = client();
+        let before = client.clone();
+        let mut body = outcome(&client);
+        let UpdateBody::Outcome { facts, event, .. } = &mut body else {
+            unreachable!()
+        };
+        facts.self_target = ActorTarget::from_digest([2; 32]);
+        facts.validate_at(client.cursor().tick).unwrap();
+        *event = Some(Box::new(HistoryEntry {
+            id: EntryId("wrong-self-event".into()),
+            branch: client.branch().clone(),
+            actor: client.actor(),
+            tick: client.cursor().tick,
+            author: Author::Backend {
+                component: "test".into(),
+            },
+            audience: Audience::Actor,
+            content: HistoryContent::Action {
+                action: Action::Wait,
+                event: Box::new(Event::Waited),
+            },
+        }));
+        assert_eq!(
+            client.apply(update(&client, client.cursor().tick, body)),
+            Err(StreamError::InconsistentState)
+        );
+        assert_eq!(client, before);
+    }
+
+    #[test]
+    fn future_control_and_invalid_outcomes_do_not_advance_the_stream() {
+        let mut client = client();
+        let before = client.clone();
+        let tick = client.cursor().tick + 1;
+        assert_eq!(
+            client.apply(update(
+                &client,
+                tick,
+                UpdateBody::Control {
+                    has_control: client.has_control()
+                }
+            )),
+            Err(StreamError::InconsistentState)
+        );
+        assert_eq!(client, before);
+        let mut body = outcome(&client);
+        let UpdateBody::Outcome { facts, .. } = &mut body else {
+            unreachable!()
+        };
+        facts.actor_names.push(DisclosedActorName {
+            actor: facts.self_target,
+            name: "invalid self alias".into(),
+            asset: None,
+            current_disclosed_appearance: None,
+        });
+        assert_eq!(
+            client.apply(update(&client, tick, body)),
+            Err(StreamError::InconsistentState)
+        );
+        assert_eq!(client, before);
+    }
+
+    #[test]
+    fn visual_history_is_rejected_without_partial_publication() {
+        let mut client = client();
+        let before = client.clone();
+        let tick = client.cursor().tick;
+        let entry = HistoryEntry {
+            id: EntryId("outcome-only".into()),
+            branch: client.branch().clone(),
+            actor: client.actor(),
+            tick,
+            author: Author::Backend {
+                component: "test".into(),
+            },
+            audience: Audience::Actor,
+            content: HistoryContent::Action {
+                action: Action::Wait,
+                event: Box::new(Event::Waited),
+            },
+        };
+        let mut state = client.state().clone();
+        state.snapshot = SnapshotId("forbidden-visual-event".into());
+        state.revision += 1;
+        assert_eq!(
+            client.apply(update(
+                &client,
+                tick,
+                UpdateBody::Observation {
+                    state: Arc::new(state),
+                    event: Some(Box::new(entry.clone()))
+                }
+            )),
+            Err(StreamError::InconsistentState)
+        );
+        assert_eq!(client, before);
+        let mut body = outcome(&client);
+        let UpdateBody::Outcome { event, .. } = &mut body else {
+            unreachable!()
+        };
+        *event = Some(Box::new(entry));
+        client.apply(update(&client, tick, body)).unwrap();
+        assert_eq!(client.history().len(), 1);
+        assert!(!client.narration_lines().is_empty());
+        assert_eq!(client.state(), before.state());
+    }
 }

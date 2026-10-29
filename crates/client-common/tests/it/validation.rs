@@ -8,7 +8,7 @@ pub(super) fn snapshot(revision: u64) -> Snapshot {
         "context":{"stream":"3b7523b8-893a-4ea9-8b09-0a3887a7e6a1","epoch":"0"},
         "actor":"1","branch":"validation","cursor":{"sequence":"0","tick":revision.to_string()},
         "has_control":false,"intentions":[],"history":{"entries":[],"older_before":null},
-        "state":{"wizard_game":false,"revision":revision.to_string(),"observation":{
+        "state":{"snapshot":format!("fixture-{revision}"), "wizard_game":false,"revision":revision.to_string(),"observation":{
             "actor":"1","self_target":tor_protocol::ActorTarget::from_digest([1; 32]),"tick":revision.to_string(),"position":{"x":0,"y":0,"z":0},
             "places":[{"key":"here","name":"Here","origin":"authored"}],
             "visible_cells":[
@@ -185,7 +185,7 @@ fn readiness_is_ordered_independently_of_observation_revision_and_rejects_atomic
     assert_eq!(client.state().revision, 0);
     assert_eq!(client.observation_base().cursor.sequence, 0);
     assert_eq!(
-        serde_json::to_value(client.snapshot()).unwrap()["readiness"]["revision"],
+        serde_json::to_value(client.readiness()).unwrap()["revision"],
         "1"
     );
     let before = client.clone();
@@ -467,6 +467,53 @@ fn started_intention_can_suspend_resume_and_cancel_under_original_context() {
 }
 
 #[test]
+fn gameplay_request_context_is_independent_of_display_revision() {
+    let mut initial = snapshot(9);
+    initial.has_control = true;
+    Arc::make_mut(&mut initial.state).observation.ready = false;
+    initial.intentions = vec![IntentionStatus {
+        actor: initial.actor,
+        branch: initial.branch.clone(),
+        intention: IntentionId("retained".into()),
+        entry_id: EntryId("admission".into()),
+        phase: IntentionPhase::Suspended,
+    }];
+    initial.readiness.resume = vec![IntentionId("retained".into())];
+    initial.readiness.cancel = vec![IntentionId("retained".into())];
+    let original = ClientState::from_snapshot(initial.clone()).unwrap();
+    let before = [
+        original.command_request(Command::Act {
+            action: Action::Wait,
+        }),
+        original.resume_intention_request().unwrap(),
+        original.cancel_intention_request().unwrap(),
+    ];
+    Arc::make_mut(&mut initial.state).revision += 1;
+    let displayed = ClientState::from_snapshot(initial.clone()).unwrap();
+    let after = [
+        displayed.command_request(Command::Act {
+            action: Action::Wait,
+        }),
+        displayed.resume_intention_request().unwrap(),
+        displayed.cancel_intention_request().unwrap(),
+    ];
+    assert_ne!(original.state().revision, displayed.state().revision);
+    assert_eq!(
+        before, after,
+        "cosmetic/display numbering is not input authority"
+    );
+    initial.readiness.revision += 1;
+    let new_authority = ClientState::from_snapshot(initial).unwrap();
+    assert_ne!(displayed.input_context(), new_authority.input_context());
+    assert_ne!(
+        after[0],
+        new_authority.command_request(Command::Act {
+            action: Action::Wait
+        })
+    );
+}
+
+#[test]
 fn intention_controls_require_current_control_and_never_reuse_an_abandoned_context() {
     let mut initial = snapshot(9);
     initial.has_control = true;
@@ -483,7 +530,7 @@ fn intention_controls_require_current_control_and_never_reuse_an_abandoned_conte
     let mut client = ClientState::from_snapshot(initial.clone()).unwrap();
     assert!(
         matches!(client.resume_intention_request(), Some(Request::Command { branch, context: _, command:
-        Command::ResumeIntention { expected_revision: 9, intention } })
+        Command::ResumeIntention {  intention } })
         if branch == initial.branch && intention.0 == "original")
     );
     client
@@ -515,7 +562,7 @@ fn intention_controls_require_current_control_and_never_reuse_an_abandoned_conte
     assert!(client.resume_intention_request().is_none());
     assert!(
         matches!(client.cancel_intention_request(), Some(Request::Command { branch, context: _, command:
-        Command::CancelIntention { expected_revision: 11, intention, step: None } })
+        Command::CancelIntention {  intention, step: None } })
         if branch == replaced.branch && intention.0 == "new-work")
     );
     replaced.intentions[0].phase = IntentionPhase::Started;
@@ -793,7 +840,7 @@ fn delta_base_names_the_last_observation_not_an_intervening_control_message() {
         "context":client.context(), "actor":"1","branch":"validation",
         "cursor":{"sequence":"2","tick":"1"},
         "body":{"type":"observation_delta","state":delta,"event":null,
-            "base":{"cursor":{"sequence":"1","tick":"0"},"revision":"0"}}
+            "base":{"snapshot":"fixture-0","cursor":{"sequence":"1","tick":"0"},"revision":"0"}}
     });
     let before = client.clone();
     assert!(
@@ -823,6 +870,7 @@ fn reset_establishes_a_new_exact_observation_base_and_rejected_bases_are_atomic(
     let delta = StateDelta::between(client.state(), &snapshot(1).state).unwrap();
     for base in [
         ObservationBase {
+            snapshot: tor_protocol::SnapshotId("fixture-0".into()),
             cursor: StreamCursor {
                 sequence: 0,
                 tick: 0,
@@ -830,6 +878,7 @@ fn reset_establishes_a_new_exact_observation_base_and_rejected_bases_are_atomic(
             revision: 0,
         },
         ObservationBase {
+            snapshot: tor_protocol::SnapshotId("fixture-0".into()),
             cursor: StreamCursor {
                 sequence: 7,
                 tick: 1,
@@ -837,6 +886,7 @@ fn reset_establishes_a_new_exact_observation_base_and_rejected_bases_are_atomic(
             revision: 0,
         },
         ObservationBase {
+            snapshot: tor_protocol::SnapshotId("fixture-0".into()),
             cursor: StreamCursor {
                 sequence: 7,
                 tick: 0,
@@ -883,6 +933,7 @@ fn reset_establishes_a_new_exact_observation_base_and_rejected_bases_are_atomic(
     assert_eq!(
         client.observation_base(),
         ObservationBase {
+            snapshot: tor_protocol::SnapshotId("fixture-1".into()),
             cursor: StreamCursor {
                 sequence: 8,
                 tick: 1

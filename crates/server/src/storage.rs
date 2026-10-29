@@ -1828,7 +1828,7 @@ mod tests {
                     &format!("{index}"),
                     &engine.branch().clone(),
                     crate::journal::Command::Act {
-                        expected_revision: engine.revision(ActorId(1)).unwrap(),
+                        expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
                         action: Action::Wait,
                     },
                 )
@@ -2061,7 +2061,7 @@ mod tests {
                         "0",
                         &recovered.branch().clone(),
                         crate::journal::Command::Act {
-                            expected_revision: 0,
+                            expected_boundary: 0,
                             action: Action::Wait
                         }
                     )
@@ -2086,7 +2086,7 @@ mod tests {
 
     fn walk(engine: &mut Engine, direction: crate::journal::Direction, steps: usize) {
         for _ in 0..steps {
-            let revision = engine.revision(ActorId(1)).unwrap();
+            let revision = engine.causal_boundary(ActorId(1)).unwrap();
             let request = format!("walk-{direction:?}-{revision}");
             engine
                 .command(
@@ -2096,7 +2096,7 @@ mod tests {
                     &request,
                     &engine.branch().clone(),
                     crate::journal::Command::Act {
-                        expected_revision: revision,
+                        expected_boundary: revision,
                         action: Action::Move { direction },
                     },
                 )
@@ -2152,7 +2152,7 @@ mod tests {
                 "capture-fixture",
                 &engine.branch().clone(),
                 crate::journal::Command::Act {
-                    expected_revision: engine.revision(ActorId(1)).unwrap(),
+                    expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
                     action: crate::journal::Action::Wait,
                 },
             )
@@ -2263,9 +2263,10 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("queued-execution.db");
         let mut engine = capture_engine(&path);
+        engine.register_input_observer(ActorId(1)).unwrap();
         let branch = engine.branch().clone();
         let command = crate::journal::Command::AdmitIntention {
-            expected_revision: engine.revision(ActorId(1)).unwrap(),
+            expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
             action: crate::journal::Action::Move {
                 direction: crate::journal::Direction::East,
             },
@@ -2277,6 +2278,7 @@ mod tests {
         let store = engine.flush_handle().unwrap();
         let before = engine.state(ActorId(1)).unwrap();
         let counts = engine.profile_counts();
+        let input_generation = engine.input_generation(ActorId(1)).unwrap();
         let saved = store.status();
         store.0.shared.state.lock().unwrap().status.error = Some("injected worker failure".into());
         for _ in 0..2 {
@@ -2286,10 +2288,19 @@ mod tests {
             );
             assert_eq!(engine.state(ActorId(1)).unwrap(), before);
             assert_eq!(engine.profile_counts(), counts);
+            assert_eq!(
+                engine.input_generation(ActorId(1)).unwrap(),
+                input_generation,
+                "failed persistence cannot consume input authority"
+            );
             assert_eq!(store.status().accepted_sequence, saved.accepted_sequence);
         }
         store.0.shared.state.lock().unwrap().status.error = None;
         let executed = engine.execute_next_intention().unwrap().unwrap();
+        assert!(
+            engine.input_generation(ActorId(1)).unwrap() > input_generation,
+            "only the successfully admitted execution changes input authority"
+        );
         assert!(engine.execute_next_intention().unwrap().is_none());
         let after = engine.state(ActorId(1)).unwrap();
         assert_ne!(after, before);
@@ -2493,6 +2504,7 @@ mod tests {
             let mut failure = None;
             for step in 0..TO_HALL_4 {
                 let before = engine.state(ActorId(1)).unwrap();
+                let before_boundary = engine.causal_boundary(ActorId(1)).unwrap();
                 let history = engine.history(ActorId(1), "player", None, 100).unwrap();
                 engine.flush().unwrap();
                 let file = std::fs::read(&path).unwrap();
@@ -2503,7 +2515,7 @@ mod tests {
                     &format!("back-{step}"),
                     &engine.branch().clone(),
                     crate::journal::Command::Act {
-                        expected_revision: before.revision,
+                        expected_boundary: before_boundary,
                         action: Action::Move {
                             direction: crate::journal::Direction::West,
                         },

@@ -621,11 +621,199 @@ mod tests {
                 game.set_wall(at(4, 5, 4), wall).unwrap();
                 let scene = game.scene(ActorId(1)).unwrap();
                 assert_eq!(
+                    game.attack_available(ActorId(1), ActorId(2)),
+                    game.melee_reachable_in_scene(ActorId(1), ActorId(2), &scene)
+                );
+                assert_eq!(
                     game.melee_reachable_in_scene(ActorId(1), ActorId(2), &scene),
                     game.melee_contact_in_scene(ActorId(1), ActorId(2), &scene)
                         .reachable()
                 );
             }
         }
+    }
+
+    #[test]
+    fn retained_contact_geometry_keeps_life_combat_and_rejected_world_fresh() {
+        let game = fixture();
+        let source = ActorId(1);
+        let target = ActorId(2);
+        assert_attack_matches_fresh(&game, source, target, true);
+        for changed in [source, target] {
+            let mut candidate = game.clone();
+            let combat = candidate.actors.get_mut(&changed).unwrap().combat.take();
+            assert_attack_matches_fresh(&candidate, source, target, false);
+            candidate.actors.get_mut(&changed).unwrap().combat = combat;
+            assert_attack_matches_fresh(&candidate, source, target, true);
+            crate::test_creatures::injure(&mut candidate, changed, u32::MAX).unwrap();
+            assert_attack_matches_fresh(&candidate, source, target, false);
+            assert_attack_matches_fresh(&game, source, target, true);
+        }
+        let mut rejected = game.clone();
+        rejected.teleport(target, at(5, 5, 4)).unwrap();
+        assert_attack_matches_fresh(&rejected, source, target, true);
+        rejected.set_wall(at(5, 4, 4), true).unwrap();
+        assert_attack_matches_fresh(&rejected, source, target, false);
+        assert_attack_matches_fresh(&game, source, target, true);
+    }
+
+    #[test]
+    fn warm_contact_endpoints_reuse_source_geometry_but_resolve_live_target() {
+        let game = fixture();
+        let source = ActorId(1);
+        let target = ActorId(2);
+        assert!(
+            game.attack_available(source, target),
+            "adjacent living bodies"
+        );
+        let before = crate::diagnostics::work_counts();
+        for _ in 0..4 {
+            assert!(game.attack_available(source, target));
+        }
+        let after = crate::diagnostics::work_counts();
+        assert_eq!(
+            after.body_cells - before.body_cells,
+            4,
+            "only the current target body needs resolving after source geometry is witnessed"
+        );
+        assert_eq!(after.contact_route_probes - before.contact_route_probes, 0);
+    }
+
+    #[test]
+    fn warm_attack_available_reuses_scene_and_revalidates_contact() {
+        let game = fixture();
+        let actor = ActorId(1);
+        let target = ActorId(2);
+        let scene = game.scene(actor).unwrap();
+        assert!(game.attack_available_in_scene(actor, target, &scene));
+        let unchanged = game.clone();
+        let before = crate::diagnostics::work_counts();
+        let mut body_cells = before.body_cells;
+        for _ in 0..4 {
+            assert!(game.attack_available(actor, target));
+            let now = crate::diagnostics::work_counts();
+            assert!(
+                now.body_cells > body_cells,
+                "each query must revalidate live bodies"
+            );
+            body_cells = now.body_cells;
+        }
+        let after = crate::diagnostics::work_counts();
+        assert_eq!(game, unchanged);
+        assert_eq!(
+            after.ordinary_scenes - before.ordinary_scenes,
+            0,
+            "warm preparation reach checks must not force fresh ordinary scenes"
+        );
+        assert_eq!(
+            after.scene_cells_copied - before.scene_cells_copied,
+            0,
+            "shared geometry must not be cloned into reach-only queries"
+        );
+    }
+
+    // Ask the optimized entry point first. Building the forced-fresh oracle
+    // earlier would warm the shared cache and mask a stale-witness bug.
+    fn assert_attack_matches_fresh(game: &Game, source: ActorId, target: ActorId, expected: bool) {
+        let unchanged = game.clone();
+        let actual = game.attack_available(source, target);
+        let scene = game.scene(source).unwrap();
+        let fresh = game.attack_available_in_scene(source, target, &scene);
+        assert_eq!(fresh, expected, "independent contact fixture");
+        assert_eq!(actual, fresh, "cached geometry cannot change live reach");
+        assert_eq!(*game, unchanged);
+    }
+
+    #[test]
+    fn cached_attack_scene_revalidates_location_body_rotation_geometry_and_candidate_identity() {
+        let source = ActorId(1);
+        let target = ActorId(2);
+        let mut game = fixture();
+        assert_attack_matches_fresh(&game, source, target, true);
+        game.teleport(target, at(7, 4, 4)).unwrap();
+        assert_attack_matches_fresh(&game, source, target, false);
+        game.set_body(source, body(vec![[0, 0, 0], [1, 0, 0], [2, 0, 0]]))
+            .unwrap();
+        assert_attack_matches_fresh(&game, source, target, true);
+        let quarter_turn = (0..24)
+            .find(|&rotation| tor_world::rotate_vector(rotation, [1, 0, 0]) == [0, 1, 0])
+            .unwrap();
+        game.actors.get_mut(&source).unwrap().orientation = quarter_turn;
+        assert_attack_matches_fresh(&game, source, target, false);
+        game.set_body(source, body(vec![[0, 0, 0]])).unwrap();
+        game.teleport(source, at(6, 4, 4)).unwrap();
+        game.teleport(target, at(7, 5, 4)).unwrap();
+        assert_attack_matches_fresh(&game, source, target, true);
+        game.set_wall(at(7, 4, 4), true).unwrap();
+        assert_attack_matches_fresh(&game, source, target, false);
+        game.set_wall(at(7, 4, 4), false).unwrap();
+        assert_attack_matches_fresh(&game, source, target, true);
+
+        // A discarded candidate shares the derived cache, never its authority.
+        let mut discarded = game.clone();
+        discarded.teleport(source, at(1, 1, 4)).unwrap();
+        assert_attack_matches_fresh(&discarded, source, target, false);
+        assert_attack_matches_fresh(&game, source, target, true);
+        assert!(!game.attack_available(source, source));
+        assert!(!game.attack_available(source, ActorId(u64::MAX)));
+        assert!(!game.attack_available(ActorId(u64::MAX), target));
+    }
+
+    #[test]
+    fn cached_attack_scene_preserves_hidden_contact_and_rotated_portal_boundaries() {
+        use crate::perception::contract_fixtures as f;
+        use crate::perception::{ActorDisclosure, PerceptionValue};
+        let mut game = f::fixture(&[], &[PerceptionValue::Invisible { enabled: true }]);
+        assert_attack_matches_fresh(&game, f::OWNER, f::SUBJECT, true);
+        let contact = game.observe(f::OWNER).unwrap();
+        let target = contact
+            .visible_actors
+            .iter()
+            .find(|a| a.id == f::SUBJECT)
+            .unwrap();
+        assert_eq!(target.disclosure, ActorDisclosure::AnonymousContact);
+        assert!(target.name.is_empty() && target.asset.is_none());
+
+        game.teleport(f::OWNER, f::at(1, 8, 2)).unwrap();
+        game.teleport(f::SUBJECT, f::at(2, 2, 0)).unwrap();
+        assert_attack_matches_fresh(&game, f::OWNER, f::SUBJECT, false);
+        assert!(game
+            .observe(f::OWNER)
+            .unwrap()
+            .visible_actors
+            .iter()
+            .all(|a| a.id != f::SUBJECT));
+        let quarter_turn = (0..24)
+            .find(|&rotation| {
+                tor_world::rotate_vector(rotation, [1, 0, 0]) == [0, 1, 0]
+                    && tor_world::rotate_vector(rotation, [0, 1, 0]) == [-1, 0, 0]
+            })
+            .unwrap();
+        game.connect(
+            tor_world::Passage {
+                from: f::at(1, 8, 2),
+                direction: tor_world::Direction::East,
+                to: f::at(2, 2, 0),
+            },
+            quarter_turn,
+        )
+        .unwrap();
+        assert_attack_matches_fresh(&game, f::OWNER, f::SUBJECT, true);
+        let scene = game.scene(f::OWNER).unwrap();
+        assert!(scene.iter().any(|cell| {
+            cell.physical && cell.location == f::at(2, 2, 0) && cell.rotation == quarter_turn
+        }));
+        f::apply(&mut game, f::OWNER, "fixture_blind", 1000);
+        assert_attack_matches_fresh(&game, f::OWNER, f::SUBJECT, true);
+        let contact = game.observe(f::OWNER).unwrap();
+        let target = contact
+            .visible_actors
+            .iter()
+            .find(|a| a.id == f::SUBJECT)
+            .unwrap();
+        assert_eq!(target.disclosure, ActorDisclosure::AnonymousContact);
+        assert!(target.name.is_empty() && target.asset.is_none());
+        game.teleport(f::SUBJECT, f::at(2, 2, 4)).unwrap();
+        assert_attack_matches_fresh(&game, f::OWNER, f::SUBJECT, false);
     }
 }

@@ -47,7 +47,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "wait",
                 &engine.branch().clone(),
                 tor_server::journal::Command::Act {
-                    expected_revision: 0,
+                    expected_boundary: 0,
                     action: tor_server::journal::Action::Wait,
                 },
             )?;
@@ -74,7 +74,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "wait",
                 &durable.branch().clone(),
                 tor_server::journal::Command::Act {
-                    expected_revision: 0,
+                    expected_boundary: 0,
                     action: tor_server::journal::Action::Wait,
                 },
             )?;

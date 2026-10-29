@@ -47,7 +47,7 @@ fn app() -> App {
         "readiness":{"revision":"0","admission":true,"resume":[],"cancel":[]},
         "context":{"stream":"fixture-attachment","epoch":"0"},"actor":"1","branch":"test",
         "cursor":{"sequence":"0","tick":"0"},"has_control":true,"intentions":[],
-        "history":{"entries":[],"older_before":null},"state":{"wizard_game":false,"revision":"1","observation":view}
+        "history":{"entries":[],"older_before":null},"state":{"snapshot":"fixture-snapshot","wizard_game":false,"revision":"1","observation":view}
     })).unwrap();
     let mut app = App::default();
     app.set_state(ClientState::from_snapshot(snapshot).unwrap());
@@ -102,9 +102,9 @@ fn supply_purposes_preserve_the_diagnostic_json_shape() {
 #[test]
 fn phase5_supply_menu_defaults_to_carried_and_never_pays_locally() {
     let mut app = app();
-    let before = app.state.as_ref().unwrap().snapshot();
+    let before = app.state.as_ref().unwrap().session().clone();
     open(&mut app);
-    assert_eq!(app.state.as_ref().unwrap().snapshot(), before);
+    assert_eq!(app.state.as_ref().unwrap().session().clone(), before);
     assert!(app.supply_rows().join(" ").contains("25 active ticks"));
     assert!(app.supply_rows().join(" ").contains("1 Bandage"));
     assert!(matches!(
@@ -120,7 +120,7 @@ fn phase5_supply_menu_defaults_to_carried_and_never_pays_locally() {
             ..
         })
     ));
-    assert_eq!(app.state.as_ref().unwrap().snapshot(), before);
+    assert_eq!(app.state.as_ref().unwrap().session().clone(), before);
 }
 #[test]
 fn phase5_supply_menu_selects_exact_adjacent_ground_and_cancels_cleanly() {
@@ -144,7 +144,7 @@ fn phase5_supply_menu_selects_exact_adjacent_ground_and_cancels_cleanly() {
 #[test]
 fn phase5_supply_picker_bounds_exact_checked_rows_and_clears_on_revision_change() {
     let mut app = app();
-    let mut snapshot = app.state.as_ref().unwrap().snapshot();
+    let mut snapshot = app.state.as_ref().unwrap().reset_snapshot().unwrap();
     let view = &mut std::sync::Arc::make_mut(&mut snapshot.state).observation;
     let source = view.ground_items[0].clone();
     view.ground_items = (1..=33)
@@ -177,6 +177,10 @@ fn phase5_supply_picker_bounds_exact_checked_rows_and_clears_on_revision_change(
     assert_eq!(app.input(Input::Key { key: Key::Enter }), Effect::None);
     assert!(app.supply_selection.is_some());
     std::sync::Arc::make_mut(&mut snapshot.state).revision += 1;
+    std::sync::Arc::make_mut(&mut snapshot.state)
+        .snapshot
+        .0
+        .push_str("-next");
     app.set_state(ClientState::from_snapshot(snapshot).unwrap());
     assert!(app.supply_selection.is_none());
 }
@@ -196,7 +200,7 @@ fn ray_menu_selects_all_ten_directions_and_preserves_supply_selection_without_ta
         (Key::Descend, Direction::Down),
     ] {
         let mut app = app();
-        let mut snapshot = app.state.as_ref().unwrap().snapshot();
+        let mut snapshot = app.state.as_ref().unwrap().reset_snapshot().unwrap();
         let mut state = snapshot.state.as_ref().clone();
         let ability = &mut state
             .observation
@@ -214,7 +218,7 @@ fn ray_menu_selects_all_ten_directions_and_preserves_supply_selection_without_ta
         app.set_state(ClientState::from_snapshot(snapshot).unwrap());
         app.ready();
         app.messages.skip();
-        let before = app.state.as_ref().unwrap().snapshot();
+        let before = app.state.as_ref().unwrap().session().clone();
         assert_eq!(
             app.input(Input::Key {
                 key: Key::Abilities
@@ -234,12 +238,12 @@ fn ray_menu_selects_all_ten_directions_and_preserves_supply_selection_without_ta
             }, .. }, ..
         }) if selected == direction)
         );
-        assert_eq!(app.state.as_ref().unwrap().snapshot(), before);
+        assert_eq!(app.state.as_ref().unwrap().session().clone(), before);
     }
 }
 
 fn with_weapons(mut app: App, permitted: bool) -> App {
-    let mut snapshot = app.state.as_ref().unwrap().snapshot();
+    let mut snapshot = app.state.as_ref().unwrap().reset_snapshot().unwrap();
     let view = &mut std::sync::Arc::make_mut(&mut snapshot.state).observation;
     view.combat
         .as_mut()
@@ -310,7 +314,7 @@ fn select_secondary(app: &mut App) {
 #[test]
 fn weapon_picker_preserves_one_exact_action_through_supplies_without_local_payment() {
     let mut app = with_weapons(app(), true);
-    let before = app.state.as_ref().unwrap().snapshot();
+    let before = app.state.as_ref().unwrap().session().clone();
     assert_eq!(
         app.input(Input::Key {
             key: Key::Abilities
@@ -330,7 +334,7 @@ fn weapon_picker_preserves_one_exact_action_through_supplies_without_local_payme
             supplies: SupplySelection::Explicit { items }, ..
         }, .. }, ..
     }) if item == super::item_target(81) && items == vec![SelectedSupply { cost_ordinal: 0, item: super::item_target(4) }]));
-    assert_eq!(app.state.as_ref().unwrap().snapshot(), before);
+    assert_eq!(app.state.as_ref().unwrap().session().clone(), before);
     assert_eq!(app.selected_weapon, WeaponSelection::Default);
     assert!(app.supply_selection.is_none());
     assert!(app.weapon_selection.is_none());
@@ -381,7 +385,7 @@ fn weapon_selection_rejects_disappeared_or_moved_items_and_clears_on_new_observa
     select_secondary(&mut app);
     app.input(Input::Key { key: Key::Enter });
     assert!(app.supply_selection.is_some());
-    let mut snapshot = app.state.as_ref().unwrap().snapshot();
+    let mut snapshot = app.state.as_ref().unwrap().reset_snapshot().unwrap();
     std::sync::Arc::make_mut(&mut snapshot.state)
         .observation
         .interactions
@@ -403,7 +407,7 @@ fn weapon_selection_rejects_disappeared_or_moved_items_and_clears_on_new_observa
     app.input(Input::Key { key: Key::Tab });
     app.input(Input::Key { key: Key::Down });
     app.input(Input::Key { key: Key::Down });
-    let mut snapshot = app.state.as_ref().unwrap().snapshot();
+    let mut snapshot = app.state.as_ref().unwrap().reset_snapshot().unwrap();
     let observation = &mut std::sync::Arc::make_mut(&mut snapshot.state).observation;
     let removed = observation.inventory.pop().unwrap().id;
     observation
@@ -417,6 +421,10 @@ fn weapon_selection_rejects_disappeared_or_moved_items_and_clears_on_new_observa
     assert!(app.weapon_selection.is_some());
     assert_eq!(app.selected_weapon, WeaponSelection::Default);
     std::sync::Arc::make_mut(&mut snapshot.state).revision += 1;
+    std::sync::Arc::make_mut(&mut snapshot.state)
+        .snapshot
+        .0
+        .push_str("-next");
     app.set_state(ClientState::from_snapshot(snapshot).unwrap());
     assert!(app.weapon_selection.is_none());
     assert!(app.ability_choices.is_empty());
@@ -427,7 +435,7 @@ fn weapon_selection_rejects_disappeared_or_moved_items_and_clears_on_new_observa
 fn ordinary_attack_picker_emits_only_selected_or_default_weapon_action() {
     for explicit in [false, true] {
         let mut app = with_weapons(app(), true);
-        let mut snapshot = app.state.as_ref().unwrap().snapshot();
+        let mut snapshot = app.state.as_ref().unwrap().reset_snapshot().unwrap();
         std::sync::Arc::make_mut(&mut snapshot.state)
             .observation
             .combat
@@ -438,7 +446,7 @@ fn ordinary_attack_picker_emits_only_selected_or_default_weapon_action() {
             .unwrap()
             .abilities = vec![test_support::ability("basic_melee")];
         app.set_state(ClientState::from_snapshot(snapshot).unwrap());
-        let before = app.state.as_ref().unwrap().snapshot();
+        let before = app.state.as_ref().unwrap().session().clone();
         assert_eq!(app.input(Input::Key { key: Key::Attack }), Effect::None);
         if explicit {
             select_secondary(&mut app);
@@ -469,7 +477,7 @@ fn ordinary_attack_picker_emits_only_selected_or_default_weapon_action() {
         assert!(matches!(super::request(effect), Some(Request::Command {
             command: Command::Act { action: Action::UseAbility { id, invocation: AbilityInvocation { weapon, .. }, supplies: SupplySelection::Carried }, .. }, ..
         }) if id == "basic_melee" && weapon == expected));
-        assert_eq!(app.state.as_ref().unwrap().snapshot(), before);
+        assert_eq!(app.state.as_ref().unwrap().session().clone(), before);
         assert!(app.attack_targets.is_empty());
         assert_eq!(app.selected_weapon, WeaponSelection::Default);
     }
@@ -557,9 +565,13 @@ fn selected_preview_cancellation_mismatch_and_staleness_never_commit() {
             if failure == 1 {
                 assert_eq!(app.input(Input::Key { key: Key::Escape }), Effect::None);
             } else {
-                let mut snapshot = app.state.as_ref().unwrap().snapshot();
+                let mut snapshot = app.state.as_ref().unwrap().reset_snapshot().unwrap();
                 if failure == 2 {
                     std::sync::Arc::make_mut(&mut snapshot.state).revision += 1;
+                    std::sync::Arc::make_mut(&mut snapshot.state)
+                        .snapshot
+                        .0
+                        .push_str("-next");
                 } else {
                     snapshot.has_control = false;
                     snapshot.readiness.admission = false;
@@ -575,7 +587,7 @@ fn selected_preview_cancellation_mismatch_and_staleness_never_commit() {
 #[test]
 fn projectile_menu_queries_without_bogus_target_or_direction_selection() {
     let mut app = app();
-    let mut snapshot = app.state.as_ref().unwrap().snapshot();
+    let mut snapshot = app.state.as_ref().unwrap().reset_snapshot().unwrap();
     let view = &mut std::sync::Arc::make_mut(&mut snapshot.state).observation;
     let ability = &mut view
         .combat
@@ -591,7 +603,7 @@ fn projectile_menu_queries_without_bogus_target_or_direction_selection() {
     app.set_state(ClientState::from_snapshot(snapshot).unwrap());
     app.ready();
     app.messages.skip();
-    let before = app.state.as_ref().unwrap().snapshot();
+    let before = app.state.as_ref().unwrap().session().clone();
     assert_eq!(
         app.input(Input::Key {
             key: Key::Abilities
@@ -616,12 +628,12 @@ fn projectile_menu_queries_without_bogus_target_or_direction_selection() {
     assert!(app.attack_targets.is_empty());
     assert!(app.selected_ability.is_none());
     assert!(app.supply_selection.is_none());
-    assert_eq!(app.state.as_ref().unwrap().snapshot(), before);
+    assert_eq!(app.state.as_ref().unwrap().session().clone(), before);
 }
 
 fn projectile_app() -> App {
     let mut app = with_weapons(app(), false);
-    let mut snapshot = app.state.as_ref().unwrap().snapshot();
+    let mut snapshot = app.state.as_ref().unwrap().reset_snapshot().unwrap();
     let view = &mut std::sync::Arc::make_mut(&mut snapshot.state).observation;
     let ability = &mut view
         .combat
@@ -667,7 +679,7 @@ fn projectile_reply(
     id: &str,
 ) {
     app.bind_projectile_request(id).unwrap();
-    let context = app.state.as_ref().unwrap().snapshot().reply_context();
+    let context = app.state.as_ref().unwrap().reply_context();
     app.show_projectile_choices(
         &context,
         id,
@@ -691,7 +703,7 @@ fn projectile_throw() -> ProjectileChoice {
 #[test]
 fn projectile_throw_shows_server_terms_before_one_confirmed_exact_action() {
     let mut app = projectile_app();
-    let before = app.state.as_ref().unwrap().snapshot();
+    let before = app.state.as_ref().unwrap().session().clone();
     let query = projectile_open(&mut app);
     assert_eq!(
         app.input(Input::Key { key: Key::Enter }),
@@ -723,7 +735,7 @@ fn projectile_throw_shows_server_terms_before_one_confirmed_exact_action() {
         "cannot confirm before preview reply"
     );
     app.bind_weapon_preview("terms").unwrap();
-    let context = app.state.as_ref().unwrap().snapshot().reply_context();
+    let context = app.state.as_ref().unwrap().reply_context();
     app.show_weapon_preview(&context, "terms", &preview)
         .unwrap();
     app.ready();
@@ -749,7 +761,7 @@ fn projectile_throw_shows_server_terms_before_one_confirmed_exact_action() {
     );
     assert_eq!(app.input(Input::Key { key: Key::Enter }), Effect::None);
     assert!(app.weapon_confirmation.is_none());
-    assert_eq!(app.state.as_ref().unwrap().snapshot(), before);
+    assert_eq!(app.state.as_ref().unwrap().session().clone(), before);
 }
 #[test]
 fn projectile_launch_queries_exact_launcher_ammunition_then_direction_and_preview() {
@@ -810,7 +822,7 @@ fn projectile_empty_pages_are_navigable_and_cancelled_replies_never_reopen() {
     assert_eq!(previous, query);
     app.input(Input::Key { key: Key::Escape });
     assert!(app.projectile_selection.is_none());
-    let context = app.state.as_ref().unwrap().snapshot().reply_context();
+    let context = app.state.as_ref().unwrap().reply_context();
     app.bind_projectile_request("late").unwrap();
     app.show_projectile_choices(
         &context,
@@ -837,12 +849,12 @@ fn projectile_observation_equipment_control_and_ability_changes_clear_selection_
             if phase > 1 {
                 let preview = preview_reply(app.input(Input::Key { key: Key::Up }));
                 app.bind_weapon_preview("terms").unwrap();
-                let context = app.state.as_ref().unwrap().snapshot().reply_context();
+                let context = app.state.as_ref().unwrap().reply_context();
                 app.show_weapon_preview(&context, "terms", &preview)
                     .unwrap();
                 app.ready();
             }
-            let mut snapshot = app.state.as_ref().unwrap().snapshot();
+            let mut snapshot = app.state.as_ref().unwrap().reset_snapshot().unwrap();
             match change {
                 0 => {
                     snapshot.has_control = false;
@@ -850,7 +862,11 @@ fn projectile_observation_equipment_control_and_ability_changes_clear_selection_
                 }
                 1 => snapshot.branch.0.push('x'),
                 2 => snapshot.context.epoch += 1,
-                3 => std::sync::Arc::make_mut(&mut snapshot.state).revision += 1,
+                3 => {
+                    let state = std::sync::Arc::make_mut(&mut snapshot.state);
+                    state.revision += 1;
+                    state.snapshot.0.push_str("-next");
+                }
                 4 => {
                     let view = &mut std::sync::Arc::make_mut(&mut snapshot.state).observation;
                     view.inventory

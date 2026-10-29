@@ -20,7 +20,7 @@ fn snapshot(count: u8) -> Snapshot {
         "context":{"stream":"fixture-attachment","epoch":"0"},"actor":"1","branch":"holds",
         "cursor":{"sequence":"0","tick":"0"},"has_control":true,"intentions":[],
         "history":{"entries":[],"older_before":null},
-        "state":{"wizard_game":false,"revision":"1","observation":view}
+        "state":{"snapshot":"fixture-snapshot","wizard_game":false,"revision":"1","observation":view}
     }))
     .unwrap()
 }
@@ -38,16 +38,16 @@ fn key(app: &mut App, key: Key) -> Effect {
     app.input(Input::Key { key })
 }
 
-fn assert_escape(effect: Effect, hold: HoldTarget, revision: u64) {
+fn assert_escape(effect: Effect, hold: HoldTarget, expected_context: InputContext) {
     assert!(matches!(
         super::request(effect),
         Some(Request::Command {
+            context,
             command: Command::Act {
                 action: Action::Escape { hold: actual },
-                expected_revision,
             },
             ..
-        }) if actual == hold && expected_revision == revision
+        }) if actual == hold && context == expected_context
     ));
 }
 
@@ -55,12 +55,12 @@ fn assert_escape(effect: Effect, hold: HoldTarget, revision: u64) {
 fn hold_escape_requires_explicit_choice_and_dismissal_never_submits() {
     for dismiss in [Key::Escape, Key::EscapeHold] {
         let mut app = app(2);
-        let before = app.state.as_ref().unwrap().snapshot();
+        let before = app.state.as_ref().unwrap().session().clone();
         assert_eq!(key(&mut app, Key::EscapeHold), Effect::None);
         assert_eq!(app.hold_choices.len(), 2);
         assert_eq!(
             app.hold_choice_offers(),
-            before.state.observation.linked_holds
+            app.state.as_ref().unwrap().state().observation.linked_holds
         );
         assert_eq!(key(&mut app, Key::Wait), Effect::None);
         assert_eq!(app.input(Input::Click { x: 100, y: 200 }), Effect::None);
@@ -70,11 +70,11 @@ fn hold_escape_requires_explicit_choice_and_dismissal_never_submits() {
         assert!(app.hold_choices.is_empty());
         assert!(app.hold_choice_offers().is_empty());
         assert_eq!(key(&mut app, Key::Enter), Effect::None);
-        assert_eq!(app.state.as_ref().unwrap().snapshot(), before);
+        assert_eq!(app.state.as_ref().unwrap().session().clone(), before);
         assert!(!app.busy);
     }
     let mut app = app(2);
-    let before = app.state.as_ref().unwrap().snapshot();
+    let before = app.state.as_ref().unwrap().session().clone();
     assert_eq!(key(&mut app, Key::EscapeHold), Effect::None);
     assert_eq!(key(&mut app, Key::Up), Effect::None);
     assert_eq!(app.selected, 0);
@@ -82,21 +82,27 @@ fn hold_escape_requires_explicit_choice_and_dismissal_never_submits() {
         assert_eq!(key(&mut app, Key::Down), Effect::None);
     }
     assert_eq!(app.selected, 1);
-    assert_escape(key(&mut app, Key::Enter), target(2), 1);
+    let expected_context = app.state.as_ref().unwrap().input_context();
+    assert_escape(key(&mut app, Key::Enter), target(2), expected_context);
     assert!(app.hold_choices.is_empty());
-    assert_eq!(app.state.as_ref().unwrap().snapshot(), before);
+    assert_eq!(app.state.as_ref().unwrap().session().clone(), before);
     assert!(app.busy);
 }
 
 #[test]
 fn sole_hold_escape_is_exact_and_spectators_can_only_read_the_hold_rows() {
     let mut player = app(1);
-    assert_escape(key(&mut player, Key::EscapeHold), target(1), 1);
+    let expected_context = player.state.as_ref().unwrap().input_context();
+    assert_escape(
+        key(&mut player, Key::EscapeHold),
+        target(1),
+        expected_context,
+    );
     assert!(player.hold_choices.is_empty());
 
     let mut spectator = app(2);
     spectator.role = AccessRole::Spectator;
-    let before = spectator.state.as_ref().unwrap().snapshot();
+    let before = spectator.state.as_ref().unwrap().session().clone();
     let rows = spectator.hold_rows().join("\n");
     assert!(rows.contains("sentinel"));
     assert!(rows.contains("Unseen holder"));
@@ -108,7 +114,7 @@ fn sole_hold_escape_is_exact_and_spectators_can_only_read_the_hold_rows() {
         tor_client_ascii::status_lines(&spectator, spectator.state.as_ref().unwrap())[1]
             .contains("Held:2")
     );
-    assert_eq!(spectator.state.as_ref().unwrap().snapshot(), before);
+    assert_eq!(spectator.state.as_ref().unwrap().session().clone(), before);
     assert!(!spectator.busy);
     assert!(tor_client_ascii::HELP.iter().any(|row| row.contains("F11")));
 
@@ -125,10 +131,11 @@ fn refreshed_hold_offers_clear_selection_instead_of_rebinding_the_selected_index
         assert_eq!(key(&mut app, Key::EscapeHold), Effect::None);
         assert_eq!(key(&mut app, Key::Down), Effect::None);
         assert_eq!(app.hold_choices[app.selected].target, target(2));
-        let before = app.state.as_ref().unwrap().snapshot();
+        let before = app.state.as_ref().unwrap().reset_snapshot().unwrap();
         let mut changed = before.clone();
         let state = Arc::make_mut(&mut changed.state);
         state.revision += 1;
+        state.snapshot = tor_protocol::SnapshotId(format!("fixture-display-{}", state.revision));
         state.observation.linked_holds.reverse();
         if refresh != 0 {
             let body = if refresh == 1 {
@@ -139,6 +146,7 @@ fn refreshed_hold_offers_clear_selection_instead_of_rebinding_the_selected_index
             } else {
                 UpdateBody::ObservationDelta {
                     base: ObservationBase {
+                        snapshot: before.state.snapshot.clone(),
                         cursor: before.cursor,
                         revision: before.state.revision,
                     },
@@ -165,7 +173,8 @@ fn refreshed_hold_offers_clear_selection_instead_of_rebinding_the_selected_index
         app.messages.skip();
         assert_eq!(key(&mut app, Key::EscapeHold), Effect::None);
         assert_eq!(app.selected, 0);
-        assert_escape(key(&mut app, Key::Enter), target(2), 2);
+        let expected_context = app.state.as_ref().unwrap().input_context();
+        assert_escape(key(&mut app, Key::Enter), target(2), expected_context);
     }
 }
 
@@ -174,7 +183,7 @@ fn snapshot_reset_clears_hold_selection_even_when_observation_revision_is_unchan
     let mut app = app(2);
     assert_eq!(key(&mut app, Key::EscapeHold), Effect::None);
     assert_eq!(key(&mut app, Key::Down), Effect::None);
-    let mut reset = app.state.as_ref().unwrap().snapshot();
+    let mut reset = app.state.as_ref().unwrap().reset_snapshot().unwrap();
     reset.context.epoch += 1;
     let mut invalid = reset.clone();
     invalid.actor = ActorId(99);
@@ -205,7 +214,7 @@ fn hold_escape_checks_connection_busy_control_and_current_admission() {
 
     let mut app = self::app(2);
     assert_eq!(key(&mut app, Key::EscapeHold), Effect::None);
-    let current = app.state.as_ref().unwrap().snapshot();
+    let current = app.state.as_ref().unwrap().reset_snapshot().unwrap();
     app.update(StreamUpdate {
         context: current.context,
         actor: current.actor,
@@ -229,7 +238,7 @@ fn hold_escape_checks_connection_busy_control_and_current_admission() {
     assert!(!app.busy);
     let mut app = self::app(2);
     assert_eq!(key(&mut app, Key::EscapeHold), Effect::None);
-    let current = app.state.as_ref().unwrap().snapshot();
+    let current = app.state.as_ref().unwrap().reset_snapshot().unwrap();
     app.update(StreamUpdate {
         context: current.context,
         actor: current.actor,
@@ -266,7 +275,8 @@ fn hold_escape_modal_draws_the_selected_row_and_scrolls_with_long_offers() {
     canvas.draw(&app);
     assert_ne!(canvas.pixels, first);
     assert_eq!(app.selected, 31);
-    assert_escape(key(&mut app, Key::Enter), target(32), 1);
+    let expected_context = app.state.as_ref().unwrap().input_context();
+    assert_escape(key(&mut app, Key::Enter), target(32), expected_context);
 }
 
 #[test]

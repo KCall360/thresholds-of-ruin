@@ -26,11 +26,11 @@ class ItemProcesses(ProcessTestCase):
         initial = p.until(lambda s: s == 'Ready.')
         self.assertNotIn('potion of healing', initial)
         self.assertIn('Which item', p.command('take 3 arrows'))
-        self.assertIn('Taken', p.command(f"take 3 #{arrows['10']}"))
-        self.assertIn('Taken', p.command(f"take #{arrows['5']}"))
+        self.assertIn('You pick up 3 x arrow.', p.command(f"take 3 #{arrows['10']}"))
+        self.assertIn('You pick up 5 x arrow.', p.command(f"take #{arrows['5']}"))
         self.assertIn('8 x arrow', p.command('inventory'))
         held = self.request(probe, {'type': 'snapshot'})['state']['observation']['inventory'][0]['id']
-        self.assertIn('Dropped', p.command(f'drop 2 #{held}'))
+        self.assertIn('You drop 2 x arrow.', p.command(f'drop 2 #{held}'))
         self.assertIn('6 x arrow', p.command('inventory'))
         self.assertIn('InvalidAction', p.command(f'drop 99 #{held}'))
         p.command('save'); p.stop(); probe.stop(); self.game.stop(); self.start()
@@ -68,7 +68,7 @@ class ItemProcesses(ProcessTestCase):
             self.assertIsNone(effects[0]["receipt"])
         player.stop(); self.game.stop(); self.start()
         _, restored = self.client()
-        self.assertEqual(restored["state"], taken["state"])
+        self.assertDisclosedStateEqual(restored["state"], taken["state"])
         self.assertEqual(restored["intentions"], [])
 
     @non_graphical

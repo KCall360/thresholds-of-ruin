@@ -33,6 +33,10 @@ pub struct CollectionEdit<T> {
 /// A state view expressed as cell changes and exact ordered collection edits.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StateDelta {
+    /// Exact visual allocation this delta was derived from, independent of revisions.
+    pub base_snapshot: SnapshotId,
+    /// Destination visual identity, retained exactly after reconstruction.
+    pub snapshot: SnapshotId,
     #[serde(deserialize_with = "crate::chart_pages::read_summaries")]
     pub charts: Vec<crate::chart_pages::ChartSummary>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -137,7 +141,10 @@ impl StateDelta {
     /// Changes from `base` to `next`, or `None` when a delta cannot represent
     /// `next` exactly. Encoded-message size selection is a separate boundary.
     pub fn between(base: &StateView, next: &StateView) -> Option<Self> {
-        if base.observation.self_target != next.observation.self_target {
+        if !base.snapshot.is_valid()
+            || !next.snapshot.is_valid()
+            || base.observation.self_target != next.observation.self_target
+        {
             return None;
         }
         let old = &base.observation.visible_cells;
@@ -207,6 +214,8 @@ impl StateDelta {
         // Shifting preserves order, so the merge above saw both lists sorted.
         let observation = &next.observation;
         Some(Self {
+            base_snapshot: base.snapshot.clone(),
+            snapshot: next.snapshot.clone(),
             self_appearance: observation.self_appearance.clone(),
             interactions: observation.interactions.clone(),
             base_revision: base.revision,
@@ -249,10 +258,12 @@ impl StateDelta {
 
     /// The full state this delta describes. Fails without partial effects.
     pub fn apply(self, base: &StateView) -> Result<StateView, DeltaError> {
-        if base.revision != self.base_revision {
+        if base.revision != self.base_revision || base.snapshot != self.base_snapshot {
             return Err(DeltaError::WrongBase);
         }
-        if crate::chart_pages::validate_summaries(&self.charts).is_err()
+        if !self.snapshot.is_valid()
+            || !self.base_snapshot.is_valid()
+            || crate::chart_pages::validate_summaries(&self.charts).is_err()
             || self.self_target != base.observation.self_target
             || self.combat.as_ref().is_some_and(|combat| {
                 !combat.valid_sequence()
@@ -303,6 +314,7 @@ impl StateDelta {
             return Err(DeltaError::InvalidChange);
         }
         Ok(StateView {
+            snapshot: self.snapshot,
             wizard_game: self.wizard_game,
             revision: self.revision,
             observation: Observation {

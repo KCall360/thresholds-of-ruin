@@ -258,7 +258,7 @@ class RogueCarrierProcesses(ProcessTestCase):
         shutil.rmtree(package)
         server = self.server("--checkpoint-interval", 1, scenario=unrelated_fallback(self), seed=None)
         player, restored = self.client()
-        self.assertEqual(restored["state"], before_restart["state"])
+        self.assertDisclosedStateEqual(restored["state"], before_restart["state"])
         self.assertEqual(restored["history"], before_restart["history"])
         self.assertEqual(checkpoint(self, player), killed)
         self.assertEqual(self.private_receipts(), receipts)

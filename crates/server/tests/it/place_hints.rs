@@ -12,7 +12,7 @@ fn setup(
         engine,
         ActorId(1),
         &tor_protocol::Command::Wizard {
-            expected_revision: engine.revision(ActorId(1)).unwrap(),
+            expected_revision: 0,
             operation: operation.into(),
         },
     )?;
@@ -46,10 +46,12 @@ fn durable_places_are_disclosed_once_renamed_freely_replayed_and_rewound() {
     .unwrap();
     engine.enable_wizard().unwrap();
     let initial = engine.state(ActorId(1)).unwrap();
+    let initial_boundary = engine.causal_boundary(ActorId(1)).unwrap();
     assert_eq!(initial.observation.places.len(), 2);
     let place = initial.observation.places[0].clone();
     let command = Command::RenamePlace {
-        expected_revision: initial.revision,
+        display_basis: None,
+        expected_boundary: initial_boundary,
         key: place.key.clone(),
         name: "Hearth of Echoes".into(),
     };
@@ -71,8 +73,13 @@ fn durable_places_are_disclosed_once_renamed_freely_replayed_and_rewound() {
             .duplicate
     );
     let state = engine.state(ActorId(1)).unwrap();
+    let state_boundary = engine.causal_boundary(ActorId(1)).unwrap();
     assert_eq!(state.observation.tick, initial.observation.tick);
-    assert_eq!(state.revision, initial.revision + 1);
+    assert_eq!(state_boundary, initial_boundary + 1);
+    assert_eq!(
+        state.revision, 0,
+        "Engine views do not issue display generations"
+    );
     assert_eq!(state.observation.places[0].name, "Hearth of Echoes");
     for (id, key, name) in [
         ("unknown", "unseen", "Name"),
@@ -86,7 +93,8 @@ fn durable_places_are_disclosed_once_renamed_freely_replayed_and_rewound() {
             id,
             &branch,
             Command::RenamePlace {
-                expected_revision: state.revision,
+                display_basis: None,
+                expected_boundary: state_boundary,
                 key: key.into(),
                 name: name.into(),
             },

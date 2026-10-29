@@ -1,4 +1,6 @@
 //! Items workload v1. Timed phases exclude JSON reporting and authored setup.
+#[path = "support/benchmark_display.rs"]
+mod benchmark_display;
 use std::{path::Path, time::Instant};
 use tor_protocol::ActorId;
 use tor_server::journal::Action;
@@ -60,7 +62,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "identify",
                 &branch,
                 Command::Wizard {
-                    expected_revision: 0,
+                    display_basis: None,
+                    expected_boundary: 0,
                     operation: tor_server::journal::WizardOperation::IdentifyItem {
                         actor,
                         item: identities - 1,
@@ -101,6 +104,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let before = tor_simulation::diagnostics::work_counts();
             let mut transfer_ms = Vec::new();
             let mut client_apply_ms = Vec::new();
+            let mut outcome_apply_ms = Vec::new();
             let mut client_render_ms = Vec::new();
             for turn in 0..20 {
                 let action = if turn % 2 == 0 {
@@ -117,7 +121,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         },
                     )?
                 };
-                let revision = engine.revision(actor).unwrap();
+                let before = engine.state(actor)?;
+                let before_stamp =
+                    engine.event_history_boundary_at(&engine.presentation_boundary())?;
+                let revision = engine.causal_boundary(actor).unwrap();
                 let branch = engine.branch().clone();
                 let start = Instant::now();
                 let result = engine.command(
@@ -127,33 +134,58 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     &format!("{turn}"),
                     &branch,
                     Command::Act {
-                        expected_revision: revision,
+                        expected_boundary: revision,
                         action,
                     },
                 )?;
                 transfer_ms.push(start.elapsed().as_secs_f64() * 1000.);
-                let state = engine.state(actor)?;
+                let mut state =
+                    engine.state_at(&engine.presentation_boundary(), actor, turn + 1)?;
+                state.snapshot = tor_protocol::SnapshotId(format!("item-picture-{turn}"));
+                let expected_history = engine
+                    .disclose_entry(&result.entry)
+                    .expect("completed command has history");
+                let outcome = tor_protocol::StreamUpdate {
+                    context: fixture_context(),
+                    actor,
+                    branch: branch.clone(),
+                    cursor: tor_protocol::StreamCursor {
+                        sequence: turn * 2 + 1,
+                        tick: state.observation.tick,
+                    },
+                    body: benchmark_display::outcome(
+                        &before.observation,
+                        &state.observation,
+                        before_stamp,
+                        engine.event_history_boundary_at(&engine.presentation_boundary())?,
+                        Some(expected_history.clone()),
+                    ),
+                };
+                let start = Instant::now();
+                app.update(outcome)
+                    .map_err(|e| format!("Client outcome: {e:?}"))?;
+                outcome_apply_ms.push(start.elapsed().as_secs_f64() * 1000.);
                 let update = tor_protocol::StreamUpdate {
                     context: fixture_context(),
                     actor,
                     branch: branch.clone(),
                     cursor: tor_protocol::StreamCursor {
-                        sequence: turn + 1,
+                        sequence: turn * 2 + 2,
                         tick: state.observation.tick,
                     },
                     body: tor_protocol::UpdateBody::Observation {
                         state: state.into(),
-                        event: Some(Box::new(
-                            engine
-                                .disclose_entry(&result.entry)
-                                .expect("completed command has history"),
-                        )),
+                        event: None,
                     },
                 };
                 let start = Instant::now();
                 app.update(update)
                     .map_err(|e| format!("Client update: {e:?}"))?;
                 client_apply_ms.push(start.elapsed().as_secs_f64() * 1000.);
+                assert_eq!(
+                    app.state.as_ref().unwrap().history().last(),
+                    Some(&expected_history)
+                );
                 let start = Instant::now();
                 canvas.draw(std::hint::black_box(&app));
                 std::hint::black_box(&canvas.pixels);
@@ -175,7 +207,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "take",
                 &durable.branch().clone(),
                 Command::Act {
-                    expected_revision: 0,
+                    expected_boundary: 0,
                     action: Action::Take {
                         item: 1,
                         quantity: Some(1),
@@ -197,7 +229,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 serde_json::json!({"workload_version":1,"items":items,"identities":identities,
                 "sample":sample,"transfers":20,"construction_ms":construction_ms,"transfer_ms":transfer_ms,
                 "knowledge_ms":knowledge_ms,
-                "client_apply_ms":client_apply_ms,"client_render_ms":client_render_ms,
+                "client_apply_ms":client_apply_ms,"outcome_apply_ms":outcome_apply_ms,"client_render_ms":client_render_ms,
                 "observations":after.observations-before.observations,"scenes":after.scenes-before.scenes,
                 "item_candidates":after.item_candidates-before.item_candidates,"stack_candidates":after.stack_candidates-before.stack_candidates,
                 "knowledge_checks":after.knowledge_checks-before.knowledge_checks,

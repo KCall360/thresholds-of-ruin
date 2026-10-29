@@ -278,7 +278,7 @@ value = { id = "fixture.scared", family = "fixture.scared", name = "Scared", lif
         denied = self.act(easy, {"type": "wait"})
         self.assertIsNotNone(denied["error"])
         after_denial = self.snapshot(easy)
-        self.assertEqual(after_denial["state"], before_denial["state"])
+        self.assertDisclosedStateEqual(after_denial["state"], before_denial["state"])
         self.assertEqual(after_denial["intentions"], before_denial["intentions"])
         self.assertIsNotNone(self.shown_condition(easy, "fixture.held"))
         self.control_attack(owner, [easy, hard], "willing subject")

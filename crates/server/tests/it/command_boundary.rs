@@ -2,7 +2,10 @@ use tor_protocol::{
     Action, ActorId, Anchor, AnnotationCategory, Audience, ClientSource, Direction,
 };
 use tor_server::journal::{Command, WizardOperation};
-use tor_server::{wire_adapter::DecodedCommand, Engine, Scenario};
+use tor_server::{
+    wire_adapter::{DecodedCommand, DisplayCommand},
+    Engine, Scenario,
+};
 
 #[test]
 fn ordinary_commands_preserve_every_payload_at_the_wire_boundary() {
@@ -65,12 +68,14 @@ fn ordinary_commands_preserve_every_payload_at_the_wire_boundary() {
             },
         },
         Wire::ResumeIntention {
-            expected_revision: u64::MAX,
             intention: tor_protocol::IntentionId("original-admission".into()),
         },
         Wire::CancelIntention {
             step: None,
-            expected_revision: u64::MAX,
+            intention: tor_protocol::IntentionId("original-admission".into()),
+        },
+        Wire::CancelIntention {
+            step: Some(Direction::NorthEast),
             intention: tor_protocol::IntentionId("original-admission".into()),
         },
         Wire::RenamePlace {
@@ -125,13 +130,12 @@ fn ordinary_commands_preserve_every_payload_at_the_wire_boundary() {
         },
         Action::Wait,
     ] {
-        commands.push(Wire::Act {
-            expected_revision: u64::MAX,
-            action,
-        });
+        commands.push(Wire::Act { action });
     }
     for anchor in [
-        Anchor::State { revision: u64::MAX },
+        Anchor::State {
+            snapshot: tor_protocol::SnapshotId("opaque-issued-state".into()),
+        },
         Anchor::Entry {
             id: tor_protocol::EntryId("opaque-entry".into()),
         },
@@ -158,6 +162,24 @@ fn ordinary_commands_preserve_every_payload_at_the_wire_boundary() {
         let backend = tor_server::wire_adapter::decode_command(&wire).unwrap();
         let reconstructed = match backend {
             DecodedCommand::Backend(command) => engine.encode_command(ActorId(1), command).unwrap(),
+            DecodedCommand::Display {
+                expected_revision,
+                operation,
+            } => match operation {
+                DisplayCommand::RenamePlace { key, name } => Wire::RenamePlace {
+                    expected_revision,
+                    key,
+                    name,
+                },
+                DisplayCommand::Travel { destination } => Wire::Travel {
+                    expected_revision,
+                    destination,
+                },
+                DisplayCommand::Wizard { operation } => Wire::Wizard {
+                    expected_revision,
+                    operation: serde_json::to_string(&operation).unwrap(),
+                },
+            },
             DecodedCommand::ProjectileChoices {
                 expected_revision,
                 query,
@@ -179,12 +201,13 @@ fn ordinary_commands_preserve_every_payload_at_the_wire_boundary() {
             | DecodedCommand::CombatDiagnostics { .. } => {
                 panic!("read-only query is not a journal command")
             }
-            DecodedCommand::Gameplay {
-                expected_revision,
-                action,
-            } => Wire::Act {
-                expected_revision,
-                action,
+            DecodedCommand::Gameplay { action } => Wire::Act { action },
+            DecodedCommand::ResumeIntention { admission } => Wire::ResumeIntention {
+                intention: tor_protocol::IntentionId(admission.0),
+            },
+            DecodedCommand::CancelIntention { admission, step } => Wire::CancelIntention {
+                intention: tor_protocol::IntentionId(admission.0),
+                step,
             },
         };
         assert_eq!(reconstructed, wire);
@@ -195,7 +218,6 @@ fn ordinary_commands_preserve_every_payload_at_the_wire_boundary() {
 fn fresh_gameplay_resolves_to_admission_and_developer_spelling_is_normalized() {
     let engine = Engine::memory(Scenario::two_room(42)).unwrap();
     let wire = tor_protocol::Command::Act {
-        expected_revision: 0,
         action: Action::Wait,
     };
     assert_eq!(
@@ -207,7 +229,7 @@ fn fresh_gameplay_resolves_to_admission_and_developer_spelling_is_normalized() {
             )
             .unwrap(),
         Command::AdmitIntention {
-            expected_revision: 0,
+            expected_boundary: 0,
             action: tor_server::journal::Action::Wait,
         }
     );
@@ -232,7 +254,8 @@ fn fresh_gameplay_resolves_to_admission_and_developer_spelling_is_normalized() {
 fn developer_commands_are_parsed_and_backend_only_commands_stay_private() {
     let engine = Engine::memory(Scenario::two_room(42)).unwrap();
     let backend = Command::Wizard {
-        expected_revision: u64::MAX,
+        display_basis: None,
+        expected_boundary: u64::MAX,
         operation: WizardOperation::SetGravity {
             region: u64::MAX,
             vector: [0, 0, -1],
@@ -241,7 +264,15 @@ fn developer_commands_are_parsed_and_backend_only_commands_stay_private() {
     let wire = engine.encode_command(ActorId(1), backend.clone()).unwrap();
     assert_eq!(
         tor_server::wire_adapter::decode_command(&wire).unwrap(),
-        DecodedCommand::Backend(backend)
+        DecodedCommand::Display {
+            expected_revision: u64::MAX,
+            operation: DisplayCommand::Wizard {
+                operation: WizardOperation::SetGravity {
+                    region: u64::MAX,
+                    vector: [0, 0, -1],
+                },
+            },
+        }
     );
     assert!(
         tor_server::wire_adapter::decode_command(&tor_protocol::Command::Wizard {
@@ -273,7 +304,7 @@ fn backend_actions_use_independent_types_and_numeric_save_payloads() {
         supplies: Default::default(),
     };
     let command = Command::AdmitIntention {
-        expected_revision: u64::MAX,
+        expected_boundary: u64::MAX,
         action,
     };
     let stored = serde_json::to_value(&command).unwrap();
@@ -305,6 +336,7 @@ fn backend_actions_use_independent_types_and_numeric_save_payloads() {
 fn readonly_creature_query_cannot_be_resolved_into_a_journal_command() {
     let engine = Engine::memory(Scenario::two_room(42)).unwrap();
     let before = engine.state(ActorId(1)).unwrap();
+    let before_boundary = engine.causal_boundary(ActorId(1)).unwrap();
     let query = tor_server::wire_adapter::decode_command(&tor_protocol::Command::Wizard {
         expected_revision: before.revision,
         operation: "creature inspect 999".into(),
@@ -319,7 +351,8 @@ fn readonly_creature_query_cannot_be_resolved_into_a_journal_command() {
     ));
     assert!(!query.matches(
         &Command::Wizard {
-            expected_revision: before.revision,
+            display_basis: None,
+            expected_boundary: before_boundary,
             operation: WizardOperation::Rewind { target: None }
         },
         &engine.target_scope(ActorId(1))
@@ -335,6 +368,7 @@ fn readonly_creature_query_cannot_be_resolved_into_a_journal_command() {
 fn readonly_advancement_query_cannot_be_resolved_into_a_journal_command() {
     let engine = Engine::memory(Scenario::two_room(42)).unwrap();
     let before = engine.state(ActorId(1)).unwrap();
+    let before_boundary = engine.causal_boundary(ActorId(1)).unwrap();
     let wire = tor_protocol::Command::Advancement {
         expected_revision: before.revision,
         query: tor_protocol::AdvancementQuery::Overview {},
@@ -349,7 +383,7 @@ fn readonly_advancement_query_cannot_be_resolved_into_a_journal_command() {
     );
     assert!(!query.matches(
         &Command::Act {
-            expected_revision: before.revision,
+            expected_boundary: before_boundary,
             action: tor_server::journal::Action::Wait
         },
         &engine.target_scope(ActorId(1))

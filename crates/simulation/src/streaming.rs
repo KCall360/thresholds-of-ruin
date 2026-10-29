@@ -598,6 +598,8 @@ pub(crate) struct Lifecycle {
     pub(crate) discovery_contexts: crate::discovery::DiscoveryContexts,
     #[serde(skip)]
     pub(crate) awareness_contexts: crate::awareness::AwarenessContexts,
+    #[serde(skip)]
+    pub(crate) region_contributions: crate::region_contributions::ContributionCache,
     /// Construction-only gate; never persisted into a published game.
     #[serde(skip)]
     pub(crate) initial_awareness_deferred: bool,
@@ -628,6 +630,7 @@ impl Default for Lifecycle {
             recovery_contexts: crate::recovery_context::RecoveryContexts::default(),
             discovery_contexts: crate::discovery::DiscoveryContexts::default(),
             awareness_contexts: Default::default(),
+            region_contributions: Default::default(),
             initial_awareness_deferred: false,
             discovery_started: false,
             points: BTreeMap::new(),
@@ -642,6 +645,37 @@ impl Default for Lifecycle {
     }
 }
 
+/// Exact private residency witness; derived caches never retain an entire Game.
+#[derive(Clone, Debug)]
+pub(crate) struct ResidencyWitness {
+    frozen: BTreeSet<RegionId>,
+    stamps: BTreeMap<ActorId, u64>,
+    detached: tor_world::SharedIdentity<BTreeMap<RegionId, RecordId>>,
+    unbuilt: tor_world::SharedIdentity<BTreeSet<RegionId>>,
+    directory: tor_world::SharedIdentity<Directory>,
+}
+impl ResidencyWitness {
+    pub(crate) fn matches(&self, lifecycle: &Lifecycle) -> bool {
+        self.frozen == lifecycle.frozen
+            && self.stamps == lifecycle.stamps
+            && self.detached.matches(&lifecycle.detached)
+            && self.unbuilt.matches(&lifecycle.unbuilt)
+            && self.directory.matches(&lifecycle.directory)
+    }
+}
+
+impl Lifecycle {
+    pub(crate) fn dependency_witness(&self) -> ResidencyWitness {
+        ResidencyWitness {
+            frozen: self.frozen.clone(),
+            stamps: self.stamps.clone(),
+            detached: self.detached.weak_identity(),
+            unbuilt: self.unbuilt.weak_identity(),
+            directory: self.directory.weak_identity(),
+        }
+    }
+}
+
 impl Lifecycle {
     pub(crate) fn is_empty(&self) -> bool {
         *self == Self::default()
@@ -651,6 +685,9 @@ impl Lifecycle {
 /// Pins computed for one game state, reused while proposed sets grow.
 #[derive(Default)]
 struct PinCache {
+    contributions: Option<crate::region_contributions::RegionContributions>,
+    force_cold: bool,
+    force_index: bool,
     points: Option<RegionTransition>,
     live: BTreeMap<ActorId, BTreeSet<RegionId>>,
     /// An active actor's reach and the regions its view reads.
@@ -972,70 +1009,77 @@ impl Game {
             .points
             .get_or_insert_with(|| self.point_requirements(can_prepare))
             .clone();
-        for (id, actor) in self.actors.iter() {
-            let region = actor.location.region;
-            let is_active = active.contains(&region);
-            if !is_active && !loaded.contains(&region) {
-                continue;
-            }
-            let live = cache
-                .live
-                .entry(*id)
-                .or_insert_with(|| self.live_regions(*id));
-            if !is_active {
-                need.loaded.extend(live.iter().copied());
-                continue;
-            }
-            need.active.extend(live.iter().copied());
-            if actor.alive() {
-                if !cache.reach.contains_key(id) {
-                    let view = self.perception_scene_regions(*id);
-                    let reach = self.reach_regions(*id);
-                    cache.reach.insert(*id, (reach, view));
+        if (crate::region_contributions::ENABLED || cache.force_index) && !cache.force_cold {
+            let contributions = cache
+                .contributions
+                .get_or_insert_with(|| self.region_contributions());
+            let indexed = contributions.requirements(active, loaded);
+            need.active.extend(indexed.active);
+            need.loaded.extend(indexed.loaded);
+        } else {
+            for (id, actor) in self.actors.iter() {
+                let region = actor.location.region;
+                let is_active = active.contains(&region);
+                if !is_active && !loaded.contains(&region) {
+                    continue;
                 }
-                let (reach, view) = &cache.reach[id];
-                need.active.extend(reach.iter().copied());
-                need.loaded.extend(view.iter().copied());
+                let live = cache
+                    .live
+                    .entry(*id)
+                    .or_insert_with(|| self.live_regions(*id));
+                if !is_active {
+                    need.loaded.extend(live.iter().copied());
+                    continue;
+                }
+                need.active.extend(live.iter().copied());
+                if actor.alive() {
+                    if !cache.reach.contains_key(id) {
+                        cache.reach.insert(*id, self.streaming_actor_regions(*id));
+                    }
+                    let (reach, view) = &cache.reach[id];
+                    need.active.extend(reach.iter().copied());
+                    need.loaded.extend(view.iter().copied());
+                }
             }
-        }
-        // A pending physical fall needs its original XP owner available for
-        // atomic credit. This is deliberately load-only: credit must not thaw
-        // the owner's region, grant elapsed time, or become a horizon root.
-        for id in self.actors.active_fall_owners() {
-            let actor = &self.actors[&id];
-            if active.contains(&actor.location.region) {
-                if let Some(owner) = actor
-                    .motion
-                    .active_fall
-                    .and_then(|fall| self.actor_region(fall.owner))
+            // A pending physical fall needs its original XP owner available for
+            // atomic credit. This is deliberately load-only: credit must not thaw
+            // the owner's region, grant elapsed time, or become a horizon root.
+            for id in self.actors.active_fall_owners() {
+                let actor = &self.actors[&id];
+                if active.contains(&actor.location.region) {
+                    if let Some(owner) = actor
+                        .motion
+                        .active_fall
+                        .and_then(|fall| self.actor_region(fall.owner))
+                    {
+                        need.loaded.insert(owner);
+                    }
+                }
+            }
+            // Item-owned claims provide the reverse edge. It has the same active
+            // strength as its source region, independent of endpoint attach order.
+            for (_, item) in self.items.claimed() {
+                let source_region = match item.location {
+                    ItemLocation::Ground(at) => at.region,
+                    ItemLocation::Carried(actor) => match self.actor_region(actor) {
+                        Some(region) => region,
+                        None => continue,
+                    },
+                };
+                let is_active = active.contains(&source_region);
+                if !is_active && !loaded.contains(&source_region) {
+                    continue;
+                }
+                for owner in item
+                    .holds
+                    .iter()
+                    .filter_map(|hold| self.actor_region(hold.key.lineage.actor))
                 {
-                    need.loaded.insert(owner);
-                }
-            }
-        }
-        // Item-owned claims provide the reverse edge. It has the same active
-        // strength as its source region, independent of endpoint attach order.
-        for (_, item) in self.items.claimed() {
-            let source_region = match item.location {
-                ItemLocation::Ground(at) => at.region,
-                ItemLocation::Carried(actor) => match self.actor_region(actor) {
-                    Some(region) => region,
-                    None => continue,
-                },
-            };
-            let is_active = active.contains(&source_region);
-            if !is_active && !loaded.contains(&source_region) {
-                continue;
-            }
-            for owner in item
-                .holds
-                .iter()
-                .filter_map(|hold| self.actor_region(hold.key.lineage.actor))
-            {
-                if is_active {
-                    need.active.insert(owner);
-                } else {
-                    need.loaded.insert(owner);
+                    if is_active {
+                        need.active.insert(owner);
+                    } else {
+                        need.loaded.insert(owner);
+                    }
                 }
             }
         }
@@ -1116,7 +1160,7 @@ impl Game {
     }
 
     /// A loaded actor's live references: its body and any attack in progress.
-    fn live_regions(&self, id: ActorId) -> BTreeSet<RegionId> {
+    pub(crate) fn live_regions(&self, id: ActorId) -> BTreeSet<RegionId> {
         let mut live = self.body_regions(id);
         let target = self.actors[&id]
             .pending
@@ -1227,7 +1271,7 @@ impl Game {
     /// movement, physics or sight step. The next action can't touch anything
     /// farther. The world answers from its exit field where the body is far
     /// from every exit, so this rarely searches.
-    fn reach_regions(&self, id: ActorId) -> BTreeSet<RegionId> {
+    pub(crate) fn reach_regions(&self, id: ActorId) -> BTreeSet<RegionId> {
         let actor = &self.actors[&id];
         let frontier: BTreeSet<Location> =
             match self.body_cells(actor.location, actor.orientation, &actor.body) {
@@ -1250,6 +1294,36 @@ impl Game {
     /// Replanning must start from the original frontier, not this result.
     pub fn settle_region_transition(&self, proposed: &RegionTransition) -> RegionTransition {
         self.settle(proposed, &mut PinCache::default(), &|_| true)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn settle_region_transition_indexed(
+        &self,
+        proposed: &RegionTransition,
+    ) -> RegionTransition {
+        self.settle(
+            proposed,
+            &mut PinCache {
+                force_index: true,
+                ..PinCache::default()
+            },
+            &|_| true,
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn settle_region_transition_cold(
+        &self,
+        proposed: &RegionTransition,
+    ) -> RegionTransition {
+        self.settle(
+            proposed,
+            &mut PinCache {
+                force_cold: true,
+                ..PinCache::default()
+            },
+            &|_| true,
+        )
     }
 
     fn settle(
@@ -1316,6 +1390,7 @@ impl Game {
         can_prepare: &dyn Fn(RegionId) -> bool,
         complete_floors: bool,
     ) -> RegionTransition {
+        let _diagnostic_span = crate::diagnostics::spans::span("region_pins");
         let mut t = proposed.clone();
         t.loaded.extend(t.active.iter().copied());
         loop {
@@ -1367,9 +1442,14 @@ impl Game {
     ) -> (RegionTransition, PinWork) {
         let mut cache = PinCache::default();
         let t = self.settle(proposed, &mut cache, can_prepare);
+        let (actors, reaches) = cache
+            .contributions
+            .as_ref()
+            .map(|index| index.coverage(&t.active, &t.loaded))
+            .unwrap_or((cache.live.len(), cache.reach.len()));
         let work = PinWork {
-            actors: cache.live.len(),
-            reaches: cache.reach.len(),
+            actors,
+            reaches,
             hold_owners: cache.hold_owners.len(),
             hold_references: cache.hold_owners.values().map(Vec::len).sum(),
             hold_regions: cache

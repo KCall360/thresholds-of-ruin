@@ -5,6 +5,7 @@ use tor_protocol::*;
 #[test]
 fn escape_selects_a_single_hold_and_preserves_directional_sequence_escape() {
     let mut state = StateView {
+        snapshot: tor_protocol::SnapshotId("fixture-snapshot".into()),
         wizard_game: false,
         revision: 7,
         observation: test_support::observation(),
@@ -23,7 +24,6 @@ fn escape_selects_a_single_hold_and_preserves_directional_sequence_escape() {
         assert_eq!(
             parse(&line, &state).unwrap(),
             Input::Command(Command::Act {
-                expected_revision: 7,
                 action: Action::Escape { hold }
             }),
             "{line}"
@@ -65,7 +65,6 @@ fn escape_selects_a_single_hold_and_preserves_directional_sequence_escape() {
     assert_eq!(
         parse("escape hold west", &state).unwrap(),
         Input::Command(Command::Act {
-            expected_revision: 7,
             action: Action::Escape { hold }
         })
     );

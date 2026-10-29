@@ -17,7 +17,7 @@ fn own_stats_disclose_current_build_and_reserved_resources_only_to_the_owner() {
     let (mut game, actor, target) = game();
     let before = game.clone();
     let view = game.observe(actor).unwrap();
-    let stats = view.combat.unwrap().own_stats.unwrap();
+    let stats = view.combat.unwrap().own_stats.unwrap().into_owned();
     let creature = game.creature(actor).unwrap();
     assert_eq!(stats.attributes, creature.derived().attributes);
     assert_eq!(stats.skills, creature.derived().skills);
@@ -51,7 +51,8 @@ fn own_stats_disclose_current_build_and_reserved_resources_only_to_the_owner() {
         .combat
         .unwrap()
         .own_stats
-        .unwrap();
+        .unwrap()
+        .into_owned();
     let focus = stats
         .resources
         .iter()
@@ -65,7 +66,8 @@ fn own_stats_disclose_current_build_and_reserved_resources_only_to_the_owner() {
         .combat
         .unwrap()
         .own_stats
-        .unwrap();
+        .unwrap()
+        .into_owned();
     assert!(target_stats.resources.iter().all(|r| r.reserved == 0));
     assert_ne!(stats.resources, target_stats.resources);
     let mut shared = tor_simulation::checkpoint::SharedState::default();
@@ -76,7 +78,13 @@ fn own_stats_disclose_current_build_and_reserved_resources_only_to_the_owner() {
     )
     .unwrap();
     assert_eq!(
-        restored.observe(actor).unwrap().combat.unwrap().own_stats,
+        restored
+            .observe(actor)
+            .unwrap()
+            .combat
+            .unwrap()
+            .own_stats
+            .map(|stats| stats.into_owned()),
         Some(stats)
     );
 }
@@ -90,7 +98,8 @@ fn own_stats_rederive_after_transformation_without_disclosing_another_build() {
         .combat
         .unwrap()
         .own_stats
-        .unwrap();
+        .unwrap()
+        .into_owned();
     let target_before = game.observe(target).unwrap().combat.unwrap().own_stats;
     let original_build = game.creature(actor).unwrap().build().clone();
     let mut transformed = original_build.clone();
@@ -107,7 +116,8 @@ fn own_stats_rederive_after_transformation_without_disclosing_another_build() {
         .combat
         .unwrap()
         .own_stats
-        .unwrap();
+        .unwrap()
+        .into_owned();
     assert_eq!(
         changed.kind,
         tor_simulation::content_ids::TypeId::new("undead").unwrap()
@@ -132,7 +142,12 @@ fn own_stats_rederive_after_transformation_without_disclosing_another_build() {
         resource.available = resource.balance;
     }
     assert_eq!(
-        game.observe(actor).unwrap().combat.unwrap().own_stats,
+        game.observe(actor)
+            .unwrap()
+            .combat
+            .unwrap()
+            .own_stats
+            .map(|stats| stats.into_owned()),
         Some(original)
     );
 }

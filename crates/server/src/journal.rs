@@ -14,6 +14,33 @@ fn required_option<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
     Option::<T>::deserialize(d)
 }
 
+/// Durable causal anchor. The boundary identity is backend-only; the public
+/// snapshot capability never reveals another actor's journal entry.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RecordedAnchor {
+    State {
+        snapshot: tor_protocol::SnapshotId,
+        #[serde(deserialize_with = "required_option")]
+        boundary: Option<EntryId>,
+    },
+    Entry {
+        #[serde(with = "crate::storage::schema::EntryId")]
+        id: EntryId,
+    },
+}
+
+impl RecordedAnchor {
+    pub fn to_public(&self) -> Anchor {
+        match self {
+            Self::State { snapshot, .. } => Anchor::State {
+                snapshot: snapshot.clone(),
+            },
+            Self::Entry { id } => Anchor::Entry { id: id.clone() },
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Position {
     pub region: u64,
@@ -35,41 +62,47 @@ pub struct RegionView {
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
     ResumeIntention {
-        expected_revision: u64,
+        expected_boundary: u64,
         #[serde(with = "crate::storage::schema::EntryId")]
         admission: EntryId,
     },
     CancelIntention {
-        expected_revision: u64,
+        expected_boundary: u64,
         #[serde(with = "crate::storage::schema::EntryId")]
         admission: EntryId,
         #[serde(with = "crate::storage::schema::optional_direction")]
         step: Option<Direction>,
     },
     AdmitIntention {
-        expected_revision: u64,
+        expected_boundary: u64,
         #[serde(with = "crate::storage::schema::Action")]
         action: Action,
     },
     PausePreparation,
     RenamePlace {
-        expected_revision: u64,
+        expected_boundary: u64,
+        #[serde(deserialize_with = "required_option")]
+        display_basis: Option<u64>,
         key: String,
         name: String,
     },
     Travel {
-        expected_revision: u64,
+        expected_boundary: u64,
+        #[serde(deserialize_with = "required_option")]
+        display_basis: Option<u64>,
         destination: String,
     },
     Wizard {
-        expected_revision: u64,
+        expected_boundary: u64,
+        #[serde(deserialize_with = "required_option")]
+        display_basis: Option<u64>,
         operation: WizardOperation,
     },
     /// Low-level direct action with no admitted ownership. Finite-item work
     /// (including Drink) and resource-paid abilities use AdmitIntention.
     /// The public wire Act command already maps to that admitted path.
     Act {
-        expected_revision: u64,
+        expected_boundary: u64,
         #[serde(with = "crate::storage::schema::Action")]
         action: Action,
     },
@@ -446,6 +479,8 @@ pub enum JournalContent {
         intention: tor_simulation::IntentionId,
         #[serde(with = "crate::storage::schema::Action")]
         action: Action,
+        /// Exact private operand intent; never an RPC authority or public history field.
+        human_operands: tor_simulation::HumanOperandBinding,
     },
     PlaceRenamed {
         key: String,
@@ -465,8 +500,7 @@ pub enum JournalContent {
         event: Event,
     },
     Annotation {
-        #[serde(with = "crate::storage::schema::Anchor")]
-        anchor: Anchor,
+        anchor: RecordedAnchor,
         #[serde(with = "crate::storage::schema::AnnotationCategory")]
         category: AnnotationCategory,
         text: String,
@@ -526,9 +560,9 @@ impl JournalContent {
 
     pub(crate) fn admission(&self) -> Option<(tor_simulation::IntentionId, AdmittedWork<'_>)> {
         match self {
-            Self::IntentionAdmitted { intention, action } => {
-                Some((*intention, AdmittedWork::Human(action)))
-            }
+            Self::IntentionAdmitted {
+                intention, action, ..
+            } => Some((*intention, AdmittedWork::Human(action))),
             Self::TravelIntentionAdmitted {
                 intention,
                 action,
@@ -658,5 +692,33 @@ mod rewind_boundary_tests {
             direction: Direction::Down
         })
         .rewindable());
+    }
+    #[test]
+    fn recorded_snapshot_anchor_retains_cause_without_disclosing_it() {
+        let anchor = RecordedAnchor::State {
+            snapshot: tor_protocol::SnapshotId("issued-snapshot".into()),
+            boundary: Some(EntryId("private-causal-entry".into())),
+        };
+        let saved = serde_json::to_value(&anchor).unwrap();
+        assert_eq!(
+            serde_json::from_value::<RecordedAnchor>(saved.clone()).unwrap(),
+            anchor
+        );
+        let public = serde_json::to_string(&anchor.to_public()).unwrap();
+        assert!(public.contains("issued-snapshot"));
+        assert!(!public.contains("private-causal-entry"));
+        assert!(!public.contains("boundary"));
+        let mut missing = saved;
+        missing.as_object_mut().unwrap().remove("boundary");
+        assert!(serde_json::from_value::<RecordedAnchor>(missing).is_err());
+        let initial = RecordedAnchor::State {
+            snapshot: tor_protocol::SnapshotId("initial".into()),
+            boundary: None,
+        };
+        assert_eq!(
+            serde_json::from_value::<RecordedAnchor>(serde_json::to_value(&initial).unwrap())
+                .unwrap(),
+            initial
+        );
     }
 }

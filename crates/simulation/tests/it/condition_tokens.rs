@@ -364,7 +364,7 @@ fn incoming_token_reservation_never_changes_personal_status_facts() {
     let after = preparing.observe(subject).unwrap().combat.unwrap();
     assert_eq!(before.own_stats, after.own_stats);
     assert!(
-        before.own_stats.unwrap().conditions.is_empty(),
+        before.own_stats.unwrap().into_owned().conditions.is_empty(),
         "one-use tokens have separate disclosure contracts"
     );
     assert_eq!(

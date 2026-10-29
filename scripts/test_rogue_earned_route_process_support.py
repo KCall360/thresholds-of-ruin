@@ -13,8 +13,27 @@ from rogue_earned_route_process import (
     classify_failure, record_acquisition, compress_completed_logs, comparison_surface, validate_initial_anchor,
     validate_resume_binding, validate_saved_authority, retain_segment, verify_retained_segment,
     RouteExecution, prepare_campaign, POLICY_REVISION, main, read_authoritative_evidence,
-    ArchiveVerificationCache, RouteMeasurements, verify_earned_history,
+    ArchiveVerificationCache, RouteMeasurements, verify_earned_history, validate_restored_picture, COMPARISON_SURFACES,
 )
+
+
+class RestoredPictureIdentity(unittest.TestCase):
+    def test_only_attachment_picture_capabilities_change(self):
+        old = {'state': {'snapshot': 'old', 'revision': '12', 'tick': '100',
+                         'observation': {'ready': True}, 'memory': ['exact']},
+               'history': [{'event': 'wait', 'tick': '0'}]}
+        current = copy.deepcopy(old)
+        current['state'].update(snapshot='new', revision='1')
+        validate_restored_picture(current, old)
+        for field, value in [('tick', '101'), ('observation', {'ready': False}),
+                             ('memory', [])]:
+            changed = copy.deepcopy(current)
+            changed['state'][field] = value
+            with self.subTest(field=field), self.assertRaises(EvidenceError):
+                validate_restored_picture(changed, old)
+        current['history'] = []
+        with self.assertRaises(EvidenceError):
+            validate_restored_picture(current, old)
 
 
 class CompactRouteSnapshots(unittest.TestCase):
@@ -168,6 +187,20 @@ class EarnedRouteEvidenceTests(unittest.TestCase):
             self.assertEqual(gzip.decompress((root / rows[0]['retained']).read_bytes()), raw)
             self.assertEqual(rows[0]['uncompressed_sha256'], hashlib.sha256(raw).hexdigest())
             self.assertEqual(rows[0]['uncompressed_bytes'], len(raw))
+
+    def test_comparison_preserves_complete_payload_but_not_picture_issuance(self):
+        report = {field: [] for field in COMPARISON_SURFACES}
+        report.update(ordinary_evidence_status='complete', flows={'actors': []},
+                      state={'snapshot': 'old', 'revision': '25',
+                             'observation': {'tick': '100', 'handle': 'private-handle'}})
+        before = copy.deepcopy(report)
+        first = comparison_surface(report)
+        self.assertEqual(report, before, 'comparison must not rewrite raw evidence')
+        report['state'].update(snapshot='new', revision='5')
+        self.assertEqual(first, comparison_surface(report))
+        report['state']['observation']['tick'] = '101'
+        self.assertNotEqual(first, comparison_surface(report))
+        self.assertEqual(first['state']['observation']['handle'], 'private-handle')
 
     def test_comparison_refuses_unavailable_gross_flows(self):
         with self.assertRaisesRegex(EvidenceError, 'incomplete ordinary'):
@@ -1708,6 +1741,29 @@ class PaidTailBudgetCallerTests(unittest.TestCase):
         route.finish_evidence = Mock()
         return route, completed
 
+    def test_settlement_demands_late_picture_before_next_owner_query(self):
+        with tempfile.TemporaryDirectory() as directory:
+            route, completed = self.route(Path(directory), 2)
+            picture = copy.deepcopy(completed)
+            picture['state']['observation']['inventory'] = [{'name': 'token'}]
+            route.frame.side_effect = [completed, picture]
+            result = route.settle(route.current)
+            self.assertEqual(result, picture)
+            self.assertEqual(route.current, picture)
+            self.assertEqual(route.controller.commands, 2)  # Observe is not gameplay.
+            self.assertEqual([json.loads(call.args[0]) for call in route.player.write.call_args_list],
+                             [{'type': 'resume_intention'},
+                              {'type': 'request', 'request': {'type': 'observe'}}])
+
+    def test_picture_demand_refusal_remains_a_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            route, completed = self.route(Path(directory), 2)
+            rejected = {**completed, 'error': 'StaleContext: rejected'}
+            route.frame.side_effect = [completed, rejected]
+            with self.assertRaisesRegex(ValueError, 'Ordinary command refused.*StaleContext'):
+                route.settle(route.current)
+            self.assertEqual(route.player.write.call_count, 2)  # No retry.
+
     def test_paid_tail_at_exact_budget_censors_before_any_transport_write(self):
         with tempfile.TemporaryDirectory() as directory:
             route, _ = self.route(Path(directory), 1)
@@ -1728,14 +1784,16 @@ class PaidTailBudgetCallerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             route, completed = self.route(Path(directory), 2)
             route.run_loop()
-            route.player.write.assert_called_once_with(json.dumps({'type': 'resume_intention'}))
+            self.assertEqual([json.loads(call.args[0]) for call in route.player.write.call_args_list],
+                             [{'type': 'resume_intention'},
+                              {'type': 'request', 'request': {'type': 'observe'}}])
             self.assertEqual(route.current, completed)
             self.assertEqual(route.controller.commands, 2)
             self.assertEqual(route.controller.command_kinds, {'action': 1, 'resume': 1})
             self.assertNotIn('unsubmitted_budget_command', route.report)
             self.assertNotEqual(route.report['outcome'], 'censored_action_budget')
-            self.assertEqual([row['kind'] for row in route.commands], ['resume'])
-            self.assertEqual(len((route.output / 'commands.jsonl').read_text().splitlines()), 1)
+            self.assertEqual([row['kind'] for row in route.commands], ['resume', 'read'])
+            self.assertEqual(len((route.output / 'commands.jsonl').read_text().splitlines()), 2)
             route.finish_evidence.assert_called_once_with()
 
 

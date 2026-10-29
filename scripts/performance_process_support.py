@@ -8,7 +8,8 @@ from physics_performance_report import summarize
 from process_harness import ROOT
 
 
-def benchmark(case, name, args, timeout):
+def benchmark_executable(case, name):
+    """Build/check once and resolve Cargo's exact example, separate from app bundles."""
     profile = os.environ.get('TOR_TEST_PROFILE', 'debug')
     if profile not in ('debug', 'release'):
         raise ValueError('TOR_TEST_PROFILE must be debug or release')
@@ -27,7 +28,11 @@ def benchmark(case, name, args, timeout):
                    and row.get('profile', {}).get('test') is False]
     if len(executables) != 1 or not isinstance(executables[0], str) or not Path(executables[0]).is_absolute():
         raise ValueError(f'Cargo must report one exact non-test executable for example {name}')
-    executable = Path(executables[0])
+    return Path(executables[0])
+
+
+def benchmark(case, name, args, timeout):
+    executable = benchmark_executable(case, name)
     output = case.directory/f'{name}.jsonl'
     with output.open('w', encoding='utf-8') as log, (case.directory/f'{name}-stderr.log').open('w', encoding='utf-8') as errors:
         subprocess.run([executable, *args],

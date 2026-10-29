@@ -138,7 +138,7 @@ class RogueStavesProcesses(ProcessTestCase):
         self.server("--checkpoint-interval", 1, seed=None)
         self.probe, reopened = self.client(observe=True)
         self.peer, _ = self.client(actor=3)
-        self.assertEqual(reopened["state"], paused["state"])
+        self.assertDisclosedStateEqual(reopened["state"], paused["state"])
         self.assertEqual(reopened["intentions"], paused["intentions"])
         self.assertEqual(checkpoint(self, self.probe), frozen)
         owner, _ = self.client()

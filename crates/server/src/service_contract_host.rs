@@ -443,7 +443,7 @@ mod tests {
 
     fn catalog() -> Value {
         json!({"type":"creature_catalog", "request_id":"query",
-            "context":{"input":{"stream":{"stream":"stream", "epoch":"1"},
+            "context":{"snapshot":"fixture-snapshot", "input":{"stream":{"stream":"stream", "epoch":"1"},
                 "readiness_revision":"1"}, "actor":"1", "branch":"branch",
                 "cursor":{"sequence":"0", "tick":"0"}, "revision":"0"},
             "page":{"depth":null, "entries":[

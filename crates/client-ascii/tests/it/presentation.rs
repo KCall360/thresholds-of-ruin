@@ -5,7 +5,7 @@ use tor_client_common::ClientState;
 use tor_protocol::*;
 
 fn creature_snapshot() -> Snapshot {
-    let mut snapshot = state().snapshot();
+    let mut snapshot = state().reset_snapshot().unwrap();
     Arc::make_mut(&mut snapshot.state).observation.combat = Some(serde_json::from_value(serde_json::json!({
         "public_plan":null,"hp": "7", "max_hp": "12", "sequence":null,"preparation_remaining": null, "preparation_active": false,
         "recovery_remaining": "0", "actors": [], "events": [], "objective": null,
@@ -32,7 +32,7 @@ fn stats_screen_is_readonly_scrollable_and_available_to_spectators() {
     app.set_state(ClientState::from_snapshot(snapshot).unwrap());
     app.role = AccessRole::Spectator;
     app.ready();
-    let before = app.state.as_ref().unwrap().snapshot();
+    let before = app.state.as_ref().unwrap().session().clone();
     assert_eq!(app.input(Input::Key { key: Key::Stats }), Effect::None);
     assert!(app.stats_open);
     let rows = app.stats_rows().into_owned();
@@ -50,7 +50,7 @@ fn stats_screen_is_readonly_scrollable_and_available_to_spectators() {
     assert_eq!(app.stats_scroll, rows.len() - tor_client_ascii::STATS_ROWS);
     assert_eq!(app.input(Input::Key { key: Key::Attack }), Effect::None);
     assert!(app.stats_open);
-    assert_eq!(app.state.as_ref().unwrap().snapshot(), before);
+    assert_eq!(app.state.as_ref().unwrap().session().clone(), before);
     assert_eq!(app.input(Input::Key { key: Key::Stats }), Effect::None);
     assert!(!app.stats_open);
 }
@@ -109,7 +109,7 @@ fn ability_menu_selects_a_granted_technique_then_an_opaque_target_without_paying
         app.role = AccessRole::Player;
         app.ready();
         app.messages.skip();
-        let before = app.state.as_ref().unwrap().snapshot();
+        let before = app.state.as_ref().unwrap().session().clone();
         assert_eq!(
             app.input(Input::Key {
                 key: Key::Abilities
@@ -127,14 +127,14 @@ fn ability_menu_selects_a_granted_technique_then_an_opaque_target_without_paying
             1,
             "portal occurrences must not duplicate targets"
         );
-        assert_eq!(app.state.as_ref().unwrap().snapshot(), before);
+        assert_eq!(app.state.as_ref().unwrap().session().clone(), before);
         assert!(
             matches!(super::request(app.input(Input::Key { key: Key::Enter })), Some(Request::Command {
-            command: Command::Act { expected_revision: 3, action: Action::UseAbility { id: selected, invocation: tor_protocol::AbilityInvocation { aim: tor_protocol::AbilityAim::ActorTarget { target: selected_target }, weapon: tor_protocol::WeaponSelection::Default }, ..} }, ..
+            command: Command::Act {  action: Action::UseAbility { id: selected, invocation: tor_protocol::AbilityInvocation { aim: tor_protocol::AbilityAim::ActorTarget { target: selected_target }, weapon: tor_protocol::WeaponSelection::Default }, ..} }, ..
         }) if selected == ability.id && selected_target == target)
         );
         assert_eq!(
-            app.state.as_ref().unwrap().snapshot(),
+            app.state.as_ref().unwrap().session().clone(),
             before,
             "admission sends a request without spending locally"
         );
@@ -185,6 +185,7 @@ fn ability_selection_cancels_cleanly_and_clears_when_grants_or_control_change() 
     });
     let view = Arc::make_mut(&mut snapshot.state);
     view.revision += 1;
+    view.snapshot = tor_protocol::SnapshotId(format!("fixture-display-{}", view.revision));
     view.observation
         .combat
         .as_mut()
@@ -265,7 +266,7 @@ fn ability_preparation_history_names_the_technique() {
 }
 
 fn carried_rings() -> Snapshot {
-    let mut snapshot = state().snapshot();
+    let mut snapshot = state().reset_snapshot().unwrap();
     let view = &mut Arc::make_mut(&mut snapshot.state).observation;
     let mut first = view.ground_items[0].item.clone();
     first.id = super::item_target(250);
@@ -391,6 +392,10 @@ fn item_selection_cancels_and_is_invalidated_by_state_or_control_changes() {
             }
             "revision" => {
                 Arc::make_mut(&mut snapshot.state).revision += 1;
+                Arc::make_mut(&mut snapshot.state)
+                    .snapshot
+                    .0
+                    .push_str("-next");
                 snapshot.readiness.revision = snapshot.state.revision;
                 app.set_state(ClientState::from_snapshot(snapshot).unwrap());
             }
@@ -435,7 +440,7 @@ fn equipment_picker_keeps_blocked_choices_and_explains_removal() {
 #[test]
 fn opaque_bytes_do_not_reorder_pickup_or_drop_choices() {
     for key in [Key::Pickup, Key::Drop] {
-        let mut snapshot = state().snapshot();
+        let mut snapshot = state().reset_snapshot().unwrap();
         let observation = &mut Arc::make_mut(&mut snapshot.state).observation;
         let mut first = observation.ground_items[0].clone();
         first.item.id = super::item_target(250);
@@ -480,7 +485,7 @@ fn opaque_bytes_do_not_reorder_pickup_or_drop_choices() {
 
 #[test]
 fn opaque_bytes_do_not_reorder_attack_choices_or_duplicate_body_cells() {
-    let mut snapshot = state().snapshot();
+    let mut snapshot = state().reset_snapshot().unwrap();
     let first = ActorView {
         appearance_seed: None,
         worn: Vec::new(),
@@ -513,7 +518,7 @@ fn opaque_bytes_do_not_reorder_attack_choices_or_duplicate_body_cells() {
 
 #[test]
 fn suspended_work_does_not_advertise_or_send_undisclosed_controls() {
-    let mut snapshot = state().snapshot();
+    let mut snapshot = state().reset_snapshot().unwrap();
     snapshot.readiness.admission = false;
     snapshot.intentions = vec![IntentionStatus {
         actor: snapshot.actor,
@@ -538,7 +543,7 @@ fn suspended_work_does_not_advertise_or_send_undisclosed_controls() {
 #[test]
 fn action_admission_uses_disclosed_capacity_independently_of_simulation_turn() {
     for (due, admission) in [(true, false), (false, true)] {
-        let mut snapshot = state().snapshot();
+        let mut snapshot = state().reset_snapshot().unwrap();
         Arc::make_mut(&mut snapshot.state).observation.ready = due;
         snapshot.readiness.admission = admission;
         let mut app = App::new();
@@ -563,7 +568,7 @@ fn action_admission_uses_disclosed_capacity_independently_of_simulation_turn() {
 #[test]
 fn validated_lifecycle_updates_refresh_action_status_without_changing_spectator_status() {
     for role in [AccessRole::Player, AccessRole::Spectator] {
-        let initial = state().snapshot();
+        let initial = state().reset_snapshot().unwrap();
         let mut app = App::new();
         app.role = role;
         app.set_state(ClientState::from_snapshot(initial.clone()).unwrap());
@@ -619,7 +624,7 @@ fn mixed_intention_hints_and_keys_select_queue_before_paused_progress() {
     for phase in [IntentionPhase::Queued, IntentionPhase::Suspended] {
         for queue_first in [false, true] {
             for key in [Key::ResumeIntention, Key::CancelIntention] {
-                let mut snapshot = state().snapshot();
+                let mut snapshot = state().reset_snapshot().unwrap();
                 snapshot.has_control = true;
                 let progress = IntentionStatus {
                     actor: snapshot.actor,
@@ -704,7 +709,7 @@ fn intention_controls_preserve_identity_context_and_read_only_access() {
         (IntentionPhase::Paused, Key::CancelIntention, true),
     ] {
         for role in [AccessRole::Player, AccessRole::Spectator] {
-            let mut snapshot = state().snapshot();
+            let mut snapshot = state().reset_snapshot().unwrap();
             snapshot.readiness.admission = false;
             snapshot.readiness.cancel = vec![IntentionId("original".into())];
             snapshot.readiness.resume =
@@ -727,25 +732,29 @@ fn intention_controls_preserve_identity_context_and_read_only_access() {
             let effect = app.input(Input::Key { key });
             if allowed && role == AccessRole::Player {
                 let Some(Request::Command {
-                    branch, command, ..
+                    branch,
+                    context,
+                    command,
                 }) = super::request(effect)
                 else {
                     panic!("intention request");
                 };
                 assert_eq!(branch, snapshot.branch);
-                let (expected_revision, intention) = match command {
-                    Command::ResumeIntention {
-                        expected_revision,
-                        intention,
-                    }
+                let intention = match command {
+                    Command::ResumeIntention { intention }
                     | Command::CancelIntention {
-                        expected_revision,
                         intention,
                         step: None,
-                    } => (expected_revision, intention),
+                    } => intention,
                     _ => panic!("wrong command"),
                 };
-                assert_eq!(expected_revision, snapshot.state.revision);
+                assert_eq!(
+                    context,
+                    InputContext {
+                        stream: snapshot.context.clone(),
+                        readiness_revision: snapshot.readiness.revision
+                    }
+                );
                 assert_eq!(intention.0, "original");
             } else {
                 assert_eq!(effect, Effect::None);
@@ -764,7 +773,7 @@ fn intention_controls_preserve_identity_context_and_read_only_access() {
 
 #[test]
 fn queued_intention_prevents_another_gameplay_request_even_when_observation_is_ready() {
-    let mut snapshot = state().snapshot();
+    let mut snapshot = state().reset_snapshot().unwrap();
     snapshot.readiness.admission = false;
     snapshot.intentions = vec![IntentionStatus {
         actor: snapshot.actor,
@@ -784,7 +793,7 @@ fn queued_intention_prevents_another_gameplay_request_even_when_observation_is_r
 
 #[test]
 fn quantity_picker_submits_partial_pickup_and_drop() {
-    let mut snapshot = state().snapshot();
+    let mut snapshot = state().reset_snapshot().unwrap();
     Arc::make_mut(&mut snapshot.state).observation.ground_items[0]
         .item
         .quantity = 10;
@@ -828,7 +837,7 @@ fn quantity_picker_submits_partial_pickup_and_drop() {
 
 #[test]
 fn places_modal_displays_memory_and_renames_without_travel_or_time() {
-    let mut snapshot = state().snapshot();
+    let mut snapshot = state().reset_snapshot().unwrap();
     Arc::make_mut(&mut snapshot.state)
         .observation
         .places
@@ -897,7 +906,7 @@ fn diagonal_cursor_and_actions_use_current_disclosed_state() {
         (Key::NorthWest, Direction::NorthWest),
     ] {
         assert!(
-            matches!(super::request(app.input(Input::Key {key})),Some(Request::Command {command:Command::Act { action:Action::Move {direction:d}, expected_revision:3 },..}) if d==direction)
+            matches!(super::request(app.input(Input::Key {key})),Some(Request::Command {command:Command::Act { action:Action::Move {direction:d}, },..}) if d==direction)
         );
         app.ready();
     }
@@ -925,7 +934,7 @@ fn travel_clicks_ignore_unknown_cells_and_spectators() {
 fn travel_accepts_remembered_cells_with_keyboard_and_mouse() {
     for mouse in [false, true] {
         let mut client = state();
-        let mut snapshot = client.snapshot();
+        let mut snapshot = client.reset_snapshot().unwrap();
         snapshot.context.epoch += 1;
         Arc::make_mut(&mut snapshot.state)
             .observation
@@ -1016,7 +1025,7 @@ fn state() -> ClientState {
     ClientState::from_snapshot(serde_json::from_value(serde_json::json!({
         "readiness":{"revision":"0","admission":true,"resume":[],"cancel":[]},"context":{"stream":"fixture-attachment","epoch":"0"},"actor":"1","branch":"test","cursor":{"sequence":"0","tick":"0"},"has_control":true, "intentions":[],
         "history":{"entries":[],"older_before":null},
-        "state":{"wizard_game":false,"revision":"3","observation":{"charts":[],"linked_holds":[],
+        "state":{"snapshot":"fixture-snapshot","wizard_game":false,"revision":"3","observation":{"charts":[],"linked_holds":[],
             "actor":"1","self_target":super::actor_target(1),"tick":"0","position":{"x":1,"y":1,"z":0},
 
             "places":[],"visible_cells": (0..5).flat_map(|x| (0..3).map(move |y| serde_json::json!({"key":format!("{x}:{y}"),"trap":null,"object_presentation":null,"stairs_up":false,"stairs_down":false,"position":{"x":x,"y":y,"z":0},"wall":false,"lit":true,"place_hint":false}))).collect::<Vec<_>>(),
@@ -1039,7 +1048,6 @@ fn input_uses_current_revision_and_does_not_queue_actions_while_busy() {
             context: state().input_context(),
             branch: BranchId("test".into()),
             command: Command::Act {
-                expected_revision: 3,
                 action: Action::Move {
                     direction: Direction::East
                 }
@@ -1112,7 +1120,7 @@ fn notes_are_modal_and_do_not_turn_typed_movement_letters_into_actions() {
     );
     assert_eq!(app.input(Input::Key { key: Key::Right }), Effect::None);
     assert!(
-        matches!(super::request(app.input(Input::Key {key:Key::Enter})), Some(Request::Command {command:Command::Annotate {text, audience:Audience::Private,anchor:Anchor::State {revision:3},..},..}) if text == "east")
+        matches!(super::request(app.input(Input::Key {key:Key::Enter})), Some(Request::Command {command:Command::Annotate {text, audience:Audience::Private,anchor:Anchor::State {snapshot},..},..}) if text == "east" && snapshot == state().state().snapshot)
     );
 }
 
@@ -1196,6 +1204,10 @@ fn ambiguous_pickup_is_modal_free_and_invalidated_by_an_observation_change() {
     app.ready();
     app.input(Input::Key { key: Key::Pickup });
     Arc::make_mut(&mut snapshot.state).revision += 1;
+    Arc::make_mut(&mut snapshot.state)
+        .snapshot
+        .0
+        .push_str("-next");
     app.set_state(ClientState::from_snapshot(snapshot).unwrap());
     assert!(app.pickup.is_empty());
     assert_eq!(app.input(Input::Key { key: Key::Enter }), Effect::None);
@@ -1354,7 +1366,7 @@ fn resized_clicks_use_the_rendered_cell_layout_and_ignore_far_heights() {
     landing.key = "landing".into();
     landing.position = Position { x: 2, y: 1, z: -17 };
     view.visible_cells.push(landing.clone());
-    let mut snapshot = state().snapshot();
+    let mut snapshot = state().reset_snapshot().unwrap();
     Arc::make_mut(&mut snapshot.state).observation = view.clone();
     assert!(!tor_client_ascii::render::map_tiles(
         &ClientState::from_snapshot(snapshot).unwrap(),
@@ -1400,6 +1412,7 @@ fn keys_skip_an_active_journey_and_changed_observations_clear_selection() {
             },
             body: UpdateBody::Observation {
                 state: (StateView {
+                    snapshot: tor_protocol::SnapshotId("fixture-display-4".into()),
                     revision: 4,
                     observation: Observation {
                         tick: 100,
@@ -1519,12 +1532,13 @@ fn missing_door_direction_is_rejected_locally_and_escape_cancels() {
 fn streamed_updates_retain_intermediate_memory_and_snapshot_resets_selections() {
     let mut app = App::new();
     app.role = AccessRole::Player;
-    let initial = state().snapshot();
+    let initial = state().reset_snapshot().unwrap();
     app.replace_snapshot(initial.clone()).unwrap();
     app.ready();
     for sequence in 1..=64 {
         let mut view = Arc::unwrap_or_clone(initial.state.clone());
         view.revision += sequence;
+        view.snapshot = tor_protocol::SnapshotId(format!("fixture-display-{}", view.revision));
         view.observation.tick += sequence;
         view.observation.visible_cells[0].key = format!("intermediate-{sequence}");
         app.update(StreamUpdate {
@@ -1775,7 +1789,7 @@ fn privileged_inspection_is_authorized_scrollable_and_cleared_on_snapshot() {
         assert!(!app.has_inspection());
     }
     app.role = AccessRole::Wizard;
-    let before = app.state.as_ref().unwrap().snapshot();
+    let before = app.state.as_ref().unwrap().session().clone();
     let mut invalid = report.clone();
     invalid.hp += 1;
     app.show_inspection(&report).unwrap();
@@ -1797,7 +1811,7 @@ fn privileged_inspection_is_authorized_scrollable_and_cleared_on_snapshot() {
         app.stats_scroll,
         app.stats_rows().len() - tor_client_ascii::STATS_ROWS
     );
-    assert_eq!(app.state.as_ref().unwrap().snapshot(), before);
+    assert_eq!(app.state.as_ref().unwrap().session().clone(), before);
     let mut reset = snapshot;
     reset.context.epoch += 1;
     app.replace_snapshot(reset).unwrap();
@@ -1816,7 +1830,8 @@ fn wizard_console_is_private_and_submits_the_current_input_context() {
         assert!(app.wizard_command.is_none());
     }
     app.role = AccessRole::Wizard;
-    let before = app.state.as_ref().unwrap().snapshot();
+    let before = app.state.as_ref().unwrap().session().clone();
+    let expected = app.state.as_ref().unwrap().reply_context();
     assert_eq!(app.input(Input::Key { key: Key::Wizard }), Effect::None);
     assert_eq!(
         app.input(Input::Text {
@@ -1832,16 +1847,16 @@ fn wizard_console_is_private_and_submits_the_current_input_context() {
     else {
         panic!("query request");
     };
-    assert_eq!(context, before.reply_context().input);
-    assert_eq!(branch, before.branch);
+    assert_eq!(context, expected.input);
+    assert_eq!(branch, expected.branch);
     assert_eq!(
         command,
         Command::Wizard {
-            expected_revision: before.state.revision,
+            expected_revision: expected.revision,
             operation: "creature inspect 2".into()
         }
     );
-    assert_eq!(app.state.as_ref().unwrap().snapshot(), before);
+    assert_eq!(app.state.as_ref().unwrap().session().clone(), before);
     assert!(app.wizard_command.is_none());
     app.ready();
     app.input(Input::Key { key: Key::Wizard });
@@ -1942,7 +1957,7 @@ fn ordered_strikes_native_direction_sends_one_atomic_escape_only_with_permission
             );
             app.ready();
             app.messages.skip();
-            let before = app.state.as_ref().unwrap().snapshot();
+            let before = app.state.as_ref().unwrap().session().clone();
             let effect = app.input(Input::Key { key: Key::Left });
             if completed > 0 && permitted {
                 let Effect::Request(request) = effect else {
@@ -1955,7 +1970,7 @@ fn ordered_strikes_native_direction_sends_one_atomic_escape_only_with_permission
             } else {
                 assert_eq!(effect, Effect::None);
             }
-            assert_eq!(app.state.as_ref().unwrap().snapshot(), before);
+            assert_eq!(app.state.as_ref().unwrap().session().clone(), before);
         }
     }
 }
@@ -2053,7 +2068,7 @@ fn ordered_strikes_ascii_private_source_menu_builds_a_current_typed_page_query()
     app.set_state(ClientState::from_snapshot(creature_snapshot()).unwrap());
     app.ready();
     app.show_inspection(&report).unwrap();
-    let before = app.state.as_ref().unwrap().snapshot();
+    let before = app.state.as_ref().unwrap().session().clone();
     assert_eq!(app.input(Input::Key { key: Key::Tab }), Effect::None);
     assert!(app.stats_rows().join("\n").contains("Strike sources"));
     let Effect::Request(request) = app.input(Input::Key { key: Key::Enter }) else {
@@ -2068,8 +2083,8 @@ fn ordered_strikes_ascii_private_source_menu_builds_a_current_typed_page_query()
         serde_json::json!({"kind":"natural"})
     );
     assert!(wire["command"]["cursor"].is_null());
-    assert_eq!(app.state.as_ref().unwrap().snapshot(), before);
-    let mut reset = before;
+    assert_eq!(app.state.as_ref().unwrap().session().clone(), before);
+    let mut reset = app.state.as_ref().unwrap().reset_snapshot().unwrap();
     reset.context.epoch += 1;
     app.replace_snapshot(reset).unwrap();
     assert!(!app.has_inspection());
@@ -2095,7 +2110,7 @@ fn ordered_strikes_ascii_detail_keys_replace_current_page_and_revisit_zero_witho
         app.input(Input::Key { key: Key::Enter }),
         Effect::Request(_)
     ));
-    let context = app.state.as_ref().unwrap().snapshot().reply_context();
+    let context = app.state.as_ref().unwrap().reply_context();
     let mut entries = vec![StrikePageEntry::StrikeHeader {
         strike: 0,
         offset: 0,
@@ -2329,14 +2344,14 @@ fn personal_condition_rows_are_visible_readonly_and_distinguish_protection() {
     let mut app = App::default();
     app.set_state(ClientState::from_snapshot(snapshot).unwrap());
     app.ready();
-    let before = app.state.as_ref().unwrap().snapshot();
+    let before = app.state.as_ref().unwrap().session().clone();
     assert_eq!(app.input(Input::Key { key: Key::Stats }), Effect::None);
     let rows = app.stats_rows().join("\n");
     assert!(rows.contains("Fixture Haste: until removed"));
     assert!(rows.contains("Fixture Faint: 200 active ticks remaining"));
     assert!(rows.contains("Protection against Fixture Ice: 400 active ticks remaining"));
     assert!(!rows.contains("from actor"));
-    assert_eq!(app.state.as_ref().unwrap().snapshot(), before);
+    assert_eq!(app.state.as_ref().unwrap().session().clone(), before);
 }
 
 #[test]
@@ -2356,13 +2371,13 @@ fn stats_screen_displays_restorable_losses_without_changing_state() {
     let mut app = App::default();
     app.set_state(ClientState::from_snapshot(snapshot).unwrap());
     app.ready();
-    let before = app.state.as_ref().unwrap().snapshot();
+    let before = app.state.as_ref().unwrap().session().clone();
     assert_eq!(app.input(Input::Key { key: Key::Stats }), Effect::None);
     assert!(app
         .stats_rows()
         .iter()
         .any(|line| line.contains("Restorable losses: Strength 1, maximum Health 2")));
-    assert_eq!(app.state.as_ref().unwrap().snapshot(), before);
+    assert_eq!(app.state.as_ref().unwrap().session().clone(), before);
 }
 
 #[test]
@@ -2424,7 +2439,7 @@ fn wizard_creature_catalog_is_discoverable_in_ascii_help() {
 #[test]
 fn one_reachable_stack_is_taken_whole_without_a_quantity_menu() {
     for quantity in [1, 6, u64::MAX] {
-        let mut snapshot = state().snapshot();
+        let mut snapshot = state().reset_snapshot().unwrap();
         Arc::make_mut(&mut snapshot.state).observation.ground_items[0]
             .item
             .quantity = quantity;
@@ -2465,7 +2480,7 @@ fn status_reports_disclosed_attributes_resources_and_exact_gold_without_name_inf
     let mut app = App::new();
     app.set_state(ClientState::from_snapshot(snapshot).unwrap());
     let state = app.state.as_ref().unwrap();
-    let before = state.snapshot();
+    let before = state.session().clone();
     let rows = tor_client_ascii::status_lines(&app, state);
     for term in ["Str:2", "Spd:1", "Int:3", "Wil:2", "Awr:1", "Pre:0", "HD:1"] {
         assert!(rows[0].contains(term), "{term}: {rows:?}");
@@ -2505,7 +2520,7 @@ fn status_reports_disclosed_attributes_resources_and_exact_gold_without_name_inf
             );
         }
     }
-    assert_eq!(state.snapshot(), before);
+    assert_eq!(state.session().clone(), before);
 }
 
 #[test]
@@ -2564,7 +2579,7 @@ fn fitted_status_preserves_paused_state_with_large_counters() {
 #[test]
 fn discovered_trap_draws_and_selected_adjacent_look_examines_without_moving() {
     let target = TrapTarget::from_digest([61; 32]);
-    let mut snapshot = state().snapshot();
+    let mut snapshot = state().reset_snapshot().unwrap();
     let o = &mut Arc::make_mut(&mut snapshot.state).observation;
     o.ground_items.clear();
     let position = Position {
@@ -2603,7 +2618,7 @@ fn discovered_trap_draws_and_selected_adjacent_look_examines_without_moving() {
 fn distant_or_identified_trap_look_never_creates_an_examination_action() {
     let target = TrapTarget::from_digest([62; 32]);
     for reachable in [false, true] {
-        let mut snapshot = state().snapshot();
+        let mut snapshot = state().reset_snapshot().unwrap();
         let o = &mut Arc::make_mut(&mut snapshot.state).observation;
         o.ground_items.clear();
         let position = Position {
@@ -2632,7 +2647,7 @@ fn distant_or_identified_trap_look_never_creates_an_examination_action() {
 
 #[test]
 fn running_stops_before_a_known_trap_even_when_an_item_covers_its_glyph() {
-    let mut snapshot = state().snapshot();
+    let mut snapshot = state().reset_snapshot().unwrap();
     let o = &mut Arc::make_mut(&mut snapshot.state).observation;
     let position = Position {
         x: o.position.x + 1,

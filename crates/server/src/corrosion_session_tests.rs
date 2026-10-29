@@ -140,10 +140,7 @@ impl Wire {
         Request::Command {
             context: snapshot.reply_context().input,
             branch: snapshot.branch.clone(),
-            command: Command::Act {
-                expected_revision: snapshot.state.revision,
-                action,
-            },
+            command: Command::Act { action },
         }
     }
     fn finish(&mut self, actor: ActorId, id: &str, request: &Request) -> RequestReceipt {

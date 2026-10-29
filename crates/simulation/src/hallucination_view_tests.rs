@@ -146,6 +146,15 @@ fn genuine_stair_memory_survives_and_false_stair_sample_never_creates_recognitio
         },
     )
     .unwrap();
+    let factual = game.observe(OWNER).unwrap();
+    assert!(factual
+        .visible_cells
+        .iter()
+        .find(|cell| cell.location == stair)
+        .expect("visible factual stair before dosing")
+        .object_presentation
+        .is_none());
+    let expected_factual = (*factual.visible_cells).clone();
     let mut known = game.clone();
     let mut appearance = blank_map();
     appearance.stairs_up = true;
@@ -161,7 +170,9 @@ fn genuine_stair_memory_survives_and_false_stair_sample_never_creates_recognitio
         .unwrap();
     drink(&mut game);
     drink(&mut known);
+    let before_projection = crate::diagnostics::work_counts().observation_cells_copied;
     let current = game.observe(OWNER).unwrap();
+    let copied = crate::diagnostics::work_counts().observation_cells_copied - before_projection;
     let unknown_art = current
         .visible_cells
         .iter()
@@ -170,6 +181,13 @@ fn genuine_stair_memory_survives_and_false_stair_sample_never_creates_recognitio
         .object_presentation
         .clone();
     assert!(unknown_art.is_some());
+    assert_eq!(
+        copied,
+        current.visible_cells.len(),
+        "hallucinated stair projection detaches the factual cell array exactly once"
+    );
+    assert!(!current.visible_cells.shares_storage(&factual.visible_cells));
+    assert_eq!(*factual.visible_cells, expected_factual);
     let known_view = known.observe(OWNER).unwrap();
     assert!(known_view
         .visible_cells
@@ -179,6 +197,17 @@ fn genuine_stair_memory_survives_and_false_stair_sample_never_creates_recognitio
         .object_presentation
         .is_none());
     assert_eq!(current.exits, known_view.exits);
+    assert_eq!(
+        current
+            .visible_cells
+            .iter()
+            .find(|cell| cell.location == stair)
+            .unwrap()
+            .object_presentation,
+        unknown_art,
+        "the known branch's projection cannot rewrite retained unknown artwork"
+    );
+    assert_eq!(*factual.visible_cells, expected_factual);
     let fake_stairs = ObjectPresentation {
         name: Arc::from(""),
         asset: None,
@@ -458,5 +487,165 @@ fn a_hallucinated_figure_shows_none_of_its_true_gear() {
         seen(&game.observe(OWNER).unwrap()),
         0,
         "the hallucination hides it"
+    );
+}
+
+#[test]
+fn boundary_effects_include_observer_stair_memory_without_actor_mutation() {
+    let mut before = fixture();
+    let stair = at(1, 2, 1);
+    let destination = at(2, 2, 1);
+    before
+        .register_named_anchors(
+            destination.region,
+            [("landing".into(), destination.position)].into(),
+        )
+        .unwrap();
+    before
+        .connect_named_stair(
+            stair,
+            Direction::Up,
+            tor_world::NamedAnchor {
+                region: destination.region,
+                name: "landing".into(),
+            },
+        )
+        .unwrap();
+    drink(&mut before);
+    let original = before.observe(OWNER).unwrap();
+    assert!(
+        original
+            .visible_cells
+            .iter()
+            .find(|c| c.location == stair)
+            .unwrap()
+            .object_presentation
+            .is_some(),
+        "positive unknown hallucinated stair"
+    );
+    let mut after = before.clone();
+    let mut appearance = blank_map();
+    appearance.stairs_up = true;
+    after
+        .record_explored_observation(
+            OWNER,
+            &[MapCellInput {
+                location: stair,
+                appearance,
+            }],
+            &[],
+        )
+        .unwrap();
+    assert!(
+        before.actors.shares_actor_payload(&after.actors, OWNER),
+        "map learning does not detach the actor"
+    );
+    let learned = after.observe(OWNER).unwrap();
+    assert!(learned
+        .visible_cells
+        .iter()
+        .find(|c| c.location == stair)
+        .unwrap()
+        .object_presentation
+        .is_none());
+    assert_ne!(original, learned);
+    let effects = after.boundary_effects_since(&before);
+    assert_eq!(effects.changed_actors().count(), 0);
+    assert_eq!(
+        effects.observation_change(OWNER).unwrap(),
+        crate::ObservationChange::NeedsProjection
+    );
+}
+
+#[test]
+fn map_projection_matches_full_appearances_without_rich_materialization() {
+    for guise in [false, true] {
+        let values = if guise {
+            vec![crate::perception::contract_fixtures::guise()]
+        } else {
+            vec![]
+        };
+        let mut game = named_fixture(&values);
+        let stair = at(1, 2, 1);
+        let destination = at(2, 2, 1);
+        game.register_named_anchors(
+            destination.region,
+            [("map-landing".into(), destination.position)].into(),
+        )
+        .unwrap();
+        game.connect_named_stair(
+            stair,
+            Direction::Up,
+            tor_world::NamedAnchor {
+                region: destination.region,
+                name: "map-landing".into(),
+            },
+        )
+        .unwrap();
+        let mut spec = crate::ItemSpec::ordinary("genuine map object".into());
+        spec.concealed = true;
+        spec.appearance = "unidentified map object".into();
+        spec.asset = Some("map_object".into());
+        game.place_item_stack(71, game.actors[&SUBJECT].location, None, 1, spec)
+            .unwrap();
+        for phase in 0..3 {
+            if phase == 1 {
+                drink(&mut game);
+            }
+            if phase == 2 {
+                let mut appearance = blank_map();
+                appearance.stairs_up = true;
+                game.record_explored_observation(
+                    OWNER,
+                    &[MapCellInput {
+                        location: stair,
+                        appearance,
+                    }],
+                    &[],
+                )
+                .unwrap();
+            }
+            let before = game.clone();
+            let (full, scene, _) = game.observe_event_shared_scene(OWNER).unwrap();
+            let counts = crate::diagnostics::work_counts();
+            let (map, map_scene) = game.observe_map_shared_scene(OWNER).unwrap();
+            let after = crate::diagnostics::work_counts();
+            assert_eq!(
+                map.visible_cells, full.visible_cells,
+                "guise={guise}, phase={phase}"
+            );
+            assert_eq!(map.exits, full.exits);
+            assert_eq!(map.ground_items, full.ground_items);
+            assert_eq!(map_scene, scene);
+            assert_eq!(
+                after.observations, counts.observations,
+                "map acquisition must not construct a discarded full Observation"
+            );
+            assert_eq!(
+                after.own_stats_materializations,
+                counts.own_stats_materializations
+            );
+            assert_eq!(game, before, "appearance queries remain pure");
+        }
+    }
+}
+
+#[test]
+fn map_projection_preserves_invalid_observer_and_anatomy_errors() {
+    let mut game = named_fixture(&[]);
+    let missing = crate::ActorId(u64::MAX);
+    assert_eq!(
+        game.observe_map_shared_scene(missing).unwrap_err(),
+        game.observe_event_shared_scene(missing).unwrap_err()
+    );
+    game.actors
+        .get_mut(&OWNER)
+        .unwrap()
+        .anatomy
+        .slots
+        .push(crate::content_ids::EquipmentSlot::new("missing_map_fixture_slot").unwrap());
+    assert_eq!(
+        game.observe_map_shared_scene(OWNER).unwrap_err(),
+        game.observe_event_shared_scene(OWNER).unwrap_err()
     );
 }

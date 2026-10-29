@@ -9,11 +9,23 @@ use tor_protocol::ErrorCode;
 pub(super) struct CheckedRequest<'a> {
     receipt: &'a Receipt,
     revision: u64,
+    annotation: Option<crate::journal::RecordedAnchor>,
 }
 
 impl<'a> CheckedRequest<'a> {
-    pub(super) fn into_parts(self) -> (&'a Receipt, u64) {
-        (self.receipt, self.revision)
+    pub(super) fn into_parts(self) -> (&'a Receipt, u64, Option<crate::journal::RecordedAnchor>) {
+        (self.receipt, self.revision, self.annotation)
+    }
+    pub(super) fn with_annotation_anchor(
+        mut self,
+        anchor: crate::journal::RecordedAnchor,
+    ) -> Result<Self, Failure> {
+        if !matches!(&self.receipt.command, Command::Annotate { anchor: raw, .. } if *raw == anchor.to_public())
+        {
+            return Err(super::invalid_anchor());
+        }
+        self.annotation = Some(anchor);
+        Ok(self)
     }
 }
 
@@ -56,7 +68,7 @@ impl Engine {
         let revision = self.check_metadata(
             receipt.actor,
             &receipt.branch,
-            receipt.command.revision_requirement(),
+            receipt.command.boundary_requirement(),
         )?;
         if let Command::AdmitIntention { action, .. } | Command::Act { action, .. } =
             &receipt.command
@@ -72,34 +84,45 @@ impl Engine {
                 ));
             }
         }
-        Ok(CheckedRequest { receipt, revision })
+        let annotation = match &receipt.command {
+            Command::Annotate {
+                anchor: tor_protocol::Anchor::Entry { id },
+                ..
+            } => Some(crate::journal::RecordedAnchor::Entry { id: id.clone() }),
+            _ => None,
+        };
+        Ok(CheckedRequest {
+            receipt,
+            revision,
+            annotation,
+        })
     }
 }
 
 impl Command {
-    pub(crate) fn revision_requirement(&self) -> Option<(u64, &'static str)> {
+    pub(crate) fn boundary_requirement(&self) -> Option<(u64, &'static str)> {
         match self {
             Command::AdmitIntention {
-                expected_revision, ..
+                expected_boundary, ..
             }
             | Command::ResumeIntention {
-                expected_revision, ..
+                expected_boundary, ..
             }
             | Command::CancelIntention {
-                expected_revision, ..
+                expected_boundary, ..
             }
             | Command::Act {
-                expected_revision, ..
-            } => Some((*expected_revision, "Refresh the observation before acting")),
+                expected_boundary, ..
+            } => Some((*expected_boundary, "Refresh the observation before acting")),
             Command::Travel {
-                expected_revision, ..
-            } => Some((*expected_revision, "Refresh before travelling")),
+                expected_boundary, ..
+            } => Some((*expected_boundary, "Refresh before travelling")),
             Command::RenamePlace {
-                expected_revision, ..
-            } => Some((*expected_revision, "Refresh before naming a place")),
+                expected_boundary, ..
+            } => Some((*expected_boundary, "Refresh before naming a place")),
             Command::Wizard {
-                expected_revision, ..
-            } => Some((*expected_revision, "Refresh before a wizard operation")),
+                expected_boundary, ..
+            } => Some((*expected_boundary, "Refresh before a wizard operation")),
             Command::Annotate { .. } | Command::PausePreparation => None,
         }
     }
@@ -118,7 +141,7 @@ impl Engine {
                 "Reconnect to the current branch",
             ));
         }
-        let revision = self.revision(actor)?;
+        let revision = self.causal_boundary(actor)?;
         if let Some((expected, message)) = expected {
             if expected != revision {
                 return Err(Failure::new(ErrorCode::StaleRevision, message));

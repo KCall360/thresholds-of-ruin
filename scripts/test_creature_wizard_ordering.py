@@ -18,11 +18,12 @@ class OwnedHitDieWizardOrdering(unittest.TestCase):
         subject = creature_process.CreatureAbilityProcesses(
             "test_wizard_preserves_paid_preparation_until_its_owned_hit_die_is_removed")
         commands = []
+        observer_requests = []
         state = {"remaining": 3, "fresh": False}
 
         def frame(remaining=3, *, prepared=True):
             active = prepared and remaining >= granted_hd
-            return {"history": [{"content": {"event": {"type": "ability_started",
+            return {"error": None, "history": [{"content": {"event": {"type": "ability_started",
                     "ability": {"id": ability}}}}] if prepared else [],
                 "state": {"observation": {"tick": "0", "combat": {
                     "own_stats": {"hit_dice": {"total": str(remaining)},
@@ -65,7 +66,10 @@ class OwnedHitDieWizardOrdering(unittest.TestCase):
 
         def request(client, value):
             self.assertIs(client, observer)
-            self.assertEqual(value, {"type": "snapshot"})
+            expected = "observe" if not observer_requests else "snapshot"
+            self.assertEqual(value, {"type": expected})
+            observer_requests.append(value["type"])
+            # This read refreshes only the observer, never the Text mutator.
             return copy.deepcopy(frame(state["remaining"]))
 
         subject.frame, subject.request = observed, request
@@ -78,9 +82,11 @@ class OwnedHitDieWizardOrdering(unittest.TestCase):
                         subject.check_owned_hit_die_preparation(ability, start_x=1, granted_hd=granted_hd)
                     self.assertEqual(commands, ["wizard arena step", "sync"])
                     self.assertEqual(state["remaining"], 3)
+                    self.assertEqual(observer_requests, ["observe"])
                 else:
                     with self.assertRaises(ReachedThirdRemoval):
                         subject.check_owned_hit_die_preparation(ability, start_x=1, granted_hd=granted_hd)
+                    self.assertEqual(observer_requests, ["observe", "snapshot", "snapshot"])
                     self.assertEqual(commands, ["wizard arena step"] +
                         [value for _ in range(3) for value in ("sync", "wizard creature remove-hd 1")])
 

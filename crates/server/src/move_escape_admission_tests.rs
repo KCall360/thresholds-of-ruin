@@ -6,15 +6,15 @@ use serde_json::{json, Value};
 const SUBJECT: ActorId = ActorId(1);
 
 fn action_request(engine: &Engine, action: Action, direct: bool) -> Command {
-    let expected_revision = engine.revision(SUBJECT).unwrap();
+    let expected_revision = engine.causal_boundary(SUBJECT).unwrap();
     if direct {
         Command::Act {
-            expected_revision,
+            expected_boundary: expected_revision,
             action,
         }
     } else {
         Command::AdmitIntention {
-            expected_revision,
+            expected_boundary: expected_revision,
             action,
         }
     }
@@ -51,7 +51,7 @@ fn wait(engine: &mut Engine, serial: usize) {
             &format!("advance-{serial}"),
             &engine.branch().clone(),
             Command::Act {
-                expected_revision: engine.revision(actor).unwrap(),
+                expected_boundary: engine.causal_boundary(actor).unwrap(),
                 action: Action::Wait,
             },
         )
@@ -261,10 +261,12 @@ fn stale_move_metadata_and_busy_slots_preserve_exact_authority_and_receipts() {
         let mut stale = movement(&engine, direct);
         match &mut stale {
             Command::Act {
-                expected_revision, ..
+                expected_boundary: expected_revision,
+                ..
             }
             | Command::AdmitIntention {
-                expected_revision, ..
+                expected_boundary: expected_revision,
+                ..
             } => *expected_revision += 1,
             _ => unreachable!(),
         }
@@ -333,7 +335,8 @@ fn released_selected_hold_fails_queued_escape_without_rebinding_to_remaining_hol
     let raw = movement(&engine, false);
     let admitted = request(&mut engine, "move", raw.clone()).unwrap();
     let warp = Command::Wizard {
-        expected_revision: engine.revision(SUBJECT).unwrap(),
+        display_basis: None,
+        expected_boundary: engine.causal_boundary(SUBJECT).unwrap(),
         operation: WizardOperation::Teleport {
             actor: ActorId(oldest.holder.0),
             position: Position {
@@ -428,7 +431,7 @@ fn forged_newer_hold_is_rejected_by_replay_and_authoritative_checkpoint_predeces
             for serial in 0..REWIND_BOUNDARIES {
                 engine.suspend_queued_intention(SUBJECT).unwrap().unwrap();
                 let resume = Command::ResumeIntention {
-                    expected_revision: engine.revision(SUBJECT).unwrap(),
+                    expected_boundary: engine.causal_boundary(SUBJECT).unwrap(),
                     admission: accepted.entry.id.clone(),
                 };
                 request(&mut engine, &format!("resume-{serial}"), resume).unwrap();
@@ -549,7 +552,7 @@ fn unheld_move_keeps_its_original_action_and_direct_escape_requires_exact_event(
             }
             _ => {
                 record.receipt.as_mut().unwrap().command = Command::CancelIntention {
-                    expected_revision: engine.revision(SUBJECT).unwrap(),
+                    expected_boundary: engine.causal_boundary(SUBJECT).unwrap(),
                     admission: original.entry.id.clone(),
                     step: Some(Direction::West),
                 };

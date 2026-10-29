@@ -6,13 +6,22 @@ record accepted work that is not yet complete. “Implemented” describes code 
 this tree, not a promise that every related product or performance goal is closed.
 Every change still requires the [testing policy](development/testing.md).
 
-**Current formats:** protocol **64**, save format **63**, scenario format **35**, ruleset
+**Current formats:** protocol **66**, save format **64**, scenario format **35**, ruleset
 **`interactions-v56`**, scenario validator **`tor-scenario-47`**. Unsupported
 protocol/save/rules identities are rejected rather than migrated. Current private
 creature records also require explicit Health roll policy, stable HD/purchase
 ownership, body snapshots and pending-return state; authored packages may
 explicitly register body forms and eligibility. Other current guides refer here
 instead of copying these identities.
+
+Gameplay submissions and resume/cancel controls now bind to the attachment's
+input authority rather than its display revision. Unrelated display updates do
+not invalidate them; changed origin, operand identity, disclosed intention state
+or control still invalidates old input. Automatic human weapon/supply choices
+retain private admission-owned identities and cannot silently substitute later.
+These changes require the current protocol/save identities; old identities are
+rejected rather than migrated. Queries, travel and wizard commands retain their
+existing display-version checks.
 
 The independent compiled inputs use RulesInput **26**, ContentPackage **32** and
 RegionInput **9**. Physical TORB/TORJ/TORR framing stays at **6** and TORC at **1**;
@@ -156,8 +165,19 @@ destinations; live weighted stock and kits remain unchanged. Personal restoratio
 must distinguish empty-choice `ChooseAgain` from original-choice `Authored`, with
 stable purchase high-water marks and authored package restoration.
 
-Current application writers validate all 44 packages and produce protocol 64 and
-save 61 fixtures without altering historical formats. Ordinary paid
+Current application formats are protocol 66 and save 64. Recorded historical
+fixtures remain unchanged; current-format qualification requires fresh real-process
+recording and source-free save recovery, not relabeling an older fixture.
+
+The causal/display split is source-staged: ordered `Outcome` updates carry disclosed
+narration facts and complete owner status independently of demanded `Observe`
+pictures. Display generations are attachment-local; opaque SnapshotIds pin issued
+immutable page/inspection boundaries. InputContext remains separate authority.
+Notes normalize issued snapshot anchors into durable saved boundaries. Transient
+receipt clearing and hidden tick-only changes are not visual-change signals.
+Clients may coalesce pictures but not ordered outcomes; disconnected clients have
+current-state/history recovery, not a promise of offline transient-event delivery.
+Verification of this batch remains pending coordinated qualification. Ordinary paid
 `ChooseAgain` purchase/drain/XP restoration now has corresponding first-red and
 green process evidence; retained Authored attribute receipts have a separate
 explicitly privileged-builder witness. Aggregate qualification remains a release
@@ -677,10 +697,10 @@ checks do not replace the current
   ASCII map/look/inventory redraw on palette changes and recover safely.
   Shared creature seeds and captured corpse appearance support the optional,
   independently maintained [3D prototype](../crates/client-3d/README.md).
-  Protocol 64 adds each disclosed creature's visibly worn weapons and armour,
+  The protocol includes each disclosed creature's visibly worn weapons and armour,
   and the observer's own, as a bounded `worn` list. That list is projected after
   observer disclosure and carries no more than the items show on the ground; see
-  the [first slice](plans/appearance-composition-contract.md#implemented-first-slice-protocol-64).
+  the [first slice](plans/appearance-composition-contract.md#implemented-first-slice).
   Text examination and the ASCII look line name the visible gear. The 3D client
   dresses bodies from it: each of Rogue's eight body armours now has its own
   asset and torso recipe, following the maintainer's style guide.

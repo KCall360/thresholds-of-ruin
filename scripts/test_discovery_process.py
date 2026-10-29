@@ -46,7 +46,7 @@ class DiscoveryProcesses(ProcessTestCase):
         self.assertEqual(observation(initial)["tick"], "0", "Explicit examination is not a paid search")
         self.assertIn("not disarmed", self.say(text, "examine trap"))
         for _ in range(3):
-            self.assertEqual(self.snapshot(spectator)["state"], initial["state"])
+            self.assertDisclosedStateEqual(self.snapshot(spectator)["state"], initial["state"])
         self.say(text, "step east")
         self.say(text, "open secret entrance")
         opened = self.capture_discovery_snapshot(spectator, "opened")
@@ -64,7 +64,7 @@ class DiscoveryProcesses(ProcessTestCase):
         self.server("--checkpoint-interval", checkpoint_interval, scenario=ROOT / "scenarios/two-room", seed=None)
         restored_client, _ = self.client(SPECTATOR_TOKEN)
         restored = self.capture_discovery_snapshot(restored_client, "restored")
-        self.assertEqual(restored["state"], opened["state"])
+        self.assertDisclosedStateEqual(restored["state"], opened["state"])
         self.assertEqual(traps(restored), traps(opened))
         self.assertFalse(restored["state"]["wizard_game"])
 
@@ -164,7 +164,7 @@ class DiscoveryProcesses(ProcessTestCase):
         shutil.rmtree(source)
         self.server("--checkpoint-interval", 1, scenario=ROOT / "scenarios/two-room", seed=None)
         player, restored = self.client()
-        self.assertEqual(restored["state"], before["state"])
+        self.assertDisclosedStateEqual(restored["state"], before["state"])
         self.assertEqual(restored["history"], before["history"])
         self.assertFalse(restored["state"]["wizard_game"])
 

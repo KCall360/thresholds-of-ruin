@@ -96,7 +96,7 @@ class NutritionProcesses(ProcessTestCase):
             retained = saved["actors"]["1"]["combat"]["creature"]["nutrition"]
             self.assertEqual(retained["regeneration_remainder"], index % 3)
             for _ in range(3):
-                self.assertEqual(self.request(player, {"type": "snapshot"})["state"], frame["state"])
+                self.assertDisclosedStateEqual(self.request(player, {"type": "snapshot"})["state"], frame["state"])
             failed = self.act(player, {"type": "use_ability", "id": "fixture_missing",
                                       "invocation": {"aim": {"kind": "actor_target",
                                                      "target": observation(frame)["self_target"]}, "weapon": {"kind": "default"}}})
@@ -106,7 +106,7 @@ class NutritionProcesses(ProcessTestCase):
                 player.stop(); game.stop()
                 game = self.server("--checkpoint-interval", 1, seed=None)
                 player, reopened = self.client()
-                self.assertEqual(reopened["state"], frame["state"])
+                self.assertDisclosedStateEqual(reopened["state"], frame["state"])
                 self.assertEqual(self.checkpoint(player), saved)
                 frame = reopened
         full = self.act(player, {"type": "wait"})
@@ -184,7 +184,7 @@ class NutritionProcesses(ProcessTestCase):
         self.assertEqual(saved["items"]["10"]["holds"], [])
         self.assertEqual(saved["items"]["12"]["quantity"], 3)
         for _ in range(4):
-            self.assertEqual(self.request(player, {"type": "snapshot"})["state"], first["state"])
+            self.assertDisclosedStateEqual(self.request(player, {"type": "snapshot"})["state"], first["state"])
             self.assertIsNone(self.request(player, {"type": "history", "limit": 50, "before": None})["error"])
             self.assertIsNone(self.command(player, {"type": "inspect"})["error"])
         self.assertEqual(self.checkpoint(player), saved, "queries must not draw, digest, or change holds")
@@ -204,7 +204,7 @@ class NutritionProcesses(ProcessTestCase):
         player.stop(); game.stop()
         self.server("--checkpoint-interval", 1, seed=None)
         player, restored = self.client()
-        self.assertEqual(restored["state"], final["state"])
+        self.assertDisclosedStateEqual(restored["state"], final["state"])
         self.assertEqual(self.checkpoint(player), completed, "restart must not repeat the deleted item's meal")
 
     def test_source_deleted_pending_rolled_meal_matches_uninterrupted_checkpoint_continuation(self):
@@ -272,12 +272,12 @@ class NutritionProcesses(ProcessTestCase):
         self.assertEqual(nutrition(first)["reserve"], 1108)
         replayed = self.act(player, {"type": "eat", "item": meal["id"]})
         self.assertIsNone(replayed["error"])
-        self.assertEqual(replayed["state"], baseline["state"])
+        self.assertDisclosedStateEqual(replayed["state"], baseline["state"])
         self.assertEqual(self.checkpoint(player), baseline_game)
         player.stop(); peer.stop(); game.stop()
         self.server("--checkpoint-interval", 1, seed=None)
         player, reopened = self.client()
-        self.assertEqual(reopened["state"], replayed["state"])
+        self.assertDisclosedStateEqual(reopened["state"], replayed["state"])
         self.assertEqual(self.checkpoint(player), baseline_game)
 
     def test_websocket_edible_affordance_never_discloses_rolled_operands_to_any_role(self):
@@ -361,7 +361,7 @@ class NutritionProcesses(ProcessTestCase):
         player.stop(); game.stop()
         self.server("--checkpoint-interval", 1, scenario=package, seed=None, spectator=False)
         player, restored = self.client()
-        self.assertEqual(restored["state"], eaten["state"])
+        self.assertDisclosedStateEqual(restored["state"], eaten["state"])
         states = set()
         final = restored
         for _ in range(16):
@@ -403,7 +403,7 @@ class NutritionProcesses(ProcessTestCase):
                     path.unlink()
         self.server("--checkpoint-interval", 1, seed=None, spectator=False)
         player, restored = self.client()
-        self.assertEqual(restored["state"], empty["state"])
+        self.assertDisclosedStateEqual(restored["state"], empty["state"])
         meal = next(item for item in observation(restored)["inventory"] if item["name"] == "fixture meal")
         eaten = self.act(player, {"type": "eat", "item": meal["id"]})
         self.assertIsNone(eaten["error"])
@@ -431,7 +431,7 @@ class NutritionProcesses(ProcessTestCase):
         text = self.launch("tor-client-text", ["--script", "--connect", self.address])
         text.until(lambda line: line == "Ready.")
         self.assertIn("Nutrition: 8/12", text.command("stats"))
-        self.assertIn("ItemStarted", text.command("eat fixture meal"))
+        self.assertIn("You begin to eat the fixture meal.", text.command("eat fixture meal"))
         self.assertIn("Nutrition: 12/12", text.command("stats"))
 
     def test_text_rolled_eat_reports_uncapped_gain_and_last_unit_depletion(self):
@@ -439,9 +439,13 @@ class NutritionProcesses(ProcessTestCase):
         self.server(scenario=package, seed=FIRST_MEAL_SEED)
         observer, _ = self.client(observe=True)
         text, _ = self.text_client()
-        self.assertIn("ItemStarted", text.command("eat fixture meal"))
+        self.assertIn("You begin to eat the fixture meal.", text.command("eat fixture meal"))
         self.assertIn("Nutrition: 1108/4000", text.command("stats"))
-        self.assertIn("ItemStarted", text.command("eat fixture meal"))
+        depleted_prose = text.command("eat fixture meal")
+        start, finish = "You begin to eat the item.", "You finish eating the fixture meal."
+        self.assertEqual(depleted_prose.count(start), 1)
+        self.assertEqual(depleted_prose.count(finish), 1)
+        self.assertLess(depleted_prose.index(start), depleted_prose.index(finish))
         final = self.request(observer, {"type": "snapshot"})
         self.assertGreaterEqual(nutrition(final)["reserve"], 2208)
         self.assertLessEqual(nutrition(final)["reserve"], 2607)
