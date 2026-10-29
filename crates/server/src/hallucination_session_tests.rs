@@ -225,7 +225,7 @@ fn paid_production_dose_selects_exact_visual_cosmetics_without_query_rng_or_auth
             .unwrap()
     ));
     for _ in 0..4 {
-        assert_eq!(wire.snapshot(OWNER).state, current.state);
+        crate::assert_disclosed_state_eq(&wire.snapshot(OWNER).state, &current.state);
         assert_eq!(
             wire.checkpoint(),
             after,

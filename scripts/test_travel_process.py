@@ -32,7 +32,7 @@ class TravelJournalProcesses(ProcessTestCase):
         self.assertEqual(arrived["travel"]["completed_steps"], "5")
         self.assertEqual(arrived["state"]["observation"]["tick"], '500')
         observed = self.terminal(watcher)
-        self.assertEqual(observed["state"], arrived["state"])
+        self.assertDisclosedStateEqual(observed["state"], arrived["state"])
         self.assertEqual(observed["travel"], arrived["travel"])
         boundary = self.request(player, {"type": "snapshot"})
         actions = [entry for entry in boundary["history"] if entry["content"]["type"] == "action"]
@@ -70,7 +70,7 @@ class TravelJournalProcesses(ProcessTestCase):
         server.stop(); player.stop(); watcher.stop()
         self.server(scenario="travel")
         _, recovered = self.client(SPECTATOR_TOKEN)
-        self.assertEqual(recovered["state"], boundary["state"])
+        self.assertDisclosedStateEqual(recovered["state"], boundary["state"])
         self.assertEqual(recovered["history"], boundary["history"])
         self.assertEqual(recovered["intentions"], [])
         self.assertIsNone(recovered["travel"])
@@ -99,7 +99,7 @@ class TravelProcesses(ProcessTestCase):
         self.assertEqual(arrived["travel"]["completed_steps"], "5")
         self.assertEqual(arrived["state"]["observation"]["tick"], '500')
         watched = self.terminal(spectator)
-        self.assertEqual(watched["state"], arrived["state"])
+        self.assertDisclosedStateEqual(watched["state"], arrived["state"])
         self.assertEqual(watched["travel"], arrived["travel"])
         # Click the corridor's first cell (world x=0), five cells west.
         start = next(t for t in arrived["map_tiles"] if t["position"] == {"x": -5, "y": 0, "z": 0})
@@ -131,7 +131,7 @@ class TravelProcesses(ProcessTestCase):
         server.stop()
         self.server(wizard=True)
         observer, resumed = self.client(SPECTATOR_TOKEN)
-        self.assertEqual(resumed["state"], synced["state"])
+        self.assertDisclosedStateEqual(resumed["state"], synced["state"])
         self.assertIsNone(resumed["travel"])
         wizard = self.wizard()
         self.wizard_command(wizard, "rewind initial")
@@ -265,7 +265,7 @@ class TravelProcesses(ProcessTestCase):
         stopped = self.terminal(player)
         shown = self.ascii_frame(ascii_client, lambda f: f.get("travel") and f["travel"]["phase"] != "active")
         self.assertEqual(shown["travel"], stopped["travel"])
-        self.assertEqual(shown["state"], stopped["state"])
+        self.assertDisclosedStateEqual(shown["state"], stopped["state"])
         self.assertFalse(shown["has_control"])
         return player, initial, stopped
 
@@ -288,7 +288,7 @@ class TravelProcesses(ProcessTestCase):
         self.assertEqual(stopped["travel"]["completed_steps"], "1")
         self.assertTrue(stopped["state"]["observation"]["visible_actors"])
         synced = self.request(player, {"type":"snapshot"})
-        self.assertEqual(synced["state"], stopped["state"])
+        self.assertDisclosedStateEqual(synced["state"], stopped["state"])
         self.assertEqual(synced["travel"], stopped["travel"])
 
 

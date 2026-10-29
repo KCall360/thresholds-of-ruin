@@ -162,7 +162,7 @@ mod tests {
             "actor": observation.actor, "branch": "play",
             "cursor": {"sequence": "0", "tick": observation.tick.to_string()},
             "has_control": true, "intentions": [], "history": {"entries": [], "older_before": null},
-            "state": {"wizard_game": wizard, "revision": "0", "observation": observation},
+            "state": {"snapshot": "status-picture", "wizard_game": wizard, "revision": "0", "observation": observation},
         }))
         .unwrap();
         ClientState::from_snapshot(snapshot).unwrap()

@@ -560,7 +560,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         window = self.launch("tor-client-ascii", ["--connect", self.address, "--report-frames"])
         restored = self.ascii_frame(window, lambda frame: frame["has_control"] and not frame["busy"])
         self.assertEqual(restored["identification"], choice["identification"])
-        self.assertEqual(restored["state"], choice["state"])
+        self.assertDisclosedStateEqual(restored["state"], choice["state"])
         native = self.native_keys(window)
         self.native_press(window, native, "Down", "down")
         identified = self.native_press(window, native, "Return", "enter", wait_for_ready=True)

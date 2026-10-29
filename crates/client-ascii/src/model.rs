@@ -705,7 +705,11 @@ impl App {
         // Admission opens a queue slot even while other actors are advancing.
         // A run must inspect their settled results before choosing its next step;
         // unlike explicit one-step input it must not queue from an intermediate view.
-        if self.busy || !state.observation_current() || !state.can_admit_intention() {
+        if self.busy
+            || !state.observation_current()
+            || !state.character_ready()
+            || !state.can_admit_intention()
+        {
             return Effect::None;
         }
         if !self.messages.text().is_empty()
@@ -3305,6 +3309,11 @@ impl App {
             self.status = "You are observing. Press F3 to request control.".into();
             return Effect::None;
         }
+        // Ordered terminal facts can precede both the next picture and readiness.
+        if ended(state) {
+            self.status = "This run has ended.".into();
+            return Effect::None;
+        }
         if let Action::Move { direction } = action {
             if let Some(request) = state.cancel_intention_with_step_request(direction) {
                 self.messages.begin_turn();
@@ -3390,7 +3399,7 @@ impl App {
             return Effect::None;
         };
         if matches!(command, Command::Act { .. } | Command::Travel { .. }) {
-            if !state.can_admit_intention() {
+            if ended(state) || !state.can_admit_intention() {
                 self.status = if ended(state) {
                     "This run has ended."
                 } else {

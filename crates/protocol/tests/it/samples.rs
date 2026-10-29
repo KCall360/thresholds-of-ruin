@@ -834,3 +834,25 @@ fn recorded_polymorph_has_dual_aim_and_changed_only_diagnostic() {
                 .is_some_and(|item| dual_items.contains(item))
     }));
 }
+
+#[test]
+fn recorded_noticed_outcome_has_disclosed_event_time_position() {
+    let mut noticed = Vec::new();
+    for sample in samples()["server"].as_array().unwrap() {
+        let message: ServerMessage = round_trip(sample);
+        if let ServerMessage::Update { update } = message {
+            if let UpdateBody::Outcome { facts, .. } = update.body {
+                for fact in &facts.facts {
+                    if let OutcomeFact::Noticed {
+                        actor, position, ..
+                    } = fact
+                    {
+                        assert_ne!(*actor, facts.self_target);
+                        noticed.push(*position);
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(noticed, vec![Position { x: 2, y: 0, z: 0 }]);
+}

@@ -104,6 +104,9 @@ pub enum OutcomeFact {
     Noticed {
         actor: ActorTarget,
         name: String,
+        /// Event-time offset of the lowest, nearest disclosed body cell.
+        /// Historical description only, never a targeting capability.
+        position: Position,
     },
     LostSight {
         actor: ActorTarget,
@@ -178,8 +181,9 @@ impl From<&CombatView> for OutcomeStatusFacts {
     }
 }
 
-/// Non-wire narration inputs. Unlike a picture, these contain no geometry,
+/// Non-wire narration inputs. Unlike a picture, these contain no scene geometry,
 /// assets, targeting affordances, detailed statistics or chart capabilities.
+/// Actor offsets retain only already-disclosed event-time whereabouts.
 /// Hosts must populate them from the same authorized event-time disclosure as
 /// ordinary observations; reducing presentation work does not grant knowledge.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -217,6 +221,7 @@ pub struct OutcomeTrap {
 pub struct OutcomeActorName {
     pub id: ActorTarget,
     pub name: String,
+    pub position: Position,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OutcomeItemName {
@@ -283,6 +288,7 @@ impl From<&Observation> for OutcomeObservation {
                 .map(|actor| OutcomeActorName {
                     id: actor.id,
                     name: actor.name.clone(),
+                    position: actor.position,
                 })
                 .collect(),
             inventory: view
@@ -627,24 +633,44 @@ impl OutcomeFacts {
         ) {
             facts.push(OutcomeFact::Impacted);
         }
-        let actors = |view: &OutcomeObservation| -> BTreeMap<ActorTarget, String> {
-            view.visible_actors
+        let actors = |view: &OutcomeObservation| {
+            let mut actors: BTreeMap<ActorTarget, (String, Position)> = BTreeMap::new();
+            // Match the scene's single referent for a multi-cell/portal body:
+            // lowest cell, then nearest, preserving disclosure order on ties.
+            let rank = |p: Position| {
+                (
+                    p.z,
+                    u64::from(p.x.unsigned_abs())
+                        + u64::from(p.y.unsigned_abs())
+                        + u64::from(p.z.unsigned_abs()),
+                )
+            };
+            for actor in view
+                .visible_actors
                 .iter()
-                .filter(|actor| actor.id != view.self_target)
-                .map(|actor| (actor.id, actor.name.clone()))
-                .collect()
+                .filter(|a| a.id != view.self_target)
+            {
+                let entry = actors
+                    .entry(actor.id)
+                    .or_insert_with(|| (actor.name.clone(), actor.position));
+                if rank(actor.position) < rank(entry.1) {
+                    *entry = (actor.name.clone(), actor.position);
+                }
+            }
+            actors
         };
         let old = actors(before);
         let new = actors(after);
-        for (actor, name) in &new {
+        for (actor, (name, position)) in &new {
             if !old.contains_key(actor) {
                 facts.push(OutcomeFact::Noticed {
                     actor: *actor,
                     name: name.clone(),
+                    position: *position,
                 });
             }
         }
-        for (actor, name) in &old {
+        for (actor, (name, _)) in &old {
             if !new.contains_key(actor) {
                 facts.push(OutcomeFact::LostSight {
                     actor: *actor,
@@ -1144,6 +1170,83 @@ mod tests {
             OutcomeFacts::capture_compact_causal(&before, &after, None, new, new),
             Err(InvalidState::InvalidCombat)
         );
+    }
+
+    #[test]
+    fn noticed_captures_event_time_lowest_nearest_disclosed_cell() {
+        let before = OutcomeObservation::from(&observation());
+        let mut after = before.clone();
+        let actor = ActorTarget::from_digest([2; 32]);
+        let cell = |position| OutcomeActorName {
+            id: actor,
+            name: "figure".into(),
+            position,
+        };
+        after.visible_actors = vec![
+            cell(Position { x: 0, y: 0, z: 1 }),
+            cell(Position { x: 5, y: 0, z: 0 }),
+            cell(Position { x: 1, y: 0, z: 0 }),
+            cell(Position { x: -1, y: 0, z: 0 }),
+            OutcomeActorName {
+                id: after.self_target,
+                name: "self portal copy".into(),
+                position: Position { x: 0, y: 0, z: -1 },
+            },
+        ];
+        let stamp = EventProvenance {
+            batch: 1,
+            through: 0,
+        };
+        let facts =
+            OutcomeFacts::capture_compact_causal(&before, &after, None, stamp, stamp).unwrap();
+        assert_eq!(
+            facts.facts,
+            vec![OutcomeFact::Noticed {
+                actor,
+                name: "figure".into(),
+                position: Position { x: 1, y: 0, z: 0 },
+            }]
+        );
+        assert!(facts.validate().is_ok());
+        // A later absence cannot erase or relocate the already captured event.
+        after.visible_actors.clear();
+        assert_eq!(
+            facts.facts[0],
+            OutcomeFact::Noticed {
+                actor,
+                name: "figure".into(),
+                position: Position { x: 1, y: 0, z: 0 },
+            }
+        );
+        assert!(
+            OutcomeFacts::capture_compact_causal(&before, &after, None, stamp, stamp)
+                .unwrap()
+                .facts
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn noticed_requires_an_explicit_event_time_position_on_wire() {
+        let fact = OutcomeFact::Noticed {
+            actor: ActorTarget::from_digest([2; 32]),
+            name: "figure".into(),
+            position: Position { x: -2, y: 3, z: 1 },
+        };
+        let value = serde_json::to_value(&fact).unwrap();
+        assert_eq!(
+            serde_json::from_value::<OutcomeFact>(value.clone()).unwrap(),
+            fact
+        );
+        let mut missing = value.clone();
+        missing.as_object_mut().unwrap().remove("position");
+        assert!(serde_json::from_value::<OutcomeFact>(missing).is_err());
+        let mut invalid = value.clone();
+        invalid["position"]["x"] = serde_json::json!(2147483648_u64);
+        assert!(serde_json::from_value::<OutcomeFact>(invalid).is_err());
+        let mut forged = value;
+        forged["world_region"] = serde_json::json!(17);
+        assert!(serde_json::from_value::<OutcomeFact>(forged).is_err());
     }
 
     #[test]

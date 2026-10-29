@@ -505,8 +505,10 @@ fn a_delta_rejects_any_other_base() {
         delta.clone().apply(&room(15, 15, 7)),
         Err(DeltaError::WrongBase)
     );
-    // Same revision, different contents: the removals no longer fit.
+    // Preserve the issued base identity but corrupt its payload: after the
+    // capability check succeeds, the removals must still be validated.
     let mut other = room(10, 10, 1);
+    other.snapshot = base.snapshot.clone();
     other.observation.visible_cells.truncate(10);
     assert_eq!(delta.apply(&other), Err(DeltaError::InvalidChange));
 }

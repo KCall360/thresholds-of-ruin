@@ -67,7 +67,7 @@ class CreatureTemplateProcesses(ProcessTestCase):
         server.stop()
         self.server(scenario=package, wizard=True)
         observer, restored = self.client(WIZARD_TOKEN, observe=True)
-        self.assertEqual(restored["state"], removed["state"])
+        self.assertDisclosedStateEqual(restored["state"], removed["state"])
         wizard, _ = self.text_client(WIZARD_TOKEN, observe=True)
         self.assertNotIn("Server error", wizard.command("wizard creature template 1 arcane_trial on"))
         reapplied = self.request(observer, {"type": "snapshot"})
@@ -120,7 +120,7 @@ class CreatureTemplateProcesses(ProcessTestCase):
         server.stop()
         self.server(scenario=package, wizard=True)
         player, restored = self.client()
-        self.assertEqual(restored["state"], transformed["state"])
+        self.assertDisclosedStateEqual(restored["state"], transformed["state"])
         wizard, _ = self.text_client(WIZARD_TOKEN, observe=True)
         self.assertNotIn("Server error", wizard.command("wizard creature template 1 undead_form off"))
         reverted = self.request(player, {"type": "snapshot"})["state"]["observation"]["combat"]

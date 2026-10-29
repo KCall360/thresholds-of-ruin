@@ -114,7 +114,7 @@ fn reply_context_requires_current_attachment_state_and_rejects_implicit_fields()
     });
     let decoded: ReplyContext = serde_json::from_value(context.clone()).unwrap();
     assert_eq!(serde_json::to_value(&decoded).unwrap(), context);
-    let fields = ["input", "actor", "branch", "cursor", "revision"];
+    let fields = ["snapshot", "input", "actor", "branch", "cursor", "revision"];
     assert_eq!(context.as_object().unwrap().len(), fields.len());
     let positional: Vec<_> = fields.iter().map(|field| context[*field].clone()).collect();
     assert!(serde_json::from_value::<ReplyContext>(serde_json::json!(positional)).is_err());

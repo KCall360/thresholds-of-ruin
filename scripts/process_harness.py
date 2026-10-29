@@ -1018,7 +1018,9 @@ class ProcessTestCase(unittest.TestCase):
             if message.get("type") == "snapshot" or (message.get("type") == "update"
                     and body.get("type") in ("observation", "observation_delta")):
                 client._picture_dirty = False
+                client._picture_stale = False
             elif message.get("type") == "update" and body.get("type") == "outcome":
+                client._picture_stale = True
                 client._picture_dirty = (getattr(client, "_picture_dirty", False) is True
                                          or body["visual_changed"])
             if predicate(value):
@@ -1048,10 +1050,15 @@ class ProcessTestCase(unittest.TestCase):
 
     def picture_after(self, client, current):
         """Finish already-requested visual work, without advancing or resetting play."""
-        if getattr(client, "_picture_dirty", False) is not True:
-            return current
-        return self.frame(client, lambda frame: not frame.get("state_omitted", False)
-                          and getattr(client, "_picture_dirty", False) is not True)
+        if getattr(client, "_picture_dirty", False) is True:
+            current = self.frame(client, lambda frame: not frame.get("state_omitted", False)
+                                 and getattr(client, "_picture_dirty", False) is not True)
+        if getattr(client, "_picture_stale", False) is True:
+            # A causal-only effect (for example Wait) need not publish a picture.
+            # This settle-and-inspect helper explicitly asks for the current view;
+            # Observe preserves the stream epoch, unlike a repair Snapshot.
+            return self.request(client, {"type": "observe"})
+        return current
 
     def assertDisclosedStateEqual(self, actual, expected, message=None):
         """Picture capabilities are local; every disclosed payload field is exact."""

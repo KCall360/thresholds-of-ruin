@@ -3629,7 +3629,7 @@ mod tests {
             panic!("recovery must publish one complete logical snapshot");
         };
         assert_eq!(request_id, "recover");
-        assert_eq!(*snapshot.state, expected_state);
+        crate::assert_disclosed_state_eq(&snapshot.state, &expected_state);
         assert_eq!(
             snapshot.history, expected_history,
             "recovery cannot prune history to fit"
@@ -3678,7 +3678,7 @@ mod tests {
                 panic!("healthy peer must receive its snapshot");
             };
             assert_eq!(request_id, "healthy-reset");
-            assert_eq!(*snapshot.state, before);
+            crate::assert_disclosed_state_eq(&snapshot.state, &before);
         }
     }
 

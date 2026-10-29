@@ -102,7 +102,7 @@ class FallCreditProcesses(ProcessTestCase):
                 server = self.server("--checkpoint-interval", interval, scenario=package, seed=None)
                 owner, _ = self.client()
                 victim, restored = self.client(actor=2)
-                self.assertEqual(restored["state"], current["state"])
+                self.assertDisclosedStateEqual(restored["state"], current["state"])
                 self.wait_one_decision(owner, victim)
                 tail = self.request(victim, {"type": "snapshot"})
                 self.assertEqual(view(tail)["tick"], "120")

@@ -1708,6 +1708,29 @@ class PaidTailBudgetCallerTests(unittest.TestCase):
         route.finish_evidence = Mock()
         return route, completed
 
+    def test_settlement_demands_late_picture_before_next_owner_query(self):
+        with tempfile.TemporaryDirectory() as directory:
+            route, completed = self.route(Path(directory), 2)
+            picture = copy.deepcopy(completed)
+            picture['state']['observation']['inventory'] = [{'name': 'token'}]
+            route.frame.side_effect = [completed, picture]
+            result = route.settle(route.current)
+            self.assertEqual(result, picture)
+            self.assertEqual(route.current, picture)
+            self.assertEqual(route.controller.commands, 2)  # Observe is not gameplay.
+            self.assertEqual([json.loads(call.args[0]) for call in route.player.write.call_args_list],
+                             [{'type': 'resume_intention'},
+                              {'type': 'request', 'request': {'type': 'observe'}}])
+
+    def test_picture_demand_refusal_remains_a_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            route, completed = self.route(Path(directory), 2)
+            rejected = {**completed, 'error': 'StaleContext: rejected'}
+            route.frame.side_effect = [completed, rejected]
+            with self.assertRaisesRegex(ValueError, 'Ordinary command refused.*StaleContext'):
+                route.settle(route.current)
+            self.assertEqual(route.player.write.call_count, 2)  # No retry.
+
     def test_paid_tail_at_exact_budget_censors_before_any_transport_write(self):
         with tempfile.TemporaryDirectory() as directory:
             route, _ = self.route(Path(directory), 1)
@@ -1728,14 +1751,16 @@ class PaidTailBudgetCallerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             route, completed = self.route(Path(directory), 2)
             route.run_loop()
-            route.player.write.assert_called_once_with(json.dumps({'type': 'resume_intention'}))
+            self.assertEqual([json.loads(call.args[0]) for call in route.player.write.call_args_list],
+                             [{'type': 'resume_intention'},
+                              {'type': 'request', 'request': {'type': 'observe'}}])
             self.assertEqual(route.current, completed)
             self.assertEqual(route.controller.commands, 2)
             self.assertEqual(route.controller.command_kinds, {'action': 1, 'resume': 1})
             self.assertNotIn('unsubmitted_budget_command', route.report)
             self.assertNotEqual(route.report['outcome'], 'censored_action_budget')
-            self.assertEqual([row['kind'] for row in route.commands], ['resume'])
-            self.assertEqual(len((route.output / 'commands.jsonl').read_text().splitlines()), 1)
+            self.assertEqual([row['kind'] for row in route.commands], ['resume', 'read'])
+            self.assertEqual(len((route.output / 'commands.jsonl').read_text().splitlines()), 2)
             route.finish_evidence.assert_called_once_with()
 
 

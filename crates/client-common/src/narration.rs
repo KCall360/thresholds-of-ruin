@@ -234,7 +234,7 @@ pub fn outcome_line(outcomes: &OutcomeFacts, fact: &OutcomeFact) -> Option<Line>
         OutcomeFact::DoorDiscovered => Line::new(Topic::Discovery, "You notice a door."),
         OutcomeFact::Displaced => Line::new(Topic::Motion, "You move involuntarily."),
         OutcomeFact::Impacted => Line::new(Topic::Motion, "You collide with an obstruction."),
-        OutcomeFact::Noticed { actor, name } => {
+        OutcomeFact::Noticed { actor, name, .. } => {
             let name = label(name, "figure");
             let article = if name.to_lowercase().starts_with(['a', 'e', 'i', 'o', 'u']) {
                 "an"

@@ -38,7 +38,7 @@ class RogueLocomotionProcesses(ProcessTestCase):
         server = self.server(scenario=unrelated_fallback(self), seed=None)
         player, _ = self.client()
         foe, restored = self.client(actor=3)
-        self.assertEqual(restored["state"], before["state"])
+        self.assertDisclosedStateEqual(restored["state"], before["state"])
         rejected = self.command(foe, {"type": "act", "action": {"type": "move", "direction": "east"}})
         self.assertIsNotNone(rejected["error"])
         self.assertEqual(rejected["state"], before["state"])
@@ -80,7 +80,7 @@ class RogueLocomotionProcesses(ProcessTestCase):
                     server = self.server(scenario=unrelated_fallback(self), seed=None)
                     player, _ = self.client()
                     foe, restored = self.client(actor=3)
-                    self.assertEqual(restored["state"], saved["state"])
+                    self.assertDisclosedStateEqual(restored["state"], saved["state"])
                     self.assertEqual(restored["history"], saved["history"])
                     foe.stop(); player.stop(); server.stop()
 

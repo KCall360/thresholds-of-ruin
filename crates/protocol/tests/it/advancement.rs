@@ -23,7 +23,7 @@ fn query(query: Value) -> Value {
     request(json!({"type":"advancement","expected_revision":"5","query":query}))
 }
 fn response(query: Value, entries: Value, total: u16, next: Option<u16>) -> Value {
-    json!({"type":"advancement_page","request_id":"advancement-request","context":{
+    json!({"type":"advancement_page","request_id":"advancement-request","context":{"snapshot":"advancement-picture",
         "input":{"stream":{"stream":"attachment","epoch":"1"},"readiness_revision":"3"},
         "actor":"1","branch":"branch","cursor":{"sequence":"5","tick":"12"},"revision":"5"},
         "page":{"basis":basis(),"revision":"5","query":query,"total":total,"next":next,"entries":entries}})

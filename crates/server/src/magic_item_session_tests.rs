@@ -587,10 +587,23 @@ fn equipment_only_action_broadcast_redacts_spectator_wire_and_retained_state() {
     assert!(owner_items.curse_blocked.contains(&worn));
     let mut expected = owner.clone();
     restrict_item_disclosure(&mut expected, AccessRole::Spectator);
+    // Causal outcomes are pushed, but pictures are issued only on demand.
+    wire.service
+        .handle(spectator.id, "equipment-picture".into(), Request::Observe);
     let mut observations = 0;
     while let Ok(frame) = spectator.messages.try_recv_frame() {
         if let ServerMessage::Update { update } = decode_response(&frame.text).unwrap() {
             match update.body {
+                UpdateBody::Outcome { facts, .. } => {
+                    assert!(
+                        facts
+                            .facts
+                            .iter()
+                            .all(|fact| !matches!(fact, OutcomeFact::CurseBlocked { .. })),
+                        "private curse block leaked in causal facts"
+                    );
+                    continue;
+                }
                 UpdateBody::Observation { state, .. } => received = state.as_ref().clone(),
                 UpdateBody::ObservationDelta { state, .. } => {
                     received = state.apply(&received).unwrap()
@@ -616,9 +629,9 @@ fn equipment_only_action_broadcast_redacts_spectator_wire_and_retained_state() {
     }
     assert!(
         observations > 0,
-        "the action must actually publish an observation"
+        "the explicit demand must publish an observation"
     );
-    assert_eq!(received, expected);
+    crate::assert_disclosed_state_eq(&received, &expected);
     assert_eq!(
         wire.service.clients[&spectator.id]
             .last_observation
@@ -626,7 +639,7 @@ fn equipment_only_action_broadcast_redacts_spectator_wire_and_retained_state() {
             .unwrap()
             .state
             .as_ref(),
-        &expected
+        &received
     );
 }
 

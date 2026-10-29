@@ -1918,8 +1918,9 @@ class CausalPictureCompletion(unittest.TestCase):
     class Client:
         def __init__(self, frames):
             self.frames = list(frames)
+            self.sent = []
         def write(self, value):
-            pass
+            self.sent.append(json.loads(value))
         def until(self, predicate, seconds, include_transcript=False):
             while self.frames:
                 if predicate(json.dumps(self.frames.pop(0))):
@@ -1943,15 +1944,20 @@ class CausalPictureCompletion(unittest.TestCase):
                 actual = ProcessTestCase().act(client, {"type": "wait"})
                 self.assertEqual(actual["state"]["snapshot"], "new")
                 self.assertFalse(client.frames)
+                self.assertEqual(client.sent, [{"type": "act", "action": {"type": "wait"}}])
 
-    def test_causal_only_outcome_does_not_wait_for_a_picture(self):
+    def test_causal_only_outcome_requests_one_nonresetting_current_picture(self):
         accepted = {"type": "ready", "intentions": [{"phase": "queued", "intention": "one"}]}
         outcome = self.update({"type": "outcome", "visual_changed": False})
         lifecycle = self.update({"type": "intention", "status": {"phase": "resolved", "intention": "one"}})
         permission = self.update({"type": "readiness"}, revision=2)
-        client = self.Client([accepted, outcome, lifecycle, permission])
+        picture = self.update({"type": "observation_delta"}, revision=2, picture="current")
+        ready = {**picture, "type": "ready", "message": None}
+        client = self.Client([accepted, outcome, lifecycle, permission, picture, ready])
         actual = ProcessTestCase().act(client, {"type": "wait"})
-        self.assertEqual(actual, permission)
+        self.assertEqual(actual, ready)
+        self.assertEqual(client.sent, [{"type": "act", "action": {"type": "wait"}},
+                                      {"type": "request", "request": {"type": "observe"}}])
         self.assertFalse(client.frames)
 
     def test_picture_before_lifecycle_and_noqueued_acceptance_are_already_current(self):

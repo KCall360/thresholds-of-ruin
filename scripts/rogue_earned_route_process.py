@@ -772,7 +772,12 @@ class RouteExecution:
             def frame(self, player, predicate, seconds=15):
                 return execution.frame(player, predicate, seconds=seconds)
         self.current = settle_rogue_action(Settlement(), self.player, current, survive=False)
-        return self.current
+        # Readiness acknowledges causal completion, not a refreshed picture.
+        # This controller immediately accounts for acquisitions and asks for a
+        # picture-bound advancement page. Demand that picture explicitly; the
+        # client coalesces this with any already pending Observe. Do not change
+        # general headless admission timing or silently retry a refused query.
+        return self.issue({'type': 'request', 'request': {'type': 'observe'}})
 
     def assert_start(self):
         view = self.current['state']['observation']

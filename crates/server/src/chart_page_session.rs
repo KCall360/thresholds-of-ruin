@@ -61,8 +61,10 @@ impl Service {
             }
             return Ok(transfer.clone());
         }
-        // This clones the prepared revision's Arc only: no census, resampling,
-        // learning, clock advancement or Game mutation is allowed on this path.
+        // A current boundary reuses its prepared chart Arc. An older issued
+        // boundary reconstructs from its frozen Game once for this transfer;
+        // continuations above retain that Arc. Neither path learns, resamples,
+        // advances the clock, or mutates authoritative Game state.
         let chart = self
             .engine
             .prepared_detection_charts_at(&observed.boundary, actor)?

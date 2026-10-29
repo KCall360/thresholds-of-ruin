@@ -57,7 +57,7 @@ class SupplySelectionProcesses(ProcessTestCase):
                 self.assertGreater(int(ability["cooldown_remaining"]), 0)
                 shown = self.say(text, "stats") if adventure else text.command("stats")
                 self.assertIn(f"cooldown: {ability['cooldown_remaining']} active ticks", shown)
-                self.assertEqual(self.request(observer, {"type": "snapshot"})["state"], current["state"])
+                self.assertDisclosedStateEqual(self.request(observer, {"type": "snapshot"})["state"], current["state"])
                 text.stop(); observer.stop(); server.stop()
 
 
@@ -93,7 +93,7 @@ class SupplySelectionNativeProcesses(ProcessTestCase):
         self.assertTrue(current["window_open"])
         self.assertFalse(current["state"]["wizard_game"])
         self.assertIsNone(bandage(current))
-        self.assertEqual(self.request(observer, {"type": "snapshot"})["state"], current["state"])
+        self.assertDisclosedStateEqual(self.request(observer, {"type": "snapshot"})["state"], current["state"])
         press("z", "abilities"); press("Return", "enter"); press("Up", "up")
         shown = press("Return", "enter")
         self.assertIn("active ticks", " ".join(shown["supply_rows"]))

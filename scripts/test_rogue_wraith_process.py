@@ -415,7 +415,7 @@ class RogueWraithProcesses(ProcessTestCase):
         self.sample["phase"] = "source_free_restart"
         server = self.server("--checkpoint-interval", 1, scenario=ROOT / "scenarios/two-room", seed=None)
         player, reopened = self.client(actor=1)
-        self.assertEqual(reopened["state"], current["state"])
+        self.assertDisclosedStateEqual(reopened["state"], current["state"])
         self.assertEqual(checkpoint(self, player), before)
         self.assert_progress(before, 160, 0, 2)
         self.assertEqual(lore(reopened), 0)

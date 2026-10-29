@@ -48,7 +48,7 @@ class CreatureLifecycleProcesses(ProcessTestCase):
         server.stop()
         self.server(scenario=package, wizard=True)
         observer, restored = self.client(WIZARD_TOKEN, observe=True)
-        self.assertEqual(restored["state"], removed["state"])
+        self.assertDisclosedStateEqual(restored["state"], removed["state"])
         wizard = self.wizard()
         self.wizard_command(wizard, "rewind initial")
         rewound = self.request(observer, {"type": "snapshot"})

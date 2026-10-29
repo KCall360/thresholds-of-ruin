@@ -25,8 +25,8 @@ class StreamRecoveryFixture:
         slow, _ = self.playable(kind, relay.address)
         relay.gate.clear()
         final = None
-        for _ in range(4):
-            final = self.act(player, {'type': 'wait'})
+        for direction in ('east', 'west', 'east', 'west'):
+            final = self.act(player, {'type': 'move', 'direction': direction})
             self.assertIsNone(final['error'])
         self.assertTrue(relay.held.wait(5), 'Relay did not hold an actual server update')
         # Server progress is established by execution updates while delivery is
@@ -42,24 +42,30 @@ class StreamRecoveryFixture:
         relay.gate.set()
         if kind == 'ascii':
             caught_up = self.ascii_frame(slow, lambda f: f['state']['observation']['tick'] == '400')
-            self.assertEqual(caught_up['state'], final['state'])
+            self.assertDisclosedStateEqual(caught_up['state'], final['state'])
             self.assertEqual(caught_up['history'], final['history'])
-            self.assertEqual(caught_up['narration'], ['Time passes.'])
+            self.assertIn('You move west.', caught_up['narration'])
         else:
-            # The four waits arrive together and are told as one passage.
+            # Ordered movement outcomes survive coalesced display snapshots.
             passage = slow.until(lambda line: line == '> ')
-            self.assertIn('Time passes.', passage)
+            self.assertIn('east', passage)
+            self.assertIn('west', passage)
 
         relay.repair_gate.clear()
         relay.drop_observation.set()
-        self.act(player, {'type': 'wait'})
+        before_gap = self.act(player, {'type': 'move', 'direction': 'east'})
+        self.assertIsNone(before_gap['error'])
         self.assertTrue(relay.dropped.wait(5))
+        # A dropped final picture is detected by the next ordered update, not
+        # by elapsed time. Its valid earlier Outcome remains committed.
+        self.assertIsNone(self.act(player, {'type': 'move', 'direction': 'west'})['error'])
         self.assertTrue(relay.repair_held.wait(5), 'Client did not request a repair snapshot')
-        self.assert_frozen(kind, slow, initial=caught_up if kind == 'ascii' else None)
+        self.assert_frozen(kind, slow, initial=caught_up if kind == 'ascii' else None,
+                           committed=before_gap)
         # Continue authoritative play while the single repair frame is held.
-        final = self.act(player, {'type': 'wait'})
+        final = self.act(player, {'type': 'move', 'direction': 'east'})
         self.assertIsNone(final['error'])
-        self.assertEqual(final['state']['observation']['tick'], '600')
+        self.assertEqual(final['state']['observation']['tick'], '700')
         relay.repair_gate.set()
         self.assert_recovered(kind, slow, final)
         self.assertEqual(relay.attachments, 1)
@@ -68,7 +74,7 @@ class StreamRecoveryFixture:
 
         replacement, initial = self.playable(kind, self.address)
         if kind == 'ascii':
-            self.assertEqual(initial['state'], final['state'])
+            self.assertDisclosedStateEqual(initial['state'], final['state'])
             self.assertEqual(initial['history'], final['history'])
             self.assertFalse(initial['has_control'])
             self.assertEqual(initial['narration'], [])
@@ -79,10 +85,10 @@ class StreamRecoveryFixture:
             for entry in final['history']:
                 self.assertIn(entry['id'], history)
             self.assertIn('Spectator access is read-only', initial)
-        self.assertIsNone(self.act(player, {'type': 'wait'})['error'])
+        self.assertIsNone(self.act(player, {'type': 'move', 'direction': 'east'})['error'])
 
 
-    def assert_frozen(self, kind, client, *, initial):
+    def assert_frozen(self, kind, client, *, initial, committed):
         self.assertIsNone(client.child.poll(), 'Recoverable stream error killed the client')
         if kind == 'ascii':
             # A local presentation event makes a frame without sending gameplay.
@@ -91,7 +97,8 @@ class StreamRecoveryFixture:
             held = self.ascii_frame(client, lambda f: f['input_done'] == 'places')
             self.assertTrue(held['connected'])
             self.assertEqual(held['state'], initial['state'])
-            self.assertEqual(held['history'], initial['history'])
+            # The valid Outcome preceding the rejected picture is not rolled back.
+            self.assertEqual(held['history'], committed['history'])
         else:
             # The repair is held at the relay. An actual local command creates
             # an output barrier and must present the recovery refusal, never
@@ -112,7 +119,8 @@ class StreamRecoveryFixture:
     def assert_recovered(self, kind, client, final):
         if kind == 'ascii':
             recovered = self.ascii_frame(client, lambda f:
-                f['connected'] and f['state'] == final['state'] and f['history'] == final['history'])
+                f['connected'] and f['state']['observation'] == final['state']['observation'] and f['history'] == final['history'])
+            self.assertDisclosedStateEqual(recovered['state'], final['state'])
             self.assertFalse(recovered['has_control'])
         else:
             client.until(lambda line: line == '> ')
@@ -133,29 +141,30 @@ class StreamRecoveryFixture:
         relay.corrupted.clear()
         relay.repair_gate.clear()
         getattr(relay, corruption).set()
-        final = self.act(player, {'type': 'wait'})
+        final = self.act(player, {'type': 'move', 'direction': 'east'})
         self.assertIsNone(final['error'])
         self.assertTrue(relay.corrupted.wait(5), 'No actual delta was corrupted')
         self.assertTrue(relay.repair_held.wait(5), 'Client did not request a repair snapshot')
-        self.assert_frozen(kind, spectator, initial=initial)
+        self.assert_frozen(kind, spectator, initial=initial, committed=final)
         relay.repair_gate.set()
         self.assert_recovered(kind, spectator, final)
         # Subsequent authoritative updates must work on the same attachment.
-        final = self.act(player, {'type': 'wait'})
+        final = self.act(player, {'type': 'move', 'direction': 'west'})
         self.assertIsNone(final['error'])
         if kind == 'ascii':
-            continued = self.ascii_frame(spectator, lambda f: f['state'] == final['state'])
+            continued = self.ascii_frame(spectator, lambda f: f['state']['observation'] == final['state']['observation'])
+            self.assertDisclosedStateEqual(continued['state'], final['state'])
             self.assertEqual(continued['history'], final['history'])
             self.assertTrue(continued['connected'])
         else:
             passage = spectator.until(lambda line: line == '> ')
-            self.assertIn('Time passes.', passage)
+            self.assertIn('west', passage)
         self.assertEqual(relay.attachments, 1)
         self.assertEqual(relay.repairs, 1)
         spectator.stop()
         replacement, recovered = self.playable(kind, self.address)
         if kind == 'ascii':
-            self.assertEqual(recovered['state'], final['state'])
+            self.assertDisclosedStateEqual(recovered['state'], final['state'])
             self.assertEqual(recovered['history'], final['history'])
         else:
             replacement.child.stdin.write('history\n')
@@ -163,7 +172,7 @@ class StreamRecoveryFixture:
             history = replacement.until(lambda line: line == '> ')
             for entry in final['history']:
                 self.assertIn(entry['id'], history)
-        self.assertIsNone(self.act(player, {'type': 'wait'})['error'])
+        self.assertIsNone(self.act(player, {'type': 'move', 'direction': 'east'})['error'])
 
 
 
@@ -179,7 +188,7 @@ class StreamRecoveryProcesses(StreamRecoveryFixture, ProcessTestCase):
         for note in notes:
             result = self.request(player, {
                 "type": "command", "context": initial["input_context"], "branch": initial["branch"],
-                "command": {"type": "annotate", "anchor": {"type": "state", "revision": "0"},
+                "command": {"type": "annotate", "anchor": {"type": "state", "snapshot": initial["state"]["snapshot"]},
                             "text": note, "source": "user", "category": "note", "audience": "actor"}})
             self.assertIsNone(result["error"])
         reset = self.request(player, {"type": "snapshot"})
@@ -188,10 +197,10 @@ class StreamRecoveryProcesses(StreamRecoveryFixture, ProcessTestCase):
         subset = json.dumps({"state": reset["state"], "history": reset["history"]},
                             ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         self.assertGreater(len(subset), frame_bytes)
-        self.assertEqual(reset["state"], initial["state"])
+        self.assertDisclosedStateEqual(reset["state"], initial["state"])
         self.assertEqual([entry["content"]["text"] for entry in reset["history"]], notes)
         spectator, observed = self.client(SPECTATOR_TOKEN)
-        self.assertEqual(observed["state"], reset["state"])
+        self.assertDisclosedStateEqual(observed["state"], reset["state"])
         self.assertEqual(observed["history"], reset["history"])
         self.flush_save()
         player.stop()
@@ -199,7 +208,7 @@ class StreamRecoveryProcesses(StreamRecoveryFixture, ProcessTestCase):
         server.stop()
         self.server(*limits)
         resumed, restored = self.client()
-        self.assertEqual(restored["state"], reset["state"])
+        self.assertDisclosedStateEqual(restored["state"], reset["state"])
         self.assertEqual(restored["history"], reset["history"])
         self.assertIsNone(self.act(resumed, {"type": "wait"})["error"])
 
@@ -238,7 +247,7 @@ class StreamRecoveryProcesses(StreamRecoveryFixture, ProcessTestCase):
         spectator, initial = self.client(SPECTATOR_TOKEN, observe=True)
         self.address = upstream
         relay.overdeep.set()
-        final = self.act(player, {'type': 'wait'})
+        final = self.act(player, {'type': 'move', 'direction': 'east'})
         self.assertIsNone(final['error'])
         self.assertTrue(relay.corrupted.wait(5), 'No actual observation was corrupted')
 
@@ -257,9 +266,10 @@ class StreamRecoveryProcesses(StreamRecoveryFixture, ProcessTestCase):
         self.assertEqual(relay.attachments, 1)
         self.assertFalse(relay.errors)
         replacement, recovered = self.client(SPECTATOR_TOKEN, observe=True)
-        self.assertEqual(recovered['state'], final['state'])
-        self.assertGreater(int(recovered['state']['revision']), int(initial['state']['revision']))
-        self.assertIsNone(self.act(player, {'type': 'wait'})['error'])
+        self.assertDisclosedStateEqual(recovered['state'], final['state'])
+        self.assertGreater(int(recovered['state']['observation']['tick']),
+                           int(initial['state']['observation']['tick']))
+        self.assertIsNone(self.act(player, {'type': 'move', 'direction': 'east'})['error'])
         saved = self.request(player, {'type': 'save'})
         self.assertIsNone(saved['error'])
 

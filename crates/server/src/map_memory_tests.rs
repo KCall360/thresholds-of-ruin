@@ -388,7 +388,7 @@ fn spectator_attachment_and_snapshot_reads_do_not_acquire_map_knowledge() {
                 _ => None,
             })
             .expect("spectator receives the actor's disclosed snapshot");
-        assert_eq!(*snapshot.state, expected);
+        crate::assert_disclosed_state_eq(&snapshot.state, &expected);
         assert!(!snapshot.has_control);
         no_map_writes(map_work_counts());
     }

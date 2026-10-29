@@ -1,4 +1,6 @@
 //! Versioned place discovery, rename, delivery and recovery diagnostics.
+#[path = "support/benchmark_display.rs"]
+mod benchmark_display;
 use serde::Deserialize;
 use serde_json::json;
 use std::time::Instant;
@@ -23,9 +25,19 @@ fn wizard(engine: &mut Engine, id: &str, operation: String) -> tor_server::Comma
         operation,
     })
     .unwrap();
-    let command = engine
-        .resolve_command(ActorId(1), engine.branch(), command)
-        .unwrap();
+    // Authored direct-Engine setup is not an externally issued display request.
+    let tor_server::wire_adapter::DecodedCommand::Display {
+        operation: tor_server::wire_adapter::DisplayCommand::Wizard { operation },
+        ..
+    } = command
+    else {
+        panic!("wizard setup decoded as another command");
+    };
+    let command = journal::Command::Wizard {
+        expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
+        display_basis: None,
+        operation,
+    };
     engine
         .command_profiled(
             "bench",
@@ -123,6 +135,10 @@ fn main() {
         let mut canvas = Canvas::default();
         for sample in 0..spec.samples {
             let rename = sample % 2 == 0;
+            let before = engine.state(ActorId(1)).unwrap();
+            let before_stamp = engine
+                .event_history_boundary_at(&engine.presentation_boundary())
+                .unwrap();
             let revision = engine.causal_boundary(ActorId(1)).unwrap();
             let command = if rename {
                 journal::Command::RenamePlace {
@@ -148,23 +164,53 @@ fn main() {
                 )
                 .unwrap();
             let start = Instant::now();
-            let state = engine.state(ActorId(1)).unwrap();
+            let mut state = engine
+                .state_at(
+                    &engine.presentation_boundary(),
+                    ActorId(1),
+                    sample as u64 + 1,
+                )
+                .unwrap();
+            state.snapshot = SnapshotId(format!("place-picture-{sample}"));
             let observation_ms = ms(start);
+            let expected_history = engine
+                .disclose_entry(&entry.entry)
+                .expect("completed command has history");
+            let outcome = StreamUpdate {
+                context: fixture_context(),
+                actor: ActorId(1),
+                branch: engine.branch().clone(),
+                cursor: StreamCursor {
+                    sequence: sample as u64 * 2 + 1,
+                    tick: state.observation.tick,
+                },
+                body: benchmark_display::outcome(
+                    &before.observation,
+                    &state.observation,
+                    before_stamp,
+                    engine
+                        .event_history_boundary_at(&engine.presentation_boundary())
+                        .unwrap(),
+                    Some(expected_history.clone()),
+                ),
+            };
+            let start = Instant::now();
+            let outcome_wire_bytes = serde_json::to_vec(&outcome).unwrap().len();
+            let outcome_encode_ms = ms(start);
+            let start = Instant::now();
+            app.update(outcome).unwrap();
+            let outcome_apply_ms = ms(start);
             let update = StreamUpdate {
                 context: fixture_context(),
                 actor: ActorId(1),
                 branch: engine.branch().clone(),
                 cursor: StreamCursor {
-                    sequence: sample as u64 + 1,
+                    sequence: sample as u64 * 2 + 2,
                     tick: state.observation.tick,
                 },
                 body: UpdateBody::Observation {
                     state: state.into(),
-                    event: Some(Box::new(
-                        engine
-                            .disclose_entry(&entry.entry)
-                            .expect("completed command has history"),
-                    )),
+                    event: None,
                 },
             };
             let start = Instant::now();
@@ -173,6 +219,10 @@ fn main() {
             let start = Instant::now();
             app.update(update).unwrap();
             let apply_ms = ms(start);
+            assert_eq!(
+                app.state.as_ref().unwrap().history().last(),
+                Some(&expected_history)
+            );
             let start = Instant::now();
             canvas.draw(&app);
             let render_ms = ms(start);
@@ -180,6 +230,7 @@ fn main() {
                 "{}",
                 json!({"version":1,"kind":"sample","extra_rooms":extra_rooms,"places":count,"sample":sample,
                 "label":if rename {"rename"} else {"wait"},"command_ms":profile.authoritative_total.as_secs_f64()*1000.,
+                "outcome_wire_bytes":outcome_wire_bytes,"outcome_encode_ms":outcome_encode_ms,"outcome_apply_ms":outcome_apply_ms,
                 "observation_ms":observation_ms,"encode_ms":encode_ms,"apply_ms":apply_ms,"render_ms":render_ms,
                 "wire_bytes":wire_bytes,"records":profile.records_serialized,"navigation_refreshes":profile.navigation_refreshes})
             );

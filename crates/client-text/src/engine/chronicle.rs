@@ -7,7 +7,6 @@ use std::collections::BTreeMap;
 use tor_client_common::Palette;
 use tor_protocol::*;
 
-#[cfg(test)]
 use super::scene::whereabouts;
 use super::scene::{Kind, Scene};
 
@@ -169,6 +168,13 @@ impl Chronicler {
         for actor in &facts.actor_names {
             self.names.insert(actor.actor, crate::safe(&actor.name));
         }
+        for fact in &facts.facts {
+            if let OutcomeFact::Noticed { actor, name, .. }
+            | OutcomeFact::LostSight { actor, name } = fact
+            {
+                self.names.insert(*actor, crate::safe(name));
+            }
+        }
         // Prose has always told combat, wounds, plans, then progress. Sort
         // typed facts directly; rendering never relies on positional pairing.
         let mut ordered: Vec<_> = facts.facts.iter().collect();
@@ -309,8 +315,13 @@ impl Chronicler {
                 OutcomeFact::LostSight { actor, .. } => {
                     beats.push(Beat::Vanished(self.figure(*actor)))
                 }
-                OutcomeFact::Noticed { .. }
-                | OutcomeFact::DoorChanged { .. }
+                OutcomeFact::Noticed {
+                    actor, position, ..
+                } => beats.push(Beat::Appeared {
+                    figure: self.figure(*actor),
+                    whereabouts: whereabouts(*position),
+                }),
+                OutcomeFact::DoorChanged { .. }
                 | OutcomeFact::TrapDiscovered { .. }
                 | OutcomeFact::DoorDiscovered => beats.push(Beat::Discovery(line.text)),
                 OutcomeFact::ItemRefused { .. } | OutcomeFact::CurseBlocked { .. } => {

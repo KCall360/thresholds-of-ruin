@@ -119,7 +119,7 @@ class CheckpointProcesses(CheckpointFixture, ProcessTestCase):
         self.write_checkpoint(checkpoint)
         server = self.server(scenario=package, seed=None)
         player, resumed = self.client()
-        self.assertEqual(resumed["state"], saved["state"])
+        self.assertDisclosedStateEqual(resumed["state"], saved["state"])
         player.stop()
         server.stop()
         checkpoint = self.read_checkpoint()
@@ -222,7 +222,7 @@ class CheckpointProcesses(CheckpointFixture, ProcessTestCase):
         for frame in (saved, resumed):
             # The checkpoint-tail fixture has an ordinary body, not a creature.
             self.assertNotIn("combat", frame["state"]["observation"])
-        self.assertEqual(resumed["state"], saved["state"])
+        self.assertDisclosedStateEqual(resumed["state"], saved["state"])
         self.assertEqual(resumed["history"], saved["history"])
         for _ in range(3):
             continued = self.act(player, {"type": "wait"})
@@ -279,7 +279,7 @@ class NativeCheckpointProcesses(CheckpointFixture, ProcessTestCase):
         resumed = self.ascii_frame(spectator, lambda f: f["state"] is not None)
         for frame in (saved, resumed):
             self.assertNotIn("combat", frame["state"]["observation"])
-        self.assertEqual(resumed["state"], saved["state"])
+        self.assertDisclosedStateEqual(resumed["state"], saved["state"])
         self.assertEqual(resumed["history"], saved["history"])
         player.command("wait")
         self.ascii_frame(spectator,

@@ -483,6 +483,10 @@ impl Engine {
 
     /// Play one line of input to the end of its turn.
     pub async fn play(&mut self, link: &mut impl Link, line: &str) -> Result<Outcome, Error> {
+        // Embedders may start with play rather than welcome. Establish the
+        // initial HP baseline before consuming the first causal outcome;
+        // learn never overwrites an already tracked outcome status.
+        self.learn(link);
         let mut line = line.trim().to_owned();
         let mut record = Record::default();
         if line.is_empty() {
@@ -1088,7 +1092,9 @@ impl Engine {
         }
         if flow.is_none() {
             why = Some("Updates are still arriving; you pause to take stock.");
-        } else if matches!(flow, Some(Flow::Continue)) && !link.client().can_admit_intention() {
+        } else if matches!(flow, Some(Flow::Continue))
+            && (!link.client().character_ready() || !link.client().can_admit_intention())
+        {
             why = Some("Input permissions are still updating; you pause to take stock.");
             flow = Some(Flow::Stop);
         }

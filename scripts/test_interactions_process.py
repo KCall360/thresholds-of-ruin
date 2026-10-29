@@ -80,7 +80,7 @@ class InteractionProcesses(ProcessTestCase):
         server.stop()
         self.server("--checkpoint-interval", 1, scenario="interactions", seed=None)
         _, restored = self.client()
-        self.assertEqual(restored["state"], final["state"])
+        self.assertDisclosedStateEqual(restored["state"], final["state"])
         self.assertEqual(restored["history"], final["history"])
 
 

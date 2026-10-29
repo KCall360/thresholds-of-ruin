@@ -5038,6 +5038,7 @@ mod tests {
         // and the longest numeric revisions. Delta sets partition the same
         // package-wide union; they never double its serialized asset payload.
         let context: tor_protocol::ReplyContext = serde_json::from_value(serde_json::json!({
+            "snapshot":"\\".repeat(128),
             "input": {"stream": {"stream": "\\".repeat(128), "epoch": u64::MAX.to_string()},
                       "readiness_revision": u64::MAX.to_string()},
             "actor": u64::MAX.to_string(), "branch": "\\".repeat(128),

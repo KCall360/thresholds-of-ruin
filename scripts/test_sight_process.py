@@ -48,7 +48,7 @@ class SightProcesses(ProcessTestCase):
         self.assertIn("stone", self.say(text, "examine floor"))
         window = self.launch("tor-client-ascii", ["--connect", self.address, "--automation"])
         native = self.ascii_frame(window, lambda f: f["state"] is not None and not f["busy"])
-        self.assertEqual(native["state"], initial["state"])
+        self.assertDisclosedStateEqual(native["state"], initial["state"])
         # Every height collapses into one map: the waist-high wall, the
         # creature hovering at head height and the two-cell door each show
         # in their column, and the player's own head isn't a creature.
@@ -73,14 +73,14 @@ class SightProcesses(ProcessTestCase):
         self.assertTrue(self.cell(seen, 1, 0, 1)["door"]["open"])
         self.assertEqual(self.items(seen), {"copper token", "stone tablet"})
         watched = self.request(observer, {"type": "snapshot"})
-        self.assertEqual(watched["state"], opened["state"])
+        self.assertDisclosedStateEqual(watched["state"], opened["state"])
         self.key(window, "escape")
         self.assertEqual(window.child.wait(timeout=10), 0)
         text.stop(); observer.stop(); server.stop()
         self.assertEqual(inspect_save(self.save)["ruleset"], "interactions-v56")
         self.server(scenario="sight-3d")
         _, resumed = self.client(SPECTATOR_TOKEN)
-        self.assertEqual(resumed["state"], opened["state"])
+        self.assertDisclosedStateEqual(resumed["state"], opened["state"])
 
     def test_three_cell_giant_sees_over_a_wall_a_humanoid_cannot(self):
         # The `sight-3d-giant` package, once per character: the same start,
@@ -107,13 +107,13 @@ class SightProcesses(ProcessTestCase):
             window = self.launch("tor-client-ascii", ["--connect", self.address, "--automation", "--actor", str(character)],
                                  token=SPECTATOR_TOKEN)
             native = self.ascii_frame(window, lambda f: f["state"] is not None and not f["busy"])
-            self.assertEqual(native["state"], state)
+            self.assertDisclosedStateEqual(native["state"], state)
             self.key(window, "escape")
             self.assertEqual(window.child.wait(timeout=10), 0)
             client.stop(); server.stop()
             resumed_server = self.server(scenario="sight-3d-giant", character=character)
             resumed_client, resumed = self.client(SPECTATOR_TOKEN, actor=character)
-            self.assertEqual(resumed["state"], state)
+            self.assertDisclosedStateEqual(resumed["state"], state)
             resumed_client.stop(); resumed_server.stop()
 
 

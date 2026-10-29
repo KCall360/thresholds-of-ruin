@@ -66,8 +66,7 @@ fn view() -> Observation {
 
 fn update(app: &mut App, sequence: u64, change: impl FnOnce(&mut Observation)) {
     let initial = snapshot();
-    let mut state =
-        Arc::unwrap_or_clone(app.state.as_ref().unwrap().reset_snapshot().unwrap().state);
+    let mut state = app.state.as_ref().unwrap().state().clone();
     state.revision += 1;
     state.snapshot = tor_protocol::SnapshotId(format!("fixture-display-{}", state.revision));
     state.observation.tick += 100;
@@ -87,6 +86,32 @@ fn update(app: &mut App, sequence: u64, change: impl FnOnce(&mut Observation)) {
         },
     })
     .unwrap();
+}
+
+/// Causal narration/status is delivered before the independently requested picture.
+fn outcome(app: &mut App, sequence: u64, after: &Observation, event: Option<HistoryEntry>) {
+    let state = app.state.as_ref().unwrap();
+    let before = &state.state().observation;
+    let action_event = event.as_ref().and_then(|entry| match &entry.content {
+        HistoryContent::Action { event, .. } => Some(event.as_ref()),
+        _ => None,
+    });
+    let facts = OutcomeFacts::capture(before, after, action_event);
+    let update = StreamUpdate {
+        context: state.context().clone(),
+        actor: after.actor,
+        branch: state.branch().clone(),
+        cursor: StreamCursor {
+            sequence,
+            tick: after.tick,
+        },
+        body: UpdateBody::Outcome {
+            facts,
+            event: event.map(Box::new),
+            visual_changed: OutcomeFacts::picture_changed(before, after),
+        },
+    };
+    app.update(update).unwrap();
 }
 
 fn basic_attack_view() -> Observation {
@@ -208,20 +233,7 @@ fn streamed_basic_attack_keeps_history_and_stays_quiet_until_its_result() {
             }),
         },
     };
-    app.update(StreamUpdate {
-        context: initial.context.clone(),
-        actor: initial.actor,
-        branch: initial.branch.clone(),
-        cursor: StreamCursor {
-            sequence: 1,
-            tick: preparing.observation.tick,
-        },
-        body: UpdateBody::Observation {
-            state: preparing.into(),
-            event: Some(Box::new(started.clone())),
-        },
-    })
-    .unwrap();
+    outcome(&mut app, 1, &preparing.observation, Some(started.clone()));
     assert_eq!(app.messages.text(), "");
     assert!(app
         .state
@@ -231,14 +243,16 @@ fn streamed_basic_attack_keeps_history_and_stays_quiet_until_its_result() {
         .iter()
         .any(|line| line == "You prepare to use Ordinary attack."));
 
-    update(&mut app, 2, |view| {
-        let strike = own_strike(view, AbilityOutcome::Applied);
-        view.ready = true;
-        let combat = view.combat.as_mut().unwrap();
-        combat.preparation_remaining = None;
-        combat.preparation_active = false;
-        combat.events = vec![strike];
-    });
+    update(&mut app, 2, |view| *view = preparing.observation.clone());
+    let mut completed = preparing.observation.clone();
+    completed.tick += 100;
+    completed.ready = true;
+    let strike = own_strike(&completed, AbilityOutcome::Applied);
+    let combat = completed.combat.as_mut().unwrap();
+    combat.preparation_remaining = None;
+    combat.preparation_active = false;
+    combat.events = vec![strike];
+    outcome(&mut app, 3, &completed, None);
     assert_eq!(app.messages.text(), "You hit the ruin scout.");
     let state = app.state.as_ref().unwrap();
     assert_eq!(state.history(), [started]);
@@ -246,10 +260,13 @@ fn streamed_basic_attack_keeps_history_and_stays_quiet_until_its_result() {
         .narration()
         .iter()
         .any(|line| line == "You used Ordinary attack on the ruin scout."));
-    update(&mut app, 3, |view| {
-        view.combat.as_mut().unwrap().events.clear()
-    });
+    completed.combat.as_mut().unwrap().events.clear();
+    update(&mut app, 4, |view| *view = completed);
     assert_eq!(app.messages.text(), "You hit the ruin scout.");
+    assert!(
+        app.state.as_ref().unwrap().narration().is_empty(),
+        "a picture neither replays nor owns the ordered result"
+    );
 }
 
 #[test]
@@ -567,15 +584,16 @@ fn a_creature_is_announced_again_only_after_a_long_absence() {
 #[test]
 fn messages_stay_until_the_next_command_and_then_move_to_the_log() {
     let mut app = app();
-    update(&mut app, 1, |o| {
-        o.combat.as_mut().unwrap().events = vec![CombatEventView::Ability {
-            strike: None,
-            ability: tor_client_common::test_support::content("basic_melee"),
-            caster: Some(super::actor_target(2)),
-            target: Some(super::actor_target(1)),
-            outcome: AbilityOutcome::Applied,
-        }]
-    });
+    let mut struck = app.state.as_ref().unwrap().state().observation.clone();
+    struck.tick += 100;
+    struck.combat.as_mut().unwrap().events = vec![CombatEventView::Ability {
+        strike: None,
+        ability: tor_client_common::test_support::content("basic_melee"),
+        caster: Some(super::actor_target(2)),
+        target: Some(super::actor_target(1)),
+        outcome: AbilityOutcome::Applied,
+    }];
+    outcome(&mut app, 1, &struck, None);
     // Later updates with nothing to say don't clear what was said.
     update(&mut app, 2, |o| o.combat.as_mut().unwrap().events.clear());
     assert_eq!(
@@ -871,7 +889,10 @@ fn automatic_run_waits_for_character_readiness_after_acknowledgement_and_executi
         // The request acknowledgement releases transport busy, not gameplay.
         app.ready();
         assert_eq!(app.continue_run(), Effect::None, "move is still queued");
-        update(&mut app, 3, |view| view.ready = ready_before_permissions);
+        let mut pacing = app.state.as_ref().unwrap().state().observation.clone();
+        pacing.ready = ready_before_permissions;
+        outcome(&mut app, 3, &pacing, None);
+        update(&mut app, 4, |view| *view = pacing);
         assert_eq!(
             app.continue_run(),
             Effect::None,
@@ -912,7 +933,11 @@ fn automatic_run_waits_for_character_readiness_after_acknowledgement_and_executi
                 "admission is not character readiness"
             );
             assert_eq!(app.running, Some(Direction::East));
-            update(&mut app, 6, |view| view.ready = true);
+            let mut pacing = app.state.as_ref().unwrap().state().observation.clone();
+            pacing.ready = true;
+            let sequence = app.state.as_ref().unwrap().cursor().sequence + 1;
+            outcome(&mut app, sequence, &pacing, None);
+            update(&mut app, sequence + 1, |view| *view = pacing);
         }
         assert!(matches!(
             super::request(app.continue_run()),
@@ -1429,11 +1454,17 @@ fn refusals_status_lines_and_the_end_screen_use_plain_words() {
     let [first, second] = tor_client_ascii::status_lines(&app, app.state.as_ref().unwrap());
     assert!(first.contains("Retrieve the objective item"));
     assert_eq!(second, "HP:40(50)  Gold:0  T:100");
-    update(&mut app, 1, |o| {
-        let combat = o.combat.as_mut().unwrap();
-        combat.victory = true;
-        combat.terminal = true;
-    });
+    let mut won = app.state.as_ref().unwrap().state().observation.clone();
+    won.tick += 100;
+    let combat = won.combat.as_mut().unwrap();
+    combat.victory = true;
+    combat.terminal = true;
+    outcome(&mut app, 1, &won, None);
+    // Terminal facts forbid another action even before picture/readiness delivery.
+    assert!(app.state.as_ref().unwrap().can_admit_intention());
+    assert_eq!(app.input(Input::Key { key: Key::Left }), Effect::None);
+    assert_eq!(app.status, "This run has ended.");
+    update(&mut app, 2, |view| *view = won);
     assert!(app.messages.text().contains("Victory! This run has ended."));
     // A run in progress ends with the game, and moves say why they're refused.
     app.running = Some(Direction::East);

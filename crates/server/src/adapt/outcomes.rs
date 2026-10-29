@@ -63,6 +63,11 @@ pub(crate) fn outcome_observation(
             .filter(|actor| actor.location == cell.location)
         {
             visible_actors.push(p::OutcomeActorName {
+                position: p::Position {
+                    x: cell.offset.x,
+                    y: cell.offset.y,
+                    z: cell.offset.z,
+                },
                 id: targets.actor_reference(
                     actor.id,
                     actor
@@ -78,6 +83,11 @@ pub(crate) fn outcome_observation(
         }
         if cell.location == view.location && cell.offset != (w::Position { x: 0, y: 0, z: 0 }) {
             visible_actors.push(p::OutcomeActorName {
+                position: p::Position {
+                    x: cell.offset.x,
+                    y: cell.offset.y,
+                    z: cell.offset.z,
+                },
                 id: targets.actor(view.actor),
                 name: String::new(),
             });

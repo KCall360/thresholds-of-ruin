@@ -146,7 +146,7 @@ class WizardCreatureSpawnProcesses(ProcessTestCase):
         self.server(wizard=True, seed=None)
         wizard = self.wizard()
         restored = self.request(wizard, {"type": "snapshot"})
-        self.assertEqual(restored["state"], snapshot["state"])
+        self.assertDisclosedStateEqual(restored["state"], snapshot["state"])
         _, recovered = self.query(wizard, f"creature inspect {actor}", "creature_inspection", "report")
         self.assertEqual(recovered, report)
         self.query(wizard, "creature list depth 3", "creature_catalog", "page")

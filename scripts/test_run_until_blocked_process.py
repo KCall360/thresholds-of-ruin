@@ -93,7 +93,7 @@ class RunUntilBlockedProcesses(ProcessTestCase):
         self.assertNotEqual(excess.child.wait(timeout=15), 0)
         final = self.act(player, {"type": "wait"})
         self.assertIsNone(final["error"])
-        observed = self.frame(observer, lambda value: value["state"] == final["state"])
+        observed = self.frame(observer, lambda value: value["state"]["observation"] == final["state"]["observation"])
         self.assertEqual(observed["state"]["observation"]["tick"], "100")
         self.assertIsNone(observer.child.poll())
 
@@ -149,7 +149,7 @@ class RunUntilBlockedProcesses(ProcessTestCase):
         for _ in range(256):
             snapshot = self.request(player, {"type": "snapshot"})
             self.assertIsNone(snapshot["error"])
-            self.assertEqual(snapshot["state"], initial["state"])
+            self.assertDisclosedStateEqual(snapshot["state"], initial["state"])
         with sqlite3.connect(self.save) as database:
             database.execute("BEGIN EXCLUSIVE")
             played = self.act(player, {"type": "wait"})
@@ -171,7 +171,7 @@ class RunUntilBlockedProcesses(ProcessTestCase):
         server.stop()
         self.server()
         resumed, restored = self.client()
-        self.assertEqual(restored["state"], played["state"])
+        self.assertDisclosedStateEqual(restored["state"], played["state"])
         self.assertEqual(restored["history"], played["history"])
         self.assertIsNone(self.act(resumed, {"type": "wait"})["error"])
 
@@ -210,14 +210,14 @@ class RunUntilBlockedProcesses(ProcessTestCase):
         self.assertTrue(boundary["state"]["observation"]["ready"])
         for client in watchers:
             watching = self.request(client, {"type": "snapshot"})
-            self.assertEqual(watching["state"], boundary["state"])
+            self.assertDisclosedStateEqual(watching["state"], boundary["state"])
             client.stop()
         self.flush_save()
         player.stop()
         server.stop()
         self.server(scenario="first-dungeon", seed=None)
         resumed, restored = self.client()
-        self.assertEqual(restored["state"], boundary["state"])
+        self.assertDisclosedStateEqual(restored["state"], boundary["state"])
         self.assertEqual(restored["history"], boundary["history"])
         self.assertIsNone(self.act(resumed, {"type": "wait"})["error"])
 
@@ -231,14 +231,14 @@ class RunUntilBlockedProcesses(ProcessTestCase):
             "--outbound-total-bytes", 524288,
         )
         boundary = self.request(player, {"type": "snapshot"})
-        self.assertEqual(boundary["state"], final["state"])
+        self.assertDisclosedStateEqual(boundary["state"], final["state"])
         self.flush_save()
         player.stop()
         watcher.stop()
         server.stop()
         self.server()
         resumed, restored = self.client()
-        self.assertEqual(restored["state"], boundary["state"])
+        self.assertDisclosedStateEqual(restored["state"], boundary["state"])
         self.assertEqual(restored["history"], boundary["history"])
         self.assertIsNone(self.act(resumed, {"type": "wait"})["error"])
 
@@ -304,7 +304,7 @@ class RunUntilBlockedProcesses(ProcessTestCase):
         self.assertNotEqual(stalled.child.wait(timeout=STALL_SECONDS * 4), 0)
         # A replacement spectator starts at the committed state.
         watcher, watching = self.client(SPECTATOR_TOKEN)
-        self.assertEqual(watching["state"], final["state"])
+        self.assertDisclosedStateEqual(watching["state"], final["state"])
         return server, player, watcher, final
 
 

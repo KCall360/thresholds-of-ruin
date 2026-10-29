@@ -68,7 +68,7 @@ class CreatureAdvancementProcesses(ProcessTestCase):
         server.stop()
         self.server(scenario=package, wizard=True)
         observer, restored = self.client(WIZARD_TOKEN, observe=True)
-        self.assertEqual(restored["state"], repeated["state"])
+        self.assertDisclosedStateEqual(restored["state"], repeated["state"])
         wizard, _ = self.text_client(WIZARD_TOKEN, observe=True)
         self.assertNotIn("Server error", wizard.command("wizard rewind initial"))
         rewound = self.request(observer, {"type": "snapshot"})["state"]["observation"]["combat"]
@@ -114,7 +114,7 @@ class CreatureAdvancementProcesses(ProcessTestCase):
             "wizard creature train 1 5 lore",
         ):
             self.assertIn("Server error", wizard.command(command), command)
-            self.assertEqual(self.request(observer, {"type": "snapshot"})["state"], trained["state"])
+            self.assertDisclosedStateEqual(self.request(observer, {"type": "snapshot"})["state"], trained["state"])
         self.assertNotIn("Server error", wizard.command("wizard creature remove-hd 1"))
         removed = self.request(observer, {"type": "snapshot"})["state"]["observation"]["combat"]["own_stats"]
         self.assertEqual(removed["attributes"], original["attributes"])
@@ -183,7 +183,7 @@ class CreatureAdvancementProcesses(ProcessTestCase):
         server.stop()
         self.server(scenario=package, wizard=True)
         observer, restored = self.client(WIZARD_TOKEN, observe=True)
-        self.assertEqual(restored["state"], dormant["state"])
+        self.assertDisclosedStateEqual(restored["state"], dormant["state"])
         wizard, _ = self.text_client(WIZARD_TOKEN, observe=True)
         self.assertNotIn("Server error", wizard.command("wizard creature add-hd 1 mage"))
         reactivated = self.request(observer, {"type": "snapshot"})["state"]["observation"]["combat"]["own_stats"]
@@ -359,4 +359,4 @@ class CreatureAdvancementProcesses(ProcessTestCase):
         wizard, _ = self.text_client(WIZARD_TOKEN, observe=True)
         before = self.request(observer, {"type": "snapshot"})["state"]
         self.assertIn("Server error", wizard.command("wizard creature talent 1 2 limit_256"))
-        self.assertEqual(self.request(observer, {"type": "snapshot"})["state"], before)
+        self.assertDisclosedStateEqual(self.request(observer, {"type": "snapshot"})["state"], before)

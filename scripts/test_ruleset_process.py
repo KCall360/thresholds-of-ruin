@@ -324,7 +324,7 @@ melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, stri
         rules_path.unlink()
         self.server(scenario=ROOT / "scenarios/two-room", seed=None, wizard=True)
         _, restored = self.client(observe=True)
-        self.assertEqual(restored["state"], snapshot["state"])
+        self.assertDisclosedStateEqual(restored["state"], snapshot["state"])
 
     def test_forged_ground_item_reference_rejects_restart_without_rewriting_save(self):
         import os

@@ -152,13 +152,13 @@ class ProjectileProcesses(ProcessTestCase):
         self.assertIn("No choices on this page.", text.command("throw"))
         self.assertEqual(self.reply("projectile_choices", start)["page"]["choices"], [])
         text.command("cancel")
-        self.assertEqual(self.snapshot()["state"], initial["state"])
+        self.assertDisclosedStateEqual(self.snapshot()["state"], initial["state"])
         learned = self.learn_knife(text)
         dagger = item(learned, "dagger")["id"]
         self.text_throw_preview(text)
-        self.assertEqual(self.snapshot()["state"], learned["state"])
+        self.assertDisclosedStateEqual(self.snapshot()["state"], learned["state"])
         text.command("no")
-        self.assertEqual(self.snapshot()["state"], learned["state"])
+        self.assertDisclosedStateEqual(self.snapshot()["state"], learned["state"])
         self.assertEqual(self.admissions("rogue.throw"), [])
         terms = self.text_throw_preview(text)
         before_focus = resource(learned, "focus")["balance"]
@@ -200,7 +200,7 @@ class ProjectileProcesses(ProcessTestCase):
         start = len(self.replies)
         self.assert_preview(text.command("east"), self.reply("ability_weapon_preview", start),
                             "rogue.launch", {"kind": "launch", "launcher": launcher, "ammunition": arrow})
-        self.assertEqual(self.snapshot()["state"], equipped["state"])
+        self.assertDisclosedStateEqual(self.snapshot()["state"], equipped["state"])
         self.assertNotIn("Server error", text.command("yes"))
         launched = self.settle()
         final = launched
@@ -227,7 +227,7 @@ class ProjectileProcesses(ProcessTestCase):
         shutil.rmtree(self.package)
         self.server(scenario=unrelated_fallback(self), seed=None)
         resumed, restored = self.client()
-        self.assertEqual(restored["state"], final["state"])
+        self.assertDisclosedStateEqual(restored["state"], final["state"])
         self.assertEqual(restored["history"], final["history"])
         self.assertEqual(restored["intentions"], [])
 
@@ -251,7 +251,7 @@ class ProjectileProcesses(ProcessTestCase):
 
         choose()
         self.say(text, "no")
-        self.assertEqual(self.snapshot()["state"], before["state"])
+        self.assertDisclosedStateEqual(self.snapshot()["state"], before["state"])
         self.assertEqual(self.admissions("rogue.throw"), [])
         choose()
         self.say(text, "yes")

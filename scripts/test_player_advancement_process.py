@@ -462,7 +462,7 @@ class PlayerAdvancementProcesses(ProcessTestCase):
             self.assertIn("Starting skills", text.command("advancement"))
             self.assertIn("Server error InvalidAction: Advancement is unavailable",
                           text.command("advancement purchase 1 discipline " + invalid))
-            self.assertEqual(self.request(observer, {"type": "snapshot"})["state"], unspent["state"])
+            self.assertDisclosedStateEqual(self.request(observer, {"type": "snapshot"})["state"], unspent["state"])
         observer.stop()
         self.assertIn("Starting skills", text.command("advancement"))
         preview = text.command("advancement purchase 1 discipline talent evocation_initiate form spark_lance_fire")
@@ -697,7 +697,7 @@ class PlayerAdvancementNativeProcesses(ProcessTestCase):
         # presented it. Use the controller's own settled stream before querying
         # its new owner page; ordinary UI input may still work during preparation.
         settled = self.ascii_frame(window, lambda frame:
-            frame["state"] == current["state"] and not frame["busy"]
+            frame["state"]["observation"] == current["state"]["observation"] and not frame["busy"]
             and observation(frame)["ready"]
             and not observation(frame)["combat"]["preparation_active"]
             and not any(row["phase"] in ("queued", "started")
@@ -706,7 +706,7 @@ class PlayerAdvancementNativeProcesses(ProcessTestCase):
         self.assertTrue(settled["connected"])
         shown = command("overview")
         self.assertTrue(shown["window_open"])
-        self.assertEqual(shown["state"], current["state"])
+        self.assertDisclosedStateEqual(shown["state"], current["state"])
         closed = press("Escape", "escape")
         self.assertFalse(closed["advancement_open"])
 

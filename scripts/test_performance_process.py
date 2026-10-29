@@ -132,6 +132,11 @@ class PerformanceProcesses(ProcessTestCase):
                                     wait_for_completion=True)
         timing = client.action_timing.copy()
         self.assertIsNone(completed["error"])
+        # Completion and fresh command authority precede optional display work.
+        # Demand the current picture before inspecting effects or anchoring it;
+        # this must not replace the measured action's causal timing boundaries.
+        completed, _ = client.observe()
+        self.assertEqual(client.action_timing, timing)
         self.assertEqual(timing["outcome"], "resolved")
         self.assertEqual(timing["version"], 1)
         self.assertEqual(timing["branch"], initial["branch"])
@@ -146,7 +151,7 @@ class PerformanceProcesses(ProcessTestCase):
         noted, *_ = client.send({"type": "request", "request": {
             "type": "command", "branch": completed["branch"], "context": completed["input_context"],
             "command": {"type": "annotate", "anchor": {
-                "type": "state", "revision": completed["state"]["revision"]},
+                "type": "state", "snapshot": completed["state"]["snapshot"]},
                 "text": "Fresh context after measured attack completion"}}})
         self.assertIsNone(noted["error"])
         self.assertEqual(noted["state"], completed["state"])

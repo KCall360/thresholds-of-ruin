@@ -51,7 +51,7 @@ class AsciiMovementProcesses(ProcessTestCase):
             self.assertTrue(all(actor["id"] == view["self_target"] for actor in view["visible_actors"]))
             self.assertEqual(actions(frame), [{"type": "moved", "direction": "east"}] * count)
             authoritative = self.request(observer, {"type": "snapshot"})
-            self.assertEqual(authoritative["state"], frame["state"])
+            self.assertDisclosedStateEqual(authoritative["state"], frame["state"])
             self.assertEqual(authoritative["intentions"], [])
 
         native = self.native_keys(window)
@@ -97,7 +97,7 @@ class AsciiMovementProcesses(ProcessTestCase):
         self.assertEqual(len(actions), 7)
         self.assertTrue(all(event == {"type": "moved", "direction": "east"} for event in actions))
         authoritative = self.request(observer, {"type": "snapshot"})
-        self.assertEqual(authoritative["state"], completed["state"])
+        self.assertDisclosedStateEqual(authoritative["state"], completed["state"])
 
     def test_native_bump_attacks_the_production_kestrel_above_foot_height(self):
         package = roster_package(self, "kestrel", height=5)

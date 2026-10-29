@@ -248,7 +248,7 @@ class GrowthFailureProcesses(ProcessTestCase):
         self.assertFalse(package.exists())
         server = self.server("--checkpoint-interval", 1, scenario=unrelated_fallback(self), seed=None)
         player, restored = self.client()
-        self.assertEqual(restored["state"], before["state"])
+        self.assertDisclosedStateEqual(restored["state"], before["state"])
         self.assertEqual(restored["intentions"], [dict(queued[0], phase="suspended")])
         self.assertEqual(checkpoint(self, player), saved)
         suspended_records = self.saved_records(player)

@@ -11,7 +11,7 @@ from workload_report import require, is_duration, nonnegative_counts, positive_c
 import sqlite3
 import time
 import uuid
-from performance_driver import JsonProcess, SPEC, ROOT, resolve, verify, wall_time_ns, stop_all
+from performance_driver import JsonProcess, SPEC, ROOT, resolve, verify, wall_time_ns, stop_all, same_disclosed_state
 from client_performance_report import validate_presentation_profile
 from process_harness import ascii_input_completion
 
@@ -19,7 +19,7 @@ KEYS = {"north":"up", "east":"right", "south":"down", "west":"left",
         "up":"ascend", "down":"descend"}
 
 
-def key(window, name):
+def key(window, name, *, picture_after=None, wait_after=None):
     started = time.perf_counter()
     window.input_unix_ns = wall_time_ns(started)
     window.child.stdin.write(json.dumps({"type":"key", "key":name}) + "\n")
@@ -42,10 +42,42 @@ def key(window, name):
             raise RuntimeError("Exploration actor died")
         if combat.get("terminal"):
             raise RuntimeError("Exploration run ended")
-        return complete(frame)
+        settled = complete(frame)
+        # Movement/door verification needs the independently issued picture,
+        # not merely causal permission to submit the next action.
+        snapshot = (frame.get("state") or {}).get("snapshot")
+        fresh_picture = picture_after is None or (snapshot is not None and snapshot != picture_after)
+        return settled and fresh_picture and (wait_after is None or restart_wait_completed(frame, wait_after))
 
     frame, received = window.until(completed)
     return frame, (received-started)*1000
+
+
+def restart_wait_completed(frame, before):
+    """Bind the sole in-flight Wait to its newly committed own execution receipt.
+
+    History ticks name execution time, not the next turn's ready time. In this
+    no-AI traversal, the next Wait executes at the resumed picture's current tick.
+    """
+    history = frame.get("history") or []
+    if not history or frame.get("branch") != before["branch"]:
+        return False
+    entry = history[-1]
+    observation = before["state"]["observation"]
+    return (entry.get("id") not in {item["id"] for item in before["history"]}
+            and entry.get("actor") == observation["actor"]
+            and entry.get("branch") == before["branch"]
+            and entry.get("content", {}).get("event") == {"type":"waited"}
+            and int(entry["tick"]) == int(observation["tick"]))
+
+
+def validate_text_wait(output):
+    """Require the canonical causal narration before terminal action completion."""
+    lines = output.splitlines()
+    require(lines.count("Time passes.") == 1, "Text Wait must narrate exactly once")
+    require(lines.count("Action: Resolved.") == 1, "Text Wait must resolve exactly once")
+    require(lines.index("Time passes.") < lines.index("Action: Resolved."),
+            "Text Wait narration must precede its resolution")
 
 
 def validate(result):
@@ -119,7 +151,7 @@ def run_saved_exploration(bin_dir, output, regions=8, interval=64, correlate=Fal
                 key(window, "open_door" if action["open"] else "close_door")
             else:
                 direction = KEYS[action["direction"]]
-            after, elapsed = key(window, direction)
+            after, elapsed = key(window, direction, picture_after=before["state"]["snapshot"])
             verify(step, action, before, {**after, "error":None})
             disclosed.update(c["key"] for c in after["state"]["observation"]["visible_cells"])
             sample = {"index":index, "label":step["label"], "action":step["action"],
@@ -150,9 +182,11 @@ def run_saved_exploration(bin_dir, output, regions=8, interval=64, correlate=Fal
         window = launch("tor-client-ascii", ["--connect",address,"--automation"], "restarted-ascii", True)
         resumed, _ = window.until(lambda f:f.get("state") is not None and f["has_control"] and not f["busy"])
         result["restart_to_frame_ms"] = (time.perf_counter()-started)*1000
-        result["restart_equal"] = resumed["state"] == before["state"] and resumed["branch"] == before["branch"] and resumed["history"] == before["history"]
-        continued, elapsed = key(window, "wait")
-        result["continued_after_restart"] = int(continued["state"]["revision"]) == int(before["state"]["revision"]) + 1
+        result["restart_equal"] = same_disclosed_state(resumed["state"], before["state"]) and resumed["branch"] == before["branch"] and resumed["history"] == before["history"]
+        continued, elapsed = key(window, "wait", wait_after=resumed)
+        # Wait is causal-only: its exact committed event proves continuation;
+        # no incidental picture publication or extra paid action is required.
+        result["continued_after_restart"] = restart_wait_completed(continued, resumed)
         result["restart_input_ms"] = elapsed
         key(window, "release")
         # Text player follows the same recovered state and explicit-save barrier.
@@ -162,7 +196,7 @@ def run_saved_exploration(bin_dir, output, regions=8, interval=64, correlate=Fal
         try:
             text.until(lambda line:line == "Ready.")
             waited = text.command("wait")
-            assert "Action: Resolved." in waited and "Waited" in waited
+            validate_text_wait(waited)
             assert "Done." in text.command("save")
         finally:
             text.stop()

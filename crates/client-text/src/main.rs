@@ -257,6 +257,7 @@ async fn transact(connection: &mut Connection, request: Request) -> Result<(), E
     let mut pending = tor_client_common::PendingRequest::new(id);
     timeout(Duration::from_secs(10), async {
         let mut admitted = None;
+        let mut finished = false;
         loop {
             let message = connection.next().await?;
             present(connection, &message)?;
@@ -280,7 +281,14 @@ async fn transact(connection: &mut Connection, request: Request) -> Result<(), E
                 None => false,
             };
             let executed = admitted.as_mut().is_some_and(|boundary| boundary.observe(&message));
-            if complete || executed { return Ok::<(), Error>(()); }
+            finished |= complete || executed;
+            // Causal completion can precede its demanded picture. Keep reading
+            // through the existing Observe pump before accepting another script
+            // command that parses or describes inventory, targets, or position.
+            // The completed receipt remains latched while that picture arrives.
+            if finished && connection.state.observation_current() {
+                return Ok::<(), Error>(());
+            }
         }
     }).await.map_err(|_| "Server response timed out; command outcome may be unknown. Reconnect and inspect history before retrying.")??;
     Ok(())

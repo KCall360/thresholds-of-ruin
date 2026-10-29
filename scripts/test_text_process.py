@@ -97,7 +97,8 @@ class TextProcesses(ProcessTestCase):
         self.assertIn("Actor Frontend", note)
         self.assertIn('component: "text"', note)
         self.assertIn("tick 50.", client.command("look"))
-        self.assertIn("InvalidAnchor", client.command("annotate user private note state:99 Future"))
+        self.assertIn("Server error StaleContext: Snapshot is no longer available",
+                      client.command("annotate user private note state:99 Future"))
         self.assertIn("tick 50.", client.command("look"))
         for _ in range(4):
             movement = client.command("east")

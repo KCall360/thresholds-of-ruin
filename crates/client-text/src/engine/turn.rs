@@ -654,7 +654,7 @@ async fn settle(
             continue;
         }
         let ended_run = terminal(link.client());
-        let ready = link.client().can_admit_intention() || ended_run;
+        let ready = link.client().character_ready() || ended_run;
         // Observation and journey completion precede their permission update.
         // Keep existing turn pacing, but consume that boundary before new input.
         let permissions_ready = ended_run || link.client().can_admit_intention();
@@ -999,7 +999,7 @@ pub async fn run_goal(
         waiting: None,
     };
     // After reconnecting during recovery, play resumes before anything new.
-    if !link.client().can_admit_intention()
+    if (!link.client().character_ready() || !link.client().can_admit_intention())
         && link
             .client()
             .travel()
@@ -1012,7 +1012,7 @@ pub async fn run_goal(
             episode.end = End::Deferred;
         } else if matches!(resumed, Settled::Waiting(_)) {
             episode.end = End::Waiting;
-        } else if !link.client().can_admit_intention() {
+        } else if !link.client().character_ready() || !link.client().can_admit_intention() {
             // Say why play won't come round to this character.
             episode.end = End::Refused(waiting_reason(reader.waiting).into());
         }

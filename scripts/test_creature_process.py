@@ -52,7 +52,7 @@ class CreatureAbilityProcesses(ProcessTestCase):
         shutil.rmtree(package)
         self.server("--checkpoint-interval", 1, scenario="two-room", wizard=True, seed=None)
         player, restored = self.client()
-        self.assertEqual(restored["state"], before["state"])
+        self.assertDisclosedStateEqual(restored["state"], before["state"])
         self.assertEqual(checkpoint(self, player), saved)
         self.assertEqual(restored["state"]["observation"]["combat"]["hp"], combat["hp"])
         for frame in (initial, before, restored):
@@ -150,7 +150,7 @@ class CreatureAbilityProcesses(ProcessTestCase):
         self.assertTrue(all("health_seed" in die and "purchases" in die for die in report["hit_dice"]))
         text, _ = self.text_client(observe=True)
         self.assertIn("Hit dice: 4 (4 Warrior)", text.command("stats"))
-        self.assertEqual(self.request(observer, {"type": "snapshot"})["state"], initial["state"])
+        self.assertDisclosedStateEqual(self.request(observer, {"type": "snapshot"})["state"], initial["state"])
 
     def test_default_dungeon_build_and_equipped_source_survive_restart(self):
         import json
@@ -737,7 +737,7 @@ class NativeCreatureAbilityProcesses(ProcessTestCase):
             "--report-frames", "--capture", capture])
         initial = self.ascii_frame(window, lambda f: f["has_control"] and not f["busy"])
         observer, observed = self.client(observe=True)
-        self.assertEqual(observed["state"], initial["state"])
+        self.assertDisclosedStateEqual(observed["state"], initial["state"])
         native = self.native_keys(window)
         def press(name, reported):
             return self.native_press(window, native, name, reported)
@@ -769,7 +769,7 @@ class NativeCreatureAbilityProcesses(ProcessTestCase):
         targeted = press("Up", "up")
         self.assertEqual(targeted["selected_ability"]["id"], "fixture_mana_bolt")
         self.assertEqual(targeted["state"], initial["state"])
-        self.assertEqual(self.request(observer, {"type": "snapshot"})["state"], initial["state"])
+        self.assertDisclosedStateEqual(self.request(observer, {"type": "snapshot"})["state"], initial["state"])
         accepted = press("Return", "enter")
         def resolved(frame):
             observation = frame["state"]["observation"]
@@ -777,7 +777,7 @@ class NativeCreatureAbilityProcesses(ProcessTestCase):
                     and observation["ready"] and observation["combat"]["preparation_remaining"] is None)
         completed = accepted if resolved(accepted) else self.ascii_frame(window, resolved)
         authoritative = self.request(observer, {"type": "snapshot"})
-        self.assertEqual(completed["state"], authoritative["state"])
+        self.assertDisclosedStateEqual(completed["state"], authoritative["state"])
         self.assertIn("fixture_mana_bolt", str(authoritative["history"]))
         self.assertEqual(resource(completed, "mana")["reserved"], 0)
         self.assertLess(resource(completed, "mana")["balance"], resource(initial, "mana")["balance"])

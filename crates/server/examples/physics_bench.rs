@@ -114,6 +114,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let mut apply_ms = Vec::new();
                 let mut draw_ms = Vec::new();
                 let mut sequence = 0;
+                let mut previous = engine.state(player)?;
                 for turn in 0..(actors * 8) {
                     let actor = ActorId(turn % actors + 1);
                     let revision = engine.causal_boundary(actor)?;
@@ -151,12 +152,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         profiles.push(profile);
                     }
                     let state = engine.state(player)?;
-                    // Like live delivery, do not emit unchanged observer states
-                    // when another actor acts at the same simulation timestamp.
-                    if state.revision == app.state.as_ref().unwrap().state().revision {
+                    // Do not measure a picture application when its disclosed state is unchanged.
+                    if state == previous {
                         continue;
                     }
+                    previous = state;
                     sequence += 1;
+                    // Direct Engine diagnostics issue their own fixture pictures;
+                    // internal state revision zero is not a display generation.
+                    let mut state =
+                        engine.state_at(&engine.presentation_boundary(), player, sequence)?;
+                    state.snapshot = tor_protocol::SnapshotId(format!("bench-picture-{sequence}"));
                     let update = tor_protocol::StreamUpdate {
                         context: fixture_context(),
                         actor: player,

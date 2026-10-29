@@ -139399,6 +139399,83 @@
     "travel": null
    },
    "type": "snapshot"
+  },
+  {
+   "type": "update",
+   "update": {
+    "actor": "1",
+    "body": {
+     "event": {
+      "actor": "1",
+      "audience": "actor",
+      "author": {
+       "component": "scheduler",
+       "type": "backend"
+      },
+      "branch": "d787393c-b74d-4f49-94bb-aca3fa43ad35",
+      "content": {
+       "action": {
+        "door": "d_185f8c7fd3de4ae25d20f63f2640b0346b8bd68b06dce8d5a1a1c954f992c270",
+        "open": true,
+        "type": "set_door"
+       },
+       "event": {
+        "door": "d_185f8c7fd3de4ae25d20f63f2640b0346b8bd68b06dce8d5a1a1c954f992c270",
+        "open": true,
+        "type": "door_changed"
+       },
+       "type": "action"
+      },
+      "id": "eb8cbbfb-3f73-4ed6-8d82-0f48e36e388e",
+      "tick": "0"
+     },
+     "facts": {
+      "actor_names": [],
+      "facts": [
+       {
+        "basic_attack": false,
+        "event": {
+         "door": "d_185f8c7fd3de4ae25d20f63f2640b0346b8bd68b06dce8d5a1a1c954f992c270",
+         "open": true,
+         "type": "door_changed"
+        },
+        "kind": "own_action",
+        "name": {
+         "fallback": "door",
+         "text": "wooden door"
+        }
+       },
+       {
+        "actor": "a_23e477c0a6f07c9f6bccee73016a41da5f6526a8597b9fe9bd82f17080181ef6",
+        "kind": "noticed",
+        "name": "",
+        "position": {
+         "x": 2,
+         "y": 0,
+         "z": 0
+        }
+       },
+       {
+        "kind": "pacing",
+        "ready": false
+       }
+      ],
+      "self_target": "a_071f6c91c5641a8b705c83f9e58a43b08018d9faae204599c07fe4ed12479371",
+      "status": null
+     },
+     "type": "outcome",
+     "visual_changed": true
+    },
+    "branch": "d787393c-b74d-4f49-94bb-aca3fa43ad35",
+    "context": {
+     "epoch": "1",
+     "stream": "613e2d63-37ae-4f07-9e18-e470ef94658b"
+    },
+    "cursor": {
+     "sequence": "5",
+     "tick": "0"
+    }
+   }
   }
  ]
 }

@@ -140,7 +140,7 @@ class ClientResponsivenessProcesses(ProcessTestCase):
         self.assertEqual(final["state"]["observation"]["tick"], str(actions * 100))
         presented = opened if opened["state"]["observation"]["tick"] == str(actions * 100) else self.ascii_frame(
             window, lambda f: f["state"]["observation"]["tick"] == str(actions * 100))
-        self.assertEqual(presented["state"], final["state"])
+        self.assertDisclosedStateEqual(presented["state"], final["state"])
         self.assertEqual(presented["history"], final["history"])
         self.assertEqual(len(presented["history"]), 100)
         self.assertTrue(presented["connected"])

@@ -235,7 +235,7 @@ class PopulationGrowthProcesses(ProcessTestCase):
         self.assertFalse(package.exists(), "restart must use only pinned saved source")
         server = self.server(scenario=unrelated_fallback(self), seed=None)
         player, restored = self.client(omit_memory=True)
-        self.assertEqual(restored["state"], before["state"])
+        self.assertDisclosedStateEqual(restored["state"], before["state"])
         self.assertEqual(restored["history"], before["history"])
         # Real restore validates the root against every owned ordinal; compare
         # the complete creature to retain all rows, seeds and applied choices.

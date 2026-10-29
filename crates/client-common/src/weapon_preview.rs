@@ -237,7 +237,7 @@ mod tests {
                 charges: None,
             }],
         });
-        let snapshot=serde_json::from_value(serde_json::json!({"readiness":{"revision":"0","admission":true,"resume":[],"cancel":[]},"context":{"stream":"fixture","epoch":"0"},"actor":"1","branch":"main","cursor":{"sequence":"0","tick":"0"},"has_control":true,"intentions":[],"history":{"entries":[],"older_before":null},"state":{"wizard_game":false,"revision":"1","observation":view}})).unwrap();
+        let snapshot=serde_json::from_value(serde_json::json!({"readiness":{"revision":"0","admission":true,"resume":[],"cancel":[]},"context":{"stream":"fixture","epoch":"0"},"actor":"1","branch":"main","cursor":{"sequence":"0","tick":"0"},"has_control":true,"intentions":[],"history":{"entries":[],"older_before":null},"state":{"snapshot":"weapon-preview-picture","wizard_game":false,"revision":"1","observation":view}})).unwrap();
         ClientState::from_snapshot(snapshot).unwrap()
     }
     fn action(state: &ClientState) -> Action {

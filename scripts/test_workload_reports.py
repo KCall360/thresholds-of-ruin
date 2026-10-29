@@ -122,6 +122,17 @@ class CombatReports(unittest.TestCase):
 
 
 class ItemReports(unittest.TestCase):
+    def test_causal_delivery_is_separate_and_complete(self):
+        rows = self.rows()
+        for row in rows:
+            row["outcome_apply_ms"] = [.05] * 20
+        result = item_performance_report.summarize(rows)
+        self.assertTrue(all(row["outcome_apply_ms"]["n"] == 400 for row in result))
+        self.assertTrue(all(row["client_apply_ms"]["n"] == 400 for row in result))
+        rows[0]["outcome_apply_ms"].pop()
+        with self.assertRaises(InvalidWorkload):
+            item_performance_report.summarize(rows)
+
     def rows(self):
         return [dict(workload_version=1, items=n, identities=k, sample=i, transfers=20,
             construction_ms=1., knowledge_ms=.1, transfer_ms=[.1]*20, save_ms=2., resume_ms=3.,
@@ -409,6 +420,19 @@ class ClientPerformanceReport(unittest.TestCase):
 
 
 class PlacePerformanceReport(unittest.TestCase):
+    def test_causal_delivery_metrics_do_not_replace_picture_metrics(self):
+        rows = self.rows()
+        for row in rows:
+            if row["kind"] == "sample":
+                row.update(outcome_apply_ms=.05, outcome_encode_ms=.02, outcome_wire_bytes=50)
+        result = place_performance_report.validate(rows)
+        self.assertTrue(all("apply_ms" in row and "outcome_apply_ms" in row
+                            for row in result if "label" in row))
+        sample = next(row for row in rows if row["kind"] == "sample")
+        del sample["outcome_encode_ms"]
+        with self.assertRaises(InvalidWorkload):
+            place_performance_report.validate(rows)
+
     def rows(self):
         rows = []
         for rooms in SPEC["extra_rooms"]:

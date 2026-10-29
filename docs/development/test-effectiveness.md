@@ -1267,3 +1267,140 @@ repeats are not additional defects. Rustfmt corrected only whitespace in
 `interact.rs` and `screen.rs`. Both workspace formatting checks passed locally;
 behavioral evidence is reused for identical non-whitespace source, while hosted
 native 3D qualification must still run on the corrected head.
+
+### Performance PR causal/display migration: hosted feedback
+
+The first behavioral matrix for [PR #203](https://github.com/KCall360/thresholds-of-ruin/pull/203)
+exposed both real client defects and incomplete fixture migration. This is an
+ongoing correction window, not a green final-head qualification. Repeated
+Windows/Linux and debug/release failures are not additional root causes.
+
+Confirmed client defects include automatic ASCII running choosing its next step
+before character readiness, terminal ASCII input being admitted between the
+ordered terminal outcome and the later readiness update, and scripted Text
+commands returning at causal completion before their demanded picture arrived.
+The last case reproduced as successful pickup narration followed by an empty
+inventory. An explicit Observe process check also received its picture but timed
+out waiting for a correlated reply: picture-only completion was not recognized
+by the generic pending-request path. These four roots remain distinct from test
+maintenance; their exact safety assertions and process witnesses are retained.
+
+Fixture maintenance includes state annotations still encoding a revision instead
+of a snapshot capability, cross-attachment comparisons treating local picture
+identities as global identities, and callers expecting a causal-only Wait to
+produce an automatic picture. Payload comparisons preserve every disclosed field
+and omit only the top-level snapshot/revision identities across independent
+attachments. Independent review restored an exact same-picture supply-picker
+assertion. The 220 audited comparison sites are source sites, **not** 220 observed
+failed tests. A helper requiring fresh post-action inspection requests an ordinary
+Observe; raw command delivery and transport lifecycle tests keep their distinct
+asynchronous contract.
+
+Maintained direct-Engine benchmark producers also used an internal unissued
+picture revision as a change signal: physics emitted zero apply/draw samples for
+864 commands across 24 rows; combat did so for 192 commands across three rows.
+Item/place/latency additionally retained the old combined event/picture envelope,
+and direct place setup incorrectly invoked a display-capability resolver without
+Service validation. These are five producer subcases in three failing Python
+methods, not five methods. Producer migration must retain report bounds and
+separate outcome timing from picture timing rather than rename their sum.
+
+The earned-route driver inspected advancement using a pre-settlement picture.
+Its corrected accounting boundary requests one nonresetting Observe, with pure
+regressions preserving paid-action counts and error propagation. A subsequent
+local process attempt timed out during scenario validation before route execution;
+that setup failure is not evidence of either a route regression or a passing fix.
+Final correction results and additional diagnosed roots will be recorded when
+this bounded batch has completed.
+
+Reusing the immutable, already-built Text and protocol test binaries exposed
+later failures that the hosted Cargo run had not reached after ASCII failed.
+Text reported 178/199 passing and protocol integration 274/293; protocol library
+58/58 passed. These are historical-snapshot diagnostic results, not qualification
+of the corrections. The 19 protocol failures have three stale fixture roots:
+17 failing methods shared two reply-context constructors that omitted the required
+snapshot, one field-list oracle
+still counted five fields, and one malformed-delta test accidentally changed its
+snapshot base before reaching the intended payload-validation failure.
+
+The Text failures revealed two further genuine roots: converting a noticed actor
+to generic discovery lost typed newcomer identity/direction (and therefore
+inter-leg caution), and starting play without a welcome call left the first HP
+loss without an initialized accounting baseline. Event-time disclosed positions
+are retained rather than reconstructed from a later picture; the exact newcomer
+stop and two-loss overflow-safe accounting assertions remain. Autonomous Text
+chains also confused queue admission with character readiness, the same semantic
+readiness root as ASCII autorun above. A shared causal readiness value follows
+ordered pacing facts independently of an older picture. Other Text fixtures
+still combined events with pictures or authored obsolete snapshot identities;
+those are corrected separately from the preserved production safety assertions.
+
+The bounded correction run passed all 160 ASCII tests and all 294 protocol
+integration plus 60 protocol-library tests. Common-client tests reached 177/181:
+two synthetic `Snapshot.state` constructors omitted `StateView.snapshot`, affecting
+four methods (not four production roots). Text reached 197/199: the remaining
+two exact total-request counts included a legitimate read-only Observe. Their
+revised oracles distinguish the precise picture demand from the unchanged paid
+journey/attack/pickup sequence and preserve refusal/no-retry assertions.
+
+The historical server diagnostic was interrupted after 245 passing and one
+failing test to avoid spending the local checkpoint on unrelated expensive
+floor/recovery cases; the remaining 1,022 were not run. Its one failure was rerun
+alone: the roaming-work oracle expected one scene construction, while the retained
+optimization performs zero. The corrected oracle still checks the exact actor and
+move, no route search, and bounded personal-history copying. The partial suite is
+not a pass. A later local lint failure caught an unnecessary unwrap in the migrated
+latency producer before application linking; the direct pattern match replaced it.
+
+The existing genuine wire recording contained no Noticed fact. A bounded ordinary
+door-reveal process captured the new event-time position from the actual server
+in two seconds; the prior 73 samples remain unchanged and this one raw sample was
+appended. This is a targeted additional recording, not a claim that all recording
+scenarios ran again. The new strict protocol sample regression passes.
+
+The completed focused client/protocol correction owners now pass 894 tests
+(181 common, 160 ASCII, 199 Text, 294 protocol integration and 60 protocol library).
+All five repaired producer smoke/selected cases execute and pass their existing
+report validators: physics 8 rows, combat 3, items 20, places 101 and latency 236.
+These development-profile checks qualify report/behavior contracts, not new
+performance claims. Three of seven actual-process methods passed immediately;
+the four remaining methods exposed narrower stale caller expectations: an opaque
+unknown snapshot expects StaleContext, a measured attack must demand its picture
+before comparing a later annotation response, place spectators must receive exact
+public history rather than wizard-private setup entries, and Text Wait narration
+uses its canonical sentence rather than the old debug event name. Both place
+variants are subcases of one method. The subsequent corrections keep exact
+history, causal timing, paid-action and payload assertions.
+
+A read-only audit also found additional server fixture omissions before another
+hosted round: three required snapshot contexts, five comparisons between separately
+issued pictures, one comparison mixing private causal and display revisions, and
+one equipment-projection check still expecting an unsolicited picture. These are
+source-identified corrections, not additional observed failed-method executions.
+The equipment check explicitly demands its picture and retains private-curse
+redaction checks on both causal facts and displayed fields; it does not require an
+otherwise empty private event to be broadcast.
+
+
+The final selected server checks passed 13 methods across the bounded correction
+runs. One exposed a genuine chart-ownership regression: first-page preparation
+repeated the already-owned current-boundary census. Reusing the exact current
+Game/branch view restores the original Arc-identity oracle without another cache.
+A historical first transfer reconstructs from its frozen boundary and owns its
+continuation; the regression also checks exact historical charts and unchanged
+checkpoint/RNG/knowledge state after the world advances.
+
+All seven targeted process methods above now pass. The saved-exploration retry
+also exposed a stale execution-time oracle: a Wait history entry records its
+execution/start tick, not its next-ready tick. The replacement binds a new own
+Wait receipt by actor, branch, event and exact execution tick, rejects old history,
+and preserves exact restart payload/history equality and Text narration order.
+This is one further stale driver root, not a production regression. The final
+process checks used the previously frozen application binaries; the later pure
+chart-ownership fix was qualified by its rebuilt server test owner, not relabeled
+as part of those application artifacts. Hosted CI builds the exact final tree.
+
+Resource-guard interruptions during local linking/freezing are infrastructure
+failures, not test defects or passing checkpoints. Completed application hashes
+were verified after bounded reversible archive cleanup; successful evidence was
+preserved rather than rerunning unaffected owners. No guard threshold was lowered.

@@ -81,7 +81,7 @@ class RogueFruitProcesses(ProcessTestCase):
         remove_sources(self, package)
         server = self.server("--checkpoint-interval", 1, seed=None)
         probe, restored = self.client(observe=True)
-        self.assertEqual(restored["state"], eaten["state"])
+        self.assertDisclosedStateEqual(restored["state"], eaten["state"])
         self.assertEqual(checkpoint(self, probe), saved)
         text, _ = self.text_client()
         self.assertIn("fruit", text.command("inventory"))
@@ -94,10 +94,10 @@ class RogueFruitProcesses(ProcessTestCase):
         text.stop(); probe.stop(); server.stop()
         self.server("--checkpoint-interval", 1, seed=None)
         probe, reopened = self.client(observe=True)
-        self.assertEqual(reopened["state"], depleted["state"])
+        self.assertDisclosedStateEqual(reopened["state"], depleted["state"])
         self.assertEqual(checkpoint(self, probe), completed)
         for _ in range(3):
-            self.assertEqual(self.snapshot(probe)["state"], depleted["state"])
+            self.assertDisclosedStateEqual(self.snapshot(probe)["state"], depleted["state"])
         self.assertEqual(checkpoint(self, probe), completed)
 
 

@@ -2948,6 +2948,11 @@ async fn blocked_observe_flush_keeps_ordered_outcomes_live_and_query_identity_st
         "Observe must really be blocked in flush"
     );
     let identity = pending.request_id.clone();
+    // An explicit reader joins the canceled automatic flush, not a second
+    // request. Its completion belongs to the picture, never a causal Outcome.
+    assert_eq!(client.request(Request::Observe).await.unwrap(), identity);
+    let mut explicit = crate::PendingRequest::new(identity.clone());
+    let mut unrelated = crate::PendingRequest::new("another-demand".into());
     assert!(timeout(Duration::from_millis(20), client.next())
         .await
         .is_err());
@@ -2962,6 +2967,7 @@ async fn blocked_observe_flush_keeps_ordered_outcomes_live_and_query_identity_st
             .unwrap(),
         expected
     );
+    assert!(explicit.observe(&client, &expected).is_none());
     assert_eq!(client.state.cursor().sequence, 3);
     assert_eq!(client.state.outcome_status().unwrap().hp, 10);
     assert_eq!(
@@ -2979,12 +2985,23 @@ async fn blocked_observe_flush_keeps_ordered_outcomes_live_and_query_identity_st
         identity
     );
     release_padding.send(written).unwrap();
-    assert!(
-        matches!(timeout(Duration::from_secs(2), client.next()).await.unwrap().unwrap(),
-        ServerMessage::Update { update } if matches!(update.body, UpdateBody::Observation { .. }))
-    );
+    let picture = timeout(Duration::from_secs(2), client.next())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(matches!(&picture,
+        ServerMessage::Update { update } if matches!(update.body, UpdateBody::Observation { .. })));
+    assert!(matches!(
+        explicit.observe(&client, &picture),
+        Some(crate::RequestCompletion::Reply(
+            crate::ConfirmedReply::Completed
+        ))
+    ));
+    assert!(unrelated.observe(&client, &picture).is_none());
     assert!(client.observation_demand.pending.is_none());
     assert!(!client.observation_demand.dirty);
     client.request(Request::AcquireControl).await.unwrap();
     assert_eq!(server.await.unwrap(), identity);
+    client.require_snapshot();
+    assert!(!client.completed_observation_request(&identity, &picture));
 }

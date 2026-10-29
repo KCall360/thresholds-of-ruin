@@ -74,7 +74,7 @@ impl Scripted {
         let snapshot = Snapshot {
             readiness: tor_protocol::Readiness {
                 revision: 0,
-                admission: true,
+                admission: state.observation.ready,
                 resume: vec![],
                 cancel: vec![],
             },
@@ -193,7 +193,33 @@ impl Link for Scripted {
             self.sent.push(request);
             return Ok(id);
         }
-        let frames = (self.respond)(&request, self.client.state());
+        let mut frames = (self.respond)(&request, self.client.state());
+        // Immediate synthetic action receipts follow their committed effects.
+        // Tests of queued lifecycle ordering use explicit Admitted frames.
+        if matches!(
+            request,
+            Request::Command {
+                command: Command::Act { .. },
+                ..
+            }
+        ) && !frames.iter().any(|frame| matches!(frame, Frame::Admitted))
+            && frames.iter().any(|frame| matches!(frame, Frame::View(..)))
+        {
+            if let Some(ack) = frames.iter().position(|frame| matches!(frame, Frame::Ack)) {
+                let receipt = frames.remove(ack);
+                let after_effects = frames
+                    .iter()
+                    .rposition(|frame| matches!(frame, Frame::View(..)))
+                    .expect("view checked above")
+                    + 1;
+                // A later actor's frames after Waiting are not this receipt's effects.
+                let before_wait = frames
+                    .iter()
+                    .position(|frame| matches!(frame, Frame::Waiting(_)))
+                    .unwrap_or(after_effects);
+                frames.insert(after_effects.min(before_wait), receipt);
+            }
+        }
         let destination = match &request {
             Request::Command {
                 command: Command::Travel { destination, .. },
@@ -411,6 +437,38 @@ impl Link for Scripted {
         }
         Ok(Some(message))
     }
+}
+
+fn publish_between_turns(
+    link: &mut Scripted,
+    engine: &mut Engine,
+    mut after: StateView,
+) -> Vec<tor_client_text::engine::chronicle::Beat> {
+    let before = link.client.state().clone();
+    after.revision = before.revision + 1;
+    after.snapshot = SnapshotId(format!("between-{}", link.sequence));
+    let tick = after.observation.tick;
+    let facts = OutcomeFacts::capture(&before.observation, &after.observation, None);
+    let mut beats = Vec::new();
+    for body in [
+        UpdateBody::Outcome {
+            facts,
+            event: None,
+            visual_changed: true,
+        },
+        UpdateBody::Observation {
+            state: after.into(),
+            event: None,
+        },
+    ] {
+        let previous = link.client.state().clone();
+        let message = link.update(tick, body);
+        if let ServerMessage::Update { update } = &message {
+            link.client.apply(*update.clone()).unwrap();
+        }
+        beats.extend(engine.between_turns(link, &previous, &message));
+    }
+    beats
 }
 
 fn state() -> StateView {
@@ -774,7 +832,26 @@ async fn a_pickup_waits_for_the_character_to_be_ready_after_the_journey() {
         text.lines().next(),
         Some("You walk over to the stone tablet and pick it up.")
     );
-    assert_eq!(link.sent.len(), 2);
+    assert!(
+        matches!(
+            link.sent.as_slice(),
+            [
+                Request::Command {
+                    command: Command::Travel { .. },
+                    ..
+                },
+                Request::Observe,
+                Request::Command {
+                    command: Command::Act {
+                        action: Action::Take { .. }
+                    },
+                    ..
+                },
+            ]
+        ),
+        "one journey, one demanded picture, and one pickup: {:?}",
+        link.sent
+    );
     assert_eq!(link.client.state().observation.inventory.len(), 1);
 }
 
@@ -1343,18 +1420,28 @@ async fn timed_attack_finishes_its_lifecycle_before_chained_pickup_or_refusal() 
             )
             .await;
             assert!(text.contains("falls dead"), "{text}");
+            let picture_demands = link
+                .sent
+                .iter()
+                .filter(|request| matches!(request, Request::Observe))
+                .count();
+            assert_eq!(picture_demands, usize::from(!ready_before_resolution));
+            assert!(link
+                .sent
+                .iter()
+                .all(|request| matches!(request, Request::Observe | Request::Command { .. })));
+            let gameplay_requests = link.sent.len() - picture_demands;
             if refuse_pickup {
                 assert!(text.contains("can't pick that up"), "{text}");
                 assert_eq!(
-                    link.sent.len(),
-                    2,
+                    gameplay_requests, 2,
                     "genuine refusal stops the chain without retrying"
                 );
                 assert!(link.client.state().observation.inventory.is_empty());
             } else {
                 assert!(text.contains("pick"), "{text}");
                 assert!(text.contains("drop"), "{text}");
-                assert_eq!(link.sent.len(), 3);
+                assert_eq!(gameplay_requests, 3);
             }
             assert!(
                 link.queue.is_empty(),
@@ -1763,22 +1850,7 @@ async fn what_happens_between_turns_is_one_passage() {
         .observation
         .visible_actors
         .push(figure(5, "stone guardian", 3));
-    let message = link.update(
-        0,
-        UpdateBody::Observation {
-            state: ({
-                let mut a = after.clone();
-                a.revision = 1;
-                a
-            })
-            .into(),
-            event: None,
-        },
-    );
-    if let ServerMessage::Update { update } = &message {
-        link.client.apply(*update.clone()).unwrap();
-    }
-    let beats = engine.between_turns(&link, &before, &message);
+    let beats = publish_between_turns(&mut link, &mut engine, after);
     assert_eq!(
         engine.passage(&link, beats),
         "You notice a stone guardian to the east."
@@ -2195,8 +2267,8 @@ async fn a_turn_ends_when_the_server_says_another_player_is_next() {
     assert_eq!(play(&mut link, &mut engine, "wait").await, "Time passes.");
     assert_eq!(
         link.queue.len(),
-        1,
-        "the rat's arrival waits for between turns"
+        2,
+        "the rat's outcome and picture wait for between turns"
     );
 }
 
@@ -2276,19 +2348,8 @@ async fn a_move_told_between_turns_describes_where_it_arrives() {
     let mut engine = Engine::default();
     engine.welcome(&link);
     let before = link.client.state().clone();
-    let mut after = east(before.clone(), 6);
-    after.revision = 1;
-    let message = link.update(
-        60,
-        UpdateBody::Observation {
-            state: after.into(),
-            event: None,
-        },
-    );
-    if let ServerMessage::Update { update } = &message {
-        link.client.apply(*update.clone()).unwrap();
-    }
-    let beats = engine.between_turns(&link, &before, &message);
+    let after = east(before.clone(), 6);
+    let beats = publish_between_turns(&mut link, &mut engine, after);
     let passage = engine.passage(&link, beats);
     assert!(passage.contains("You are in an open"), "{passage}");
 }

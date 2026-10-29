@@ -259,7 +259,46 @@ CLIENT = [
 ]
 
 
+class NoticedRecordingCase(ProcessTestCase):
+    """One ordinary door opening reveals an otherwise occluded actor."""
+    def runTest(self):
+        self.server(scenario="semantic-narration", seed=None)
+        player, initial = self.client()
+        before = initial["state"]["observation"]
+        self.assertFalse(initial["state"]["wizard_game"])
+        self.assertEqual([actor for actor in before["visible_actors"]
+                          if actor["id"] != before["self_target"]], [])
+        door = next(cell["door"] for cell in before["visible_cells"] if cell.get("door"))
+        self.assertFalse(door["open"])
+        start = len(player.transcript)
+        opened = self.act(player, {"type": "set_door", "door": door["id"], "open": True})
+        self.assertIsNone(opened["error"])
+        after = opened["state"]["observation"]
+        visible = [actor for actor in after["visible_actors"] if actor["id"] != after["self_target"]]
+        self.assertEqual(len(visible), 1)
+        self.assertEqual(visible[0]["position"], {"x": 2, "y": 0, "z": 0})
+        messages = [json.loads(line).get("message") for line in player.transcript[start:]
+                    if line.startswith("{")]
+        candidates = []
+        for message in messages:
+            body = (message or {}).get("update", {}).get("body", {})
+            if body.get("type") == "outcome":
+                noticed = [fact for fact in body["facts"]["facts"] if fact["kind"] == "noticed"]
+                if noticed:
+                    self.assertEqual(noticed, [{"kind": "noticed", "actor": visible[0]["id"],
+                                               "name": visible[0]["name"],
+                                               "position": visible[0]["position"]}])
+                    self.assertNotEqual(noticed[0]["actor"], body["facts"]["self_target"])
+                    candidates.append(message)
+        self.assertEqual(len(candidates), 1, "one actual newcomer outcome, never a synthesized DTO")
+        self.noticed_sample = copy.deepcopy(candidates[0])
+
+
 class Recorder(ProcessTestCase):
+    def record_noticed(self, server_samples):
+        server_samples["zz.noticed_position"] = run_recording_case(
+            NoticedRecordingCase(), "noticed_sample")
+
     def record_projectile_choices(self, server_samples):
         self.save = self.save.parent / "projectile-samples.db"
         server = self.server(scenario=projectile_package(self))
@@ -971,6 +1010,7 @@ class Recorder(ProcessTestCase):
         self.record_amulet_escape(server_samples)
         self.record_discovery(server_samples)
         self.record_scare_crumble(server_samples)
+        self.record_noticed(server_samples)
         self.server_samples = server_samples
 
 

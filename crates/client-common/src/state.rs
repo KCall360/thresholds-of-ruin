@@ -59,6 +59,7 @@ struct SessionAuthority {
     travel: Option<TravelStatus>,
     has_control: bool,
     outcome_status: Option<OutcomeStatusFacts>,
+    character_ready: bool,
 }
 
 impl ClientState {
@@ -79,6 +80,7 @@ impl ClientState {
                     branch: snapshot.branch,
                 },
                 authority: SessionAuthority {
+                    character_ready: snapshot.state.observation.ready,
                     outcome_status: snapshot
                         .state
                         .observation
@@ -297,7 +299,10 @@ impl ClientState {
             .combat
             .as_ref()
             .map(OutcomeStatusFacts::from);
-        if !self.observation_current() || self.outcome_status() != picture_status.as_ref() {
+        if !self.observation_current()
+            || self.outcome_status() != picture_status.as_ref()
+            || self.character_ready() != self.state().observation.ready
+        {
             return Err(StreamError::InconsistentState);
         }
         let snapshot = Snapshot {
@@ -332,6 +337,13 @@ impl ClientState {
 
     /// Published permissions can briefly lag their causing lifecycle/control
     /// updates. Block input during that boundary instead of inferring availability.
+    /// Whether the character can act now, independently of permission to
+    /// enqueue future work. Ordered pacing facts advance this even while the
+    /// displayed picture is stale; later pictures never rewind causal state.
+    pub fn character_ready(&self) -> bool {
+        self.session.authority.character_ready
+    }
+
     pub fn can_admit_intention(&self) -> bool {
         self.readiness().admission
             && validate_readiness(
@@ -614,6 +626,21 @@ impl ClientState {
                         return Err(StreamError::InconsistentState);
                     }
                     self.remember(*entry, update.cursor.tick)?;
+                }
+                for fact in &facts.facts {
+                    if let tor_protocol::OutcomeFact::Pacing { ready } = fact {
+                        self.session.authority.character_ready = *ready;
+                    }
+                }
+                // Terminal outcomes intentionally omit ordinary pacing prose.
+                // Their semantic status still ends character readiness, without
+                // inventing the separately ordered input-permission update.
+                if facts
+                    .status
+                    .as_ref()
+                    .is_some_and(|status| status.dead || status.terminal)
+                {
+                    self.session.authority.character_ready = false;
                 }
                 self.session.authority.outcome_status = facts.status.clone();
                 if visual_changed {
@@ -1019,6 +1046,109 @@ mod outcome_stream_tests {
             },
             event: None,
             visual_changed: true,
+        }
+    }
+
+    #[test]
+    fn causal_character_readiness_is_not_queue_admission_or_an_older_picture() {
+        let mut client = client();
+        assert!(client.character_ready());
+        assert!(client.can_admit_intention());
+        let mut body = outcome(&client);
+        let UpdateBody::Outcome { facts, .. } = &mut body else {
+            unreachable!()
+        };
+        facts.facts.push(OutcomeFact::Pacing { ready: false });
+        client.apply(update(&client, 1, body)).unwrap();
+        assert!(!client.character_ready());
+        assert!(
+            client.can_admit_intention(),
+            "explicit queued input remains permitted"
+        );
+        assert!(client.state().observation.ready, "picture can still be old");
+        let mut picture = client.state().clone();
+        picture.snapshot = SnapshotId("delayed-picture".into());
+        picture.revision += 1;
+        picture.observation.tick = 1;
+        client
+            .apply(update(
+                &client,
+                1,
+                UpdateBody::Observation {
+                    state: Arc::new(picture),
+                    event: None,
+                },
+            ))
+            .unwrap();
+        assert!(
+            !client.character_ready(),
+            "picture cannot overwrite causal pacing"
+        );
+        let mut body = outcome(&client);
+        let UpdateBody::Outcome { facts, .. } = &mut body else {
+            unreachable!()
+        };
+        facts.facts.push(OutcomeFact::Pacing { ready: true });
+        client.apply(update(&client, 2, body)).unwrap();
+        assert!(client.character_ready());
+    }
+
+    #[test]
+    fn terminal_status_without_pacing_ends_character_readiness_and_allows_current_reset() {
+        for dead in [false, true] {
+            let mut client = client();
+            let mut picture = client.state().clone();
+            picture.snapshot = SnapshotId("terminal-picture".into());
+            picture.revision += 1;
+            picture.observation.tick = 1;
+            picture.observation.ready = false;
+            let combat = picture.observation.combat.as_mut().unwrap();
+            combat.terminal = true;
+            combat.dead = dead;
+            combat.victory = !dead;
+            if dead {
+                combat.hp = 0;
+            }
+            let mut body = outcome(&client);
+            let UpdateBody::Outcome { facts, .. } = &mut body else {
+                unreachable!()
+            };
+            facts.status = Some(OutcomeStatusFacts::from(&*combat));
+            assert!(!facts
+                .facts
+                .iter()
+                .any(|fact| matches!(fact, OutcomeFact::Pacing { .. })));
+            client.apply(update(&client, 1, body)).unwrap();
+            assert!(!client.character_ready());
+            assert!(
+                client.readiness().admission,
+                "permissions retain their separate boundary"
+            );
+            client
+                .apply(update(
+                    &client,
+                    1,
+                    UpdateBody::Readiness {
+                        readiness: Readiness {
+                            revision: 1,
+                            admission: false,
+                            resume: vec![],
+                            cancel: vec![],
+                        },
+                    },
+                ))
+                .unwrap();
+            client
+                .apply(update(
+                    &client,
+                    1,
+                    UpdateBody::Observation {
+                        state: Arc::new(picture),
+                        event: None,
+                    },
+                ))
+                .unwrap();
+            assert!(client.reset_snapshot().is_ok());
         }
     }
 

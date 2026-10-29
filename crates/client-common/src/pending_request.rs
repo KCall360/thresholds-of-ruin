@@ -36,6 +36,9 @@ impl PendingRequest {
         connection: &Connection,
         message: &ServerMessage,
     ) -> Option<RequestCompletion<'a>> {
+        if self.reply.is_none() && connection.completed_observation_request(&self.id, message) {
+            self.reply = Some(ConfirmedReply::Completed);
+        }
         self.record(
             message,
             connection.is_synchronized(),

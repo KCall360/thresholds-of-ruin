@@ -68,7 +68,7 @@ class ItemProcesses(ProcessTestCase):
             self.assertIsNone(effects[0]["receipt"])
         player.stop(); self.game.stop(); self.start()
         _, restored = self.client()
-        self.assertEqual(restored["state"], taken["state"])
+        self.assertDisclosedStateEqual(restored["state"], taken["state"])
         self.assertEqual(restored["intentions"], [])
 
     @non_graphical

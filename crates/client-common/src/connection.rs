@@ -138,6 +138,7 @@ impl PendingQuery {
 struct ObservationDemand {
     pending: Option<PendingQuery>,
     dirty: bool,
+    completed: Option<String>,
 }
 impl ObservationDemand {
     fn ensure_pending(&mut self) -> &mut PendingQuery {
@@ -147,8 +148,11 @@ impl ObservationDemand {
         self.dirty |= visual_changed;
     }
     fn published(&mut self) {
-        self.pending = None;
+        self.completed = self.pending.take().map(|pending| pending.request_id);
         self.dirty = false;
+    }
+    fn reset(&mut self) {
+        *self = Self::default();
     }
 }
 
@@ -354,10 +358,16 @@ impl Connection {
         self.charts.clear();
         self.chart_request = None;
         self.map_request = None;
-        self.observation_demand.published();
+        self.observation_demand.reset();
         if self.recovery.is_none() {
             self.recovery = Some(PendingQuery::new());
         }
+    }
+
+    /// Observe is a coalesced local demand: its ordered picture has no wire
+    /// request id. Only that applied picture can complete the demand's identity.
+    pub(crate) fn completed_observation_request(&self, id: &str, message: &ServerMessage) -> bool {
+        shown(message) && self.observation_demand.completed.as_deref() == Some(id)
     }
 
     async fn progress_recovery(&mut self) -> Result<(), ConnectionError> {
@@ -1031,7 +1041,7 @@ impl Connection {
                                 self.last_recovery_snapshot = Some(request_id.clone());
                             }
                             self.recovery = None;
-                            self.observation_demand.published();
+                            self.observation_demand.reset();
                             self.last_shown = None;
                         }
                         Err(error) if recovering => {
@@ -1285,10 +1295,18 @@ mod socket_policy_tests {
         demand.published();
         assert!(!demand.dirty);
         assert!(demand.pending.is_none());
+        assert_eq!(demand.completed.as_deref(), Some(first.as_str()));
         // A later visual change, including a zero-time commit, requires a new demand.
         demand.outcome(true);
         assert!(demand.dirty);
-        assert_ne!(demand.ensure_pending().request_id, first);
+        let second = demand.ensure_pending().request_id.clone();
+        assert_ne!(second, first);
+        demand.published();
+        assert_eq!(demand.completed.as_deref(), Some(second.as_str()));
+        demand.reset();
+        assert!(demand.completed.is_none());
+        assert!(demand.pending.is_none());
+        assert!(!demand.dirty);
     }
 
     #[tokio::test]

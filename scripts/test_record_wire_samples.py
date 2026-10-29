@@ -65,6 +65,18 @@ def recording_case(failure=None):
 
 
 class CompleteRecordingContracts(unittest.TestCase):
+    def test_noticed_adapter_uses_only_the_genuine_case_artifact(self):
+        # The adapter's artifact gate owns setup, assertions, and all cleanup.
+        raw = {"type": "update", "update": {"body": {"type": "outcome", "marker": "raw"}}}
+        samples = {}
+        with patch("record_wire_samples.run_recording_case", return_value=raw) as capture:
+            record_wire_samples.Recorder().record_noticed(samples)
+        selected, attribute = capture.call_args.args
+        self.assertIsInstance(selected, record_wire_samples.NoticedRecordingCase)
+        self.assertEqual(attribute, "noticed_sample")
+        self.assertIs(samples["zz.noticed_position"], raw)
+        self.assertFalse(is_graphical_test(selected))
+
     def test_polymorph_factories_reuse_two_actual_non_graphical_boundaries(self):
         for factory, method in ((record_wire_samples.polymorph_recording_case,
                 "test_text_paid_self_polymorph_reopens_and_retries_without_source_or_private_ledger"),

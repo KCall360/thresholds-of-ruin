@@ -286,7 +286,7 @@ class RogueVampireProcesses(ProcessTestCase):
         shutil.rmtree(package)
         self.server("--checkpoint-interval", 1, scenario=unrelated_fallback(self), seed=None)
         player, reopened = self.client(actor=1, omit_memory=True)
-        self.assertEqual(reopened["state"], before["state"])
+        self.assertDisclosedStateEqual(reopened["state"], before["state"])
         self.assertEqual(checkpoint(self, player), saved)
 
     def test_separate_unchanged_emu_carrier_drops_one_finite_ration_for_ordinary_take_and_eat(self):
@@ -447,7 +447,7 @@ class RogueVampireProcesses(ProcessTestCase):
         shutil.rmtree(package)
         self.server("--checkpoint-interval", 1, scenario=unrelated_fallback(self), seed=None)
         player, restored = self.client(actor=1)
-        self.assertEqual(restored["state"], before_restart["state"])
+        self.assertDisclosedStateEqual(restored["state"], before_restart["state"])
         self.assertEqual(checkpoint(self, player), killed)
         self.assertEqual(self.private_receipts(actor=1), receipts)
 
@@ -496,7 +496,7 @@ class RogueVampireProcesses(ProcessTestCase):
                              seed=None, save_actor=character)
         player, _ = self.client(actor=character, omit_memory=True)
         vampire, reopened = self.client(actor=3, omit_memory=True)
-        self.assertEqual(reopened["state"], before["state"])
+        self.assertDisclosedStateEqual(reopened["state"], before["state"])
         self.assertEqual(checkpoint(self, player), saved)
         # Restored human queues suspend until their controller explicitly
         # resumes the same work. Only that lifecycle state may differ.

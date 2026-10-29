@@ -32,7 +32,7 @@ class LightingProcesses(ProcessTestCase):
         self.assertIn("lit tablet", welcome)
         self.assertNotIn("hidden token", welcome)
         window, frame = self.window(token=SPECTATOR_TOKEN, observe=True)
-        self.assertEqual(frame["state"], initial["state"])
+        self.assertDisclosedStateEqual(frame["state"], initial["state"])
         for _ in range(5):
             moved = self.act(player, {"type": "move", "direction": "east"})
             self.assertIsNone(moved.get("error"))
@@ -46,7 +46,7 @@ class LightingProcesses(ProcessTestCase):
         server.stop()
         self.server(scenario="lighting")
         _, resumed = self.client()
-        self.assertEqual(resumed["state"], expected)
+        self.assertDisclosedStateEqual(resumed["state"], expected)
 
     def test_ascii_travels_to_remembered_dark_cells_by_keyboard_and_click(self):
         self.server(scenario="lighting")

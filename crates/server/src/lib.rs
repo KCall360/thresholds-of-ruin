@@ -73,3 +73,13 @@ mod active_mob_options;
 #[cfg(test)]
 #[path = "../example_support/active_mob_trace.rs"]
 mod active_mob_trace;
+
+/// Compare all disclosed fields across separately issued pictures. Identity-only
+/// differences are expected; same-picture atomicity tests must use assert_eq!.
+#[cfg(test)]
+fn assert_disclosed_state_eq(actual: &tor_protocol::StateView, expected: &tor_protocol::StateView) {
+    let mut payload = actual.clone();
+    payload.snapshot = expected.snapshot.clone();
+    payload.revision = expected.revision;
+    assert_eq!(&payload, expected);
+}

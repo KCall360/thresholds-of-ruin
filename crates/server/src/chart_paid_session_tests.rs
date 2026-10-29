@@ -153,6 +153,7 @@ fn paid_monster_chart_is_nonvisual_nonactionable_pure_and_republishes_far_peer_m
         .engine
         .prepared_detection_charts(OWNER)
         .unwrap();
+    let prepared_boundary = wire.service.engine.presentation_boundary();
     let first = page(&mut wire, OWNER, request.clone());
     assert!(Arc::ptr_eq(
         &prepared,
@@ -189,7 +190,7 @@ fn paid_monster_chart_is_nonvisual_nonactionable_pure_and_republishes_far_peer_m
         act_as(&mut wire, next, &format!("owner-turn-{turn}"), Action::Wait);
     }
     assert_eq!(wire.service.engine.next_actor(), Some(OTHER));
-    let revision = wire.service.engine.causal_boundary(OWNER).unwrap();
+    let revision = wire.snapshot(OWNER).state.revision;
     let tick = wire.service.engine.state(OWNER).unwrap().observation.tick;
     act_as(
         &mut wire,
@@ -198,6 +199,22 @@ fn paid_monster_chart_is_nonvisual_nonactionable_pure_and_republishes_far_peer_m
         Action::Move {
             direction: Direction::East,
         },
+    );
+    let after_move = wire.checkpoint();
+    let historical = wire
+        .service
+        .engine
+        .prepared_detection_charts_at(&prepared_boundary, OWNER)
+        .unwrap();
+    assert_eq!(
+        historical.as_ref(),
+        prepared.as_ref(),
+        "historical first-page reconstruction preserves exact frozen charts"
+    );
+    assert_eq!(
+        wire.checkpoint(),
+        after_move,
+        "historical chart reconstruction cannot change RNG, knowledge or rules state"
     );
     let snapshot = wire.snapshot(OWNER);
     assert!(snapshot.state.observation.visible_actors.is_empty());

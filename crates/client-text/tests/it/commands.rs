@@ -305,7 +305,7 @@ fn annotations_preserve_text_and_explicit_scope_without_an_action() {
         "note bad\u{1b}[2J",
         "annotate backend actor note here spoiler",
         "annotate user public note here text",
-        "annotate user private note state:no text",
+        "annotate user private note state: text",
     ] {
         assert!(parse(bad, &state()).is_err(), "{bad}");
     }

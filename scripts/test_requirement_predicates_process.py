@@ -73,7 +73,7 @@ class RequirementPredicateProcesses(ProcessTestCase):
         rules_path.unlink()
         self.server(scenario=ROOT / "scenarios/two-room", seed=None, wizard=True)
         observer, restored = self.client(WIZARD_TOKEN, observe=True)
-        self.assertEqual(restored["state"], dormant)
+        self.assertDisclosedStateEqual(restored["state"], dormant)
         wizard, _ = self.text_client(WIZARD_TOKEN, observe=True)
         self.assertNotIn("Server error", wizard.command("wizard creature template 1 land_bound off"))
         self.assertEqual(snapshot()["observation"]["combat"]["own_stats"], active_stats)

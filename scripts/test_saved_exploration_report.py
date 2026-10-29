@@ -7,10 +7,59 @@ import subprocess
 import sys
 from pathlib import Path
 from performance_driver import SPEC
-from saved_exploration_driver import validate
+from saved_exploration_driver import validate, validate_text_wait, restart_wait_completed
 
 
 class SavedExplorationReport(unittest.TestCase):
+    def test_text_wait_requires_canonical_ordered_narration_and_resolution(self):
+        validate_text_wait("Action: Queued.\nTime passes.\nAction: Resolved.\nReady.")
+        for output in ("Done.\nReady.", "Time passes.\nReady.",
+                       "Waited\nAction: Resolved.\nReady.",
+                       "Action: Resolved.\nTime passes.\nReady.",
+                       "Time passes.\nTime passes.\nAction: Resolved."):
+            with self.subTest(output=output), self.assertRaises(InvalidWorkload):
+                validate_text_wait(output)
+
+    def test_restart_wait_binds_new_receipt_at_execution_not_next_ready_tick(self):
+        previous = dict(id="old", actor="1", branch="saved", tick="7600",
+                        content=dict(event=dict(type="moved")))
+        before = dict(branch="saved", history=[previous],
+                      state=dict(observation=dict(actor="1", tick="7700")))
+        receipt = dict(id="new", actor="1", branch="saved", tick="7700",
+                       content=dict(event=dict(type="waited")))
+        frame = dict(branch="saved", history=[previous, receipt])
+        self.assertTrue(restart_wait_completed(frame, before))
+        for field, value in (("id", "old"), ("actor", "2"), ("branch", "other"),
+                             ("tick", "7800"), ("tick", "7600"),
+                             ("content", dict(event=dict(type="moved")))):
+            with self.subTest(field=field, value=value):
+                self.assertFalse(restart_wait_completed(
+                    dict(frame, history=[previous, dict(receipt, **{field:value})]), before))
+        self.assertFalse(restart_wait_completed(dict(frame, history=[previous]), before))
+        self.assertFalse(restart_wait_completed(dict(frame, branch="other"), before))
+
+    def test_restart_input_does_not_finish_on_ack_with_old_history(self):
+        import io
+        from types import SimpleNamespace
+        from saved_exploration_driver import key
+        previous = dict(id="old", actor="1", branch="saved", tick="7600",
+                        content=dict(event=dict(type="moved")))
+        before = dict(branch="saved", history=[previous],
+                      state=dict(observation=dict(actor="1", tick="7700")))
+        acknowledged = dict(before, connected=True, window_open=True, has_control=True,
+                            busy=False, can_admit_intention=True, intentions=[], input_done="wait")
+        receipt = dict(id="new", actor="1", branch="saved", tick="7700",
+                       content=dict(event=dict(type="waited")))
+        completed = dict(acknowledged, history=[previous, receipt], input_done=None)
+        def until(predicate):
+            self.assertFalse(predicate(acknowledged))
+            self.assertTrue(predicate(completed))
+            return completed, 1.
+        window = SimpleNamespace(child=SimpleNamespace(stdin=io.StringIO()), until=until)
+        returned, _ = key(window, "wait", wait_after=before)
+        self.assertIs(returned, completed)
+        self.assertEqual(window.child.stdin.getvalue(), '{"type": "key", "key": "wait"}\n')
+
     def result(self, regions=8):
         spec = json.loads(SPEC.read_text())
         profile = dict(version=1, network_events=1, apply_ms=1, draw_ms=1,
@@ -64,7 +113,7 @@ class SavedExplorationReport(unittest.TestCase):
             if not valid:
                 result["disclosed_cells"] -= 1
             child = subprocess.run([sys.executable, "-O", "-c",
-                "import json,sys; from saved_exploration_driver import validate; validate(json.load(sys.stdin))"],
+                "import json,sys; from saved_exploration_driver import validate, validate_text_wait, restart_wait_completed; validate(json.load(sys.stdin))"],
                 input=json.dumps(result), text=True, capture_output=True, cwd=Path(__file__).parent, timeout=15)
             self.assertEqual(child.returncode == 0, valid, child.stderr)
             if not valid:

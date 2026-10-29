@@ -126,7 +126,7 @@ bands = [{ depth = { kind = "open", minimum = 3 }, choices = [{ archetype = "mar
 
         server = self.server("--checkpoint-interval", 64, scenario=unrelated_fallback(self), seed=None)
         player, resumed = self.client(omit_memory=True)
-        self.assertEqual(resumed["state"], before["state"])
+        self.assertDisclosedStateEqual(resumed["state"], before["state"])
         self.assertEqual(resumed["history"], before["history"])
         self.assertEqual(self.private_receipts(), second)
         state = explore_to_stairs(self, player, resumed["state"])
@@ -337,7 +337,7 @@ class OmittedRoomTopologyProcess(ProcessTestCase):
         fallback = unrelated_fallback(self)
         server = self.server("--checkpoint-interval", 1, scenario=fallback, seed=None)
         player, current = self.client(omit_memory=True)
-        self.assertEqual(current["state"], before["state"])
+        self.assertDisclosedStateEqual(current["state"], before["state"])
         self.assertEqual(current["history"], before["history"])
         self.assertEqual(self.private_receipts(), first)
 
@@ -462,7 +462,7 @@ class RogueStarterProcess(ProcessTestCase):
                                      seed=None, save_actor=selected)
                 player, resumed = self.client(actor=selected)
                 self.assertEqual(self.assert_starter(resumed), inventory)
-                self.assertEqual(resumed["state"], before["state"])
+                self.assertDisclosedStateEqual(resumed["state"], before["state"])
                 self.assertEqual(resumed["history"], before["history"])
                 player.stop()
                 server.stop()

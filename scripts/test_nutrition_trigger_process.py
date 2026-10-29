@@ -65,7 +65,7 @@ class NutritionTriggerProcesses(ProcessTestCase):
         self.server("--checkpoint-interval", 1, seed=None)
         player, restored = self.client()
         peer, _ = self.client(actor=2)
-        self.assertEqual(restored["state"], paused["state"])
+        self.assertDisclosedStateEqual(restored["state"], paused["state"])
         self.assertEqual(checkpoint(self, player), saved)
         for _ in range(851):
             saved = checkpoint(self, player)
@@ -143,7 +143,7 @@ class RogueNutritionProcesses(ProcessTestCase):
                             path.unlink()
                 resumed = self.server(seed=None, save_actor=actor)
                 player, reopened = self.client(actor=actor)
-                self.assertEqual(reopened["state"], eaten["state"])
+                self.assertDisclosedStateEqual(reopened["state"], eaten["state"])
                 self.assertFalse(reopened["state"]["wizard_game"])
                 player.stop(); resumed.stop()
 

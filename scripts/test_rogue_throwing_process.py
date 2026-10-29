@@ -129,7 +129,7 @@ class RogueThrowingProcesses(ProcessTestCase):
         owner, _ = self.client()
         refused = self.act(owner, {"type": "equip", "item": inventory(initial, "dart")["id"], "slot": 10})
         self.assertIsNotNone(refused["error"], "a whole multi-unit stack cannot be wielded")
-        self.assertEqual(self.snapshot()["state"], initial["state"])
+        self.assertDisclosedStateEqual(self.snapshot()["state"], initial["state"])
         owner.stop()
         text = self.text()
         start = len(self.replies)
@@ -139,7 +139,7 @@ class RogueThrowingProcesses(ProcessTestCase):
         learned = self.learn(text)
         self.choose(text, "dart", "east")
         self.assertNotIn("Server error", text.command("no"))
-        self.assertEqual(self.snapshot()["state"], learned["state"])
+        self.assertDisclosedStateEqual(self.snapshot()["state"], learned["state"])
         terms = self.choose(text, "dart", "east")
         self.assertNotIn("Server error", text.command("yes"))
         started = self.snapshot()
@@ -189,7 +189,7 @@ class RogueThrowingProcesses(ProcessTestCase):
         self.game = self.server("--checkpoint-interval", 1, seed=None)
         self.probe, restored = self.client(observe=True)
         self.peer, _ = self.client(actor=3)
-        self.assertEqual(restored["state"], paused["state"])
+        self.assertDisclosedStateEqual(restored["state"], paused["state"])
         self.assertEqual(restored["intentions"], paused["intentions"])
         self.assertEqual(checkpoint(self, self.probe), saved)
         owner, _ = self.client()
@@ -259,12 +259,12 @@ class RogueThrowingProcesses(ProcessTestCase):
         self.assertEqual(sum(int(row["item"]["quantity"]) for row in observation(shuriken_hit)["ground_items"]
                              if row["item"]["name"] == "shuriken"), 1)
         for _ in range(2):
-            self.assertEqual(self.snapshot()["state"], shuriken_hit["state"])
+            self.assertDisclosedStateEqual(self.snapshot()["state"], shuriken_hit["state"])
         self.assertEqual(checkpoint(self, self.probe), final)
         text.stop(); self.probe.stop(); self.peer.stop(); self.game.stop()
         self.server("--checkpoint-interval", 1, seed=None)
         self.probe, reopened = self.client(observe=True)
-        self.assertEqual(reopened["state"], shuriken_hit["state"])
+        self.assertDisclosedStateEqual(reopened["state"], shuriken_hit["state"])
         self.assertEqual(checkpoint(self, self.probe), final)
 
 

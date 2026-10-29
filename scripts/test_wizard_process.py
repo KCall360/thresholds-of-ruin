@@ -44,10 +44,11 @@ class WizardProcesses(ProcessTestCase):
                               and ground["position"] == selector["position"]]
                 self.assertEqual(len(candidates), 1, f"Ambiguous fixture selector: {selector}")
                 command = command.format(target_item=candidates[0])
+            previous_revision = int(seen["state"]["revision"])
             output = wizard.command(command)
             self.assertNotIn("Server error", output, command)
             if not step["command"].startswith("note"):
-                seen = self.ascii_frame(spectator, lambda f: f["state"]["revision"] == str(step["revision"]))
+                seen = self.ascii_frame(spectator, lambda f: int(f["state"]["revision"]) > previous_revision)
                 self.assertEqual(seen["state"]["observation"]["position"], {"x":0,"y":0,"z":0})
                 self.assertEqual(seen["state"]["observation"]["tick"], str(step["tick"]))
                 self.assertTrue(seen["state"]["wizard_game"])
@@ -70,7 +71,8 @@ class WizardProcesses(ProcessTestCase):
         self.assertIn("Private abandoned future", wizard.command(f"branch-history {old_branch}"))
         self.assertNotIn("Private abandoned future", text_spectator.command(f"branch-history {old_branch}"))
         wizard.command("take token")
-        alternate = self.ascii_frame(spectator, lambda f: f["state"]["revision"] == '1')
+        alternate = self.ascii_frame(spectator, lambda f: f["state"]["observation"]["tick"] == '50'
+            and bool(f["state"]["observation"]["inventory"]))
         self.assertEqual(alternate["state"]["observation"]["tick"], '50')
         target = alternate["history"][-1]["id"]
         wizard.command("wizard actor 75 1 2 1 0")
@@ -82,7 +84,7 @@ class WizardProcesses(ProcessTestCase):
         self.assertNotIn("Server error", second.command("wait"))
         self.assertNotIn("Server error", wizard.command(f"wizard rewind {target}"))
         restored = self.ascii_frame(spectator, lambda f: f["branch"] != alternate["branch"])
-        self.assertEqual(restored["state"], alternate["state"])
+        self.assertDisclosedStateEqual(restored["state"], alternate["state"])
         # Removed actors' connections end explicitly at rewind.
         self.assertNotEqual(second.child.wait(timeout=15), 0)
         wizard.command("release")
@@ -103,7 +105,7 @@ class WizardProcesses(ProcessTestCase):
         self.assertIn("WIZARD GAME", welcome)
         self.assertIn("Wizard authority", player.command("wizard rewind initial"))
         resumed, current = self.spectator()
-        self.assertEqual(current["state"], final["state"])
+        self.assertDisclosedStateEqual(current["state"], final["state"])
         self.assertEqual(current["branch"], final["branch"])
         self.assertEqual(current["history"], final["history"])
 

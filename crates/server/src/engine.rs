@@ -2904,8 +2904,16 @@ impl Engine {
         }
         Ok(&boundary.boundary.game)
     }
+    fn is_current_presentation(&self, boundary: &PresentationBoundary) -> bool {
+        self.boundaries
+            .back()
+            .is_some_and(|current| Arc::ptr_eq(current, &boundary.boundary))
+            && boundary.branch == *self.branch()
+    }
+
     /// Private causal event identity, never serialized into presentation tokens.
-    pub(crate) fn event_history_boundary_at(
+    #[doc(hidden)]
+    pub fn event_history_boundary_at(
         &self,
         boundary: &PresentationBoundary,
     ) -> Result<tor_protocol::EventProvenance, Failure> {
@@ -2923,12 +2931,7 @@ impl Engine {
         display_generation: u64,
     ) -> Result<Observation, Failure> {
         let game = self.presentation_game(boundary)?;
-        let view = if self
-            .boundaries
-            .back()
-            .is_some_and(|current| Arc::ptr_eq(current, &boundary.boundary))
-            && boundary.branch == *self.branch()
-        {
+        let view = if self.is_current_presentation(boundary) {
             self.revision_view(actor)?
         } else {
             Arc::new(revision_view(game, actor)?)
@@ -3073,10 +3076,16 @@ impl Engine {
         boundary: &PresentationBoundary,
         actor: ActorId,
     ) -> Result<Arc<crate::chart_view::PreparedCharts>, Failure> {
+        let game = self.presentation_game(boundary)?;
+        if self.is_current_presentation(boundary) {
+            // The current view already owns this census. Reuse it rather than
+            // prepare the same charts again for the first page.
+            return Ok(Arc::clone(&self.revision_view(actor)?.charts));
+        }
+        // Historical capabilities pin rules state, not every chart payload.
+        // Reconstruct once for a new transfer; its continuation owns the Arc.
         Ok(Arc::new(crate::chart_view::PreparedCharts::for_game(
-            self.presentation_game(boundary)?,
-            actor,
-            false,
+            game, actor, false,
         )?))
     }
     pub fn explored_map(

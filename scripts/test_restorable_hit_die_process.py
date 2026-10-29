@@ -40,7 +40,7 @@ class RestorableHitDieProcesses(HitDieHelpers, ProcessTestCase):
                 shutil.rmtree(path) if path.is_dir() else path.unlink()
         self.server("--checkpoint-interval", 1, seed=None)
         player, restored = self.client()
-        self.assertEqual(restored["state"], changed["state"])
+        self.assertDisclosedStateEqual(restored["state"], changed["state"])
         self.assertEqual(checkpoint(self, player), saved)
         self.assertIsNone(self.act(player, {"type": "drink", "item": self.restoration_item(restored)})["error"])
         final = self.finish(player)

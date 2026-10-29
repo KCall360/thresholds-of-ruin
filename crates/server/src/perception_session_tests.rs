@@ -591,7 +591,7 @@ fn encoded_service_preserves_contact_and_apparent_object_authority() {
         },
         ErrorCode::InvalidAction,
     );
-    assert_eq!(x.snapshot(OWNER).state, passive.state);
+    crate::assert_disclosed_state_eq(&x.snapshot(OWNER).state, &passive.state);
     for (message, text) in &x.owner_frames {
         if !matches!(message, ServerMessage::Palette { .. }) {
             assert!(
