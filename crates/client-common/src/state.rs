@@ -1041,6 +1041,7 @@ mod outcome_stream_tests {
                 facts: vec![OutcomeFact::OwnAction {
                     event: Event::Waited,
                     name: None,
+                    underfoot: None,
                     basic_attack: false,
                 }],
             },
@@ -1355,6 +1356,8 @@ mod outcome_stream_tests {
         facts.actor_names.push(DisclosedActorName {
             actor: facts.self_target,
             name: "invalid self alias".into(),
+            asset: None,
+            current_disclosed_appearance: None,
         });
         assert_eq!(
             client.apply(update(&client, tick, body)),

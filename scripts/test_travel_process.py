@@ -5,9 +5,11 @@ import subprocess
 import sqlite3
 from pathlib import Path
 import time
+import threading
 import unittest
 
 from process_harness import ProcessTestCase, SPECTATOR_TOKEN, non_graphical, read_capture
+from stream_relay import StreamRelay
 
 
 class TravelJournalProcesses(ProcessTestCase):
@@ -93,8 +95,18 @@ class TravelProcesses(ProcessTestCase):
     def test_ascii_selection_click_skip_and_resume(self):
         server = self.server(wizard=True, scenario="travel")
         spectator, _ = self.client(SPECTATOR_TOKEN)
-        # A slow pace keeps the third journey on screen long enough to skip.
-        ascii_client = self.launch("tor-client-ascii", ["--connect", self.address, "--automation", "--pace", "500"])
+        # Hold delivery after the third journey's Active status, rather than
+        # depending on server speed to expose the local Skip-ahead control.
+        arm_skip = threading.Event()
+        def hold_after_active(message):
+            body = message.get("update", {}).get("body", {})
+            if (arm_skip.is_set() and body.get("type") == "travel"
+                    and body["status"]["phase"] == "active"):
+                arm_skip.clear()
+                relay.gate.clear()
+        relay = StreamRelay(self.address, on_server_message=hold_after_active)
+        self.addCleanup(relay.close)
+        ascii_client = self.launch("tor-client-ascii", ["--connect", relay.address, "--automation", "--pace", "500"])
         initial = self.ascii_frame(ascii_client, lambda f: f["state"] is not None and not f["busy"])
         self.assertTrue(initial["has_control"])
         self.key(ascii_client, "travel")
@@ -102,8 +114,11 @@ class TravelProcesses(ProcessTestCase):
             selected = self.key(ascii_client, "right")
         self.assertEqual(selected["state"]["observation"]["tick"], '0')
         self.assertEqual(selected["travel_cursor"], {"x": 5, "y": 0, "z": 0})
-        self.key(ascii_client, "enter")
-        arrived = self.ascii_frame(ascii_client, lambda f: (f.get("travel") or {}).get("phase") == "arrived" and f["can_admit_intention"])
+        submitted = self.key(ascii_client, "enter")
+        def arrived_picture(frame):
+            return ((frame.get("travel") or {}).get("phase") == "arrived"
+                    and frame["can_admit_intention"] and frame["observation_current"])
+        arrived = submitted if arrived_picture(submitted) else self.ascii_frame(ascii_client, arrived_picture)
         self.assertEqual(arrived["travel"]["completed_steps"], "5")
         self.assertEqual(arrived["state"]["observation"]["tick"], '500')
         watched = self.terminal(spectator)
@@ -117,10 +132,25 @@ class TravelProcesses(ProcessTestCase):
         self.assertEqual(returned["state"]["observation"]["tick"], '1000')
         self.key(ascii_client, "travel")
         for _ in range(7): self.key(ascii_client, "right")
-        self.key(ascii_client, "enter")
-        # Only the server ends a journey: Escape shows the rest of it at once.
-        skipped = self.key(ascii_client, "escape")
-        self.assertEqual(skipped["status"], "Skipping ahead.")
+        arm_skip.set()
+        try:
+            # The command acknowledgement may be among the held frames; local
+            # input must still work while the receive side is held.
+            ascii_client.child.stdin.write('{"type":"key","key":"enter"}\n')
+            ascii_client.child.stdin.flush()
+            self.ascii_frame(ascii_client, lambda f: f.get("travel")
+                and f["travel"]["id"] != returned["travel"]["id"]
+                and f["travel"]["phase"] == "active")
+            self.assertTrue(relay.held.wait(5), "Relay did not hold a later journey frame")
+            ascii_client.child.stdin.write('{"type":"key","key":"escape"}\n')
+            ascii_client.child.stdin.flush()
+            skipped = self.ascii_frame(ascii_client,
+                lambda f: f["status"] == "Skipping ahead.")
+            self.assertEqual(skipped["travel"]["phase"], "active")
+        finally:
+            relay.gate.set()
+        # Only the server ends a journey. Skip changes presentation, not the
+        # seven authoritative steps or their ordered journal.
         finished = self.ascii_frame(ascii_client, lambda f: f.get("travel") and f["travel"]["id"] != returned["travel"]["id"] and f["travel"]["phase"] != "active")
         self.assertEqual(finished["travel"]["phase"], "arrived")
         self.assertEqual(finished["travel"]["completed_steps"], "7")

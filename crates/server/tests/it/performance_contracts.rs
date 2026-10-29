@@ -320,7 +320,16 @@ fn movement_observer_work_remains_complete_without_display_comparisons() {
     for actors in [1, 8] {
         let mut engine = Engine::memory(Scenario::performance(42, 8, actors).unwrap()).unwrap();
         let actor = ActorId(1);
-        let before = engine.state(actor).unwrap().observation.position;
+        let center = |state: tor_protocol::StateView| {
+            state
+                .observation
+                .visible_cells
+                .into_iter()
+                .find(|cell| cell.position == tor_protocol::Position { x: 0, y: 0, z: 0 })
+                .expect("disclosed occupied cell")
+                .key
+        };
+        let before = center(engine.state(actor).unwrap());
         let (_, profile) = engine
             .command_profiled(
                 "observer-work",
@@ -336,7 +345,7 @@ fn movement_observer_work_remains_complete_without_display_comparisons() {
                 },
             )
             .unwrap();
-        assert_ne!(engine.state(actor).unwrap().observation.position, before);
+        assert_ne!(center(engine.state(actor).unwrap()), before);
         assert_eq!(profile.action_observer_boundaries, actors);
         assert_eq!(profile.action_event_receipts_recorded, actors);
         assert_eq!(profile.action_projection_validated, actors);

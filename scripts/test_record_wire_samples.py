@@ -1400,5 +1400,71 @@ class HallucinationRecordingContracts(unittest.TestCase):
                 self.assertEqual(samples, {"existing": {"type": "palette"}})
 
 
+
+
+class RecorderCaptureStorageTests(unittest.TestCase):
+    def test_headless_recording_uses_existing_lossless_per_launch_capture(self):
+        recorder = record_wire_samples.Recorder()
+        environment = {"FIXTURE_MARKER": "unchanged"}
+        args = ["--connect", "127.0.0.1:1"]
+        with patch.object(record_wire_samples.ProcessTestCase, "launch", return_value="launched") as launch:
+            self.assertEqual(record_wire_samples._recorded_launch(recorder.launch, "tor-client-headless", args, extra_env=environment,
+                                             token="fixture-token"), "launched")
+        launch.assert_called_once_with("tor-client-headless", args,
+            extra_env={"FIXTURE_MARKER": "unchanged", "TOR_TEST_SEGMENTED_STDOUT_BYTES": "4194304"},
+            token="fixture-token")
+        self.assertEqual(environment, {"FIXTURE_MARKER": "unchanged"})
+        self.assertEqual(args, ["--connect", "127.0.0.1:1"])
+
+    def test_capture_preserves_explicit_none_and_positional_process_class(self):
+        recorder = record_wire_samples.Recorder()
+        process_class = object()
+        with patch.object(record_wire_samples.ProcessTestCase, "launch", return_value="launched") as launch:
+            self.assertEqual(record_wire_samples._recorded_launch(recorder.launch,
+                "tor-client-headless", ["--fixture"], process_class, extra_env=None), "launched")
+        launch.assert_called_once_with("tor-client-headless", ["--fixture"], process_class,
+            extra_env={"TOR_TEST_SEGMENTED_STDOUT_BYTES": "4194304"})
+
+    def test_other_recorded_processes_keep_their_exact_launch_options(self):
+        recorder = record_wire_samples.Recorder()
+        with patch.object(record_wire_samples.ProcessTestCase, "launch", return_value="launched") as launch:
+            self.assertEqual(record_wire_samples._recorded_launch(recorder.launch, "tor-server", ["--fixture"], token="fixture-token"), "launched")
+        launch.assert_called_once_with("tor-server", ["--fixture"], token="fixture-token")
+
+
+    def test_nested_case_capture_restores_launch_after_success_and_failure(self):
+        for fail in (False, True):
+            class Case(record_wire_samples.ProcessTestCase):
+                @classmethod
+                def setUpClass(cls):
+                    pass
+
+                @classmethod
+                def tearDownClass(cls):
+                    pass
+
+                def setUp(self):
+                    pass
+
+                def tearDown(self):
+                    pass
+
+                def runTest(self):
+                    self.sample = self.launch("tor-client-headless", ["--connect", "fixture"])
+                    if fail:
+                        self.fail("intentional recording failure")
+
+            case = Case()
+            with patch.object(record_wire_samples.ProcessTestCase, "launch", return_value={"raw": "unchanged"}) as launch:
+                if fail:
+                    with self.assertRaisesRegex(AssertionError, "intentional recording failure"):
+                        record_wire_samples.run_recording_case(case, "sample")
+                else:
+                    self.assertEqual(record_wire_samples.run_recording_case(case, "sample"), {"raw": "unchanged"})
+                launch.assert_called_once_with("tor-client-headless", ["--connect", "fixture"],
+                    extra_env={"TOR_TEST_SEGMENTED_STDOUT_BYTES": "4194304"})
+            self.assertNotIn("launch", case.__dict__)
+
+
 if __name__ == "__main__":
     unittest.main()

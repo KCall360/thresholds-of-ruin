@@ -363,6 +363,8 @@ struct Viewer {
     state: StateView,
     branch: BranchId,
     palettes: Vec<(Option<String>, PaletteUpdate)>,
+    palette_positions: Vec<(u64, usize)>,
+    outcome_sequences: Vec<u64>,
     step: usize,
 }
 
@@ -381,6 +383,8 @@ impl Viewer {
             state: Arc::unwrap_or_clone(snapshot.state),
             branch: snapshot.branch,
             palettes: Vec::new(),
+            palette_positions: Vec::new(),
+            outcome_sequences: Vec::new(),
             step: 0,
         };
         viewer.until(|v| !v.palettes.is_empty()).await;
@@ -391,6 +395,9 @@ impl Viewer {
         match message {
             ServerMessage::Update { update } => {
                 match update.body {
+                    UpdateBody::Outcome { .. } => {
+                        self.outcome_sequences.push(update.cursor.sequence);
+                    }
                     UpdateBody::Observation { state, .. } => {
                         self.state = Arc::unwrap_or_clone(state)
                     }
@@ -404,8 +411,10 @@ impl Viewer {
             ServerMessage::Palette {
                 request_id,
                 palette,
-                ..
+                context,
             } => {
+                self.palette_positions
+                    .push((context.cursor.sequence, self.outcome_sequences.len()));
                 self.palettes.push((request_id, palette));
                 None
             }
@@ -540,37 +549,71 @@ async fn clients_get_a_full_palette_then_deltas_and_can_ask_for_it_again() {
     let mut spectator = Viewer::attach(&address, "bob-test-token").await;
     assert_eq!(*full(&spectator.palettes[0].1), union(&[stone(), cave()]));
 
-    // Walking into the first cave changes nothing; into the second, a delta.
+    // One forecast change brackets its causal Outcome with additions then
+    // removals. Clients must receive and apply both ordered deltas.
     for _ in 0..INTO_CAVE + ACROSS_CAVE {
         player.east().await;
     }
-    player.until(|v| v.palettes.len() >= 2).await;
+    player.until(|v| v.palettes.len() >= 3).await;
     assert_eq!(
         player.palettes.len(),
-        2,
-        "one change: {:?}",
+        3,
+        "one two-phase change: {:?}",
         player.palettes
     );
-    let (request, delta) = &player.palettes[1];
-    assert_eq!(*request, None);
-    assert_eq!(delta.revision, 2);
-    assert_eq!(
-        delta.body,
-        PaletteBody::Delta {
+    let expected_additions = PaletteUpdate {
+        revision: 2,
+        body: PaletteBody::Delta {
             base: 1,
             added: vault(),
+            removed: BTreeSet::new(),
+        },
+    };
+    let expected_removals = PaletteUpdate {
+        revision: 3,
+        body: PaletteBody::Delta {
+            base: 2,
+            added: BTreeSet::new(),
             removed: stone(),
-        }
-    );
-    spectator.until(|v| v.palettes.len() >= 2).await;
-    assert_eq!(spectator.palettes[1].1.body, delta.body);
-
-    // Asking gets the whole palette, answering the request. Spectators may ask.
-    spectator.client.request("palette", Request::Palette).await;
+        },
+    };
     spectator.until(|v| v.palettes.len() >= 3).await;
-    let (request, again) = &spectator.palettes[2];
+    for viewer in [&player, &spectator] {
+        assert_eq!(viewer.palettes[1], (None, expected_additions.clone()));
+        assert_eq!(viewer.palettes[2], (None, expected_removals.clone()));
+        let (before_sequence, before_outcomes) = viewer.palette_positions[1];
+        let (after_sequence, after_outcomes) = viewer.palette_positions[2];
+        assert_eq!(after_sequence, before_sequence + 1);
+        assert_eq!(after_outcomes, before_outcomes + 1);
+        assert_eq!(
+            viewer.outcome_sequences[before_outcomes], after_sequence,
+            "exactly one ordered Outcome separates forecast additions and removals"
+        );
+        let mut held = full(&viewer.palettes[0].1).clone();
+        let PaletteBody::Delta { added, removed, .. } = &viewer.palettes[1].1.body else {
+            unreachable!()
+        };
+        for asset in removed {
+            held.remove(asset);
+        }
+        held.extend(added.iter().cloned());
+        assert_eq!(held, union(&[stone(), cave(), vault()]));
+        let PaletteBody::Delta { added, removed, .. } = &viewer.palettes[2].1.body else {
+            unreachable!()
+        };
+        for asset in removed {
+            held.remove(asset);
+        }
+        held.extend(added.iter().cloned());
+        assert_eq!(held, union(&[cave(), vault()]));
+    }
+
+    // Asking gets the whole final palette at the next exact revision.
+    spectator.client.request("palette", Request::Palette).await;
+    spectator.until(|v| v.palettes.len() >= 4).await;
+    let (request, again) = &spectator.palettes[3];
     assert_eq!(request.as_deref(), Some("palette"));
-    assert_eq!(again.revision, 3);
+    assert_eq!(again.revision, 4);
     assert_eq!(*full(again), union(&[cave(), vault()]));
 
     // Reconnecting starts over with the whole palette.

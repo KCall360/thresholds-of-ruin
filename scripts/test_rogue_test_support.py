@@ -21,15 +21,15 @@ class DisclosedAbilityReceipts(unittest.TestCase):
         return {"state": {"revision": "4", "snapshot": "unchanged-picture", "observation": {
                     "combat": {"events": [{"type": "not-an-ordered-receipt"}]}}},
                 "message": {"type": "update", "update": {
-                    "context": {"stream": "stream", "epoch": "0"},
+                    "context": {"stream": "stream", "epoch": "0"}, "branch": "branch",
                     "cursor": {"sequence": str(sequence), "tick": "10"},
-                    "body": {"type": kind, "facts": {"facts": [
+                    "body": {"type": kind, "facts": {"self_target": "caster", "facts": [
                         {"kind": "combat", "event": event} for event in events]}}}}}
 
     def test_transient_receipts_exclude_stale_and_unrelated_events(self):
         event = {"type": "ability", "ability": {"id": "rust"}, "caster": "caster",
                  "target": "target", "strike": 0, "outcome": "applied"}
-        before = {"cursor": {"sequence": "4"},
+        before = {"branch": "branch", "cursor": {"sequence": "4"},
                   "input_context": {"stream": {"stream": "stream", "epoch": "0"}},
                   "state": {"revision": "4", "observation": {"self_target": "caster"}}}
         others = []
@@ -61,10 +61,24 @@ class DisclosedAbilityReceipts(unittest.TestCase):
             list(ordered_combat_events([first, conflicting]))
 
     def test_receipts_cannot_reuse_actor_handles_from_another_attachment(self):
-        baseline = {"input_context": {"stream": {"stream": "other", "epoch": "0"}},
+        baseline = {"state": {"observation": {"self_target": "caster"}}, "branch": "branch", "input_context": {"stream": {"stream": "other", "epoch": "0"}},
                     "cursor": {"sequence": "0"}}
         with self.assertRaisesRegex(AssertionError, "attachment"):
             list(ordered_combat_events([self.frame(1, [])], after=baseline))
+
+    def test_snapshot_reset_keeps_ordered_receipts_but_rewind_and_old_epochs_do_not(self):
+        event = {"type": "died", "actor": "foe"}
+        baseline = {"state": {"observation": {"self_target": "caster"}}, "branch": "branch", "input_context": {
+            "stream": {"stream": "stream", "epoch": "2"}}, "cursor": {"sequence": "4"}}
+        frame = self.frame(5, [event])
+        frame["message"]["update"]["context"]["epoch"] = "3"
+        self.assertEqual(list(ordered_combat_events([frame], after=baseline)), [event])
+        for field, value in (("epoch", "1"), ("branch", "rewound")):
+            bad = copy.deepcopy(frame)
+            update = bad["message"]["update"]
+            (update["context"] if field == "epoch" else update)[field] = value
+            with self.assertRaisesRegex(AssertionError, "attachment or branch"):
+                list(ordered_combat_events([bad], after=baseline))
 
     def test_snapshot_issuance_is_not_a_causal_change_but_all_disclosed_state_is(self):
         initial = {"state": {"snapshot": "first", "revision": "1",

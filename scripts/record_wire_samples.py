@@ -10,6 +10,7 @@ Rerun this when the protocol version changes and review the diff:
 """
 import argparse
 import copy
+from functools import partial
 import hashlib
 import json
 import os
@@ -30,6 +31,15 @@ from status_condition_package import combat, observation
 PROTOCOL = int(re.search(r"PROTOCOL_VERSION: u32 = (\d+);", (ROOT / "crates/protocol/src/wire.rs").read_text()).group(1))
 
 
+def _recorded_launch(launch, name, args, *positional, **kwargs):
+    # Same executable, wire bytes and stdout projection; only the storage owner
+    # changes. Large map/history transcripts remain complete and indexed.
+    if name == "tor-client-headless":
+        kwargs["extra_env"] = {**(kwargs.get("extra_env") or {}),
+                               "TOR_TEST_SEGMENTED_STDOUT_BYTES": str(4 * 1024 * 1024)}
+    return launch(name, args, *positional, **kwargs)
+
+
 def run_recording_case(case, attribute):
     """Return one artifact only after the actual case and every cleanup pass.
 
@@ -38,7 +48,22 @@ def run_recording_case(case, attribute):
     neither establishes an actual recording. Subtest failures remain failures.
     """
     result = unittest.TestResult()
-    unittest.TestSuite([case]).run(result)
+    # Apply the existing lossless storage policy to every actual recording case,
+    # including imported acceptance cases. Never change a global harness default
+    # or leave a different launch method installed after the case finishes.
+    captured = isinstance(case, ProcessTestCase)
+    had_launch = "launch" in case.__dict__
+    previous_launch = case.__dict__.get("launch")
+    if captured:
+        case.launch = partial(_recorded_launch, case.launch)
+    try:
+        unittest.TestSuite([case]).run(result)
+    finally:
+        if captured:
+            if had_launch:
+                case.launch = previous_launch
+            else:
+                del case.launch
     groups = {"failure": result.failures, "error": result.errors,
               "skip": result.skipped, "expected failure": result.expectedFailures}
     if (result.testsRun != 1 or result.shouldStop or result.unexpectedSuccesses
@@ -287,6 +312,7 @@ class NoticedRecordingCase(ProcessTestCase):
                 if noticed:
                     self.assertEqual(noticed, [{"kind": "noticed", "actor": visible[0]["id"],
                                                "name": visible[0]["name"],
+                                               "asset": visible[0].get("asset"),
                                                "position": visible[0]["position"]}])
                     self.assertNotEqual(noticed[0]["actor"], body["facts"]["self_target"])
                     candidates.append(message)
@@ -294,7 +320,60 @@ class NoticedRecordingCase(ProcessTestCase):
         self.noticed_sample = copy.deepcopy(candidates[0])
 
 
+class ObserverDoorRecordingCase(ProcessTestCase):
+    """Record an ordinary actor seeing another actor open the shared door."""
+    def runTest(self):
+        self.server(scenario="semantic-narration", seed=None)
+        player, initial = self.client()
+        self.assertTrue(initial["has_control"])
+        self.assertEqual(initial["role"], "player")
+        self.assertFalse(initial["state"]["wizard_game"])
+        before = initial["state"]["observation"]
+        door_cell = next(cell for cell in before["visible_cells"] if cell.get("door"))
+        self.assertEqual(door_cell["position"], {"x": 1, "y": 0, "z": 0})
+        self.assertFalse(door_cell["door"]["open"])
+        other = self.launch("tor-client-headless", ["--connect", self.address, "--actor", "2"])
+        other_initial = self.frame(other, lambda frame: frame["type"] == "ready")
+        self.assertTrue(other_initial["has_control"])
+        self.assertEqual(other_initial["role"], "player")
+        self.assertNotEqual(other_initial["state"]["observation"]["self_target"], before["self_target"])
+        other_door = next(cell["door"]["id"]
+                          for cell in other_initial["state"]["observation"]["visible_cells"]
+                          if cell.get("door"))
+        self.assertIsNone(self.act(player, {"type": "wait"})["error"])
+        self.assertIsNone(self.request(other, {"type": "snapshot"})["error"])
+        start = len(player.transcript)
+        self.assertIsNone(self.act(other, {"type": "set_door", "door": other_door, "open": True})["error"])
+        current = self.request(player, {"type": "observe"})
+        self.assertIsNone(current["error"])
+        self.assertTrue(current["has_control"])
+        self.assertEqual(current["role"], "player")
+        self.assertTrue(next(cell["door"]["open"] for cell in current["state"]["observation"]["visible_cells"]
+                             if cell.get("door")))
+        messages = [json.loads(line).get("message") for line in player.transcript[start:]
+                    if line.startswith("{")]
+        candidates = []
+        for message in messages:
+            body = (message or {}).get("update", {}).get("body", {})
+            if body.get("type") != "outcome":
+                continue
+            changed = [fact for fact in body["facts"]["facts"] if fact["kind"] == "door_changed"]
+            if changed:
+                self.assertEqual(body["facts"]["self_target"], before["self_target"])
+                self.assertEqual(changed, [{"kind": "door_changed", "name": door_cell["door"]["name"],
+                                           "open": True, "position": door_cell["position"]}])
+                self.assertFalse(any(fact["kind"] == "own_action"
+                                     and fact["event"]["type"] == "door_changed"
+                                     for fact in body["facts"]["facts"]))
+                candidates.append(message)
+        self.assertEqual(len(candidates), 1, "one actual foreign door-change outcome")
+        self.door_sample = copy.deepcopy(candidates[0])
+
+
 class Recorder(ProcessTestCase):
+    def record_observer_door(self, server_samples):
+        server_samples["zz.observer_door_position"] = run_recording_case(
+            ObserverDoorRecordingCase(), "door_sample")
     def record_noticed(self, server_samples):
         server_samples["zz.noticed_position"] = run_recording_case(
             NoticedRecordingCase(), "noticed_sample")
@@ -1011,6 +1090,7 @@ class Recorder(ProcessTestCase):
         self.record_discovery(server_samples)
         self.record_scare_crumble(server_samples)
         self.record_noticed(server_samples)
+        self.record_observer_door(server_samples)
         self.server_samples = server_samples
 
 

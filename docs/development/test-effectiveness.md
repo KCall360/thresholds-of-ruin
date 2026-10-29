@@ -1470,3 +1470,72 @@ These are stale fixture/driver corrections, not additional production defects.
 The remaining earned-route local run stops in candidate validation at the existing
 30-second setup limit with the development opt0 scenario tool. No route behavior
 was qualified by that timeout, and no limit was increased.
+
+The next hosted run passed the server library and reached the previously blocked
+integration owner: 234 methods passed and 36 failed. Source triage found additional
+fixture migrations, not 36 new production defects: trusted direct-Engine helpers
+did not bind the new display-operation variant to a causal boundary; transport
+fixtures expected eager pictures instead of ordered Outcomes; reset comparisons
+included issued picture identities; a note retry reconstructed a different anchor;
+and direct performance drivers used the deliberately unissued display sentinel as
+an advance counter. Corrections preserve exact event ordering, attachment-local
+delta bases, original retry anchors, payload, hidden-observer disclosure, payment,
+and causal advancement. Physics now separately asserts no eager picture work and
+actual disclosure on demand. These integration corrections are pending their
+focused owner run; the prior passing library/client/application evidence remains
+valid for unchanged production code.
+
+The next process triage identified additional genuine narration regressions:
+ordinary ASCII HP/preparation updates became caution messages; Text retained its
+HP/name baseline across a rewind Snapshot; Text no longer used legacy noun
+fallbacks and classified refusal sentences as conditions; and observer door facts
+omitted their already-authorized event-time direction. The semantic projection
+audit also found missing disclosed actor assets (used by Text's palette fallback)
+and coalesced ASCII underfoot prose. These are production roots, not stale-test
+counts; the correction preserves the disclosed event-time facts rather than
+looking them up in a later picture. Focused regressions and rebuilt qualification
+are pending for this coherent correction.
+
+Windows release's earned-route execution reached its final comparison after
+1,257 seconds and differed only in the independently issued snapshot capability;
+Linux likewise differed in picture identity fields. The comparison now excludes
+only top-level snapshot/display-generation identities, retaining exact payload,
+causal history, gross flows and source-free restore. Sixty-one pure comparison
+checks pass; this does not substitute for the next final-head hosted route run.
+
+The focused correction checkpoint passed all 96 selected protocol/client methods
+and 269 of 270 server integration methods. The remaining integration failure was
+one stale palette expectation: it required one combined delta where event-time
+asset dependencies now require additions, the ordered Outcome, then removals.
+The replacement checks both exact deltas and the intervening event for player and
+spectator, rather than ignoring extra messages. A newly authored palette test
+also used an untyped TOML mutation on a typed Archetype, caught at compilation;
+this is test-implementation maintenance, not a gameplay defect. Its corrected
+fixture uses the existing concealed dual-use archetype rule: globally forecast
+item-pool assets do not imply that the actor's regional asset is already present.
+
+The completed correction checkpoint qualified all 270 server integration methods,
+the compact/full projection oracle, both palette Service fault/order cases, and
+the 96 selected protocol/client methods. The genuine wire-66 recording was
+regenerated with the corrected event-time fields. Four additional stale process
+assertions were corrected: one restart compared a session-local display revision,
+one wizard setup command lacked a fresh observation, one required two transport
+frames for two correctly ordered strikes in a single Outcome, and one expected
+obsolete readiness prose. Their four actual-process regressions now pass.
+
+Local lossless segmented capture exposed a harness qualification limitation:
+raw-file byte budgets do not count archived segments. Such runs establish behavior,
+not those byte budgets. The wraith witness was rerun with ordinary raw capture and
+its existing compact-background diagnostic option (all wire messages and gameplay
+frames retained). It passed the unchanged 96 MiB output bound with 85,917,443 bytes,
+249 requests and 10,828 actor ticks, preserving the survived drain and source-free
+restart. Hosted ordinary-capture checks remain required for the other budgeted
+process cases. Storage-guard interruptions and a mistyped pure-test selector were
+setup failures, not production defects or passing behavioral checks.
+
+The regenerated recording's existing Noticed golden test also required updating:
+the new foreign-door witness legitimately records a second reveal at the same
+exact disclosed offset. Its replacement checks both reveals and the exact new
+wooden-door name, open state and observer-relative position; it does not drop the
+cardinality or position assertion. The other 17 recorded-sample tests passed
+before this isolated expectation correction.

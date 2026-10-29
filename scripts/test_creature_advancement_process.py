@@ -271,10 +271,11 @@ class CreatureAdvancementProcesses(ProcessTestCase):
         wizard, _ = self.text_client(WIZARD_TOKEN, observe=True)
         self.assertDisclosedInspectionEqual(inspect(), dormant)
         self.assertIn("Server error", wizard.command("wizard creature add-hd 1 warrior"))
-        self.assertDisclosedInspectionEqual(inspect(), dormant)
+        refused = inspect()
+        self.assertDisclosedInspectionEqual(refused, dormant)
         self.assertNotIn("Server error", wizard.command("wizard creature add-hd 1 mage"))
         restored = inspect()
-        self.assertGreater(int(restored["revision"]), int(dormant["revision"]))
+        self.assertGreater(int(restored["revision"]), int(refused["revision"]))
         self.assertEqual(restored["hit_dice"], original["hit_dice"][:2])
         self.assertEqual(restored["starting_skills"], original["starting_skills"])
         self.assertEqual(restored["dormant_talents"], [])
@@ -294,10 +295,10 @@ class CreatureAdvancementProcesses(ProcessTestCase):
                                        "creature replace 1 2 1 advancement skill athletics"})
         self.assertIsNotNone(denied["error"])
         player.stop()
-        self.assertEqual(inspect(), fully_restored)
+        self.assertDisclosedInspectionEqual(inspect(), fully_restored)
         self.assertIn("Server error", wizard.command(
             "wizard creature replace 1 2 1 unknown_pool skill athletics"))
-        self.assertEqual(inspect(), fully_restored)
+        self.assertDisclosedInspectionEqual(inspect(), fully_restored)
         self.assertNotIn("Server error", wizard.command(
             "wizard creature replace 1 2 1 advancement skill athletics"))
         alternate = inspect()
@@ -324,7 +325,7 @@ class CreatureAdvancementProcesses(ProcessTestCase):
         server.stop()
         self.server(scenario=package, wizard=True)
         observer, _ = self.client(WIZARD_TOKEN, observe=True)
-        self.assertEqual(inspect(), replaced)
+        self.assertDisclosedInspectionEqual(inspect(), replaced)
 
     def test_multi_point_authoring_enforces_total_talent_ownership_before_observation(self):
         package = creature_package(self, "ownership-boundary", abilities=("fixture_stamina_strike",))

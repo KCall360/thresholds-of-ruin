@@ -218,6 +218,8 @@ class CreatureInspectionProcesses(ProcessTestCase):
 
     def _private_report(self, client, operation, kind="combat_diagnostics"):
         import json
+        if kind == "creature_inspection":
+            self.assertIsNone(self.request(client, {"type": "observe"})["error"])
         start = len(client.transcript)
         ready = self.command(client, {"type": "wizard", "command": operation})
         self.assertFalse(ready.get("error"), ready.get("error"))
@@ -430,7 +432,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
             start = len(client.transcript)
             result = self.request(client, {"type": "command", "context": frame["input_context"],
                 "branch": frame["branch"], "command": {"type": "inspect_strike_source",
-                    "expected_revision": frame["state"]["revision"], "actor": "2",
+                    "expected_revision": report["revision"], "actor": "2",
                     "target_revision": report["revision"], "source": source, "cursor": cursor}})
             messages = [json.loads(line).get("message") for line in client.transcript[start:]
                         if line.startswith("{")]
@@ -471,6 +473,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
         stale, pages = query(wizard, reset, source, first_cursor)
         self.assertIsNotNone(stale["error"])
         self.assertFalse(pages)
+        report = self._private_report(wizard, "creature inspect 2", "creature_inspection")
         fresh, pages = query(wizard, stale, source, None)
         self.assertFalse(fresh.get("error"), fresh.get("error"))
         self.assertEqual(pages[0]["page"]["start"], {"kind": "strike_header", "strike": 0})
@@ -946,7 +949,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
                 player, _ = self.client()
 
                 def operation(command):
-                    ready = self.command(wizard, {"type": "wizard", "command": command})
+                    ready = self.wizard_command(wizard, command)
                     self.assertFalse(ready.get("error"), ready.get("error"))
                     return ready
 

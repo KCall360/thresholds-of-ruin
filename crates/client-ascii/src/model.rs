@@ -185,7 +185,6 @@ pub struct App {
     /// The last request sent was a one-cell move, so a refusal means the
     /// way is blocked.
     last_move: bool,
-    underfoot_pending: bool,
     pub places_open: bool,
     pub place_selected: usize,
     pub place_name: Option<String>,
@@ -259,7 +258,6 @@ impl App {
             running: None,
             letters: Default::default(),
             last_move: false,
-            underfoot_pending: false,
             places_open: false,
             place_selected: 0,
             place_name: None,
@@ -309,7 +307,6 @@ impl App {
             .as_ref()
             .map(|s| (s.branch().clone(), s.state().revision));
         self.state = Some(state);
-        self.underfoot_pending = false;
         // A new transport owner has no matching local chart selection.
         self.charts.clear();
         self.chart_selected = 0;
@@ -329,6 +326,13 @@ impl App {
             UpdateBody::Observation { .. } | UpdateBody::ObservationDelta { .. }
         );
         let outcome = matches!(update.body, UpdateBody::Outcome { .. });
+        let underfoot = match &update.body {
+            UpdateBody::Outcome { facts, .. } => facts.facts.iter().find_map(|fact| match fact {
+                tor_protocol::OutcomeFact::OwnAction { underfoot, .. } => underfoot.clone(),
+                _ => None,
+            }),
+            _ => None,
+        };
         let control_changed = matches!(update.body, UpdateBody::Control { .. });
         let travel = match &update.body {
             UpdateBody::Travel { status, .. } => Some(status.phase),
@@ -359,12 +363,6 @@ impl App {
         }
         if outcome {
             let lines = state.narration_lines();
-            self.underfoot_pending |= lines.iter().any(|line| {
-                matches!(
-                    line.topic,
-                    tor_client_common::narration::Topic::Own(Event::Moved { .. })
-                )
-            });
             // A spectator never sends commands; the followed actor's next
             // action starts its turn instead.
             if self.role == AccessRole::Spectator
@@ -374,11 +372,12 @@ impl App {
             {
                 self.messages.begin_turn();
             }
-            self.messages.absorb_outcome(lines, state.cursor().tick);
-        }
-        if observed && self.underfoot_pending {
-            self.messages.here(&state.state().observation);
-            self.underfoot_pending = false;
+            self.messages.absorb_outcome_with_underfoot(
+                lines,
+                state.cursor().tick,
+                state.outcome_status(),
+                underfoot.as_ref(),
+            );
         }
         if let Some(reason) = travel.and_then(travel_stop) {
             self.messages.push(reason);
@@ -409,7 +408,6 @@ impl App {
         } else {
             self.state = Some(ClientState::from_snapshot(snapshot)?);
         }
-        self.underfoot_pending = false;
         // Recovery cancels the transport's chart request. Return to the catalog
         // only after validation succeeds rather than leaving a loading selection
         // that has no corresponding worker query.

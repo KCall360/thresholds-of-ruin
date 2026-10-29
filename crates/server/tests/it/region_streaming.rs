@@ -546,7 +546,8 @@ fn an_actor_a_client_controls_keeps_its_region_in_play() {
 /// A transition must not disclose anything an observer can't see: when the
 /// character's move changes which regions are loaded, an actor elsewhere
 /// whose view didn't change (here a frozen guard, at the same tick) keeps
-/// its revision, so its clients get no update.
+/// its disclosed view. The private causal ordinal may still advance; it is not
+/// an observer-visible display generation.
 #[test]
 fn an_unseen_transition_leaves_other_observers_revisions_alone() {
     let root =
@@ -585,8 +586,8 @@ fn an_unseen_transition_leaves_other_observers_revisions_alone() {
     // the loaded regions.
     let mut checked = 0;
     for _ in 0..40 {
-        let before = (counts(&engine), engine.causal_boundary(guard).unwrap());
-        let tick = engine.state(guard).unwrap().observation.tick;
+        let before = (counts(&engine), engine.state(guard).unwrap());
+        let tick = before.1.observation.tick;
         act(
             &mut engine,
             ActorId(1),
@@ -597,7 +598,7 @@ fn an_unseen_transition_leaves_other_observers_revisions_alone() {
         if counts(&engine) != before.0 {
             assert_eq!(engine.state(guard).unwrap().observation.tick, tick);
             assert_eq!(
-                engine.causal_boundary(guard).unwrap(),
+                engine.state(guard).unwrap(),
                 before.1,
                 "{:?}",
                 counts(&engine)

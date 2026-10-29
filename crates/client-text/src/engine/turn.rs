@@ -439,7 +439,8 @@ impl Reader<'_> {
         match message {
             ServerMessage::Update { update } => match &update.body {
                 UpdateBody::Outcome { facts, .. } => {
-                    self.beats.extend(self.chronicler.outcome(facts));
+                    self.beats
+                        .extend(self.chronicler.outcome(facts, link.palette()));
                 }
                 UpdateBody::Observation { .. } | UpdateBody::ObservationDelta { .. } => {
                     self.chronicler.learn(after, link.palette());
@@ -458,6 +459,7 @@ impl Reader<'_> {
                 | UpdateBody::Intention { .. } => {}
             },
             ServerMessage::Snapshot { .. } => {
+                self.chronicler.reset_baseline(after, link.palette());
                 self.resynced = true;
                 self.beats.push(Beat::Resync);
             }

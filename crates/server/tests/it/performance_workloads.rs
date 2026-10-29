@@ -287,7 +287,12 @@ fn mixed_trace_schedules_actors_changes_los_and_replays_identical_disclosure() {
                         step.label
                     );
                 }
-                step.verify(&before, &after, result.is_ok());
+                if result.is_ok() {
+                    assert!(engine.causal_boundary(ActorId(1)).unwrap() > before_boundary);
+                } else {
+                    assert_eq!(engine.causal_boundary(ActorId(1)).unwrap(), before_boundary);
+                }
+                step.verify_effect(&before, &after, result.is_ok());
                 if result.is_ok() {
                     accepted += 1;
                 }
@@ -350,8 +355,10 @@ fn explored_saved_fixture_checkpoint_matches_counting_diagnostic_and_reloads() {
                 let resolved = engine
                     .decode_action(ActorId(1), &action.resolve(&before))
                     .unwrap();
+                let boundary = engine.causal_boundary(ActorId(1)).unwrap();
                 step(&mut engine, resolved);
-                action.verify(&before, &engine.state(ActorId(1)).unwrap(), true);
+                assert!(engine.causal_boundary(ActorId(1)).unwrap() > boundary);
+                action.verify_effect(&before, &engine.state(ActorId(1)).unwrap(), true);
             }
         }
         // Finish a periodic capture after fully exploring, then retain a real

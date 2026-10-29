@@ -64,7 +64,7 @@ class SightProcesses(ProcessTestCase):
         for direction in ("left", "left", "left", "up"):
             self.key(window, direction)
         looked = self.key(window, "look")
-        self.assertEqual(looked["state"], initial["state"])
+        self.assertEqual(looked["state"], native["state"])
         self.assertIsNone(looked["screen"]["look_cursor"])
         self.assertRegex(looked["messages"]["turn"].split("  ")[-1], r"^[a-z&] - ")
         self.key(window, "open_door")

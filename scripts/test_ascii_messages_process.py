@@ -12,6 +12,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from rogue_test_support import disclosed_frames, ordered_combat_events
 from arena_matrix import toml_source
 from process_harness import (
     ProcessTestCase, ROOT, ascii_input_completion, headless_fight_completion, non_graphical,
@@ -100,7 +101,6 @@ class AsciiMessageProcesses(ProcessTestCase):
         for _ in range(32):
             view = current["state"]["observation"]
             before_tick = int(view["tick"])
-            before_revision = int(current["state"]["revision"])
             target = next((actor for actor in view["visible_actors"]
                            if actor["name"] == "ruin scout" and actor["position"]["z"] == 0), None)
             self.assertIsNotNone(target, f"Scout disappeared before combat completed: {trace!r}")
@@ -132,24 +132,18 @@ class AsciiMessageProcesses(ProcessTestCase):
             self.assertIsNone(current["error"])
             paused = (current["intentions"][0]["intention"]
                       if current["intentions"] else None)
+            current = self.picture_after(player, current)
             view = current["state"]["observation"]
             self.assertGreater(int(view["tick"]), before_tick, trace)
             trace.append({"direction": direction, "tick": view["tick"],
                           "scout": [actor["position"] for actor in view["visible_actors"]
                                     if actor["id"] == target["id"]]})
-            attacked = False
-            for line in player.transcript[start:]:
-                if line.startswith("{"):
-                    state = json.loads(line)["state"]
-                    # Acknowledgements may repeat the preceding turn's event.
-                    if int(state["revision"]) <= before_revision:
-                        continue
-                    events = state["observation"]["combat"]["events"]
-                    attacked |= any(event["type"] == "ability"
-                                    and event["caster"] == view["self_target"]
-                                    and event["target"] == target["id"] for event in events)
-                    death = next((event for event in events if event["type"] == "died"
-                                  and event["actor"] == target["id"]), death)
+            events = list(ordered_combat_events(disclosed_frames(player, start)))
+            attacked = any(event["type"] == "ability"
+                           and event["caster"] == view["self_target"]
+                           and event["target"] == target["id"] for event in events)
+            death = next((event for event in events if event["type"] == "died"
+                          and event["actor"] == target["id"]), death)
             attack_turns += attacked
             if death is not None:
                 break

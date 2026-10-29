@@ -23,11 +23,10 @@ fn ordered_strikes_text_chronicle_identifies_later_visible_miss_without_opponent
             "ability":{"id":"triple_strike","name":"Triple Strike"},"outcome":"miss","strike":1
         }))
         .unwrap()];
-    let beats = Chronicler::default().outcome(&OutcomeFacts::capture(
-        &before.observation,
-        &after.observation,
-        None,
-    ));
+    let beats = Chronicler::default().outcome(
+        &OutcomeFacts::capture(&before.observation, &after.observation, None),
+        &tor_client_common::Palette::default(),
+    );
     let text = compose(&Record {
         entries: vec![Entry::Beats(beats)],
     });

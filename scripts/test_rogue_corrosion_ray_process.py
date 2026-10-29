@@ -163,7 +163,7 @@ class RogueCorrosionRayProcesses(ProcessTestCase):
         server = self.server(scenario=unrelated_fallback(self), seed=None)
         reopened = [self.client(actor=actor) for actor in (1, 3)]
         for (_, after), prior in zip(reopened, before):
-            self.assertEqual(after["state"], prior["state"])
+            self.assertDisclosedStateEqual(after["state"], prior["state"])
             self.assertEqual(after["history"], prior["history"])
         for client, _ in reopened:
             client.stop()
@@ -300,7 +300,8 @@ class RogueMechanismSnapshotTests(unittest.TestCase):
                     "tick": str(tick), "ready": ready,
                     "combat": {"dead": terminal, "terminal": terminal}}},
                 "readiness": {"revision": str(sequence), "admission": admission},
-                "intentions": list(intentions), "error": None}
+                "intentions": list(intentions), "history": [], "branch": "branch",
+                "has_control": True, "error": None}
 
     def test_mixed_ticks_are_reread_before_predicate_without_spending_a_decision(self):
         from unittest.mock import Mock, patch

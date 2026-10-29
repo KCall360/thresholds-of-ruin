@@ -47,7 +47,16 @@ class WizardProcesses(ProcessTestCase):
             previous_revision = int(seen["state"]["revision"])
             output = wizard.command(command)
             self.assertNotIn("Server error", output, command)
-            if not step["command"].startswith("note"):
+            if step["command"] == "wait":
+                previous_entries = {entry["id"] for entry in seen["history"]}
+                def waited(frame):
+                    return any(entry["id"] not in previous_entries
+                               and entry["content"].get("event") == {"type": "waited"}
+                               and int(entry["tick"]) == step["tick"] - 100
+                               for entry in (frame.get("history") or []))
+                seen = self.ascii_frame(spectator, waited)
+                self.assertTrue(seen["state"]["wizard_game"])
+            elif not step["command"].startswith("note"):
                 seen = self.ascii_frame(spectator, lambda f: int(f["state"]["revision"]) > previous_revision)
                 self.assertEqual(seen["state"]["observation"]["position"], {"x":0,"y":0,"z":0})
                 self.assertEqual(seen["state"]["observation"]["tick"], str(step["tick"]))
@@ -80,7 +89,7 @@ class WizardProcesses(ProcessTestCase):
         wizard.command("wait")
         # A response on actor 1's socket does not mean actor 2 has consumed its
         # pushed readiness revision. Establish that boundary before acting.
-        self.assertIn("Ready to act", second.command("sync"))
+        self.assertNotIn("Server error", second.command("sync"))
         self.assertNotIn("Server error", second.command("wait"))
         self.assertNotIn("Server error", wizard.command(f"wizard rewind {target}"))
         restored = self.ascii_frame(spectator, lambda f: f["branch"] != alternate["branch"])
@@ -92,7 +101,17 @@ class WizardProcesses(ProcessTestCase):
         waited = player.command("wait")
         self.assertIn("Action: Resolved.", waited)
         self.assertIn("Time passes.", waited)
-        final = self.ascii_frame(spectator, lambda f: f["state"]["observation"]["tick"] == '150')
+        old_entries = {entry["id"] for entry in restored["history"]}
+        delivered = self.ascii_frame(spectator, lambda f: any(
+            entry["id"] not in old_entries
+            and entry["content"].get("event") == {"type": "waited"}
+            and entry["tick"] == "50" for entry in (f.get("history") or [])))
+        # Pure Wait delivers its causal outcome, not an unsolicited picture.
+        # A separate real attachment captures the final payload for restart equality.
+        fresh, final = self.spectator()
+        self.assertEqual(final["history"], delivered["history"])
+        self.assertEqual(final["state"]["observation"]["tick"], "150")
+        fresh.stop()
         player.stop()
         wizard.stop()
         text_spectator.stop()

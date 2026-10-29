@@ -144,6 +144,14 @@ impl Chronicler {
         }
     }
 
+    /// A snapshot is a new authoritative baseline, not an ordinary picture.
+    /// Do not compare the next outcome with HP or names from a discarded branch.
+    pub fn reset_baseline(&mut self, state: &StateView, palette: &Palette) {
+        self.names.clear();
+        self.status = None;
+        self.learn(state, palette);
+    }
+
     fn who(&self, actor: Option<ActorTarget>, me: ActorTarget) -> Who {
         match actor {
             Some(id) if id == me => Who::Me,
@@ -165,15 +173,27 @@ impl Chronicler {
     }
 
     /// Consume event-time facts; never reconstruct action results from visuals.
-    pub fn outcome(&mut self, facts: &OutcomeFacts) -> Vec<Beat> {
+    pub fn outcome(&mut self, facts: &OutcomeFacts, palette: &Palette) -> Vec<Beat> {
         for actor in &facts.actor_names {
-            self.names.insert(actor.actor, crate::safe(&actor.name));
+            let (name, asset) = actor
+                .current_disclosed_appearance
+                .as_ref()
+                .map_or((&actor.name, actor.asset.as_deref()), |current| {
+                    (&current.name, current.asset.as_deref())
+                });
+            self.names
+                .insert(actor.actor, disclosed_figure_name(name, asset, palette));
         }
         for fact in &facts.facts {
-            if let OutcomeFact::Noticed { actor, name, .. }
-            | OutcomeFact::LostSight { actor, name } = fact
+            if let OutcomeFact::Noticed {
+                actor, name, asset, ..
+            }
+            | OutcomeFact::LostSight { actor, name, asset } = fact
             {
-                self.names.insert(*actor, crate::safe(name));
+                self.names.insert(
+                    *actor,
+                    disclosed_figure_name(name, asset.as_deref(), palette),
+                );
             }
         }
         // Prose has always told combat, wounds, plans, then progress. Sort
@@ -181,7 +201,9 @@ impl Chronicler {
         let mut ordered: Vec<_> = facts.facts.iter().collect();
         ordered.sort_by_key(|fact| match fact {
             OutcomeFact::OwnAction { .. } => 0,
-            OutcomeFact::ItemCompleted { .. } => 1,
+            OutcomeFact::ItemCompleted { .. }
+            | OutcomeFact::ItemRefused { .. }
+            | OutcomeFact::CurseBlocked { .. } => 1,
             OutcomeFact::TrapDiscovered { .. } | OutcomeFact::DoorDiscovered => 2,
             OutcomeFact::Displaced | OutcomeFact::Impacted => 3,
             OutcomeFact::Combat { .. } => 4,
@@ -192,9 +214,7 @@ impl Chronicler {
             OutcomeFact::Noticed { .. } => 9,
             OutcomeFact::LostSight { .. } => 10,
             OutcomeFact::DoorChanged { .. } => 11,
-            OutcomeFact::ItemRefused { .. }
-            | OutcomeFact::CurseBlocked { .. }
-            | OutcomeFact::Pacing { .. } => 12,
+            OutcomeFact::Pacing { .. } => 12,
         });
         let mut beats = Vec::new();
         for fact in ordered {
@@ -220,10 +240,9 @@ impl Chronicler {
                     event,
                     name,
                     basic_attack,
+                    ..
                 } => {
-                    let name = name
-                        .as_ref()
-                        .map_or_else(|| "thing".into(), |name| crate::safe(&name.text));
+                    let name = own_action_name(event, name.as_ref());
                     match event {
                         Event::Moved { direction } => beats.push(Beat::Stepped(*direction)),
                         Event::Waited => beats.push(Beat::Waited),
@@ -322,11 +341,24 @@ impl Chronicler {
                     figure: self.figure(*actor),
                     whereabouts: whereabouts(*position),
                 }),
-                OutcomeFact::DoorChanged { .. }
-                | OutcomeFact::TrapDiscovered { .. }
-                | OutcomeFact::DoorDiscovered => beats.push(Beat::Discovery(line.text)),
+                OutcomeFact::DoorChanged {
+                    name,
+                    open,
+                    position,
+                } => beats.push(Beat::DoorChanged {
+                    name: if name.trim().is_empty() {
+                        "door".into()
+                    } else {
+                        crate::safe(name).to_lowercase()
+                    },
+                    whereabouts: whereabouts(*position),
+                    open: *open,
+                }),
+                OutcomeFact::TrapDiscovered { .. } | OutcomeFact::DoorDiscovered => {
+                    beats.push(Beat::Discovery(line.text))
+                }
                 OutcomeFact::ItemRefused { .. } | OutcomeFact::CurseBlocked { .. } => {
-                    beats.push(Beat::Condition(line.text))
+                    beats.push(Beat::ItemFinished(line.text))
                 }
                 OutcomeFact::Pacing { .. } => {}
                 OutcomeFact::Injured { .. } | OutcomeFact::Objective { .. } => unreachable!(),
@@ -574,6 +606,50 @@ impl Chronicler {
     }
 }
 
+fn disclosed_figure_name(name: &str, asset: Option<&str>, palette: &Palette) -> String {
+    if name.trim().is_empty() {
+        tor_client_common::presentation::resolve(palette, asset)
+            .map_or("figure", |entry| entry.noun.singular)
+            .to_owned()
+    } else {
+        crate::safe(name).to_lowercase()
+    }
+}
+
+/// Preserve Text's existing nouns without consulting a newer picture.
+fn own_action_name(event: &Event, name: Option<&OutcomeName>) -> String {
+    match event {
+        Event::Taken { .. } | Event::DoorChanged { .. } => {
+            let fallback = if matches!(event, Event::DoorChanged { .. }) {
+                "door"
+            } else {
+                "thing"
+            };
+            name.filter(|name| !name.text.trim().is_empty())
+                .map_or_else(
+                    || fallback.into(),
+                    |name| crate::safe(&name.text).to_lowercase(),
+                )
+        }
+        Event::Dropped { .. } => name.map_or_else(
+            || "thing".into(),
+            |name| {
+                let text = if name.text.trim().is_empty() {
+                    match name.fallback {
+                        OutcomeNameFallback::Object => "object",
+                        OutcomeNameFallback::Stairs => "stairs",
+                        _ => &name.text,
+                    }
+                } else {
+                    &name.text
+                };
+                crate::safe(text)
+            },
+        ),
+        _ => name.map_or_else(|| "thing".into(), |name| crate::safe(&name.text)),
+    }
+}
+
 /// Whether the character's own disclosed ability is a plain attack. Names
 /// and IDs identify content; they never supply missing source-owned semantics.
 #[cfg(test)]
@@ -624,10 +700,11 @@ mod tests {
                 facts: vec![OutcomeFact::Noticed {
                     actor,
                     name: name.into(),
+                    asset: None,
                     position: Position { x: 1, y: 0, z: 0 },
                 }],
             };
-            let beats = chronicler.outcome(&facts);
+            let beats = chronicler.outcome(&facts, &Palette::default());
             assert!(
                 matches!(beats.as_slice(), [Beat::Appeared { figure, whereabouts }]
                 if figure.id == actor
@@ -635,6 +712,181 @@ mod tests {
                     && whereabouts == "to the east")
             );
         }
+    }
+
+    #[test]
+    fn event_time_actor_assets_keep_legacy_palette_names_without_a_later_picture() {
+        let before = view();
+        let mut after = before.clone();
+        let actor = &mut after.observation.visible_actors[0];
+        actor.id = ActorTarget::from_digest([99; 32]);
+        actor.name.clear();
+        actor.asset = Some("creature.jabberwock".into());
+        let mut palette = Palette::default();
+        palette.apply(&PaletteUpdate {
+            revision: 1,
+            body: PaletteBody::Full {
+                assets: ["creature.jabberwock".into()].into(),
+            },
+        });
+        let facts = OutcomeFacts::capture(&before.observation, &after.observation, None);
+        let expected = Chronicler::default().observe(&before, &after, None, &palette);
+        after.observation.visible_actors.clear();
+        assert_eq!(Chronicler::default().outcome(&facts, &palette), expected);
+        let unnamed = Chronicler::default().outcome(&facts, &Palette::default());
+        assert!(unnamed
+            .iter()
+            .any(|beat| matches!(beat, Beat::Appeared { figure, .. } if figure.name == "figure")));
+        assert_eq!(
+            disclosed_figure_name("Ruin Scout", Some("creature.jabberwock"), &palette),
+            "ruin scout"
+        );
+    }
+
+    #[test]
+    fn current_anonymous_appearance_and_prior_common_name_keep_distinct_policies() {
+        let mut before = view();
+        before.observation.visible_actors[0].name = "Earlier Guard".into();
+        let subject = before.observation.visible_actors[0].id;
+        let mut after = before.clone();
+        after.observation.visible_actors[0].name.clear();
+        after.observation.visible_actors[0].asset = Some("creature.jabberwock".into());
+        after.observation.tick += 1;
+        after.observation.combat.as_mut().unwrap().events = vec![CombatEventView::Ability {
+            caster: Some(subject),
+            target: Some(after.observation.self_target),
+            ability: ContentRef {
+                id: "strike".into(),
+                name: "Strike".into(),
+            },
+            outcome: AbilityOutcome::Applied,
+            strike: None,
+        }];
+        let mut palette = Palette::default();
+        palette.apply(&PaletteUpdate {
+            revision: 1,
+            body: PaletteBody::Full {
+                assets: ["creature.jabberwock".into()].into(),
+            },
+        });
+        let facts = OutcomeFacts::capture(&before.observation, &after.observation, None);
+        assert_eq!(facts.actor_names[0].name, "Earlier Guard");
+        assert!(facts.actor_names[0]
+            .current_disclosed_appearance
+            .as_ref()
+            .unwrap()
+            .name
+            .is_empty());
+        assert!(tor_client_common::narration::outcome_lines(&facts)
+            .iter()
+            .any(|line| line.text.contains("Earlier Guard")));
+        let expected = Chronicler::default().observe(&before, &after, None, &palette);
+        assert_eq!(Chronicler::default().outcome(&facts, &palette), expected);
+    }
+
+    #[test]
+    fn snapshot_reseeds_hp_but_ordinary_pictures_do_not_overwrite_outcomes() {
+        let initial = view();
+        let mut hurt = initial.clone();
+        hurt.observation.combat.as_mut().unwrap().hp = 40;
+        let mut chronicler = Chronicler::default();
+        chronicler.learn(&initial, &Palette::default());
+        chronicler.outcome(
+            &OutcomeFacts::capture(&initial.observation, &hurt.observation, None),
+            &Palette::default(),
+        );
+        chronicler.learn(&initial, &Palette::default());
+        assert_eq!(chronicler.status.as_ref().unwrap().hp, 40);
+        chronicler.reset_baseline(&initial, &Palette::default());
+        let beats = chronicler.outcome(
+            &OutcomeFacts::capture(&initial.observation, &hurt.observation, None),
+            &Palette::default(),
+        );
+        assert!(beats.contains(&Beat::Hp {
+            from: 50,
+            to: 40,
+            max: 50
+        }));
+    }
+
+    #[test]
+    fn item_refusal_sentences_keep_finished_beats_before_discoveries() {
+        let facts = OutcomeFacts {
+            self_target: view().observation.self_target,
+            status: None,
+            actor_names: vec![],
+            facts: vec![
+                OutcomeFact::TrapDiscovered { family: None },
+                OutcomeFact::ItemRefused {
+                    reason: ItemRefusalReason::TooWeak,
+                },
+                OutcomeFact::CurseBlocked {
+                    name: Some("mail".into()),
+                },
+            ],
+        };
+        assert_eq!(
+            Chronicler::default().outcome(&facts, &Palette::default()),
+            vec![
+                Beat::ItemFinished("You are too weak to use it.".into()),
+                Beat::ItemFinished("You cannot remove the mail; it is cursed.".into()),
+                Beat::Discovery("You notice a trap.".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn own_action_names_keep_text_case_blank_and_cosmetic_fallback_rules() {
+        let item = ItemTarget::from_digest([84; 32]);
+        let taken = Event::Taken {
+            item,
+            result: item,
+            quantity: 2,
+        };
+        let dropped = Event::Dropped {
+            item,
+            result: item,
+            quantity: 2,
+        };
+        let door = Event::DoorChanged {
+            door: DoorTarget::from_digest([85; 32]),
+            open: true,
+        };
+        let name = |text: &str, fallback| OutcomeName {
+            text: text.into(),
+            fallback,
+        };
+        assert_eq!(
+            own_action_name(
+                &taken,
+                Some(&name("Copper Token", OutcomeNameFallback::Item))
+            ),
+            "copper token"
+        );
+        assert_eq!(
+            own_action_name(&taken, Some(&name(" ", OutcomeNameFallback::Item))),
+            "thing"
+        );
+        assert_eq!(own_action_name(&door, None), "door");
+        assert_eq!(
+            own_action_name(&door, Some(&name("Oak Door", OutcomeNameFallback::Door))),
+            "oak door"
+        );
+        assert_eq!(
+            own_action_name(&dropped, Some(&name("", OutcomeNameFallback::Stairs))),
+            "stairs"
+        );
+        assert_eq!(
+            own_action_name(&dropped, Some(&name("", OutcomeNameFallback::Object))),
+            "object"
+        );
+        assert_eq!(
+            own_action_name(
+                &dropped,
+                Some(&name("Silver Flask", OutcomeNameFallback::Item))
+            ),
+            "Silver Flask"
+        );
     }
 
     #[test]
@@ -649,7 +901,7 @@ mod tests {
         let facts = OutcomeFacts::capture(&before.observation, &after.observation, Some(&event));
         let mut chronicler = Chronicler::default();
         chronicler.learn(&before, &Palette::default());
-        let beats = chronicler.outcome(&facts);
+        let beats = chronicler.outcome(&facts, &Palette::default());
         assert!(beats.contains(&Beat::Stepped(Direction::North)));
         assert!(beats.contains(&Beat::Hp {
             from: 50,
@@ -714,7 +966,7 @@ mod tests {
         let expected = Chronicler::default().observe(&before, &after, None, &Palette::default());
         let mut current = Chronicler::default();
         current.learn(&before, &Palette::default());
-        let actual = current.outcome(&facts);
+        let actual = current.outcome(&facts, &Palette::default());
         assert_eq!(actual, expected);
         assert!(matches!(
             actual.as_slice(),
@@ -882,7 +1134,7 @@ mod tests {
                 Chronicler::default().observe(&before, &after, Some(&entry), &Palette::default());
             let facts =
                 OutcomeFacts::capture(&before.observation, &after.observation, Some(&event));
-            let actual = Chronicler::default().outcome(&facts);
+            let actual = Chronicler::default().outcome(&facts, &Palette::default());
             assert_eq!(actual, expected);
             assert_eq!(
                 actual,
@@ -1084,6 +1336,62 @@ mod tests {
             .observe(&after, &after, None, &palette)
             .is_empty());
     }
+    #[test]
+    fn door_outcomes_preserve_event_time_direction_and_own_action_suppression() {
+        let before = view();
+        let mut after = before.clone();
+        after.observation.tick += 1;
+        // The final disclosed projection is the same canonical one selected by
+        // the legacy observer, including repeated portal/height projections.
+        let mut door_cell = after.observation.visible_cells[0].clone();
+        door_cell.position = Position { x: 1, y: 0, z: 0 };
+        door_cell.door.as_mut().unwrap().open = true;
+        after.observation.visible_cells[0]
+            .door
+            .as_mut()
+            .unwrap()
+            .open = true;
+        after.observation.visible_cells.push(door_cell);
+        let event = Event::DoorChanged {
+            door: tor_protocol::DoorTarget::from_digest([7; 32]),
+            open: true,
+        };
+        for own in [None, Some(&event)] {
+            let facts = OutcomeFacts::capture(&before.observation, &after.observation, own);
+            let entry = own.cloned().map(action);
+            let expected =
+                Chronicler::default().observe(&before, &after, entry.as_ref(), &Palette::default());
+            let actual = Chronicler::default().outcome(&facts, &Palette::default());
+            assert_eq!(actual, expected);
+            if own.is_none() {
+                assert_eq!(
+                    actual,
+                    [Beat::DoorChanged {
+                        name: "oak door".into(),
+                        whereabouts: "to the east".into(),
+                        open: true,
+                    }]
+                );
+            }
+        }
+        let facts = OutcomeFacts::capture(&before.observation, &after.observation, None);
+        after.observation.visible_cells.clear();
+        assert_eq!(
+            Chronicler::default().outcome(&facts, &Palette::default()),
+            [Beat::DoorChanged {
+                name: "oak door".into(),
+                whereabouts: "to the east".into(),
+                open: true,
+            }]
+        );
+        assert!(Chronicler::default()
+            .outcome(
+                &OutcomeFacts::capture(&before.observation, &before.observation, None),
+                &Palette::default()
+            )
+            .is_empty());
+    }
+
     #[test]
     fn dropped_object_narration_captures_cosmetic_name_without_true_sibling() {
         let before = view();

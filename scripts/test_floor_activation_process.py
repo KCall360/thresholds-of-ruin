@@ -507,11 +507,12 @@ class OmissionTransportCallerTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            frame = {"error": None, "state": {"all": [1, 2]}, "history": [{"sequence": 7}],
+            frame = {"error": None, "state": {"all": [1, 2], "revision": "1", "snapshot": "first"}, "history": [{"sequence": 7}],
                      "branch": "unchanged", "cursor": {"tick": "900"}}
             harness = SimpleNamespace(directory=root, processes=[], save=root / "save.db")
             for name in ("assertIsNone", "assertIsNotNone", "assertTrue", "assertFalse", "assertEqual"):
                 setattr(harness, name, getattr(self, name))
+            harness.assertDisclosedStateEqual = lambda actual, expected: ProcessTestCase.assertDisclosedStateEqual(harness, actual, expected)
             originals = {}
 
             def process(kind):
@@ -543,6 +544,8 @@ class OmissionTransportCallerTests(unittest.TestCase):
             reopened_frame = copy.deepcopy(frame)
             if mismatch == "cursor":
                 reopened_frame["cursor"]["tick"] = "901"
+            elif mismatch == "state":
+                reopened_frame["state"]["all"] = [1, 3]
             elif mismatch and mismatch not in ("authority", "sweep"):
                 reopened_frame[mismatch] = "changed"
             def client(**kwargs):

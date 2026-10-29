@@ -34,8 +34,14 @@ def ordered_combat_events(frames, *, after=None):
             continue
         context = update["context"]
         if after is not None:
-            if context != after["input_context"]["stream"]:
-                raise AssertionError("Combat receipts crossed their baseline attachment")
+            baseline = after["input_context"]["stream"]
+            # Snapshot resets advance epoch, not attachment identity or causal
+            # sequence. A later issued picture must not hide an actual outcome.
+            if (context["stream"] != baseline["stream"]
+                    or u64(context["epoch"]) < u64(baseline["epoch"])
+                    or update["branch"] != after["branch"]
+                    or body["facts"]["self_target"] != after["state"]["observation"]["self_target"]):
+                raise AssertionError("Combat receipts crossed their baseline attachment or branch")
             if u64(update["cursor"]["sequence"]) <= u64(after["cursor"]["sequence"]):
                 continue
         key = (context["stream"], context["epoch"], update["cursor"]["sequence"])

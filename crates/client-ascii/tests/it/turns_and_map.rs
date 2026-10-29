@@ -561,6 +561,107 @@ fn moving_onto_things_says_what_is_here() {
 }
 
 #[test]
+fn coalesced_moves_keep_event_time_underfoot_names_quantities_and_order() {
+    let mut app = app();
+    let original = app.state.as_ref().unwrap().state().clone();
+    let mut destination = original.observation.clone();
+    destination.ground_items.truncate(1);
+    destination.ground_items[0].position = destination.position;
+    destination.ground_items[0].presentation = None;
+    let branch = app.state.as_ref().unwrap().branch().clone();
+    for (sequence, name, quantity) in [(1, "apple", 3), (2, "arrow", 7)] {
+        destination.tick += 100;
+        destination.ground_items[0].item.name = name.into();
+        destination.ground_items[0].item.quantity = quantity;
+        let event = HistoryEntry {
+            id: EntryId(format!("underfoot-move-{sequence}")),
+            branch: branch.clone(),
+            actor: destination.actor,
+            tick: destination.tick,
+            author: Author::User {
+                user: "test".into(),
+            },
+            audience: Audience::Actor,
+            content: HistoryContent::Action {
+                action: Action::Move {
+                    direction: Direction::East,
+                },
+                event: Box::new(Event::Moved {
+                    direction: Direction::East,
+                }),
+            },
+        };
+        outcome(&mut app, sequence, &destination, Some(event));
+        // No picture has been published for either committed move.
+        assert_eq!(app.state.as_ref().unwrap().state(), &original);
+    }
+    assert_eq!(
+        app.messages.text(),
+        "You see here 3 x apple.  You see here 7 x arrow."
+    );
+    let narrated = app.messages.text();
+    destination.ground_items[0].item.name = "later picture only".into();
+    destination.ground_items[0].item.quantity = 99;
+    update(&mut app, 3, |view| *view = destination);
+    assert_eq!(
+        app.messages.text(),
+        narrated,
+        "picture must not add or replay underfoot prose"
+    );
+    assert_eq!(app.state.as_ref().unwrap().history().len(), 2);
+}
+
+#[test]
+fn underfoot_capture_uses_only_local_authorized_appearance_and_feature_priority() {
+    let mut destination = view();
+    destination.ground_items.truncate(1);
+    destination.ground_items[0].position = destination.position;
+    destination.ground_items[0].item.quantity = 4;
+    destination.ground_items[0].item.name = "undisclosed original".into();
+    destination.ground_items[0].presentation = Some(ObjectPresentation {
+        name: "apparent coins".into(),
+        asset: None,
+        kind: ObjectPresentationKind::Stairs,
+    });
+    let floor = destination
+        .visible_cells
+        .iter_mut()
+        .find(|cell| cell.position == destination.position)
+        .unwrap();
+    floor.stairs_down = true;
+    floor.stairs_up = true;
+    floor.object_presentation = Some(ObjectPresentation {
+        name: String::new(),
+        asset: None,
+        kind: ObjectPresentationKind::Stairs,
+    });
+    let mut remote = destination.ground_items[0].clone();
+    remote.position.x += 1;
+    remote.item.name = "remote secret".into();
+    destination.ground_items.push(remote);
+    let contents = OutcomeUnderfoot::from(&destination);
+    assert_eq!(contents.items.len(), 1);
+    assert_eq!(contents.items[0].quantity, 4);
+    let mut messages = Messages::default();
+    let moved = line(
+        Topic::Own(Event::Moved {
+            direction: Direction::East,
+        }),
+        "You move east.",
+    );
+    messages.absorb_outcome_with_underfoot(&[moved], destination.tick, None, Some(&contents));
+    let mut legacy = Messages::default();
+    legacy.here(&destination);
+    assert_eq!(messages.text(), legacy.text());
+    assert!(!messages.text().contains("remote secret"));
+    assert!(!messages.text().contains("undisclosed original"));
+    assert_eq!(
+        messages.text(),
+        "You see here 4 x apparent coins.  You see here a stairs."
+    );
+}
+
+#[test]
 fn a_creature_is_announced_again_only_after_a_long_absence() {
     let scout = super::actor_target(2);
     let mut messages = Messages::default();

@@ -253,9 +253,23 @@ fn unsettled_physics_refreshes_navigation_only_when_its_inputs_change() {
             )
             .unwrap();
         if step > 0 {
+            assert_eq!(
+                profile.perception_calls, 0,
+                "unsettled physics commits without eagerly constructing display pictures"
+            );
+            let before = tor_simulation::diagnostics::work_counts().observations;
+            let records = engine.profile_counts();
+            for id in engine.actors() {
+                engine.state(id).unwrap();
+            }
             assert!(
-                profile.perception_calls > 0,
-                "unsettled physics still requires fresh observation disclosure"
+                tor_simulation::diagnostics::work_counts().observations > before,
+                "explicit picture demand must still materialize current disclosure"
+            );
+            assert_eq!(
+                engine.profile_counts(),
+                records,
+                "picture reads are not gameplay"
             );
         }
         assert_eq!(profile.navigation_refreshes, refreshes);

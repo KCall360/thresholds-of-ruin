@@ -246,11 +246,11 @@ pub fn outcome_line(outcomes: &OutcomeFacts, fact: &OutcomeFact) -> Option<Line>
                 format!("You notice {article} {name}."),
             )
         }
-        OutcomeFact::LostSight { actor, name } => Line::new(
+        OutcomeFact::LostSight { actor, name, .. } => Line::new(
             Topic::LostSight(*actor),
             format!("You can no longer see the {}.", label(name, "figure")),
         ),
-        OutcomeFact::DoorChanged { name, open } => Line::new(
+        OutcomeFact::DoorChanged { name, open, .. } => Line::new(
             Topic::Door,
             format!(
                 "The {} is now {}.",

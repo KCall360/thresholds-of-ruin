@@ -441,7 +441,11 @@ class NutritionProcesses(ProcessTestCase):
         text, _ = self.text_client()
         self.assertIn("You begin to eat the fixture meal.", text.command("eat fixture meal"))
         self.assertIn("Nutrition: 1108/4000", text.command("stats"))
-        self.assertIn("You begin to eat the fixture meal.", text.command("eat fixture meal"))
+        depleted_prose = text.command("eat fixture meal")
+        start, finish = "You begin to eat the item.", "You finish eating the fixture meal."
+        self.assertEqual(depleted_prose.count(start), 1)
+        self.assertEqual(depleted_prose.count(finish), 1)
+        self.assertLess(depleted_prose.index(start), depleted_prose.index(finish))
         final = self.request(observer, {"type": "snapshot"})
         self.assertGreaterEqual(nutrition(final)["reserve"], 2208)
         self.assertLessEqual(nutrition(final)["reserve"], 2607)

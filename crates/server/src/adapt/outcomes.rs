@@ -19,15 +19,42 @@ pub(crate) fn outcome_observation(
         .collect();
     let mut visible_cells = Vec::new();
     let mut ground_items = Vec::new();
+    let mut underfoot = p::OutcomeUnderfoot::default();
+    let mut underfoot_cell_seen = false;
     let mut visible_actors = Vec::new();
     for cell in scene {
         let Some(&visible) = disclosed.get(&(cell.location, cell.rotation)) else {
             continue;
         };
+        let at_feet = cell.offset == (w::Position { x: 0, y: 0, z: 0 });
+        if at_feet && !underfoot_cell_seen {
+            underfoot_cell_seen = true;
+            underfoot.feature =
+                if let Some(value) = &visible.object_presentation {
+                    Some(p::OutcomeUnderfootFeature::Object {
+                        name: underfoot_name(Some(value), ""),
+                    })
+                } else if view.exits.iter().any(|exit| {
+                    exit.location == cell.location && exit.direction == w::Direction::Down
+                }) {
+                    Some(p::OutcomeUnderfootFeature::StairsDown)
+                } else if view.exits.iter().any(|exit| {
+                    exit.location == cell.location && exit.direction == w::Direction::Up
+                }) {
+                    Some(p::OutcomeUnderfootFeature::StairsUp)
+                } else {
+                    None
+                };
+        }
         visible_cells.push(p::OutcomeCell {
             key: cell_key(salt, view.actor.0, cell.location),
             wall: visible.wall,
             door: visible.door.map(|door| p::OutcomeDoor {
+                position: p::Position {
+                    x: cell.offset.x,
+                    y: cell.offset.y,
+                    z: cell.offset.z,
+                },
                 id: targets.door(door.id),
                 open: door.open,
                 name: door_appearance(visible.door_secret).0.into(),
@@ -42,6 +69,12 @@ pub(crate) fn outcome_observation(
             .iter()
             .filter(|item| item.location == cell.location)
         {
+            if at_feet {
+                underfoot.items.push(p::OutcomeUnderfootItem {
+                    name: underfoot_name(item.presentation.as_ref(), &item.name),
+                    quantity: item.quantity,
+                });
+            }
             ground_items.push(p::OutcomeGroundName {
                 id: targets.item(item.id),
                 name: ground_name(item.presentation.as_ref(), &item.name),
@@ -52,6 +85,12 @@ pub(crate) fn outcome_observation(
             .iter()
             .filter(|object| object.location == cell.location)
         {
+            if at_feet {
+                underfoot.items.push(p::OutcomeUnderfootItem {
+                    name: underfoot_name(object.presentation.as_ref(), &object.appearance.name),
+                    quantity: 1,
+                });
+            }
             ground_items.push(p::OutcomeGroundName {
                 id: targets.apparent_object(object.subject),
                 name: ground_name(object.presentation.as_ref(), &object.appearance.name),
@@ -63,6 +102,10 @@ pub(crate) fn outcome_observation(
             .filter(|actor| actor.location == cell.location)
         {
             visible_actors.push(p::OutcomeActorName {
+                asset: actor.presentation.as_ref().map_or_else(
+                    || actor.asset.clone(),
+                    |value| value.asset.as_deref().map(str::to_owned),
+                ),
                 position: p::Position {
                     x: cell.offset.x,
                     y: cell.offset.y,
@@ -83,6 +126,7 @@ pub(crate) fn outcome_observation(
         }
         if cell.location == view.location && cell.offset != (w::Position { x: 0, y: 0, z: 0 }) {
             visible_actors.push(p::OutcomeActorName {
+                asset: view.asset.clone(),
                 position: p::Position {
                     x: cell.offset.x,
                     y: cell.offset.y,
@@ -100,6 +144,7 @@ pub(crate) fn outcome_observation(
         visible_cells,
         visible_actors,
         ground_items,
+        underfoot,
         inventory: view
             .inventory
             .iter()
@@ -233,6 +278,22 @@ fn ground_name(
     }
 }
 
+/// Match the full-view underfoot label without exposing item identity or class.
+fn underfoot_name(
+    presentation: Option<&s::appearance_catalog::ObjectPresentation>,
+    item_name: &str,
+) -> String {
+    match presentation {
+        Some(value) if value.name.trim().is_empty() => match value.kind {
+            s::appearance_catalog::ObjectPresentationKind::Item { .. } => "object",
+            s::appearance_catalog::ObjectPresentationKind::Stairs => "stairs",
+        }
+        .into(),
+        Some(value) => value.name.to_string(),
+        None => item_name.into(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -270,11 +331,11 @@ mod tests {
             location: view.location,
             disclosure: s::perception::ActorDisclosure::Creature,
             name: "actual creature".into(),
-            asset: None,
+            asset: Some("hidden.actual.creature".into()),
             worn: Vec::new(),
             presentation: Some(s::appearance_catalog::CreaturePresentation {
                 name: "apparent creature".into(),
-                asset: None,
+                asset: Some("creature.jabberwock".into()),
                 seed: 3,
             }),
         });
@@ -321,5 +382,31 @@ mod tests {
             terminal: false,
         });
         assert_projection(&view, false);
+        let compact = outcome_observation(&view, &scene, "fixture-salt", false, &targets);
+        let disclosed = compact
+            .visible_actors
+            .iter()
+            .find(|actor| actor.name == "apparent creature")
+            .unwrap();
+        assert_eq!(disclosed.asset.as_deref(), Some("creature.jabberwock"));
+        assert!(compact
+            .visible_actors
+            .iter()
+            .all(|actor| actor.asset.as_deref() != Some("hidden.actual.creature")));
+        // An explicit anonymous presentation must not fall back to the body's
+        // actual asset, even when its visible name is also absent.
+        view.visible_actors
+            .last_mut()
+            .unwrap()
+            .presentation
+            .as_mut()
+            .unwrap()
+            .asset = None;
+        assert_projection(&view, false);
+        let compact = outcome_observation(&view, &scene, "fixture-salt", false, &targets);
+        assert!(compact
+            .visible_actors
+            .iter()
+            .all(|actor| actor.asset.as_deref() != Some("hidden.actual.creature")));
     }
 }

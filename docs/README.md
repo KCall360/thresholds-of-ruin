@@ -66,6 +66,8 @@ rather than treating a historical plan as current behavior.
 
 - [Remaining shared requirements](plans/requirements.md), including portable export
 - [Rogue adaptation](plans/rogue.md): decisions and remaining content/survival work
+- [Rogue tuning](plans/rogue-tuning.md): proposed calibration against a locked
+  reference build, scenario mechanics profile and drought guarantee
 - [Missing Rogue consumables and devices](plans/rogue-missing-consumables.md):
   preserved design direction, deferred implementation and unresolved parameters
 - [Script extension design](plans/scripting.md): unimplemented runtime and open choices

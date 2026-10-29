@@ -739,6 +739,14 @@ Those event-time facts are delivered independently of how many pictures a client
 requests. Other observers receive only their disclosed facts, never the acting
 actor's private command details merely because an outcome occurred.
 
+Narration facts retain their authorized event-time presentation: foreign door
+changes include the observer-relative position; actor references retain the
+canonical disclosed name and, separately, any current disclosed appearance used
+by palette-based prose. A historical name fallback is not current perception.
+Own movement includes local underfoot display names, quantities and feature
+priority, without targeting handles. Multiple moves between pictures therefore
+retain ordered underfoot narration; a later picture must not replay it.
+
 ### Ability projection
 
 Ability commands use the `use_ability` action with an opaque actor target and
@@ -975,7 +983,12 @@ disclosed attachment boundary.
   that doesn't stream keeps every region loaded, so its palette covers the
   whole package.
 - The server recomputes a client's palette only when its actor's region
-  changes, since a palette depends on nothing else.
+  changes, since a palette depends on nothing else. During that transition,
+  newly authorized forecast assets are delivered before the dependent Outcome;
+  old forecast assets remain available through that Outcome and are removed
+  afterward. This transient union preserves both new and lost sightings without
+  registering assets from hidden actors. Failed ordered delivery closes the
+  affected stream rather than sending an Outcome with unavailable dependencies.
 
 ### Palettes in the clients
 

@@ -547,6 +547,7 @@ fn annotation_validation_and_filtered_history_pagination() {
             .code,
         ErrorCode::InvalidAnchor
     );
+    // A trusted immutable handle from another branch is an invalid anchor.
     assert_eq!(
         engine
             .command_at_presentation(
@@ -563,6 +564,28 @@ fn annotation_validation_and_filtered_history_pagination() {
                     Audience::Private
                 ),
                 &issued
+            )
+            .unwrap_err()
+            .code,
+        ErrorCode::InvalidAnchor
+    );
+    // Ordinary backend requests still reject branch metadata before resolving
+    // even an unissued state anchor; preserve that error-order witness separately.
+    assert_eq!(
+        engine
+            .command(
+                "alice",
+                "text",
+                ActorId(1),
+                "branch-before-anchor",
+                &BranchId("wrong".into()),
+                note(
+                    Anchor::State {
+                        snapshot: SnapshotId("issued-initial".into())
+                    },
+                    "Wrong branch",
+                    Audience::Private
+                )
             )
             .unwrap_err()
             .code,

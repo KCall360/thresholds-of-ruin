@@ -104,6 +104,9 @@ class RogueWraithProcesses(ProcessTestCase):
 
     def client(self, *args, **kwargs):
         kwargs["omit_memory"] = True  # No assertion uses accumulated map memory.
+        # Keep every wire message and gameplay boundary; omit only duplicate
+        # derived pictures on map/palette/waiting transport frames.
+        kwargs["compact_background"] = True
         client, frame = super().client(*args, **kwargs)
         self.work_budget.track(client, frame)
         self.work_budget.check()

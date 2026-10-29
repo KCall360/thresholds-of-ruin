@@ -74,11 +74,11 @@ class LightingProcesses(ProcessTestCase):
         self.key(window, "travel")
         for _ in range(5):
             self.key(window, "left")
-        self.key(window, "enter")
-        arrived = self.ascii_frame(
-            window, lambda f: (f.get("travel") or {}).get("phase") == "arrived"
-            and f["can_admit_intention"]
-        )
+        submitted = self.key(window, "enter")
+        def arrived_picture(frame):
+            return ((frame.get("travel") or {}).get("phase") == "arrived"
+                    and frame["can_admit_intention"] and frame["observation_current"])
+        arrived = submitted if arrived_picture(submitted) else self.ascii_frame(window, arrived_picture)
         self.assertEqual(arrived["travel"]["completed_steps"], "5")
         for _ in range(5):
             moved = self.key(window, "right", wait_for_admission=True)

@@ -31,11 +31,10 @@ fn public_plan_text_chronicle_reports_new_paid_history_once_without_target_looku
     let before = state();
     let after = observed(before.clone());
     let mut chronicler = Chronicler::default();
-    let beats = chronicler.outcome(&OutcomeFacts::capture(
-        &before.observation,
-        &after.observation,
-        None,
-    ));
+    let beats = chronicler.outcome(
+        &OutcomeFacts::capture(&before.observation, &after.observation, None),
+        &tor_client_common::Palette::default(),
+    );
     let text = compose(&Record {
         entries: vec![Entry::Beats(beats)],
     });
@@ -43,11 +42,10 @@ fn public_plan_text_chronicle_reports_new_paid_history_once_without_target_looku
     let mut later = after.clone();
     later.observation.tick = 500;
     later.observation.visible_actors.clear();
-    let beats = chronicler.outcome(&OutcomeFacts::capture(
-        &after.observation,
-        &later.observation,
-        None,
-    ));
+    let beats = chronicler.outcome(
+        &OutcomeFacts::capture(&after.observation, &later.observation, None),
+        &tor_client_common::Palette::default(),
+    );
     let text = compose(&Record {
         entries: vec![Entry::Beats(beats)],
     });

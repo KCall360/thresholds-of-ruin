@@ -62,6 +62,25 @@ async fn connect(address: &str, token: &str, frontend: &str) -> Client {
     assert_eq!(role, expected);
     client
 }
+/// Compare the complete disclosed payload, not independently issued picture capabilities.
+pub(super) fn assert_picture_payload(actual: &StateView, expected: &StateView) {
+    let mut actual = actual.clone();
+    actual.snapshot = expected.snapshot.clone();
+    actual.revision = expected.revision;
+    assert_eq!(&actual, expected);
+}
+
+/// Observe publishes one picture; it does not emit a separate acknowledgement.
+async fn observe(client: &mut Client, base: &StateView) -> StateView {
+    client.request("observe-picture", Request::Observe).await;
+    let ServerMessage::Update { update } = receive(client).await else {
+        panic!("demanded picture required")
+    };
+    let (state, event) = observation(update.body, base);
+    assert!(event.is_none(), "events belong to the causal stream");
+    state
+}
+
 /// A pushed observation as a full state, expanding a delta against `base`.
 fn observation(body: UpdateBody, base: &StateView) -> (StateView, Option<Box<HistoryEntry>>) {
     match body {
@@ -114,35 +133,15 @@ async fn completed_action(player: &mut Client, observer: &mut Client, id: &str) 
     let ServerMessage::Update { update: effect } = receive(player).await else {
         panic!("simulation effect required")
     };
-    assert!(matches!(
-        effect.body,
-        UpdateBody::Observation { .. } | UpdateBody::ObservationDelta { .. }
-    ));
+    assert!(matches!(effect.body, UpdateBody::Outcome { .. }));
     let ServerMessage::Update { update: watched } = receive(observer).await else {
         panic!("observer effect required")
     };
     assert_ne!(watched.context.stream, effect.context.stream);
     assert_eq!(watched.actor, effect.actor);
     assert_eq!(watched.branch, effect.branch);
-    // Permission updates are controller-specific, so stream sequences and delta
-    // base cursors differ while disclosed observations and events remain equal.
     assert_eq!(watched.cursor.tick, effect.cursor.tick);
-    match (&watched.body, &effect.body) {
-        (
-            UpdateBody::ObservationDelta {
-                base: watched_base,
-                state: watched_state,
-                event: watched_event,
-            },
-            UpdateBody::ObservationDelta { base, state, event },
-        ) => {
-            assert_eq!(watched_base.revision, base.revision);
-            assert_eq!(watched_base.cursor.tick, base.cursor.tick);
-            assert_eq!(watched_state, state);
-            assert_eq!(watched_event, event);
-        }
-        _ => assert_eq!(watched.body, effect.body),
-    }
+    assert_eq!(watched.body, effect.body);
     for (client, effect_cursor) in [
         (&mut *player, effect.cursor),
         (&mut *observer, watched.cursor),
@@ -248,10 +247,13 @@ async fn clients_receive_updates_without_polling_and_can_transfer_control() {
     )
     .await;
     let update = completed_action(&mut text, &mut ascii, "take").await;
-    let (state, event) = observation(update.body, &initial.state);
+    let UpdateBody::Outcome { event, .. } = update.body else {
+        panic!("ordered outcome")
+    };
+    let state = observe(&mut text, &initial.state).await;
     assert_eq!(state.observation.inventory.len(), 1);
     assert_eq!(state.observation.tick, 50);
-    assert_eq!(state.revision, 1);
+    assert_eq!(state.revision, initial.state.revision + 1);
     assert!(event.is_some());
     text.request("release", Request::ReleaseControl).await;
     receive(&mut text).await;
@@ -330,7 +332,7 @@ async fn private_annotations_stream_to_same_user_across_frontends_but_not_other_
         ServerMessage::Snapshot { snapshot, .. } => {
             assert_eq!(snapshot.cursor.sequence, 0);
             assert!(snapshot.history.entries.is_empty());
-            assert_eq!(snapshot.state.revision, 0);
+            assert_picture_payload(&snapshot.state, &initial.state);
         }
         other => panic!("{other:?}"),
     }
@@ -617,6 +619,8 @@ async fn spectator_authority_denies_all_mutations_even_same_user_receipt_retries
     assert_eq!(snapshot.context.epoch, before.context.epoch + 1);
     let mut expected = before.clone();
     expected.context = snapshot.context.clone();
+    assert_picture_payload(&snapshot.state, &expected.state);
+    expected.state = snapshot.state.clone();
     assert_eq!(*snapshot, expected);
     spectator
         .request(
@@ -666,6 +670,7 @@ async fn reconnect_retries_a_taken_target_before_old_context_and_fresh_resolutio
     player.request("original-take", original.clone()).await;
     let mut state = Arc::unwrap_or_clone(initial.state.clone());
     let mut admitted = None;
+    let mut outcomes = 0;
     loop {
         match receive(&mut player).await {
             ServerMessage::Ack {
@@ -682,6 +687,11 @@ async fn reconnect_retries_a_taken_target_before_old_context_and_fresh_resolutio
                     assert!(admitted.is_some(), "admission precedes simulation effects");
                     state = observation(body, &state).0;
                 }
+                UpdateBody::Outcome { event, .. } => {
+                    assert!(admitted.is_some());
+                    assert!(event.is_some());
+                    outcomes += 1;
+                }
                 UpdateBody::Intention { status } => {
                     if status.phase == IntentionPhase::Resolved {
                         break;
@@ -693,6 +703,8 @@ async fn reconnect_retries_a_taken_target_before_old_context_and_fresh_resolutio
             other => panic!("unexpected message: {other:?}"),
         }
     }
+    assert_eq!(outcomes, 1);
+    state = observe(&mut player, &state).await;
     assert!(state
         .observation
         .ground_items
@@ -706,7 +718,7 @@ async fn reconnect_retries_a_taken_target_before_old_context_and_fresh_resolutio
     player.close(None).await.unwrap();
     let mut resumed = connect(&address, "alice-test-token", "ascii").await;
     let snapshot = attach(&mut resumed).await;
-    assert_eq!(*snapshot.state, state);
+    assert_picture_payload(&snapshot.state, &state);
     assert_ne!(snapshot.context.stream, initial.context.stream);
     assert!(!snapshot.has_control);
     resumed.request("original-take", original).await;
@@ -754,7 +766,7 @@ async fn reconnect_retries_a_taken_target_before_old_context_and_fresh_resolutio
     else {
         panic!("fresh rejection must not publish an effect")
     };
-    assert_eq!(*after.state, state);
+    assert_picture_payload(&after.state, &state);
     assert_eq!(after.history, snapshot.history);
     stop.send(()).unwrap();
     server.await.unwrap().unwrap();
@@ -767,7 +779,7 @@ async fn spectators_receive_each_accepted_action_once_with_identical_disclosed_s
     let initial = attach(&mut player).await;
     let mut spectator = connect(&address, "bob-test-token", "ascii").await;
     let seen = attach(&mut spectator).await;
-    assert_eq!(seen.state, initial.state);
+    assert_picture_payload(&seen.state, &initial.state);
     assert!(!serde_json::to_string(&seen)
         .unwrap()
         .contains("known_places"));
@@ -798,9 +810,10 @@ async fn spectators_receive_each_accepted_action_once_with_identical_disclosed_s
         };
         player.request(&id, command.clone()).await;
         let watched = completed_action(&mut player, &mut spectator, &id).await;
-        let event;
-        (state, event) = observation(watched.body, &state);
-        assert_eq!(state.revision, revision as u64 + 1);
+        let UpdateBody::Outcome { event, .. } = watched.body else {
+            panic!("ordered outcome")
+        };
+        state = observe(&mut player, &state).await;
         let entry = *event.unwrap();
         assert!(
             matches!(&entry.content, HistoryContent::Action { action: recorded, .. } if recorded == &action)
@@ -847,8 +860,11 @@ async fn spectators_receive_each_accepted_action_once_with_identical_disclosed_s
     let ServerMessage::Snapshot { snapshot, .. } = receive(&mut spectator).await else {
         panic!("No duplicate or rejected action updates")
     };
-    assert_eq!(snapshot.cursor.sequence, 10);
-    assert_eq!(snapshot.state.revision, 3);
+    assert_eq!(
+        snapshot.cursor.sequence, 10,
+        "exactly three causal action lifecycles and control"
+    );
+    assert_picture_payload(&snapshot.state, &state);
     assert_eq!(snapshot.history.entries, entries);
     spectator.close(None).await.unwrap();
     let mut resumed = connect(&address, "bob-test-token", "text").await;
@@ -916,7 +932,7 @@ async fn attachment_contexts_are_distinct_and_snapshot_resets_do_not_change_game
     };
     assert_eq!(snapshot.context.stream, initial.context.stream);
     assert_eq!(snapshot.context.epoch, 2);
-    assert_eq!(snapshot.state, initial.state);
+    assert_picture_payload(&snapshot.state, &initial.state);
     assert_eq!(snapshot.cursor, initial.cursor);
     assert_eq!(snapshot.history, initial.history);
     model.replace_snapshot(*snapshot).unwrap();
@@ -995,15 +1011,16 @@ async fn deltas_follow_each_attachments_last_observation_across_control_and_rese
             (&mut observer_state, &mut observer),
         ] {
             let (model, client) = model_and_client;
-            let mut saw_delta = false;
+            let mut saw_outcome = false;
             loop {
                 match receive_metadata(client).await {
                     ServerMessage::Ack { .. } => continue,
                     ServerMessage::Update { update } => {
                         if let UpdateBody::ObservationDelta { base, .. } = &update.body {
                             assert_eq!(*base, model.observation_base());
-                            saw_delta = true;
+                            panic!("no picture was requested before resolution");
                         }
+                        saw_outcome |= matches!(&update.body, UpdateBody::Outcome { .. });
                         let resolved = matches!(&update.body, UpdateBody::Intention { status } if status.phase == IntentionPhase::Resolved);
                         model.apply(*update).unwrap();
                         if resolved {
@@ -1013,14 +1030,32 @@ async fn deltas_follow_each_attachments_last_observation_across_control_and_rese
                     message => panic!("unexpected message: {message:?}"),
                 }
             }
+            assert!(saw_outcome);
+            client.request("round-picture", Request::Observe).await;
+            let mut saw_delta = false;
+            loop {
+                match receive_metadata(client).await {
+                    ServerMessage::Update { update } => {
+                        if let UpdateBody::ObservationDelta { base, .. } = &update.body {
+                            assert_eq!(*base, model.observation_base());
+                            saw_delta = true;
+                        }
+                        let picture = matches!(
+                            &update.body,
+                            UpdateBody::Observation { .. } | UpdateBody::ObservationDelta { .. }
+                        );
+                        model.apply(*update).unwrap();
+                        if picture {
+                            break;
+                        }
+                    }
+                    message => panic!("unexpected demand reply: {message:?}"),
+                }
+            }
             assert!(saw_delta);
         }
-        let ServerMessage::Update { update } = receive_metadata(&mut player).await else {
-            panic!("readiness follows resolved lifecycle")
-        };
-        assert!(matches!(&update.body, UpdateBody::Readiness { readiness } if readiness.admission));
-        player_state.apply(*update).unwrap();
-        assert_eq!(player_state.state(), observer_state.state());
+        assert!(player_state.readiness().admission);
+        assert_picture_payload(player_state.state(), observer_state.state());
         if round == 0 {
             player.request("reset", Request::Snapshot).await;
             let ServerMessage::Snapshot { snapshot, .. } = receive_metadata(&mut player).await

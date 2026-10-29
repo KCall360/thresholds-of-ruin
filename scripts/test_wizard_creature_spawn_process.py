@@ -50,7 +50,13 @@ class WizardCreatureSpawnProcesses(ProcessTestCase):
 
     def query(self, wizard, operation, kind, field):
         start = len(wizard.transcript)
-        frame = self.wizard_command(wizard, operation)
+        if kind == "creature_catalog":
+            # Catalog continuations retain the already issued read basis. They
+            # are not setup mutations and must not demand unrelated pictures.
+            frame = self.command(wizard, {"type": "wizard", "command": operation})
+            self.assertIsNone(frame["error"])
+        else:
+            frame = self.wizard_command(wizard, operation)
         messages = [json.loads(line).get("message") for line in wizard.transcript[start:] if line.startswith("{")]
         replies = [message[field] for message in messages if message and message["type"] == kind]
         self.assertEqual(len(replies), 1)

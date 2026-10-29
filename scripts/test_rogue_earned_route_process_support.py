@@ -13,7 +13,7 @@ from rogue_earned_route_process import (
     classify_failure, record_acquisition, compress_completed_logs, comparison_surface, validate_initial_anchor,
     validate_resume_binding, validate_saved_authority, retain_segment, verify_retained_segment,
     RouteExecution, prepare_campaign, POLICY_REVISION, main, read_authoritative_evidence,
-    ArchiveVerificationCache, RouteMeasurements, verify_earned_history, validate_restored_picture,
+    ArchiveVerificationCache, RouteMeasurements, verify_earned_history, validate_restored_picture, COMPARISON_SURFACES,
 )
 
 
@@ -187,6 +187,20 @@ class EarnedRouteEvidenceTests(unittest.TestCase):
             self.assertEqual(gzip.decompress((root / rows[0]['retained']).read_bytes()), raw)
             self.assertEqual(rows[0]['uncompressed_sha256'], hashlib.sha256(raw).hexdigest())
             self.assertEqual(rows[0]['uncompressed_bytes'], len(raw))
+
+    def test_comparison_preserves_complete_payload_but_not_picture_issuance(self):
+        report = {field: [] for field in COMPARISON_SURFACES}
+        report.update(ordinary_evidence_status='complete', flows={'actors': []},
+                      state={'snapshot': 'old', 'revision': '25',
+                             'observation': {'tick': '100', 'handle': 'private-handle'}})
+        before = copy.deepcopy(report)
+        first = comparison_surface(report)
+        self.assertEqual(report, before, 'comparison must not rewrite raw evidence')
+        report['state'].update(snapshot='new', revision='5')
+        self.assertEqual(first, comparison_surface(report))
+        report['state']['observation']['tick'] = '101'
+        self.assertNotEqual(first, comparison_surface(report))
+        self.assertEqual(first['state']['observation']['handle'], 'private-handle')
 
     def test_comparison_refuses_unavailable_gross_flows(self):
         with self.assertRaisesRegex(EvidenceError, 'incomplete ordinary'):

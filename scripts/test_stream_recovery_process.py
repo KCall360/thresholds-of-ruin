@@ -1,5 +1,6 @@
 """Real clients: delayed delivery, atomic gap/invalid-state repair, and relaunch."""
 import json
+import threading
 import unittest
 from stream_relay import StreamRelay
 
@@ -314,7 +315,26 @@ class NativeStreamRecoveryProcesses(StreamRecoveryFixture, ProcessTestCase):
         other = self.launch('tor-client-headless', ['--connect', self.address, '--actor', '2'])
         other_state = self.frame(other, lambda f: f['type'] == 'ready')
         text, _ = self.playable('text', self.address)
-        window, _ = self.playable('ascii', self.address)
+        captured = []
+        capture_lock = threading.Lock()
+        def capture_visibility(message):
+            body = message.get('update', {}).get('body', {})
+            if body.get('type') == 'outcome':
+                for fact in body['facts']['facts']:
+                    if fact['kind'] in ('noticed', 'lost_sight'):
+                        with capture_lock:
+                            # Two transitions are expected. Keep a bounded raw
+                            # witness without concealing duplicate deliveries.
+                            if len(captured) >= 4:
+                                raise AssertionError('Unexpected repeated visibility outcomes')
+                            captured.append(fact)
+        relay = StreamRelay(self.address, on_server_message=capture_visibility)
+        self.addCleanup(relay.close)
+        window, initial = self.playable('ascii', relay.address)
+        initial_observation = initial['state']['observation']
+        self.assertEqual([actor for actor in initial_observation['visible_actors']
+                          if actor['id'] != initial_observation['self_target']], [])
+        noticed_actor = None
         door = next(c['door']['id'] for c in other_state['state']['observation']['visible_cells'] if c['door'])
         for opened in (True, False):
             # Explicit barriers make turn handoff independent of which client's
@@ -329,9 +349,39 @@ class NativeStreamRecoveryProcesses(StreamRecoveryFixture, ProcessTestCase):
             self.assertNotIn('You open', output)
             self.assertNotIn('You close', output)
             sentence = 'The wooden door is now ' + ('open.' if opened else 'closed.')
-            shown = self.ascii_frame(window, lambda f: sentence in (f.get('narration') or []))
+            def presented(frame):
+                observation = frame['state']['observation']
+                doors = [cell['door'] for cell in observation['visible_cells'] if cell.get('door')]
+                return (sentence in frame['messages']['turn'] and frame['observation_current']
+                        and doors and all(value['open'] == opened for value in doors))
+            shown = self.ascii_frame(window, presented)
             self.assertFalse(shown['has_control'])
-            self.assertIn('You notice a figure.' if opened else 'You can no longer see the figure.', shown['narration'])
+            self.assertEqual(shown['messages']['turn'].count(sentence), 1)
+            observation = shown['state']['observation']
+            visible = [actor for actor in observation['visible_actors']
+                       if actor['id'] != observation['self_target']]
+            with capture_lock:
+                facts = list(captured)
+            if opened:
+                self.assertEqual(len(visible), 1)
+                noticed_actor = visible[0]
+                self.assertEqual(noticed_actor['position'], {'x': 2, 'y': 0, 'z': 0})
+                self.assertEqual(facts, [{'kind': 'noticed', 'actor': noticed_actor['id'],
+                    'name': noticed_actor['name'], 'asset': noticed_actor.get('asset'),
+                    'position': noticed_actor['position']}])
+                self.assertEqual(shown['messages']['turn'].count('You notice a figure.'), 1)
+            else:
+                self.assertEqual(visible, [])
+                self.assertEqual(facts, [
+                    {'kind': 'noticed', 'actor': noticed_actor['id'],
+                     'name': noticed_actor['name'], 'asset': noticed_actor.get('asset'),
+                     'position': noticed_actor['position']},
+                    {'kind': 'lost_sight', 'actor': noticed_actor['id'],
+                     'name': noticed_actor['name'], 'asset': noticed_actor.get('asset')},
+                ])
+                # ASCII intentionally leaves disappearance to the map, while
+                # the exact ordered event remains on the active stream above.
+                self.assertNotIn('You can no longer see the figure.', shown['messages']['turn'])
 
 
 

@@ -28,12 +28,14 @@ from rogue_earned_route import POLICY_REVISION, CHECKPOINT_DEPTHS, starting_body
 from ruleset_sources import resolve_with_dependencies
 from process_work_budget import ProcessBudgetExceeded, ProcessOutputBudget
 
+def _disclosed_state_payload(state):
+    return {key: value for key, value in state.items()
+            if key not in ('snapshot', 'revision')}
+
+
 def validate_restored_picture(current, expected):
     """A new attachment issues fresh picture capabilities, not new world facts."""
-    def payload(state):
-        return {key: value for key, value in state.items()
-                if key not in ('snapshot', 'revision')}
-    if (payload(current['state']) != payload(expected['state'])
+    if (_disclosed_state_payload(current['state']) != _disclosed_state_payload(expected['state'])
             or current['history'] != expected['history']):
         raise EvidenceError('Source-free restore changed exact state/history')
 
@@ -615,7 +617,7 @@ def verify_retained_segment(output, report, *, cache=None):
 
 COMPARISON_SURFACES = {
     'commands': 'All mutating owner confirmations, actions and resumes, in issue order; extra read-only restart checks are separately audited.',
-    'state': 'Complete final ordinary state, with saved privacy handles unchanged.',
+    'state': 'Complete final ordinary payload, with saved privacy handles unchanged; only attachment-issued snapshot and display generation are excluded.',
     'history': 'Complete final public history page as actually returned.',
     'receipts': 'Full chronological activation receipt audit, without deduplication.',
     'controller': 'Full saved controller state, graph, growth, rest and spent budgets.',
@@ -634,6 +636,7 @@ def comparison_surface(report):
         raise EvidenceError('Cannot compare gross flows without the commit-only validated collector')
     result = {field: copy.deepcopy(report[field]) for field in COMPARISON_SURFACES
               if field not in ('commands', 'flows')}
+    result['state'] = _disclosed_state_payload(result['state'])
     result['commands'] = [copy.deepcopy(row) for row in report['commands'] if row['kind'] != 'read']
     result['flows'] = copy.deepcopy(flows['actors'])
     result['initial_history_sequence'] = 0

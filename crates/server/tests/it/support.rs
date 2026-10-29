@@ -55,6 +55,28 @@ pub fn decode_command(
     // This helper is an explicit trusted backend driver, not a simulated
     // attachment. Parse developer syntax, then bind private causal freshness.
     // Actual display-generation authority is exercised by Service tests.
+    if let tor_server::wire_adapter::DecodedCommand::Display { operation, .. } = decoded.clone() {
+        use tor_server::wire_adapter::DisplayCommand;
+        let expected_boundary = engine.causal_boundary(actor)?;
+        return Ok(match operation {
+            DisplayCommand::Wizard { operation } => Command::Wizard {
+                display_basis: None,
+                expected_boundary,
+                operation,
+            },
+            DisplayCommand::RenamePlace { key, name } => Command::RenamePlace {
+                display_basis: None,
+                expected_boundary,
+                key,
+                name,
+            },
+            DisplayCommand::Travel { destination } => Command::Travel {
+                display_basis: None,
+                expected_boundary,
+                destination,
+            },
+        });
+    }
     if let tor_server::wire_adapter::DecodedCommand::Backend(mut command) = decoded.clone() {
         match &mut command {
             Command::Wizard {

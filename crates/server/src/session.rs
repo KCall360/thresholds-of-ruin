@@ -1440,6 +1440,14 @@ impl Service {
                 }
             };
             if visual_changed || !facts.facts.is_empty() || own_entry.is_some() {
+                // Narration uses event-time appearances from both sides of a
+                // region transition. Admit new forecast keys before the event,
+                // and retire old keys only after that event has been admitted.
+                let palette = self.prepare_palette_with_retention(id, false, true);
+                self.publish_palette(id, palette);
+                if !self.clients.contains_key(&id) {
+                    continue;
+                }
                 self.update_at(
                     id,
                     UpdateBody::Outcome {
@@ -1471,6 +1479,17 @@ impl Service {
     /// acknowledged. Scenarios that name no assets send no palettes, but a
     /// palette request still gets an (empty) answer.
     fn prepare_palette(&mut self, id: u64, full: bool) -> Option<PaletteUpdate> {
+        self.prepare_palette_with_retention(id, full, false)
+    }
+
+    /// Keep previously authorized keys through one causal Outcome. This is a
+    /// transient publication union, never an observation-derived asset registry.
+    fn prepare_palette_with_retention(
+        &mut self,
+        id: u64,
+        full: bool,
+        retain_previous: bool,
+    ) -> Option<PaletteUpdate> {
         let client = self.clients.get(&id)?;
         let actor = client.actor?;
         // A palette depends only on the actor's region: skip recomputing it
@@ -1479,11 +1498,21 @@ impl Service {
         if !full && client.palette.is_some() && client.palette_region == region {
             return None;
         }
-        let assets = match self.engine.palette(actor) {
+        let mut assets = match self.engine.palette(actor) {
             Some(assets) => assets,
             None if full => BTreeSet::new(),
             None => return None,
         };
+        let mut retained_old_keys = false;
+        if retain_previous {
+            if let Some((_, previous)) = &client.palette {
+                retained_old_keys = !previous.is_subset(&assets);
+                assets.extend(previous.iter().cloned());
+            }
+        }
+        // A retained old key requires the normal post-Outcome update to revisit
+        // this forecast and retire it; otherwise keep the usual region fast path.
+        let cached_region = if retained_old_keys { None } else { region };
         let client = self.clients.get_mut(&id).expect("connected client");
         if !full
             && client
@@ -1491,7 +1520,7 @@ impl Service {
                 .as_ref()
                 .is_some_and(|(_, previous)| *previous == assets)
         {
-            client.palette_region = region;
+            client.palette_region = cached_region;
             return None;
         }
         let body = match &client.palette {
@@ -1506,12 +1535,17 @@ impl Service {
         };
         let revision = client.palette.as_ref().map_or(1, |(r, _)| r + 1);
         client.palette = Some((revision, assets));
-        client.palette_region = region;
+        client.palette_region = cached_region;
         Some(PaletteUpdate { revision, body })
     }
 
     fn palette_update(&mut self, id: u64) {
-        if let Some(palette) = self.prepare_palette(id, false) {
+        let palette = self.prepare_palette(id, false);
+        self.publish_palette(id, palette);
+    }
+
+    fn publish_palette(&mut self, id: u64, palette: Option<PaletteUpdate>) {
+        if let Some(palette) = palette {
             if let Some(context) = self.reply_context(id) {
                 self.send(
                     id,
@@ -5542,3 +5576,7 @@ mod input_operand_context_tests {
 
 #[path = "presentation_queries.rs"]
 mod presentation_queries;
+
+#[cfg(test)]
+#[path = "palette_outcome_tests.rs"]
+mod palette_outcome_tests;

@@ -36,11 +36,12 @@ fn replay_restores_knowledge_receipts_and_moves_and_rewind_forgets_future() {
     };
     let receipt = command(&mut engine, "travel", travel.clone());
     assert_eq!(engine.observation(ActorId(1)).unwrap().tick, 0);
+    let after_travel = engine.causal_boundary(ActorId(1)).unwrap();
     command(
         &mut engine,
         "step",
         Command::Act {
-            expected_boundary: 0,
+            expected_boundary: after_travel,
             action: Action::Move {
                 direction: Direction::East,
             },

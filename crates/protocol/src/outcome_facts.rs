@@ -28,6 +28,9 @@ pub struct OutcomeFacts {
     #[serde(deserialize_with = "read_facts")]
     pub facts: Vec<OutcomeFact>,
 }
+fn read_asset<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    Option::deserialize(d)
+}
 fn read_status<'de, D: serde::Deserializer<'de>>(
     d: D,
 ) -> Result<Option<OutcomeStatusFacts>, D::Error> {
@@ -43,7 +46,26 @@ fn read_facts<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<OutcomeFact>
 #[serde(deny_unknown_fields)]
 pub struct DisclosedActorName {
     pub actor: ActorTarget,
+    /// Canonical Common name: current nonempty name, then prior disclosed name.
     pub name: String,
+    #[serde(deserialize_with = "read_asset")]
+    pub asset: Option<String>,
+    /// Text's current cosmetic referent, only when disclosed in this boundary.
+    /// Absence must not present a historical fallback as current perception.
+    #[serde(deserialize_with = "read_appearance")]
+    pub current_disclosed_appearance: Option<DisclosedActorAppearance>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DisclosedActorAppearance {
+    pub name: String,
+    #[serde(deserialize_with = "read_asset")]
+    pub asset: Option<String>,
+}
+fn read_appearance<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<DisclosedActorAppearance>, D::Error> {
+    Option::deserialize(d)
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -60,6 +82,84 @@ pub struct OutcomeName {
     pub text: String,
     pub fallback: OutcomeNameFallback,
 }
+/// Authorized contents at the actor's feet when its move committed. No targeting
+/// handles or undisclosed item identities are retained in this historical prose.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OutcomeUnderfoot {
+    #[serde(deserialize_with = "read_underfoot_items")]
+    pub items: Vec<OutcomeUnderfootItem>,
+    pub feature: Option<OutcomeUnderfootFeature>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OutcomeUnderfootItem {
+    pub name: String,
+    #[serde(with = "crate::integers::unsigned")]
+    pub quantity: u64,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum OutcomeUnderfootFeature {
+    Object { name: String },
+    StairsDown,
+    StairsUp,
+}
+fn read_underfoot<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<OutcomeUnderfoot>, D::Error> {
+    Option::deserialize(d)
+}
+fn read_underfoot_items<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Vec<OutcomeUnderfootItem>, D::Error> {
+    crate::bounded::bounded::<D, _, MAX_OUTCOME_FACTS>(d)
+}
+impl From<&Observation> for OutcomeUnderfoot {
+    fn from(view: &Observation) -> Self {
+        fn object_name(value: &ObjectPresentation) -> String {
+            if !value.name.trim().is_empty() {
+                return value.name.clone();
+            }
+            match value.kind {
+                ObjectPresentationKind::Item { .. } => "object",
+                ObjectPresentationKind::Stairs => "stairs",
+            }
+            .into()
+        }
+        let items = view
+            .ground_items
+            .iter()
+            .filter(|item| item.position == view.position)
+            .map(|item| OutcomeUnderfootItem {
+                name: item
+                    .presentation
+                    .as_ref()
+                    .map_or_else(|| item.item.name.clone(), object_name),
+                quantity: item.item.quantity,
+            })
+            .collect();
+        let feature = view
+            .visible_cells
+            .iter()
+            .find(|cell| cell.position == view.position)
+            .and_then(|cell| {
+                if let Some(value) = &cell.object_presentation {
+                    Some(OutcomeUnderfootFeature::Object {
+                        name: object_name(value),
+                    })
+                } else if cell.stairs_down {
+                    Some(OutcomeUnderfootFeature::StairsDown)
+                } else if cell.stairs_up {
+                    Some(OutcomeUnderfootFeature::StairsUp)
+                } else {
+                    None
+                }
+            });
+        Self { items, feature }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ItemWorkKind {
@@ -94,6 +194,8 @@ pub enum OutcomeFact {
         event: Event,
         name: Option<OutcomeName>,
         basic_attack: bool,
+        #[serde(deserialize_with = "read_underfoot")]
+        underfoot: Option<OutcomeUnderfoot>,
     },
     TrapDiscovered {
         family: Option<TrapFamily>,
@@ -104,6 +206,8 @@ pub enum OutcomeFact {
     Noticed {
         actor: ActorTarget,
         name: String,
+        #[serde(deserialize_with = "read_asset")]
+        asset: Option<String>,
         /// Event-time offset of the lowest, nearest disclosed body cell.
         /// Historical description only, never a targeting capability.
         position: Position,
@@ -111,10 +215,14 @@ pub enum OutcomeFact {
     LostSight {
         actor: ActorTarget,
         name: String,
+        #[serde(deserialize_with = "read_asset")]
+        asset: Option<String>,
     },
     DoorChanged {
         name: String,
         open: bool,
+        /// Event-time observer-relative offset; not a targeting capability.
+        position: Position,
     },
     Pacing {
         ready: bool,
@@ -195,6 +303,7 @@ pub struct OutcomeObservation {
     pub visible_actors: Vec<OutcomeActorName>,
     pub inventory: Vec<OutcomeItemName>,
     pub ground_items: Vec<OutcomeGroundName>,
+    pub underfoot: OutcomeUnderfoot,
     pub motion: Option<OutcomeMotion>,
     pub interactions: Option<OutcomeInteractions>,
     pub combat: Option<OutcomeCombat>,
@@ -208,6 +317,7 @@ pub struct OutcomeCell {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OutcomeDoor {
+    pub position: Position,
     pub id: DoorTarget,
     pub open: bool,
     pub name: String,
@@ -221,6 +331,7 @@ pub struct OutcomeTrap {
 pub struct OutcomeActorName {
     pub id: ActorTarget,
     pub name: String,
+    pub asset: Option<String>,
     pub position: Position,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -262,6 +373,7 @@ pub struct OutcomeCombat {
 impl From<&Observation> for OutcomeObservation {
     fn from(view: &Observation) -> Self {
         Self {
+            underfoot: OutcomeUnderfoot::from(view),
             self_target: view.self_target,
             tick: view.tick,
             ready: view.ready,
@@ -272,6 +384,7 @@ impl From<&Observation> for OutcomeObservation {
                     key: cell.key.clone(),
                     wall: cell.wall,
                     door: cell.door.as_ref().map(|door| OutcomeDoor {
+                        position: cell.position,
                         id: door.id,
                         open: door.open,
                         name: door.name.clone(),
@@ -288,6 +401,7 @@ impl From<&Observation> for OutcomeObservation {
                 .map(|actor| OutcomeActorName {
                     id: actor.id,
                     name: actor.name.clone(),
+                    asset: actor.asset.clone(),
                     position: actor.position,
                 })
                 .collect(),
@@ -586,6 +700,7 @@ impl OutcomeFacts {
         };
         if let Some(event) = event {
             facts.push(OutcomeFact::OwnAction { event:event.clone(), name:compact_action_name(event, after),
+                underfoot: matches!(event, Event::Moved { .. }).then(|| after.underfoot.clone()),
                 basic_attack:matches!(event, Event::AbilityStarted { ability, .. } if basic(ability)) });
         }
         let traps = |view: &OutcomeObservation| -> BTreeMap<TrapTarget, Option<TrapFamily>> {
@@ -634,7 +749,8 @@ impl OutcomeFacts {
             facts.push(OutcomeFact::Impacted);
         }
         let actors = |view: &OutcomeObservation| {
-            let mut actors: BTreeMap<ActorTarget, (String, Position)> = BTreeMap::new();
+            let mut actors: BTreeMap<ActorTarget, (String, Position, Option<String>)> =
+                BTreeMap::new();
             // Match the scene's single referent for a multi-cell/portal body:
             // lowest cell, then nearest, preserving disclosure order on ties.
             let rank = |p: Position| {
@@ -652,37 +768,39 @@ impl OutcomeFacts {
             {
                 let entry = actors
                     .entry(actor.id)
-                    .or_insert_with(|| (actor.name.clone(), actor.position));
+                    .or_insert_with(|| (actor.name.clone(), actor.position, actor.asset.clone()));
                 if rank(actor.position) < rank(entry.1) {
-                    *entry = (actor.name.clone(), actor.position);
+                    *entry = (actor.name.clone(), actor.position, actor.asset.clone());
                 }
             }
             actors
         };
         let old = actors(before);
         let new = actors(after);
-        for (actor, (name, position)) in &new {
+        for (actor, (name, position, asset)) in &new {
             if !old.contains_key(actor) {
                 facts.push(OutcomeFact::Noticed {
                     actor: *actor,
                     name: name.clone(),
+                    asset: asset.clone(),
                     position: *position,
                 });
             }
         }
-        for (actor, (name, _)) in &old {
+        for (actor, (name, _, asset)) in &old {
             if !new.contains_key(actor) {
                 facts.push(OutcomeFact::LostSight {
                     actor: *actor,
                     name: name.clone(),
+                    asset: asset.clone(),
                 });
             }
         }
-        let doors = |view: &OutcomeObservation| -> BTreeMap<DoorTarget, (bool, String)> {
+        let doors = |view: &OutcomeObservation| -> BTreeMap<DoorTarget, (bool, String, Position)> {
             view.visible_cells
                 .iter()
                 .filter_map(|cell| cell.door.as_ref())
-                .map(|door| (door.id, (door.open, door.name.clone())))
+                .map(|door| (door.id, (door.open, door.name.clone(), door.position)))
                 .collect()
         };
         let acted = match event {
@@ -690,9 +808,13 @@ impl OutcomeFacts {
             _ => None,
         };
         let old = doors(before);
-        for (id, (open, name)) in doors(after) {
-            if Some(id) != acted && old.get(&id).is_some_and(|(was, _)| *was != open) {
-                facts.push(OutcomeFact::DoorChanged { name, open });
+        for (id, (open, name, position)) in doors(after) {
+            if Some(id) != acted && old.get(&id).is_some_and(|(was, _, _)| *was != open) {
+                facts.push(OutcomeFact::DoorChanged {
+                    name,
+                    open,
+                    position,
+                });
             }
         }
         if before.ready != after.ready && after.combat.as_ref().is_none_or(|c| !c.status.terminal) {
@@ -826,9 +948,23 @@ impl OutcomeFacts {
                     .iter()
                     .chain(&before.visible_actors)
                     .find(|actor| actor.id == id && !actor.name.trim().is_empty())
+                    .or_else(|| {
+                        after
+                            .visible_actors
+                            .iter()
+                            .chain(&before.visible_actors)
+                            .find(|actor| actor.id == id)
+                    })
                     .map(|actor| DisclosedActorName {
                         actor: id,
                         name: actor.name.clone(),
+                        asset: actor.asset.clone(),
+                        current_disclosed_appearance: new.get(&id).map(|(name, _, asset)| {
+                            DisclosedActorAppearance {
+                                name: name.clone(),
+                                asset: asset.clone(),
+                            }
+                        }),
                     })
             })
             .collect();
@@ -882,6 +1018,16 @@ impl OutcomeFacts {
         }
         for fact in &self.facts {
             match fact {
+                OutcomeFact::OwnAction {
+                    event,
+                    underfoot: Some(contents),
+                    ..
+                } if !matches!(event, Event::Moved { .. })
+                    || contents.items.len() > MAX_OUTCOME_FACTS
+                    || contents.items.iter().any(|item| item.quantity == 0) =>
+                {
+                    return Err(InvalidState::InvalidCombat);
+                }
                 OutcomeFact::Combat {
                     event:
                         CombatEventView::Ability {
@@ -891,7 +1037,7 @@ impl OutcomeFacts {
                 } if !ability.valid()
                     || strike.is_some_and(|ordinal| ordinal >= crate::MAX_SEQUENCE_STRIKES) =>
                 {
-                    return Err(InvalidState::InvalidCombat)
+                    return Err(InvalidState::InvalidCombat);
                 }
                 OutcomeFact::Combat {
                     event: CombatEventView::Condition { condition },
@@ -902,16 +1048,17 @@ impl OutcomeFacts {
                     basic_attack: true,
                     ..
                 } if !matches!(event, Event::AbilityStarted { .. }) => {
-                    return Err(InvalidState::InvalidCombat)
+                    return Err(InvalidState::InvalidCombat);
                 }
                 OutcomeFact::Combat {
                     event,
                     basic_attack: true,
-                } if !matches!(event, CombatEventView::Ability { caster:Some(caster),.. } if *caster == self.self_target) => {
-                    return Err(InvalidState::InvalidCombat)
+                } if !matches!(event, CombatEventView::Ability { caster:Some(caster),.. } if *caster == self.self_target) =>
+                {
+                    return Err(InvalidState::InvalidCombat);
                 }
                 OutcomeFact::Status { status } if !status.valid() => {
-                    return Err(InvalidState::InvalidCombat)
+                    return Err(InvalidState::InvalidCombat);
                 }
                 _ => {}
             }
@@ -1108,6 +1255,66 @@ mod tests {
     }
 
     #[test]
+    fn underfoot_is_owned_by_the_committed_move_not_later_pictures() {
+        let before = OutcomeObservation::from(&observation());
+        let mut after = before.clone();
+        after.underfoot.items.push(OutcomeUnderfootItem {
+            name: "apparent fruit".into(),
+            quantity: 3,
+        });
+        let stamp = EventProvenance {
+            batch: 1,
+            through: 0,
+        };
+        let captured = OutcomeFacts::capture_compact_causal(
+            &before,
+            &after,
+            Some(&Event::Moved {
+                direction: Direction::East,
+            }),
+            stamp,
+            stamp,
+        )
+        .unwrap();
+        after.underfoot.items[0].name = "later name".into();
+        let OutcomeFact::OwnAction {
+            underfoot: Some(contents),
+            ..
+        } = &captured.facts[0]
+        else {
+            panic!("move contents");
+        };
+        assert_eq!(contents.items[0].name, "apparent fruit");
+        assert_eq!(contents.items[0].quantity, 3);
+        assert!(captured.validate().is_ok());
+        let encoded = serde_json::to_value(&captured).unwrap();
+        assert_eq!(
+            encoded["facts"][0]["underfoot"]["items"][0]["quantity"],
+            "3"
+        );
+        let mut invalid = captured.clone();
+        if let OutcomeFact::OwnAction { event, .. } = &mut invalid.facts[0] {
+            *event = Event::Waited;
+        }
+        assert!(invalid.validate().is_err());
+        let waited = OutcomeFacts::capture_compact_causal(
+            &before,
+            &after,
+            Some(&Event::Waited),
+            stamp,
+            stamp,
+        )
+        .unwrap();
+        assert!(matches!(
+            waited.facts[0],
+            OutcomeFact::OwnAction {
+                underfoot: None,
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn compact_capture_preserves_discovery_order_and_receipt_prefix() {
         let mut before = OutcomeObservation::from(&observation());
         before.visible_cells.push(OutcomeCell {
@@ -1119,6 +1326,7 @@ mod tests {
         let mut after = before.clone();
         after.visible_cells[0].wall = false;
         after.visible_cells[0].door = Some(OutcomeDoor {
+            position: Position { x: 1, y: 0, z: 0 },
             id: DoorTarget::from_digest([2; 32]),
             open: true,
             name: "door".into(),
@@ -1180,6 +1388,7 @@ mod tests {
         let cell = |position| OutcomeActorName {
             id: actor,
             name: "figure".into(),
+            asset: None,
             position,
         };
         after.visible_actors = vec![
@@ -1190,6 +1399,7 @@ mod tests {
             OutcomeActorName {
                 id: after.self_target,
                 name: "self portal copy".into(),
+                asset: None,
                 position: Position { x: 0, y: 0, z: -1 },
             },
         ];
@@ -1204,6 +1414,7 @@ mod tests {
             vec![OutcomeFact::Noticed {
                 actor,
                 name: "figure".into(),
+                asset: None,
                 position: Position { x: 1, y: 0, z: 0 },
             }]
         );
@@ -1215,6 +1426,7 @@ mod tests {
             OutcomeFact::Noticed {
                 actor,
                 name: "figure".into(),
+                asset: None,
                 position: Position { x: 1, y: 0, z: 0 },
             }
         );
@@ -1231,7 +1443,34 @@ mod tests {
         let fact = OutcomeFact::Noticed {
             actor: ActorTarget::from_digest([2; 32]),
             name: "figure".into(),
+            asset: None,
             position: Position { x: -2, y: 3, z: 1 },
+        };
+        let value = serde_json::to_value(&fact).unwrap();
+        assert_eq!(
+            serde_json::from_value::<OutcomeFact>(value.clone()).unwrap(),
+            fact
+        );
+        let mut missing_asset = value.clone();
+        missing_asset.as_object_mut().unwrap().remove("asset");
+        assert!(serde_json::from_value::<OutcomeFact>(missing_asset).is_err());
+        let mut missing = value.clone();
+        missing.as_object_mut().unwrap().remove("position");
+        assert!(serde_json::from_value::<OutcomeFact>(missing).is_err());
+        let mut invalid = value.clone();
+        invalid["position"]["x"] = serde_json::json!(2147483648_u64);
+        assert!(serde_json::from_value::<OutcomeFact>(invalid).is_err());
+        let mut forged = value;
+        forged["world_region"] = serde_json::json!(17);
+        assert!(serde_json::from_value::<OutcomeFact>(forged).is_err());
+    }
+
+    #[test]
+    fn door_change_requires_an_explicit_event_time_position_on_wire() {
+        let fact = OutcomeFact::DoorChanged {
+            name: "wooden door".into(),
+            open: true,
+            position: Position { x: 1, y: -2, z: 3 },
         };
         let value = serde_json::to_value(&fact).unwrap();
         assert_eq!(
@@ -1247,6 +1486,48 @@ mod tests {
         let mut forged = value;
         forged["world_region"] = serde_json::json!(17);
         assert!(serde_json::from_value::<OutcomeFact>(forged).is_err());
+    }
+
+    #[test]
+    fn anonymous_combat_never_acquires_assets_from_unreferenced_visible_figures() {
+        let before = OutcomeObservation::from(&observation());
+        let mut after = before.clone();
+        after.visible_actors.push(OutcomeActorName {
+            id: ActorTarget::from_digest([93; 32]),
+            name: String::new(),
+            asset: Some("creature.jabberwock".into()),
+            position: Position { x: 1, y: 0, z: 0 },
+        });
+        // Already visible, so no newcomer fact; only an anonymous receipt.
+        let before = after.clone();
+        after
+            .combat
+            .as_mut()
+            .unwrap()
+            .events
+            .push(CombatEventView::AnonymousAbility {
+                caster: None,
+                target: None,
+                outcome: AbilityOutcome::Applied,
+            });
+        let facts = OutcomeFacts::capture_compact_causal(
+            &before,
+            &after,
+            None,
+            EventProvenance {
+                batch: 1,
+                through: 0,
+            },
+            EventProvenance {
+                batch: 1,
+                through: 1,
+            },
+        )
+        .unwrap();
+        assert!(facts.actor_names.is_empty());
+        assert!(!serde_json::to_string(&facts)
+            .unwrap()
+            .contains("jabberwock"));
     }
 
     #[test]
@@ -1349,12 +1630,15 @@ mod tests {
         facts.actor_names.push(DisclosedActorName {
             actor: other,
             name: "figure".into(),
+            asset: None,
+            current_disclosed_appearance: None,
         });
         assert_eq!(facts.validate(), Err(InvalidState::InvalidCombat));
         facts.actor_names.clear();
         facts.facts.push(OutcomeFact::OwnAction {
             event: Event::Waited,
             name: None,
+            underfoot: None,
             basic_attack: true,
         });
         assert_eq!(facts.validate(), Err(InvalidState::InvalidCombat));

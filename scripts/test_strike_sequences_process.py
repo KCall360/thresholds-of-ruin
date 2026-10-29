@@ -193,13 +193,16 @@ class StrikeSequenceProcesses(ProcessTestCase):
         self.assertEqual(retry["message"]["context"]["cursor"], saved["cursor"])
         # The other ordinary controlled actor permits the remaining due strikes.
         self.sequence_peer_wait(target)
-        self.frame(player, lambda frame: outcome_event(frame, 1) is not None)
-        second = self.request(player, {"type": "observe"})
-        self.assertIsNone(second["error"])
+        # The peer's 150-tick Wait permits both remaining strikes (200 and
+        # 300). Their ordered event/lifecycle frames retain the paid sequence;
+        # a later demanded picture may already show its completion.
+        second = self.frame(player, lambda frame: outcome_event(frame, 1) is not None)
         self.assertEqual(second["intentions"][0]["phase"], "started")
-        self.sequence_peer_wait(target)
-        finished = self.frame(player, lambda frame: combat(frame)["sequence"] is None
-                              and not frame["intentions"])
+        if outcome_event(second, 2) is None:
+            self.frame(player, lambda frame: outcome_event(frame, 2) is not None)
+        resolved = self.frame(player, lambda frame: not frame["intentions"])
+        finished = self.picture_after(player, resolved)
+        self.assertIsNone(combat(finished)["sequence"])
         self.assertIsNone(finished["error"])
         target_final = self.request(target, {"type": "snapshot"})
         self.assertEqual(u64(combat(target_final)["hp"]), u64(combat(target_initial)["hp"]) - 3)

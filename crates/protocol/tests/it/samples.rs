@@ -838,6 +838,7 @@ fn recorded_polymorph_has_dual_aim_and_changed_only_diagnostic() {
 #[test]
 fn recorded_noticed_outcome_has_disclosed_event_time_position() {
     let mut noticed = Vec::new();
+    let mut doors = Vec::new();
     for sample in samples()["server"].as_array().unwrap() {
         let message: ServerMessage = round_trip(sample);
         if let ServerMessage::Update { update } = message {
@@ -850,9 +851,26 @@ fn recorded_noticed_outcome_has_disclosed_event_time_position() {
                         assert_ne!(*actor, facts.self_target);
                         noticed.push(*position);
                     }
+                    if let OutcomeFact::DoorChanged {
+                        name,
+                        open,
+                        position,
+                    } = fact
+                    {
+                        doors.push((name.clone(), *open, *position));
+                    }
                 }
             }
         }
     }
-    assert_eq!(noticed, vec![Position { x: 2, y: 0, z: 0 }]);
+    // The original reveal and the foreign-door recording both notice the actor.
+    assert_eq!(noticed, vec![Position { x: 2, y: 0, z: 0 }; 2]);
+    assert_eq!(
+        doors,
+        vec![(
+            "wooden door".to_owned(),
+            true,
+            Position { x: 1, y: 0, z: 0 }
+        )]
+    );
 }
