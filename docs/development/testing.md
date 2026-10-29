@@ -735,6 +735,15 @@ failed or incomplete shards fail the gate. Shards cannot adopt unsharded prior
 results. The workflow is the authoritative full job inventory; selected-mode
 lanes never stand in for a missing full partition.
 
+Linux debug Python likewise uses two isolated module-owned shards, each with
+its own ordinary application/compiler build and the unchanged 40-minute deadline.
+The Ubuntu full-mode aggregate requires their same-source, same-run, same-origin-
+attempt receipts and independently checks their exact inventory union. Both
+success-only shard attempt outputs and distinct tested-compiler fingerprints are
+required; a mixed or incomplete cohort cannot qualify. Linux release Python
+remains one complete owner. No assertion or per-test time limit changes with the
+split, and selected/prose-only modes do not substitute for full shard coverage.
+
 `--ci-partition` requires both `full` and an explicit `--ci-profile`. Each
 partition selects complete coverage without consulting Git merge history.
 Stages have explicit owners; an unclassified new stage rejects partition

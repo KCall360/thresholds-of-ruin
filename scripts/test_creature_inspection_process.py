@@ -218,8 +218,10 @@ class CreatureInspectionProcesses(ProcessTestCase):
 
     def _private_report(self, client, operation, kind="combat_diagnostics"):
         import json
-        if kind == "creature_inspection":
-            self.assertIsNone(self.request(client, {"type": "observe"})["error"])
+        # Every private wizard report binds to a current disclosed picture,
+        # including combat diagnostics after a causal-only paid action. Read
+        # once before submission; never retry a possibly applied command.
+        self.assertIsNone(self.request(client, {"type": "observe"})["error"])
         start = len(client.transcript)
         ready = self.command(client, {"type": "wizard", "command": operation})
         self.assertFalse(ready.get("error"), ready.get("error"))

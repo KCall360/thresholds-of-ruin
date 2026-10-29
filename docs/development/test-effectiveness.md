@@ -1582,3 +1582,45 @@ acknowledgement before holding later steps, preserving the Skip control, seven
 paid steps, ordered history and source-free restart checks. This is maintenance
 within the same travel method, not a production defect or another failed method.
 The door witness drains each completed prompt explicitly before its query barrier.
+
+The following hosted Linux debug run passed all 1,274 server unit, 270 server
+integration, 2,266 simulation unit and 815 simulation integration tests, then
+reached twelve failing test-support performance methods. All twelve stopped while
+decoding one shared synthetic view that omitted the now-required snapshot identity;
+this is one stale fixture root affecting twelve methods, not twelve engine bugs.
+The repaired fixture adds the identity and a required-field rejection witness.
+The forbidden-acceptance mutation also advances its revision so it reaches the
+intended acceptance guard rather than the independent progress guard first.
+All thirteen focused performance-oracle tests pass, including their exact expected
+failure reasons. No production oracle or gameplay logic changed.
+
+The same hosted round's Linux release Python lane exposed one further stale
+private-report caller: the helper refreshed before creature inspection but not
+combat inspection after causal-only actions. It now explicitly observes before
+either private query, without retrying a rejected command. The failing fear,
+disadvantage, immunity and source-free restart witness and the outgoing-policy
+restart sibling both pass on unchanged qualified applications. Count one further
+stale method/root; none of its RNG, payment, trace, privacy or restart assertions
+were removed. Windows release Python shard 2 completed successfully on the
+published test-correction head, including the preceding travel and combat fixtures.
+
+The Linux debug Python lane also exhausted its 40-minute job budget without a
+failed test: its exact receipt records 2,049 passed of 2,395 selected, leaving 346
+unexecuted. This is incomplete infrastructure qualification, not a test pass or a
+new gameplay defect. The two longest completed witnesses took 1,251 and 714
+seconds. Linux debug now uses two existing module-owned shards, placing those
+witnesses in separate owners while retaining the same full inventory, original
+per-test limits and 40-minute job cap. The aggregate independently checks exact
+coverage, source/run/attempt bindings and both compiler identities; Windows and
+Linux release coverage are unchanged.
+
+All 161 owning orchestration methods qualified across focused receipts. One stale
+workflow-name expectation was updated for the explicit shard owners. Five CLI
+plan subcases initially lacked the actual local Rust toolchain environment; the
+two affected methods passed after supplying it, without compilation. These setup
+failures do not count as production detections. Independent review caught and
+corrected two new orchestration defects before publication: the seal's strict
+output-key set needed the shard-attempt fields, and each shard needed a distinct
+compiler role instead of a last-writer matrix output. Negative regressions retain
+both safeguards. Actionlint, Ruff and the focused coverage/attempt/seal tests pass;
+final hosted exhaustive qualification remains required.

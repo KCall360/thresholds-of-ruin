@@ -745,7 +745,7 @@ def main(argv=None):
     parser.add_argument("--ci-partition", choices=CI_PARTITIONS,
                         help="CI-only Rust or Python/native stages; requires full and --ci-profile; all partitions are required")
     parser.add_argument("--ci-python-shard", type=int, choices=(1, 2),
-                        help="Explicit complete Windows Python profile shard; both are required")
+                        help="Explicit complete Python profile shard; both are required")
     parser.add_argument("--ci-binaries", type=Path, help="Exact-run ordinary application artifact for fresh full Python partitions")
     parser.add_argument("--base", default="origin/main", help="Compare against this ref to find changes")
     parser.add_argument("--jobs", type=int, help="CARGO_BUILD_JOBS; chosen from free memory by default")
@@ -770,9 +770,9 @@ def main(argv=None):
         parser.error("--ci-profile requires the full tier")
     if args.ci_partition and (args.tier != "full" or args.ci_profile is None):
         parser.error("--ci-partition requires full and --ci-profile")
-    if args.ci_python_shard is not None and (sys.platform != "win32" or args.tier != "full" or args.ci_profile not in ("debug", "release")
+    if args.ci_python_shard is not None and (sys.platform not in ("win32", "linux") or args.tier != "full" or args.ci_profile not in ("debug", "release")
             or args.ci_partition != "python" or args.fail_fast or args.rerun_failed):
-        parser.error("--ci-python-shard requires fresh complete Windows profile Python verification")
+        parser.error("--ci-python-shard requires fresh complete supported-platform profile Python verification")
     if args.ci_binaries and (args.tier != "full" or args.ci_partition != "python" or not args.ci_profile
             or args.fail_fast or args.rerun_failed or not os.environ.get("CI")):
         parser.error("--ci-binaries requires fresh full CI Python verification without evidence reuse")
@@ -826,7 +826,9 @@ def main(argv=None):
                  ci_profile=args.ci_profile, ci_partition=args.ci_partition,
                  workers=workers, failfast=args.fail_fast, deferred=deferred, tested=tested)
     if args.ci_python_shard is not None:
-        steps = [(name, [*command[:2], "--ci-python-shard", str(args.ci_python_shard), *command[2:]],
+        steps = [(name, [*command[:command.index(str(SCRIPTS / "test_runner.py")) + 1],
+                            "--ci-python-shard", str(args.ci_python_shard),
+                            *command[command.index(str(SCRIPTS / "test_runner.py")) + 1:]],
                           {**env, "TOR_TEST_PROFILE": "debug"} if name == "python-debug" else env)
                  if name in ("process-release", "python-debug") else (name, command, env) for name, command, env in steps]
     if args.ci_python_shard is not None:
