@@ -95,13 +95,17 @@ class TravelProcesses(ProcessTestCase):
     def test_ascii_selection_click_skip_and_resume(self):
         server = self.server(wizard=True, scenario="travel")
         spectator, _ = self.client(SPECTATOR_TOKEN)
-        # Hold delivery after the third journey's Active status, rather than
-        # depending on server speed to expose the local Skip-ahead control.
+        # Deliver Active and its command acknowledgement before holding later
+        # steps. Automation reads keys only once its command is acknowledged;
+        # withholding that reply tests a transport timeout, not Skip-ahead.
         arm_skip = threading.Event()
+        active_seen = threading.Event()
         def hold_after_active(message):
             body = message.get("update", {}).get("body", {})
             if (arm_skip.is_set() and body.get("type") == "travel"
                     and body["status"]["phase"] == "active"):
+                active_seen.set()
+            if arm_skip.is_set() and active_seen.is_set() and message.get("type") == "ack":
                 arm_skip.clear()
                 relay.gate.clear()
         relay = StreamRelay(self.address, on_server_message=hold_after_active)
@@ -128,19 +132,23 @@ class TravelProcesses(ProcessTestCase):
         start = next(t for t in arrived["map_tiles"] if t["position"] == {"x": -5, "y": 0, "z": 0})
         ascii_client.child.stdin.write(json.dumps({"type": "click", "x": start["center"][0], "y": start["center"][1]}) + "\n")
         ascii_client.child.stdin.flush()
-        returned = self.ascii_frame(ascii_client, lambda f: f.get("travel") and f["travel"]["id"] != arrived["travel"]["id"] and f["travel"]["phase"] == "arrived" and f["can_admit_intention"])
+        # Arrival is authoritative before the optional picture refresh. The
+        # position/tick assertion requires the same current-picture barrier as
+        # the outbound journey, not just the causal travel status.
+        returned = self.ascii_frame(ascii_client, lambda f: arrived_picture(f)
+            and f["travel"]["id"] != arrived["travel"]["id"])
         self.assertEqual(returned["state"]["observation"]["tick"], '1000')
         self.key(ascii_client, "travel")
         for _ in range(7): self.key(ascii_client, "right")
         arm_skip.set()
         try:
-            # The command acknowledgement may be among the held frames; local
-            # input must still work while the receive side is held.
+            # Let the acknowledgement settle, while later server steps stay
+            # held so Skip-ahead remains observable independently of CPU speed.
             ascii_client.child.stdin.write('{"type":"key","key":"enter"}\n')
             ascii_client.child.stdin.flush()
             self.ascii_frame(ascii_client, lambda f: f.get("travel")
                 and f["travel"]["id"] != returned["travel"]["id"]
-                and f["travel"]["phase"] == "active")
+                and f["travel"]["phase"] == "active" and not f["busy"])
             self.assertTrue(relay.held.wait(5), "Relay did not hold a later journey frame")
             ascii_client.child.stdin.write('{"type":"key","key":"escape"}\n')
             ascii_client.child.stdin.flush()

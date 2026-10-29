@@ -254,25 +254,56 @@ class HeadlessCombatFixtureContracts(unittest.TestCase):
         case = AsciiMessageProcesses("test_combat_fixture_keeps_scout_visible_until_defeated")
         player = SimpleNamespace(transcript=[])
         inputs, pending, clock = [], [], [0.0]
-        state = {"resumed": False, "last_tick": 0, "waits": []}
+        state = {"resumed": False, "last_tick": 0, "waits": [], "sequence": 0}
+        caster, scout = "a_" + "11" * 32, "a_" + "22" * 32
 
         def frame(tick, *, phase=None, remaining=None, active=False, ready=True,
                   resume=(), identity="paid-attack", events=(), dead_scout=False, kind="update"):
-            return {"type": kind, "error": None,
+            value = {"type": kind, "error": None,
                     "state": {"wizard_game": False, "revision": str(tick), "observation": {
-                        "tick": str(tick), "ready": ready, "self_target": "delver",
+                        "tick": str(tick), "ready": ready, "self_target": caster,
                         "visible_actors": [] if dead_scout else [{
-                            "id": "scout", "name": "ruin scout", "position": {"x": 1, "y": 0, "z": 0}}],
+                            "id": scout, "name": "ruin scout", "position": {"x": 1, "y": 0, "z": 0}}],
                         "combat": {"dead": False, "preparation_active": active,
-                                   "preparation_remaining": remaining, "events": list(events)}}},
+                                   "preparation_remaining": remaining, "events": []}}},
                     "intentions": [] if phase is None else [{"intention": identity, "phase": phase}],
                     "readiness": {"admission": True, "resume": list(resume),
                                   "cancel": [identity] if phase else [], "revision": str(tick)}}
+            if events:
+                # Real headless output retains the received Outcome independently
+                # of its picture. Keep complete event-time fact fields here: an
+                # observation's combat.events is never a completion receipt.
+                value["message"] = {"type": "update", "update": {
+                    "context": {"stream": "mock-combat", "epoch": "0"},
+                    "actor": "1", "branch": "mock-branch",
+                    "cursor": {"sequence": "0", "tick": str(tick)},
+                    "body": {"type": "outcome", "visual_changed": True, "event": None,
+                             "facts": {"self_target": caster,
+                                       "status": {"hp": "50", "max_hp": "50", "dead": False,
+                                                  "victory": False, "terminal": False,
+                                                  "sequence": None, "preparation_remaining": remaining,
+                                                  "preparation_active": active, "recovery_remaining": "0"},
+                                       "actor_names": [{"actor": scout, "name": "ruin scout", "asset": None,
+                                                        "current_disclosed_appearance": None if dead_scout else {
+                                                            "name": "ruin scout", "asset": None}}],
+                                       "facts": [{"kind": "combat", "event": event,
+                                                  "basic_attack": event["type"] == "ability"}
+                                                 for event in events]}}}}
+            return value
 
-        hit = {"type": "ability", "caster": "delver", "target": "scout"}
-        death = {"type": "died", "actor": "scout"}
+        hit = {"type": "ability", "caster": caster, "target": scout, "strike": None,
+               "ability": {"id": "basic_melee", "name": "Basic Melee"}, "outcome": "applied"}
+        death = {"type": "died", "actor": scout}
 
         def publish(value):
+            state["sequence"] += 1
+            if "message" in value:
+                update = value["message"]["update"]
+                update["cursor"]["sequence"] = str(state["sequence"])
+                if mode == "picture_only":
+                    value["state"]["observation"]["combat"]["events"] = [
+                        fact["event"] for fact in update["body"]["facts"]["facts"]]
+                    del value["message"]
             state["last_tick"] = int(value["state"]["observation"]["tick"])
             if mode == "elapsed" and value["readiness"]["resume"] == ["paid-attack"]:
                 clock[0] = 20
@@ -283,7 +314,7 @@ class HeadlessCombatFixtureContracts(unittest.TestCase):
             self.assertIs(_player, player)
             self.assertEqual(action["type"], "use_ability")
             self.assertEqual(action["id"], "basic_melee")
-            self.assertEqual(action["invocation"]["aim"]["target"], "scout")
+            self.assertEqual(action["invocation"]["aim"]["target"], scout)
             self.assertFalse(pending, "A new attack replaced unresolved paid work")
             inputs.append("attack")
             if mode == "bound":
@@ -296,7 +327,7 @@ class HeadlessCombatFixtureContracts(unittest.TestCase):
                     clock[0] = 5
                 return publish(frame(100, events=(hit,)))
             self.assertEqual(len(inputs), 2, "Only the original two attacks may be admitted")
-            if mode == "complete":
+            if mode in ("complete", "picture_only"):
                 return publish(frame(200, events=(hit, death), dead_scout=True))
             if mode == "elapsed":
                 clock[0] = 12
@@ -358,6 +389,19 @@ class HeadlessCombatFixtureContracts(unittest.TestCase):
 
     def test_already_completed_baseline_needs_two_attacks_and_no_resume(self):
         self.run_fixture()
+        self.assertEqual(self.inputs, ["attack", "attack"])
+
+    def test_ordered_outcomes_not_picture_events_certify_combat_completion(self):
+        self.run_fixture()
+        frames = [json.loads(line) for line in self.publications]
+        self.assertTrue(all(not frame["state"]["observation"]["combat"]["events"] for frame in frames))
+        self.assertEqual([event["type"] for event in ordered_combat_events(frames)],
+                         ["ability", "ability", "died"])
+        sequences = [frame["message"]["update"]["cursor"]["sequence"]
+                     for frame in frames if "message" in frame]
+        self.assertEqual(len(sequences), len(set(sequences)))
+        with self.assertRaisesRegex(AssertionError, "Scout disappeared before combat completed"):
+            self.run_fixture("picture_only")
         self.assertEqual(self.inputs, ["attack", "attack"])
 
     def test_actual_fixture_resumes_only_after_matching_lifecycle_and_permission(self):

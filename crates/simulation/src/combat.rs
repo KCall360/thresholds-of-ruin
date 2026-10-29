@@ -974,6 +974,7 @@ mod tests {
                 configure_subject(&mut game, actor, 0, 60);
             }
             let old = game.clone();
+            let before = crate::diagnostics::work_counts();
             assert_eq!(
                 game.apply_damage(
                     ActorId(1),
@@ -989,7 +990,12 @@ mod tests {
                 ),
                 Ok(1)
             );
-            let copied = crate::diagnostics::work_counts().actor_table_copies;
+            let copied = crate::diagnostics::work_counts();
+            assert_eq!(copied.actor_table_copies - before.actor_table_copies, 1);
+            assert_eq!(
+                copied.actor_table_entries_copied - before.actor_table_entries_copied,
+                count as usize
+            );
             game.apply_damage(
                 ActorId(2),
                 &crate::damage::DamageSpec::new(
@@ -1004,10 +1010,17 @@ mod tests {
             )
             .unwrap();
             assert_eq!(
-                crate::diagnostics::work_counts().actor_table_copies,
-                copied,
+                crate::diagnostics::work_counts().actor_table_entries_copied,
+                copied.actor_table_entries_copied,
                 "a second injury in the same transaction must not clone the actor table again"
             );
+            assert_eq!(
+                crate::diagnostics::work_counts().actor_table_copies - copied.actor_table_copies,
+                1,
+                "the second distinct shared actor payload is copied, not every actor"
+            );
+            assert_eq!(old.health(ActorId(2)), Some((30, 30)));
+            assert_eq!(game.health(ActorId(2)), Some((29, 30)));
             assert_eq!(old.health(ActorId(1)), Some((30, 30)));
             assert_eq!(game.health(ActorId(1)), Some((29, 30)));
             assert_eq!(

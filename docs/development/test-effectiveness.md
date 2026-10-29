@@ -1539,3 +1539,46 @@ exact disclosed offset. Its replacement checks both reveals and the exact new
 wooden-door name, open state and observer-relative position; it does not drop the
 cardinality or position assertion. The other 17 recorded-sample tests passed
 before this isolated expectation correction.
+
+The next hosted Linux debug Rust run passed 2,264 simulation unit tests and exposed
+two additional stale work-counter assertions. One still interpreted the historical
+`actor_table_copies` field as whole-map detaches rather than per-actor payload
+copies; its replacement checks both payload copies and ordered table-entry copies,
+while retaining old-snapshot, injury and unrelated-creature assertions. The other
+expected repeated classification on an unchanged warm observation; its replacement
+checks exact cold counts, zero additional warm classifications, identical disclosed
+views, and renewed classification after an actor is added. These are two stale-test
+roots/methods, not evidence of gameplay or privacy regressions.
+The same two failures reproduced in hosted Linux release (2,264 other simulation
+unit tests passed). Both corrected counter contracts passed the focused local
+owner; the unchanged production binaries and previously qualified behavior
+checks were not rebuilt or relabeled.
+
+The same hosted correction exposed three additional pure-fixture roots: the owned-HD
+wizard double still accepted only Snapshot where setup now explicitly requires
+Observe; the active-mob scripted binary bundle omitted Windows executable suffixes;
+and the combat driver double put completion receipts in picture events rather
+than ordered Outcomes. These account for six existing failed methods (one wizard,
+one driver and four combat methods), with repeated platform executions and combat
+subtests not counted again. Nine focused wizard/driver checks and eight combat
+checks pass, including both platform path branches and a negative picture-only
+completion witness. Production behavior and hash/identity/deadline checks were
+not relaxed.
+
+The real ASCII return-journey assertion also read a picture before its refresh:
+authoritative arrival correctly preceded the new displayed tick. Its replacement
+uses the outbound journey's existing current-picture barrier and retains the exact
+return tick. The door rewind witness likewise relied on display pace to keep
+travel unfinished; its replacement holds the Text client's arrival receipt while
+an independent spectator verifies completed travel and a still-closed door, then
+rewinds before releasing the pending door goal. These are two stale process-test
+methods, pending focused actual-process qualification; no additional production
+root is established by these timing failures.
+Both actual-process replacements now pass on the unchanged qualified applications.
+The first travel rerun additionally exposed a fixture-owned transport deadlock:
+it held the command acknowledgement, while automation intentionally waits for
+acknowledgement before reading another key. The relay now delivers Active and the
+acknowledgement before holding later steps, preserving the Skip control, seven
+paid steps, ordered history and source-free restart checks. This is maintenance
+within the same travel method, not a production defect or another failed method.
+The door witness drains each completed prompt explicitly before its query barrier.

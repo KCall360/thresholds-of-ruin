@@ -18,7 +18,10 @@ class ScriptedRun:
         self.stops, self.tools = [], []
         self.output = root / "output"
         root.mkdir()
-        binaries = {name: root / name for name in ("tor-server", "tor-client-headless", "active_mob_bench")}
+        suffix = ".exe" if driver.os.name == "nt" else ""
+        binaries = {name: root / (name + suffix)
+                    for name in ("tor-server", "tor-client-headless", "active_mob_bench")}
+        self.benchmark = binaries["active_mob_bench"]
         for name, binary in binaries.items():
             binary.write_bytes(("scripted fixture: " + name).encode())
         self.manifest = root / "manifest.json"
@@ -53,6 +56,7 @@ class ScriptedRun:
         fixture = self
         class Process:
             def __init__(self, binary, args, env, directory, name):
+                assert binary.is_file(), "Scripted run must use the qualified fixture bytes"
                 self.name, self.stopped = name, False
                 self.child = SimpleNamespace(pid=1)
                 self.last_reader_work_ms = self.last_queue_delay_ms = 0.
@@ -95,7 +99,7 @@ class ScriptedRun:
                 patch.object(driver.perf_ledger, "probe_machine", return_value={"scripted": True}), \
                 patch.object(driver.time, "perf_counter", side_effect=lambda: self.now), \
                 patch.object(driver.time, "sleep", side_effect=self.sleep):
-            return driver.run(self.root, self.root / "active_mob_bench", self.output, self.manifest,
+            return driver.run(self.root, self.benchmark, self.output, self.manifest,
                               duration=3.2, rate=5., burst=4, smoke=True)
 
 
@@ -380,6 +384,22 @@ class ActivityEvidence(unittest.TestCase):
             mutate(broken)
             with self.subTest(mutation=mutate), self.assertRaises(ValueError):
                 driver.validate_activity(broken, 300)
+
+    def test_scripted_paths_cover_both_driver_platform_branches(self):
+        # Replace only the driver's OS facade: pathlib and the host filesystem
+        # remain native, and no applications are launched by these doubles.
+        host_os = driver.os
+        with tempfile.TemporaryDirectory() as directory:
+            for platform, suffix in (("posix", ""), ("nt", ".exe")):
+                with self.subTest(platform=platform), patch.object(driver, "os", SimpleNamespace(
+                        name=platform, environ=host_os.environ, getpid=host_os.getpid)):
+                    scripted = ScriptedRun(Path(directory) / platform)
+                    self.assertEqual(scripted.benchmark.name, "active_mob_bench" + suffix)
+                    self.assertTrue((scripted.root / ("tor-server" + suffix)).is_file())
+                    self.assertTrue((scripted.root / ("tor-client-headless" + suffix)).is_file())
+                    self.assertTrue(scripted.run()["complete"])
+                    self.assertEqual(scripted.stops, ["initial-headless", "initial-server",
+                                                     "restart-headless", "restart-server"])
 
     def test_run_preserves_causal_failure_and_records_terminal_cleanup(self):
         # First establish the existing full run path, including actual local

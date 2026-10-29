@@ -144,21 +144,42 @@ fn observing_invisibility_and_guises_is_rng_clock_and_lifecycle_pure() {
 }
 
 #[test]
-fn one_observation_classifies_each_local_actor_once_for_all_projections() {
+fn observation_classifies_once_then_reuses_only_unchanged_visibility() {
     let mut game = fixture(&[], &[invisible()]);
     spawn(&mut game, "fixture_perception_owner", at(1, 2, 3));
-    game.observe(OWNER).unwrap();
     let before = crate::diagnostics::work_counts();
-    let view = game.observe(OWNER).unwrap();
+    let first = game.observe(OWNER).unwrap();
+    let cold = crate::diagnostics::work_counts();
+    assert_eq!(first.visible_actors.len(), 2);
+    assert_eq!(cold.observations - before.observations, 1);
+    assert_eq!(cold.actor_candidates - before.actor_candidates, 3);
+    assert_eq!(
+        cold.perception_projections - before.perception_projections,
+        1
+    );
+    assert_eq!(cold.actor_disclosures - before.actor_disclosures, 3);
+
+    let repeated = game.observe(OWNER).unwrap();
+    let warm = crate::diagnostics::work_counts();
+    assert_eq!(repeated, first);
+    assert_eq!(warm.observations - cold.observations, 1);
+    assert_eq!(warm.actor_candidates, cold.actor_candidates);
+    assert_eq!(warm.perception_projections, cold.perception_projections);
+    assert_eq!(warm.actor_disclosures, cold.actor_disclosures);
+
+    // A new actor invalidates the classification witness, including hidden rows.
+    spawn(&mut game, "fixture_perception_owner", at(1, 3, 3));
+    let before = crate::diagnostics::work_counts();
+    let changed = game.observe(OWNER).unwrap();
     let after = crate::diagnostics::work_counts();
-    assert_eq!(view.visible_actors.len(), 2);
+    assert_eq!(changed.visible_actors.len(), 3);
     assert_eq!(after.observations - before.observations, 1);
-    assert_eq!(after.actor_candidates - before.actor_candidates, 3);
+    assert_eq!(after.actor_candidates - before.actor_candidates, 4);
     assert_eq!(
         after.perception_projections - before.perception_projections,
         1
     );
-    assert_eq!(after.actor_disclosures - before.actor_disclosures, 3);
+    assert_eq!(after.actor_disclosures - before.actor_disclosures, 4);
 }
 
 #[test]
