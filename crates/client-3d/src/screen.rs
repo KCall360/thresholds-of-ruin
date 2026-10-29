@@ -160,7 +160,8 @@ pub(crate) fn typing(mut input: EventReader<KeyboardInput>, net: Res<Net>, mut g
             }
             continue;
         }
-        if let (Screen::Note { snapshot, private }, Key::Tab) = (screen.clone(), &event.logical_key) {
+        if let (Screen::Note { snapshot, private }, Key::Tab) = (screen.clone(), &event.logical_key)
+        {
             game.screen = Some(Screen::Note {
                 snapshot,
                 private: !private,
@@ -401,8 +402,13 @@ mod tests {
             private: true,
         });
         // A later display must not silently retarget the open note.
-        app.world_mut().resource_mut::<Game>().view.as_mut().unwrap().shown.snapshot =
-            tor_protocol::SnapshotId("newer-display-snapshot".into());
+        app.world_mut()
+            .resource_mut::<Game>()
+            .view
+            .as_mut()
+            .unwrap()
+            .shown
+            .snapshot = tor_protocol::SnapshotId("newer-display-snapshot".into());
         press(&mut app, Key::Tab);
         for c in ["o", "k"] {
             press(&mut app, Key::Character(c.into()));

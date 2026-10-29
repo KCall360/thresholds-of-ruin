@@ -546,7 +546,8 @@ pub fn keys(
     if keys.just_pressed(KeyCode::F4) {
         let snapshot = game.view.as_ref().map(|view| view.shown.snapshot.clone());
         if let Some(snapshot) = snapshot.filter(|_| {
-            game.screen.as_ref()
+            game.screen
+                .as_ref()
                 .is_none_or(|open| matches!(open, Screen::Note { .. }))
         }) {
             toggle(
@@ -564,7 +565,12 @@ pub fn keys(
         toggle(&net, &mut game, Screen::Places { renaming: None });
         return;
     }
-    if keys.just_pressed(KeyCode::KeyC) && game.screen.as_ref().is_none_or(|open| *open == Screen::Charts) {
+    if keys.just_pressed(KeyCode::KeyC)
+        && game
+            .screen
+            .as_ref()
+            .is_none_or(|open| *open == Screen::Charts)
+    {
         toggle(&net, &mut game, Screen::Charts);
         return;
     }

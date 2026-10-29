@@ -1257,3 +1257,13 @@ with its hash and actual `--list` paths verified; seven exact checks then passed
 This is a local driver-selection error, not a production defect or a passing test.
 Read-only audit also found two benchmark examples selecting an older wire fixture;
 both now select the current fixture and their existing contract tests pass.
+
+### Performance PR hosted 3D formatting gate
+
+The first independent 3D CI run rejected rustfmt layout in two migrated UI
+files before compiling or executing behavior tests. This is one formatting
+root cause, not a gameplay defect or stale behavioral oracle; platform/profile
+repeats are not additional defects. Rustfmt corrected only whitespace in
+`interact.rs` and `screen.rs`. Both workspace formatting checks passed locally;
+behavioral evidence is reused for identical non-whitespace source, while hosted
+native 3D qualification must still run on the corrected head.
