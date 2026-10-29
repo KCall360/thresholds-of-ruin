@@ -5,10 +5,14 @@ the eligible recipes, with Vampire/Griffin/Jabberwock in the explicit mixed tail
 racial growth still refuses beyond current construction/storage capacity. Inputs
 are not balance recommendations or earned progression evidence. Run only in the
 qualified coordinator lane; the ordinary compiler creates candidate certificates.
-Reviewed 21-, 24- and 26-species inputs are conditioned to the same
-eighteen-species diagnostic output; none reproduces current production population
+Reviewed 21-, 24- and historical/live 26-species inputs are conditioned to the same
+eighteen-species population policy; none reproduces current production population
 or its Gold, perception, corrosion and ray encounters. The fixed diagnostic has
 no wandering policy and provides no evidence for current wandering pressure.
+The rest of the supplied package is inherited, including geometry recipes:
+current-source candidates include its omission/maze policies. Fixed population
+does not mean frozen geometry or seed-identical outcomes across source snapshots,
+and this adapter never updates the separately frozen earned-route comparator.
 """
 import argparse
 import copy
@@ -23,7 +27,7 @@ from arena_evaluation import MAX_BYTES, digest, files, write_json
 from arena_matrix import toml_source
 from ruleset_sources import resolve_with_dependencies
 from rogue_activation_oracle import (reviewed_twenty_four_activation, reviewed_twenty_one_activation,
-                                     reviewed_twenty_six_activation)
+                                     reviewed_twenty_six_activation, reviewed_live_activation)
 
 
 REFERENCE = "c7c119f893bd2f8255f2ad78d58a32664ddb9a97"
@@ -161,7 +165,7 @@ def population_shape(source):
         return "reviewed_twenty_one_species_input"
     if exact(activation) == exact(reviewed_twenty_four_activation()):
         return "reviewed_twenty_four_species_input"
-    if exact(activation) == exact(reviewed_twenty_six_activation()):
+    if exact(activation) in (exact(reviewed_twenty_six_activation()), exact(reviewed_live_activation())):
         return "reviewed_twenty_six_species_input"
     raise ValueError("Review changed population profile or carried-item pool before generating a candidate")
 
@@ -177,6 +181,11 @@ def population_scope(manifest):
 
 
 def candidate_manifest(source, *, start_depth=1):
+    """Replace only population policy, identity and an optional start anchor.
+
+    Geometry and other supplied content remain source-owned, not frozen by the
+    eighteen-species population transformation or qualified by earlier runs.
+    """
     domain = source["procedural_worlds"]["dungeon"]["domain"]
     if (domain["kind"] != "open" or type(start_depth) is not int
             or not 1 <= start_depth <= domain["max_depth"]):
@@ -289,7 +298,9 @@ def create_candidate(output, compiler, *, source_package, source_provenance, sta
             "the Leprechaun birth-Gold pool, room-Gold stage and "
             "finite magic-potion, magic-scroll and magic-device stages are omitted; "
             "finite equipment, equipment-scroll, ammunition and ring stages are omitted; "
-            "the finite control-scroll stage and wandering population policy are omitted")
+            "the finite control-scroll stage and wandering population policy are omitted; "
+            "live supplemental stock and treasure-room stages are omitted when present; "
+            "authored geometry is retained and is not a frozen earned-route comparator")
     write_json(output / "partial.json", inventory)
     try:
         for group, values in (("package", snapshot), ("tools", tools), ("compiler", compiler_inputs)):

@@ -28,7 +28,7 @@ from process_harness import (
 )
 from arena_matrix import toml_source
 from process_work_budget import ProcessOutputBudget, ProcessWorkBudget
-from rogue_activation_oracle import reviewed_twenty_six_activation
+from rogue_activation_oracle import reviewed_live_activation
 from rogue_earned_route_process import read_authoritative_evidence
 from rogue_magic_receipts import (
     EQUIPMENT_ITEM_STAGE_IDS, CONTROL_ITEM_STAGE_IDS, MAGIC_ITEM_STAGE_IDS,
@@ -58,7 +58,7 @@ def carried_stock(frame, supply):
 def fixed_initial_population_manifest(manifest):
     """Reviewed current26 source, diagnostic-only fixed initial population."""
     actual = json.dumps(manifest.get("floor_activation"), sort_keys=True)
-    expected = json.dumps(reviewed_twenty_six_activation(), sort_keys=True)
+    expected = json.dumps(reviewed_live_activation(), sort_keys=True)
     if actual != expected:
         raise ValueError("Fixed-initial diagnostic requires exact reviewed current26 population")
     fixture = copy.deepcopy(manifest)
@@ -1169,6 +1169,8 @@ class RogueChecks:
         return current, meals.eaten
 
     def assert_rogue_population(self, receipt, scope, cause):
+        from rogue_magic_receipts import LIVE_CONTENT_STAGE_IDS, assert_live_content_receipts
+
         self.assertEqual(receipt["scope"], scope)
         self.assertEqual(receipt["entrant"], 1)
         self.assertEqual(receipt["cause"], cause)
@@ -1190,11 +1192,13 @@ class RogueChecks:
         )
         self.assertEqual([stage["id"] for stage in receipt["decisions"]],
                          [stage for stage, _, _, _ in expected]
-                         + ["rogue.room_gold", *MAGIC_ITEM_STAGE_IDS, *EQUIPMENT_ITEM_STAGE_IDS, *CONTROL_ITEM_STAGE_IDS])
+                         + ["rogue.room_gold", *MAGIC_ITEM_STAGE_IDS, *EQUIPMENT_ITEM_STAGE_IDS,
+                            *CONTROL_ITEM_STAGE_IDS, *LIVE_CONTENT_STAGE_IDS])
         entities = assert_room_gold_receipt(self, receipt["decisions"][4], depth)
         entities.extend(assert_magic_item_receipts(self, receipt["decisions"][5:8], require_placed=True))
         entities.extend(assert_equipment_item_receipts(self, receipt["decisions"][8:12], require_placed=True))
-        entities.extend(assert_control_item_receipts(self, receipt["decisions"][12:], require_placed=True))
+        entities.extend(assert_control_item_receipts(self, receipt["decisions"][12:13], require_placed=True))
+        entities.extend(assert_live_content_receipts(self, receipt["decisions"][13:], depth))
         for stage, (_, choices, kind, count) in zip(receipt["decisions"][:4], expected, strict=True):
             self.assertEqual(stage["version"], 1)
             result = stage["result"]

@@ -1734,3 +1734,42 @@ text call, then passed with the single-path correction. Companion checks retain
 Windows key release on a frame-wait failure and immediate rejection of a `kk`
 edit. These mocks prove fixture ownership/cleanup, not Win32 translation; the
 real native acceptance remains the platform authority.
+
+## Live Rogue content activation (2026-10-29)
+
+The approved data-only activation intentionally supersedes earlier opt-in-only
+stock and exact thirteen-stage assertions. The first content checkpoint had
+18 distinct stale methods (19 failure reports because the dart/shuriken method
+reported two subtests); two diagnostic-adapter methods then exposed a stale
+listed-stage inventory and a last-stage `bands` assumption after the appended
+treasure stage. These are planned policy/fixture maintenance, not discovered
+production gameplay defects. Existing item/effect, unchanged-kit, legacy-stage
+and historical-oracle assertions remain; explicit live-policy and real-process
+birth/layout/reopen witnesses cover the new policy. The three deliberate
+feature-first-red tests are excluded from stale-test and defect totals.
+
+The first combined process checkpoint overlapped a server test-binary build and
+hit two setup/deadline failures: the unmodified-live-package witness exceeded its
+60-second compiler limit, and the existing preset witness exceeded the Mage's
+server-start deadline. The suite was stopped (exit 130), retaining both failures
+and the completed all-17 and existing treasure-room witnesses. Resource
+contention is a possible contributor, not a proven cause; neither failure
+establishes a gameplay defect. Failed/interrupted and unrun selected methods are
+rerun serially after the Rust checkpoint, without increasing limits or weakening
+assertions. These two distinct methods are separate from the stale-oracle counts
+above; interrupted methods without outcomes are not counted as failures.
+
+Both earlier deadline methods passed serially with unchanged limits. Two other
+methods then exceeded existing 30-second fixture-compilation limits before any
+play: Mage source-deletion and the fixed-initial first-floor walkthrough. The
+qualified local compiler is dev-opt0; unmodified live-package validation passed
+in 51.4 seconds, so these capped methods remain locally unqualified. Ordinary
+death was reached, but its saved-game reopening exceeded the existing 15-second
+startup deadline after `restore.replay.begin`; that replay outcome also remains
+unresolved. No crash or gameplay diagnosis follows from the deadline alone.
+There are five distinct failed/error methods across these checkpoints, two later
+passing and three unresolved locally. On maintainer direction, the selected
+four deep-fixture compiles and unfinished technique methods were deferred to
+required hosted profiles rather than repeating predictable compilation limits
+or starting an optimized-build campaign. No timeout or assertion was relaxed;
+these deferrals are not passes or graphical waivers.

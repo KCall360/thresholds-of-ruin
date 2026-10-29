@@ -79,7 +79,7 @@ class RogueEquipmentContent(unittest.TestCase):
         stages = source("scenario.toml")["floor_activation"]["profiles"]["rogue.low_depth"]["stages"]
         self.assertEqual([stage["id"] for stage in stages], ["rogue.eight_species_foes", "rogue.bandages",
                          "rogue.rations", "rogue.restore_strength", "rogue.room_gold", "rogue.magic_potions",
-                         "rogue.magic_scrolls", "rogue.magic_devices", "rogue.equipment", "rogue.equipment_scrolls", "rogue.ammunition", "rogue.rings", "rogue.control_scrolls"])
+                         "rogue.magic_scrolls", "rogue.magic_devices", "rogue.equipment", "rogue.equipment_scrolls", "rogue.ammunition", "rogue.rings", "rogue.control_scrolls", "rogue.expanded_stock", "rogue.treasure_room"])
         expected = [
             ["healing", "confusion", "blindness", "poison", "see_invisible", "extra_healing", "levitation"],
             ["identify_potion", "identify_scroll", "identify_wand", "sleep", "teleportation"],

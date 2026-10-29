@@ -137,7 +137,7 @@ class RogueProjectileContent(unittest.TestCase):
                 self.assertNotIn("discreet", profile["expert_traits"]["remove"])
 
 
-    def test_standalone_darts_and_shuriken_have_distinct_payloads_and_no_live_stock(self):
+    def test_standalone_darts_and_shuriken_have_distinct_payloads_and_live_stock(self):
         items = source("catalog/items.toml")["items"]
         expected = {
             "dart": ({"category": "keen"}, {"type": "fixed", "value": 1}, 1, 3),
@@ -166,8 +166,8 @@ class RogueProjectileContent(unittest.TestCase):
                 # These are real inventory weapons, never disguised ammunition.
                 self.assertNotIn("projectile", items[identity])
                 self.assertNotIn("launcher", items[identity]["equipment"]["weapon_profile"])
-                for path in ("scenario.toml", "catalog/actors.toml"):
-                    self.assertNotIn(identity, (PACKAGE / path).read_text(encoding="utf-8"))
+                self.assertIn(identity, (PACKAGE / "scenario.toml").read_text(encoding="utf-8"))
+                self.assertNotIn(identity, (PACKAGE / "catalog/actors.toml").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

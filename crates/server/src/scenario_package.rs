@@ -47,6 +47,8 @@ pub use retrieval::UniqueRetrieval;
 #[cfg(test)]
 pub(crate) use spatial_runtime::tests::package as spatial_audit_test_package;
 pub(crate) use spatial_runtime::{HistoricalSourceAudit, SpatialAudit};
+#[cfg(test)]
+pub(crate) use spatial_sources::unroot_live_rogue_supplement;
 #[path = "scenario_rules.rs"]
 mod rules_source;
 pub use artifact::export;

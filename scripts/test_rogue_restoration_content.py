@@ -125,7 +125,7 @@ class RogueRestorationContent(unittest.TestCase):
         stages = source("scenario.toml")["floor_activation"]["profiles"]["rogue.low_depth"]["stages"]
         self.assertEqual([row["id"] for row in stages], ["rogue.eight_species_foes", "rogue.bandages",
             "rogue.rations", "rogue.restore_strength", "rogue.room_gold", "rogue.magic_potions", "rogue.magic_scrolls",
-            "rogue.magic_devices", "rogue.equipment", "rogue.equipment_scrolls", "rogue.ammunition", "rogue.rings", "rogue.control_scrolls"])
+            "rogue.magic_devices", "rogue.equipment", "rogue.equipment_scrolls", "rogue.ammunition", "rogue.rings", "rogue.control_scrolls", "rogue.expanded_stock", "rogue.treasure_room"])
         self.assertEqual(stages[3], {"id": "rogue.restore_strength", "version": 1, "kind": "items",
             "count": [1, 1], "quantity": 1, "bands": [{"depth": {"kind": "open", "minimum": 1},
                 "choices": [{"archetype": POTION, "weight": 1}]}]})

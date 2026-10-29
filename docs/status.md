@@ -55,18 +55,21 @@ The current retained authoring/content format stores bounded physical forms;
 protocol item class `wand` remains the shared wands-and-staves category. See the
 [item contracts](reference/items.md#magical-wand-and-staff-forms).
 
-The opt-in Rogue content catalog now includes ordinary fruit and standalone
-stackable darts/shuriken with distinct melee/throw payloads and consumed-hit
-recovery. A bounded shared-room population stage supports treasure rooms with
-explicit effective actor birth depth and strict nested entry receipts. The
-inert [authoring example](../scenarios/rogue-exploration/examples/treasure-stage.toml)
-must be selected explicitly; existing live stage IDs/order, weights, starter
-kits, dagger/arrow behavior and food rules are unchanged. See the
-[item contracts](reference/items.md#ordinary-fruit) and
-[population schema](reference/scenario-packages.md#first-entry-population).
-Focused local and real-process evidence is distinct from required final-head
-hosted qualification; native carried-stack input is a hosted owner, not a claimed
-local graphical pass. This does not establish balance or complete Rogue parity.
+The live Rogue package now enables 17 already-implemented catalog items through
+an appended zero-or-one supplemental stock stage, plus a rare shared treasure room.
+Existing stages, their relative order and weights, starter kits and rules remain
+intact. Treasure uses independent 2–4 item / 1–3 actor requests, one unit per item,
+and ordinary actor bands at next-depth context. Room omissions (0–1) and eligible
+dark-room maze trials (1 in 15) are also enabled. The
+[live policy](reference/scenario-packages.md#live-rogue-content-policy) and
+[generation reference](reference/generation.md#optional-room-omissions) own exact
+choices and constraints. All frequencies are explicitly provisional; geometry
+and legal placements can change even with the same seed. Torches remain
+catalog-only and Polymorph destinations remain emu/snake/troll. This activation
+adds no mechanics, formats, balance campaign or new earned-route qualification.
+Earlier reconstruction receipts below describe their original checkpoints, not
+fresh verification or current loot availability. Required final-head hosted
+qualification remains separate from local evidence.
 
 The approved [missing-consumables batch](plans/rogue-missing-consumables.md) is
 being reconstructed from published source after its previous local implementation
@@ -839,11 +842,12 @@ Its actual-process witnesses cover paid Search, traversal and source-free revisi
 The earlier all-dark discovery failure motivated the approved tactile rule, not a
 weaker fixture, private route oracle or larger navigation cap.
 
-Live maze and omission policies remain disabled; numerical enablement is separate
-work. The separately approved missing-consumables reconstruction is in progress;
-balance tuning and unrelated milestones remain deferred. Remaining work includes
-shared survival, items and
-species behavior, the complete 26-species roster's integrated acceptance and
+Live maze and omission policies are now enabled with the provisional activation
+values in the [generation reference](reference/generation.md#optional-room-omissions).
+Completed catalog items and rare treasure rooms are also selected by the live
+package; numerical calibration, balance tuning and unrelated milestones remain
+deferred. This does not expand the frozen earned-route comparator. Remaining work
+includes shared survival, items and species behavior, the complete 26-species roster's integrated acceptance and
 pressured runs. Topology/persistence witnesses do not establish survival balance.
 Local graphical waivers were not passes; they did not remove required CI coverage.
 Work beyond the accepted 256-HD guard, including exact-row deep storage and

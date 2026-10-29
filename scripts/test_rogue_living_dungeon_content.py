@@ -49,7 +49,7 @@ class RogueLivingDungeonContent(unittest.TestCase):
                 self.assertNotIn("rogue." + name, [v["archetype"] for v in character["loadout"]])
         self.assertEqual(items["rogue.scare_monster"]["ground_scare"], {
             "condition": "rogue.scared", "duration": 1000})
-        stage = manifest["floor_activation"]["profiles"]["rogue.low_depth"]["stages"][-1]
+        stage = manifest["floor_activation"]["profiles"]["rogue.low_depth"]["stages"][12]
         self.assertEqual(stage, {"id": "rogue.control_scrolls", "version": 1, "kind": "items",
             "count": [1, 1], "quantity": 1, "bands": [{"depth": {"kind": "open", "minimum": 1},
                 "choices": [{"archetype": "rogue." + name, "weight": 1} for name in expected]}]})

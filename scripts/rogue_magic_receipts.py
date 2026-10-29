@@ -101,3 +101,118 @@ CONTROL_ITEM_STAGE_IDS = tuple(identity for identity, _ in CONTROL_ITEM_STAGES)
 def assert_control_item_receipts(test, stages, *, require_placed=False):
     """Require the one finite control-scroll attempt and return its owned ID."""
     return _assert_finite_item_receipts(test, stages, CONTROL_ITEM_STAGES, require_placed=require_placed)
+
+
+LIVE_CONTENT_STAGE_IDS = ("rogue.expanded_stock", "rogue.treasure_room")
+EXPANDED_ITEM_CHOICES = tuple("rogue." + name for name in (
+    "haste", "gain_strength", "raise_level", "hallucination", "monster_detection",
+    "magic_detection", "food_detection", "magic_mapping", "wand_nothing", "wand_light",
+    "wand_drain_life", "wand_cancellation", "wand_magic_missile", "wand_polymorph",
+    "fruit", "dart", "shuriken"))
+TREASURE_ITEM_CHOICES = tuple("rogue." + name for name in ("gold", "healing", "fruit", "dart", "shuriken"))
+
+
+def _bounded_integer(test, value, minimum, maximum):
+    test.assertIs(type(value), int)
+    test.assertGreaterEqual(value, minimum)
+    test.assertLessEqual(value, maximum)
+
+
+def _assert_live_attempt(test, attempt, choices, kind, depth):
+    test.assertIn(attempt["content"], choices)
+    if attempt["kind"] == "skipped":
+        test.assertEqual(attempt, {"kind": "skipped", "content": attempt["content"],
+                                   "reason": "no_eligible_cell"})
+        return []
+    test.assertEqual(set(attempt), {"kind", "content", "location", "entity"})
+    test.assertEqual(attempt["kind"], "placed")
+    location = attempt["location"]
+    test.assertEqual(set(location), {"region", "position"})
+    _bounded_integer(test, location["region"], 1, (1 << 64) - 1)
+    test.assertEqual(set(location["position"]), {"x", "y", "z"})
+    for coordinate in location["position"].values():
+        _bounded_integer(test, coordinate, -(1 << 31), (1 << 31) - 1)
+    entity = attempt["entity"]
+    test.assertEqual(set(entity), {"kind", "id", "quantity" if kind == "item" else "carried_loot"})
+    test.assertEqual(entity["kind"], kind)
+    _bounded_integer(test, entity["id"], 1, (1 << 64) - 1)
+    identities = [(kind, entity["id"])]
+    if kind == "item":
+        _bounded_integer(test, entity["quantity"], 1, 1)
+        return identities
+    policy = choices[attempt["content"]].get("carried_loot")
+    stock = entity["carried_loot"]
+    if policy is None:
+        test.assertIsNone(stock)
+        return identities
+    test.assertIsInstance(stock, dict)
+    if stock["kind"] == "not_carried":
+        test.assertEqual(stock, {"kind": "not_carried"})
+        test.assertLess(policy["chance"]["numerator"], policy["chance"]["denominator"])
+        return identities
+    test.assertEqual(set(stock), {"kind", "content", "quantity", "item"})
+    test.assertEqual(stock["kind"], "carried")
+    _bounded_integer(test, stock["item"], 1, (1 << 64) - 1)
+    if policy["pool"] == "rogue.leprechaun_gold":
+        test.assertEqual(stock["content"], "rogue.gold")
+        _bounded_integer(test, stock["quantity"], 2, 51 + 10 * depth)
+    else:
+        test.assertEqual(policy["pool"], "rogue.vampire_supplies")
+        test.assertIn(stock["content"], ("rogue.ration", "rogue.clean_bandage"))
+        _bounded_integer(test, stock["quantity"], 1, 1)
+    identities.append(("item", stock["item"]))
+    return identities
+
+
+def assert_live_content_receipts(test, stages, depth):
+    """Strict appended-stage policy; return all births, including carried stock.
+
+    Actor eligibility comes from the independent historical roster oracle, not
+    the supplied manifest or a receipt. This does not assert occurrence rates.
+    """
+    from rogue_activation_oracle import reviewed_twenty_six_activation
+
+    _bounded_integer(test, depth, 1, 1_000_000)
+    test.assertEqual([stage["id"] for stage in stages], list(LIVE_CONTENT_STAGE_IDS))
+    for stage in stages:
+        test.assertEqual(set(stage), {"id", "version", "result"})
+        _bounded_integer(test, stage["version"], 1, 1)
+    stock = stages[0]["result"]
+    test.assertEqual(set(stock), {"kind", "requested", "attempts"})
+    test.assertEqual(stock["kind"], "evaluated")
+    _bounded_integer(test, stock["requested"], 0, 1)
+    test.assertIsInstance(stock["attempts"], list)
+    test.assertEqual(len(stock["attempts"]), stock["requested"])
+    identities = []
+    for attempt in stock["attempts"]:
+        identities.extend(_assert_live_attempt(test, attempt, EXPANDED_ITEM_CHOICES, "item", depth))
+    cluster = stages[1]["result"]
+    test.assertEqual(set(cluster), {"kind", "selection"})
+    test.assertEqual(cluster["kind"], "room_cluster")
+    selected = cluster["selection"]
+    if selected["kind"] in ("chance_miss", "no_eligible_room"):
+        test.assertEqual(set(selected), {"kind"})
+        return identities
+    test.assertEqual(set(selected), {"kind", "room", "room_area", "actor_depth", "item_requested",
+                                    "actor_requested", "items", "actors"})
+    test.assertEqual(selected["kind"], "selected")
+    _bounded_integer(test, selected["room"], 1, 64)
+    _bounded_integer(test, selected["room_area"], 1, 1024)
+    _bounded_integer(test, selected["actor_depth"], depth + 1, depth + 1)
+    _bounded_integer(test, selected["item_requested"], 2, 4)
+    _bounded_integer(test, selected["actor_requested"], 1, 3)
+    actor_depth = selected["actor_depth"]
+    bands = reviewed_twenty_six_activation()["profiles"]["rogue.low_depth"]["stages"][0]["bands"]
+    actors = {choice["archetype"]: choice for band in bands
+              if band["depth"]["minimum"] <= actor_depth
+              and (band["depth"]["kind"] == "open" or actor_depth <= band["depth"]["maximum"])
+              for choice in band["choices"]}
+    test.assertTrue(actors)
+    for role, choices, kind in (("items", TREASURE_ITEM_CHOICES, "item"), ("actors", actors, "actor")):
+        test.assertIsInstance(selected[role], list)
+        requested = selected["item_requested" if kind == "item" else "actor_requested"]
+        test.assertEqual(len(selected[role]), min(requested, selected["room_area"]))
+        for attempt in selected[role]:
+            identities.extend(_assert_live_attempt(test, attempt, choices, kind, actor_depth))
+    test.assertEqual(len(identities), len(set(identities)))
+    return identities

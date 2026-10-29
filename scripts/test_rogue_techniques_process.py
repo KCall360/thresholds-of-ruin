@@ -10,8 +10,9 @@ from process_harness import (
     ProcessTestCase, content_ids, disclosed_exploration_route, resource, settle_rogue_action, underfoot, hit_die_counts,
 )
 from rogue_magic_receipts import (
-    EQUIPMENT_ITEM_STAGE_IDS, CONTROL_ITEM_STAGE_IDS, MAGIC_ITEM_STAGE_IDS,
+    EQUIPMENT_ITEM_STAGE_IDS, CONTROL_ITEM_STAGE_IDS, MAGIC_ITEM_STAGE_IDS, LIVE_CONTENT_STAGE_IDS,
     assert_equipment_item_receipts, assert_control_item_receipts, assert_magic_item_receipts,
+    assert_live_content_receipts,
 )
 
 from rogue_test_support import (
@@ -82,11 +83,13 @@ class RogueTechniquesProcesses(ProcessTestCase):
         )
         self.assertEqual([row["id"] for row in receipt["decisions"]],
                          [row[0] for row in expected]
-                         + ["rogue.room_gold", *MAGIC_ITEM_STAGE_IDS, *EQUIPMENT_ITEM_STAGE_IDS, *CONTROL_ITEM_STAGE_IDS])
+                         + ["rogue.room_gold", *MAGIC_ITEM_STAGE_IDS, *EQUIPMENT_ITEM_STAGE_IDS,
+                            *CONTROL_ITEM_STAGE_IDS, *LIVE_CONTENT_STAGE_IDS])
         identities = assert_room_gold_receipt(self, receipt["decisions"][4], 1)
         identities.extend(assert_magic_item_receipts(self, receipt["decisions"][5:8], require_placed=True))
         identities.extend(assert_equipment_item_receipts(self, receipt["decisions"][8:12], require_placed=True))
-        identities.extend(assert_control_item_receipts(self, receipt["decisions"][12:], require_placed=True))
+        identities.extend(assert_control_item_receipts(self, receipt["decisions"][12:13], require_placed=True))
+        identities.extend(assert_live_content_receipts(self, receipt["decisions"][13:], 1))
         for stage, (_, eligible, kind, count) in zip(receipt["decisions"][:4], expected, strict=True):
             self.assertEqual(stage["version"], 1)
             result = stage["result"]
