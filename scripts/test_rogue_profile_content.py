@@ -65,15 +65,78 @@ class RogueProfileContent(unittest.TestCase):
                       if row["path"] == ["constants", "default_abilities"]]
         self.assertNotIn("bind_wounds", defaults)
 
+    def test_item_stages_follow_rogue_generation(self):
+        stages = {stage["id"]: stage for stage in
+                  self.manifest["floor_activation"]["profiles"]["rogue.low_depth"]["stages"]}
+        # Two independent groups keep each type's expected count equal to
+        # Rogue's nine 36% attempts with category x subtype weights.
+        expected = {}
+        for stage in (stages["rogue.items"], stages["rogue.items_other"]):
+            self.assertEqual((stage["kind"], stage["attempts"]), ("chance_items", 9))
+            chance = stage["chance"]["numerator"] / stage["chance"]["denominator"]
+            weights = {row["archetype"]: row["weight"] for row in stage["bands"][0]["choices"]}
+            for archetype, weight in weights.items():
+                expected[archetype] = 9 * chance * weight / sum(weights.values())
+        self.assertAlmostEqual(sum(expected.values()), 9 * 0.36)
+        food = expected["rogue.ration"] + expected["rogue.fruit"]
+        self.assertAlmostEqual(food, 9 * 0.36 * 0.16)
+        self.assertAlmostEqual(expected["rogue.ration"] / food, 0.9)
+        self.assertAlmostEqual(expected["rogue.healing"], 9 * 0.36 * 0.26 * 0.13)
+        drought = stages["rogue.food_drought"]
+        self.assertEqual((drought["kind"], drought["threshold"]), ("food_drought", 3))
+        self.assertEqual(set(drought["food"]), {"rogue.ration", "rogue.fruit"})
+        self.assertEqual(stages["rogue.treasure_room"]["chance"], {"numerator": 1, "denominator": 20})
+        # The committed stages are exactly the generator's current output.
+        import rogue_item_table
+        text = (PACKAGE / "scenario.toml").read_text(encoding="utf-8")
+        self.assertEqual(rogue_item_table.rewrite(text), text)
+
     def test_only_listed_sources_differ_from_the_starter_package(self):
-        for name in ["catalog/actors.toml", "catalog/bodies.toml", "catalog/creatures.toml",
-                     "catalog/items.toml"]:
+        for name in ["catalog/actors.toml", "catalog/bodies.toml", "catalog/items.toml"]:
             self.assertEqual((PACKAGE / name).read_bytes(), (STARTER / name).read_bytes(), name)
+        # Species differ only in tuned values: Health and defense modifiers,
+        # melee accuracy and damage-dice bonuses (rogue_species_tuning.py).
+        def untuned(path):
+            species = load(path / "catalog/creatures.toml")["creatures"]["species"]
+            for row in species.values():
+                row["modifiers"] = [modifier for modifier in row.get("modifiers", [])
+                                    if not (modifier["op"].get("kind") == "add"
+                                            and modifier["op"]["stat"]["kind"] in ("health", "defense"))
+                                    and modifier["op"].get("kind") != "attribute_without_defense"]
+                if "bonus" in row.get("melee", {}):
+                    row["melee"]["bonus"] = 0
+                for strike in row.get("melee", {}).get("strikes", []):
+                    for effect in strike.get("on_success", []):
+                        for component in effect.get("damage", {}).get("components", []):
+                            if component["amount"].get("kind") == "rolled":
+                                component["amount"]["dice"]["bonus"] = 0
+            return species
+        self.assertEqual(untuned(PACKAGE), untuned(STARTER))
         starter = load(STARTER / "rules.toml")
         changed = [row["path"] for row, old in zip(self.rules["overrides"], starter["overrides"])
                    if row != old]
-        self.assertEqual(changed, [["constants", "default_abilities"]])
-        self.assertEqual(len(self.rules["overrides"]), len(starter["overrides"]))
+        self.assertEqual(changed, [["nutrition"], ["constants", "default_abilities"]])
+        added = [row["path"] for row in self.rules["overrides"][len(starter["overrides"]):]]
+        self.assertEqual(added, [["health_recovery"], ["growth", "threshold_base"],
+                                 ["growth", "threshold_per_tier"]])
+
+    def test_rogue_value_tuning_in_rules(self):
+        by_path = {tuple(row["path"]): row["value"] for row in self.rules["overrides"]}
+        nutrition = by_path[("nutrition",)]
+        # Rogue's food constants; healing never costs food.
+        self.assertEqual((nutrition["initial"], nutrition["maximum"], nutrition["hungry_below"],
+                          nutrition["weak_below"], nutrition["starve_at"]), (1300, 2000, 300, 150, -852))
+        self.assertEqual({key: value for key, value in nutrition["regeneration_cost"].items()
+                          if key != "denominator"}, {"health": 0, "stamina": 0, "focus": 0, "mana": 0})
+        recovery = by_path[("health_recovery",)]
+
+        def turns_per_hp(level):
+            hd = level + 1  # the body's racial HD plus one Warrior HD per level
+            period = recovery["base_period"] - recovery["reduction_per_hd"] * (hd - 1)
+            return max(recovery["minimum_period"], period) / 100
+        # Rogue's doctor: 21 - 2 x level turns per HP below level 8.
+        for level in (1, 3, 5, 7):
+            self.assertLessEqual(abs(turns_per_hp(level) - (21 - 2 * level)), 2.5, level)
 
 
 if __name__ == "__main__":

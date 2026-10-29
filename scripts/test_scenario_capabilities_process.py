@@ -85,6 +85,37 @@ class ScenarioCapabilityProcesses(ProcessTestCase):
         self.assertNotIn("bind_wounds", abilities)
         self.assertIn("basic_melee", abilities)
 
+    def test_rogue_adventurer_grows_its_scheduled_row_through_ordinary_play(self):
+        # A copy of the Rogue package whose kit adds one known Raise Level potion.
+        package = self.directory / "rogue-raise"
+        shutil.copytree(ROOT / "scenarios/rogue", package, dirs_exist_ok=True)
+        manifest = tomllib.loads((package / "scenario.toml").read_text(encoding="utf-8"))
+        character = manifest["characters"][0]
+        character["loadout"].append({"archetype": "rogue.raise_level", "quantity": 1})
+        character["known_identities"].append("rogue.raise_level")
+        (package / "scenario.toml").write_text(toml_source(manifest), encoding="utf-8", newline="\n")
+        compiler = self.bin / ("tor-scenario" + self.suffix)
+        validated = subprocess.run([str(compiler), "validate", str(package)], capture_output=True,
+                                   text=True, encoding="utf-8", timeout=120)
+        self.assertEqual(validated.returncode, 0, validated.stderr)
+        self.server(scenario=package)
+        player, initial = self.client()
+        before = overview(self, player)
+        stats = observation(initial)["combat"]["own_stats"]
+        self.assertEqual(u64(stats["hit_dice"]["total"]), 2)
+        potion = next(row for row in observation(initial)["inventory"] if "raise level" in row["name"])
+        self.assertIsNone(self.act(player, {"type": "drink", "item": potion["id"]})["error"])
+        after_frame = self.request(player, {"type": "snapshot"})
+        stats = observation(after_frame)["combat"]["own_stats"]
+        self.assertEqual(u64(stats["hit_dice"]["total"]), 3)
+        after = overview(self, player)
+        self.assertTrue(after["locked"])
+        # The first scheduled row buys one Light Weaponry rank automatically.
+        self.assertEqual(u64(after["points"]["spent"]), u64(before["points"]["spent"]) + 1)
+        self.assertEqual(after["points"]["unspent"], before["points"]["unspent"])
+        self.assertEqual(manifest["characters"][0]["creature"]["growth_schedule"][0]["purchases"][0]
+                         ["selection"]["skill"], "light_weaponry")
+
     def check_mutated_rogue(self, edit):
         package = self.directory / "rogue-mutated"
         shutil.copytree(ROOT / "scenarios/rogue", package, dirs_exist_ok=True)

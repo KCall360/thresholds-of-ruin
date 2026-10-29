@@ -860,6 +860,27 @@ impl CreatureBuild {
             })
             .collect()
     }
+    /// Authored future personal rows after the birth rows, as unowned
+    /// declarations; a new birth assigns their owners and purchase serials.
+    pub(crate) fn body_birth_growth_schedule(&self) -> Vec<PlannedAdvancement> {
+        let Some(body) = &self.body_build else {
+            return Vec::new();
+        };
+        let PersonalRestorationPolicy::Authored(plan) = &body.personal_restoration else {
+            return Vec::new();
+        };
+        plan.iter()
+            .filter(|(id, _)| id.0.get() > body.birth_personal_count)
+            .map(|(_, row)| {
+                let mut row = row.clone();
+                row.choices.purchase_highwater = 0;
+                for purchase in &mut row.choices.purchases {
+                    purchase.id = None;
+                }
+                row
+            })
+            .collect()
+    }
     pub(crate) fn body_birth_uses_authored_restoration(&self) -> bool {
         self.body_build.as_ref().is_some_and(|body| {
             matches!(

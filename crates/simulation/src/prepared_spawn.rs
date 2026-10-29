@@ -325,6 +325,8 @@ impl CreatureBuild {
                                 source,
                                 choices,
                             })
+                            // An authored growth schedule follows the birth rows.
+                            .chain(self.body_birth_growth_schedule())
                             .collect(),
                     );
                 }

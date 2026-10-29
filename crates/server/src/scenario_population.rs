@@ -205,6 +205,9 @@ pub type ActorPopulationBand = PopulationBand<ActorPopulationChoice>;
 pub struct PopulationChoice {
     pub archetype: String,
     pub weight: u32,
+    /// Overrides the stage quantity for this choice, such as grouped missiles.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quantity: Option<QuantityExpression>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -383,6 +386,26 @@ pub enum PopulationStage {
         #[serde(default = "unit_population_quantity")]
         quantity: QuantityExpression,
     },
+    /// `attempts` independent rolls, each placing one item with `chance`.
+    ChanceItems {
+        id: String,
+        version: u32,
+        attempts: u16,
+        chance: CarryChance,
+        bands: Vec<PopulationBand>,
+        #[serde(default = "unit_population_quantity")]
+        quantity: QuantityExpression,
+    },
+    /// One guaranteed item after more than `threshold` foodless first entries.
+    FoodDrought {
+        id: String,
+        version: u32,
+        threshold: u16,
+        food: Vec<String>,
+        bands: Vec<PopulationBand>,
+        #[serde(default = "unit_population_quantity")]
+        quantity: QuantityExpression,
+    },
     Actors {
         id: String,
         version: u32,
@@ -450,6 +473,12 @@ impl PopulationStage {
             }
             | PopulationStage::RoomItems {
                 quantity, bands, ..
+            }
+            | PopulationStage::ChanceItems {
+                quantity, bands, ..
+            }
+            | PopulationStage::FoodDrought {
+                quantity, bands, ..
             } => {
                 let bands = bands
                     .iter()
@@ -460,6 +489,7 @@ impl PopulationStage {
                                 .choices
                                 .iter()
                                 .map(|choice| {
+                                    let quantity = choice.quantity.as_ref().unwrap_or(quantity);
                                     Ok(runtime::PreparedItemChoice {
                                         content: choice.archetype.clone(),
                                         weight: choice.weight,
@@ -484,6 +514,26 @@ impl PopulationStage {
                                 numerator: chance.numerator,
                                 denominator: chance.denominator,
                             },
+                        }
+                    }
+                    PopulationStage::ChanceItems { chance, .. } => {
+                        runtime::PopulationContent::ChanceItems {
+                            bands,
+                            chance: runtime::CarryChance {
+                                numerator: chance.numerator,
+                                denominator: chance.denominator,
+                            },
+                        }
+                    }
+                    PopulationStage::FoodDrought {
+                        threshold, food, ..
+                    } => {
+                        let mut food = food.clone();
+                        food.sort();
+                        runtime::PopulationContent::FoodDrought {
+                            bands,
+                            threshold: *threshold,
+                            food,
                         }
                     }
                     _ => runtime::PopulationContent::Items { bands },
@@ -615,6 +665,13 @@ impl PopulationStage {
             | Self::Actors {
                 id, version, count, ..
             } => (id, *version, *count),
+            Self::ChanceItems {
+                id,
+                version,
+                attempts,
+                ..
+            } => (id, *version, [*attempts, *attempts]),
+            Self::FoodDrought { id, version, .. } => (id, *version, [1, 1]),
         }
     }
 }
@@ -778,14 +835,37 @@ impl Package {
                         }
                         | PopulationStage::RoomItems {
                             bands, quantity, ..
+                        }
+                        | PopulationStage::ChanceItems {
+                            bands, quantity, ..
+                        }
+                        | PopulationStage::FoodDrought {
+                            bands, quantity, ..
                         } => {
                             quantity.maximum()?;
-                            if let PopulationStage::RoomItems { chance, .. } = stage {
+                            if let PopulationStage::RoomItems { chance, .. }
+                            | PopulationStage::ChanceItems { chance, .. } = stage
+                            {
                                 require(
                                     chance.denominator > 0
                                         && chance.numerator <= chance.denominator,
-                                    "Invalid room population chance",
+                                    "Invalid population chance",
                                 )?;
+                            }
+                            if let PopulationStage::ChanceItems { attempts, .. } = stage {
+                                require(*attempts > 0, "Chance item stages need attempts")?;
+                            }
+                            if let PopulationStage::FoodDrought { food, .. } = stage {
+                                let unique: BTreeSet<_> = food.iter().collect();
+                                require(
+                                    !food.is_empty()
+                                        && food.len() <= 64
+                                        && unique.len() == food.len(),
+                                    "Food drought needs distinct food archetypes",
+                                )?;
+                                for archetype in food {
+                                    self.author_archetype(archetype)?;
+                                }
                             }
                             self.check_population_bands(bands, |choice| {
                                 (&choice.archetype, choice.weight)

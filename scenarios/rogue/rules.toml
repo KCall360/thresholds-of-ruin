@@ -46,7 +46,7 @@ value = { id = "rogue.launch", name = "Launch", interaction = "hostile_to_target
 [[overrides]]
 op = "set"
 path = ["nutrition"]
-value = { kind = "enabled", initial = 1300, maximum = 2000, hungry_below = 300, weak_below = 150, starve_at = -852, unit_ticks = 100, hungry_recovery = { kind = "normal" }, weak_recovery = { kind = "normal" }, empty_recovery = { kind = "normal" }, regeneration_cost = { denominator = 1, health = 1, stamina = 1, focus = 1, mana = 1 } }
+value = { kind = "enabled", initial = 1300, maximum = 2000, hungry_below = 300, weak_below = 150, starve_at = -852, unit_ticks = 100, hungry_recovery = { kind = "normal" }, weak_recovery = { kind = "normal" }, empty_recovery = { kind = "normal" }, regeneration_cost = { denominator = 1, health = 0, stamina = 0, focus = 0, mana = 0 } }
 
 [[overrides]]
 op = "set"
@@ -401,3 +401,24 @@ value = { id = "rogue.detecting_monsters", family = "rogue.detecting_monsters", 
 op = "add"
 path = ["abilities", "rogue.wand_polymorph"]
 value = { id = "rogue.wand_polymorph", name = "Polymorph", interaction = "hostile_to_target", tags = ["attack"], basic_attack = false, invocation = "directional_contact_ray", timing = { source = { kind = "fixed", prepare = 100, recover = 100 } }, reach = { kind = "until_obstruction" }, strikes = { kind = "authored", strikes = [{ offset = 0, check = { actor = "target", skill = { kind = "named", skill = "agility" }, against = { kind = "opposed", skill = { kind = "named", skill = "lore" } } }, on_success = [], on_failure = [{ kind = "baleful_polymorph", forms = ["rogue.body.emu", "rogue.body.snake", "rogue.body.troll"] }], descriptors = [], riders = [] }] }, ai = { priority = 0, hostile = true, minimum_resource_percent = 0, range_preference = "any" } }
+
+# Rogue's doctor heals one HP per 21 - 2 x level turns below level 8 and faster
+# above it. One HD per level plus the racial body HD gives about 21 turns at
+# level 1 and 9 at level 7; the floor stands in for the fast late rate.
+[[overrides]]
+op = "set"
+path = ["health_recovery"]
+value = { base_period = 2300, reduction_per_hd = 200, minimum_period = 150 }
+
+# Rogue's early levels come quickly. The seeded campaign earned about 515 XP by
+# depth 4; this threshold reaches level 5 there, where the reference model
+# expects 4 to 5. Deeper pacing awaits longer campaigns.
+[[overrides]]
+op = "set"
+path = ["growth", "threshold_base"]
+value = 60
+
+[[overrides]]
+op = "set"
+path = ["growth", "threshold_per_tier"]
+value = 40

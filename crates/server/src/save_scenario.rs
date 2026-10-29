@@ -542,6 +542,33 @@ enum PopulationStage {
         #[serde(with = "mapped")]
         chance: source::CarryChance,
     },
+    ChanceItems {
+        id: String,
+        version: u32,
+        attempts: u16,
+        #[serde(with = "mapped")]
+        chance: source::CarryChance,
+        #[serde(
+            serialize_with = "mapped::serialize",
+            deserialize_with = "bounded_stored::<_, source::PopulationBand, 32>"
+        )]
+        bands: Vec<source::PopulationBand>,
+        #[serde(with = "mapped")]
+        quantity: source::QuantityExpression,
+    },
+    FoodDrought {
+        id: String,
+        version: u32,
+        threshold: u16,
+        food: Vec<String>,
+        #[serde(
+            serialize_with = "mapped::serialize",
+            deserialize_with = "bounded_stored::<_, source::PopulationBand, 32>"
+        )]
+        bands: Vec<source::PopulationBand>,
+        #[serde(with = "mapped")]
+        quantity: source::QuantityExpression,
+    },
     Actors {
         id: String,
         version: u32,
@@ -642,6 +669,8 @@ struct PopulationBand {
 struct PopulationChoice {
     archetype: String,
     weight: u32,
+    #[serde(with = "mapped")]
+    quantity: Option<source::QuantityExpression>,
 }
 
 #[derive(Serialize, Deserialize)]

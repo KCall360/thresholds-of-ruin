@@ -1983,3 +1983,23 @@ fn inadmissible_growth_schedule_rejects_the_whole_build() {
     )
     .is_err());
 }
+
+#[test]
+fn seeded_birth_keeps_the_growth_schedule() {
+    let born = scheduled_fixture().instantiate_seeded(73).unwrap();
+    assert_eq!(
+        born.next_authored_restoration_source(),
+        Some(HdSource::Class(ClassId::new("warrior").unwrap()))
+    );
+    let mut state = CreatureState::new(born).unwrap();
+    state.award_xp(10_000).unwrap();
+    assert_eq!(state.build().ledger().entries().len(), 4);
+    assert_eq!(
+        trained(state.build(), 2),
+        [PurchaseSelection::SkillRank(Skill::Athletics)]
+    );
+    assert_eq!(
+        trained(state.build(), 3),
+        [PurchaseSelection::SkillRank(Skill::Perception)]
+    );
+}

@@ -391,6 +391,34 @@ changes did not cause it.
   client: a harness/environment limit, not a result). Exact-head hosted CI
   remains their qualification.
 
+## Rogue tuning branch, 29 October 2026
+
+Local `feat/rogue-mechanics-profile`, before publication. Window: this
+branch's development runs only.
+
+- **Production defect, caught in development (not by a test).** Seeded birth of
+  a body-package character rebuilt its authored plan from the birth rows only,
+  dropping the growth schedule, so the Rogue adventurer earned XP without
+  growing. The seeded-descent campaign exposed it (360 XP at level 1); the
+  existing unit and process tests built schedules without seeded birth or only
+  checked the starting state. Intended red:
+  `creatures::body_tests::seeded_birth_keeps_the_growth_schedule` failed with
+  `None` for the next scheduled source; green after the birth path carries the
+  unowned future rows. A real-process witness,
+  `test_scenario_capabilities_process...test_rogue_adventurer_grows_its_scheduled_row_through_ordinary_play`,
+  now drinks Raise Level in the Rogue package. One root, one method, one failed
+  execution.
+- **Stale/unupdated tests, approved shape change.** Adding scenario capabilities
+  and an optional choice quantity left
+  `engine::floor_activation_tests::checkpoint_cannot_inject_scenario_policy_into_a_nonpackage_game`,
+  `scenario_package::tests::authoring_explicit_actor_values_preserve_canonical_shape`,
+  `scenario_package::tests::rogue_magic_catalog_uses_explicit_capabilities_and_appends_finite_stock`
+  and `wire::current_wire_protocol_revision_is_explicitly_pinned` expecting the
+  prior shapes. The capability and growth-schedule fields were updated in the
+  tests; the absent choice quantity is now omitted from authored output instead.
+  Two roots (format additions, an absent optional serialized as null), four
+  methods, four failed executions.
+
 ## Add the next useful finding
 
 One compact row or paragraph per diagnosed cause is enough:

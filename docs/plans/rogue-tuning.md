@@ -121,111 +121,135 @@ build at the level Rogue's player is expected to have reached there.
 
 ## Rogue reference model
 
-`scripts/rogue_reference_model.py` computes Rogue's own expectations from the
-research documents, without running Rogue:
+Implemented as [`rogue_reference_model.py`](../../scripts/rogue_reference_model.py).
+It evaluates Rogue's own rules from the research documents, exactly where they
+are closed-form, without running Rogue:
 
-- **Population.** Initial monsters per floor (25% per room, 80% with gold),
-  species from the population index, monster Health and depth scaling.
-- **Progression.** Expected kill XP per floor and the resulting level at each
-  depth, from the XP thresholds and HP adjustments in
-  [R05](../research/rogue-5.4.4/rules.md#r05--combat-statistics-and-advancement)
-  and [R08](../research/rogue-5.4.4/rules.md#r08--monsters-ai-spawning-and-special-effects).
-- **Supplies.** Nine item attempts at 36%, category weights (food 16%, of which
-  90% rations), gold, drought frequency and expected food units per floor.
-- **Pressure.** Wanderer arrivals per 1,000 turns from the wandering daemon,
-  trap counts by depth, natural healing from the `doctor` formula.
+- **Population.** 7.5 present rooms at 52.5% gives about 3.9 initial monsters per
+  floor; species probabilities come from the population index, including its
+  low and deep redistribution and the wandering exclusions.
+- **Progression.** Expected kill XP, including depth and Health adjustments, and
+  the resulting level on arrival at each depth from the threshold table.
+- **Supplies.** Nine 36% attempts with category weights; food is a renewal chain
+  over the drought counter, giving about 0.56 food items per new floor.
+- **Pressure.** One wanderer per 94 turns on average, trap counts by depth, and
+  the `doctor` healing rate by level.
 
-Unit tests check each output against hand-computed examples.
+Time per floor and the share of monsters killed are play assumptions, stated as
+parameters. With 900 turns per floor the model expects level 4 by depth 3,
+7 by depth 8, 10 by depth 16 and 14 by depth 24.
+[`test_rogue_reference_model.py`](../../scripts/test_rogue_reference_model.py)
+checks each part against hand-computed values.
 
 ## Layer 1: encounter targets
 
-`scripts/rogue_reference_targets.py` derives, for each of the 26 species against
-the reference PC at its depth band: hit chance both ways, damage per action,
-actions to kill both ways, and signature-effect frequency (freezing, drain,
-theft, rust, poison, gaze, breath, holding). A new arena matrix family pits each
-species against the scheduled build, extending `scripts/rogue_roster_study.py`
-and `scripts/arena_recipes.json`, and reports target, measured value and
-tolerance. A species is tuned when every ratio is inside tolerance over the
-paired seeds, as phase 7 defines.
+[`rogue_reference_targets.py`](../../scripts/rogue_reference_targets.py) derives,
+for each species at its typical depth against the reference adventurer: hit
+chance both ways from `swing()`, damage per action, exact expected attacks to
+kill both ways (kills are granular, so not Health divided by mean damage) and
+the per-action rate of the signature effect after saving throws.
 
-Tuning follows the species waves in the [progression plan](progression.md).
-Scalar values go through `scripts/arena_search.py` parameter specifications;
-structural changes, such as a talent or strike order, are compared as candidates
-with `scripts/arena_evaluation.py`. The first lead is Physical defense against
-Rogue's armor classes.
+[`rogue_encounter_study.py`](../../scripts/rogue_encounter_study.py) measures the
+same ratios with `tor-arena`: the locked adventurer, grown along its own schedule
+to the reference level, against one ordinary actor of the species, in both
+orientations over paired seeds. The study copy makes the adventurer engage first,
+so passive species are measured too. Arena damage excludes overkill, so the
+adventurer's damage per action is reported but not judged; the other ratios are
+judged against a ±35% band.
+
+[`rogue_species_tuning.py`](../../scripts/rogue_species_tuning.py) then changes
+only authored values in `scenarios/rogue/catalog/creatures.toml`: a Health
+modifier toward Rogue's `level d8` mean, the Physical defense bonus toward the
+adventurer's hit chance, accuracy toward the foe's hit chance, and a damage-dice
+bonus toward its damage per action. Natural-attack checks take attribute plus
+skill rank, not the melee bonus, so their accuracy is an attack-attribute
+modifier that does not raise defense; selected-weapon checks use the melee
+bonus. Defense and accuracy move one point per pass, two beyond ×1.4; damage
+moves one point; Health moves straight to its target and backs off if any birth
+is rejected. Species that attack fewer than 20 times in a study (the greedy orc)
+are left alone, because their ratios are noise. Mechanics are not changed: armor keeps its damage reduction, so small
+dice gain a flat bonus instead.
+
+The baseline had 72 of 130 judged ratios in band. TOR foes had far more Health
+than Rogue's (a full first die), dealt little damage through ring mail, and were
+easier to hit at shallow depths. After eight passes, 104 of 111 judged ratios are
+in band over 32 encounters per species, including the deep species. Known limits: the arena
+cannot complete flytrap encounters ("decision did not commit exactly one action"),
+the invisible phantom is never engaged, and xerocs often stay disguised.
 
 ## Layer 2: run-shape targets
 
-**Run summary.** A versioned per-run summary record: death
-depth and cause, level at each depth, ticks and commands per floor, food found
-and eaten, time Hungry, Weak and fainting, potions and scrolls used, kills by
-species, wanderer arrivals, traps triggered, Amulet reached and escape. It is
-built from disclosed observations plus the private
-[survival-flow diagnostics](../development/performance.md#private-committed-survival-flows).
+**Run summary.** [`rogue_campaign.py`](../../scripts/rogue_campaign.py) writes a
+versioned summary per run: outcome, death depth, level on arrival at each depth,
+ticks and commands per floor, share of time hungry, meals, rest episodes, final
+level, Health and earned XP. Wanderer arrivals, kills by species, traps
+triggered and food found are listed as unavailable from ordinary disclosures.
 
-**Campaign harness.** The earned-route controller grows into a deep-descent
-controller: no purchase decisions (the build is locked), eat when Hungry, use
-known healing, flee at low Health, descend after exploring. Many seeds run
-through real processes, with bounded parallelism that respects free memory.
-It is a fixed policy and is labelled as one; its results are evidence for the
-tolerances below, not a claim about human play.
+**Campaign harness.** Each seed starts a real server on `scenarios/rogue` and
+drives the locked adventurer with the earned-route policy through the headless
+client, settling paused work with disclosed permission. There are no purchase
+decisions. The campaign aggregates death depths, mean level on arrival and the
+hungry share. It is a fixed policy, not a model of human play: it does not use
+potions, scrolls or wands, so its deaths overstate Rogue's danger.
 
-**Targets.** Level at depth against the model; food found against food spent
-per depth band; share of deaths by starvation; wanderers per floor; and the
-shape of the death-depth distribution. Tolerances are proposed from the model
-and **ratified by the maintainer before tuning starts**.
+**Targets.** Level at depth against the model; food found against food spent per
+depth band; share of deaths by starvation; and the shape of the death-depth
+distribution. Tolerances are still to be ratified by the maintainer.
 
 ## Food and the drought guarantee
 
-Food comes only from Rogue's sources: the starting ration, floor items at the
-model's expected rate with the ration and fruit split, and monster carry
-chances. A chance-based food stage replaces the flat one-ration stage. Stage
-identities stay append-only and existing streams stay untouched.
+Implemented. Food comes only from Rogue's sources: the starting ration, floor
+items and monster carry chances. Two `chance_items` stages place nine attempts
+each, with chances of 36% times their categories' share, so every item type's
+expected count per floor equals Rogue's nine 36% attempts; a 64-choice band
+limit is why there are two. Missiles keep Rogue's groups of 8 to 15.
+[`rogue_item_table.py`](../../scripts/rogue_item_table.py) generates these
+stages from the research tables.
 
-The drought guarantee is a profile mechanic. A run-scoped counter records
-consecutive newly generated floors that produced no food. When it exceeds the
-authored threshold (Rogue's is 3), the next first entry places one food item and
-resets it. Revisits, speculative preparation, queries and frozen time never
-change it, and a rolled-back entry restores it. This adds saved state and a
-scenario field, so it needs a format decision. Tests: unit counter rules;
-integration for rollback, discarded preparation and restart; an actual-process
-run on a seed that reaches the guarantee.
+The `food_drought` stage places one ration (or, one time in ten, fruit) when more
+than three consecutive earlier first-entry floors and this floor's earlier stages
+placed no food. The count is derived from the retained entry records, so no new
+counter is saved; revisits, preparation and rollback cannot change it, and the
+receipt audit recomputes it. See the
+[authoring reference](../reference/scenario-packages.md#first-entry-population).
 
 ## Healing
 
-With care disabled, healing is Rogue's: natural recovery, healing and extra
-healing potions, and level-up Health. The recovery period table is tuned to the
-`doctor` rate at each level of the reference build. Regeneration's nutrition
-cost is set to zero unless the run metrics show Rogue's food pressure needs it.
+With care disabled, healing is Rogue's: natural recovery, healing potions and
+level-up Health. The recovery override (base 2300 ticks, −200 per HD, floor 150)
+gives about 21 turns per HP at level 1 and 9 at level 7, close to the `doctor`
+rate of 19 and 7. Regeneration's nutrition cost is zero, as in Rogue.
 
 ## Population, wandering, items and traps
 
-- **Population.** Compare the four initial attempts and the per-depth bands with
-  Rogue's per-room monster chance and population index; birth stock holds only
-  items Rogue monsters carry.
-- **Wandering.** Keep the source-shaped cadence and tune delay, trial and cap
-  against the model's arrivals and the run metrics.
-- **Items.** Replace one attempt per category with Rogue's item count and
-  category and subtype weights.
-- **Traps.** Tune DCs and durations against Rogue's saving-throw odds and trap
-  counts by depth.
+- **Population.** Four initial attempts already match Rogue's 3.9 initial
+  monsters per floor. A treasure room appears on 1 in 20 floors, with monsters
+  drawn one level deeper; its items omit rings and wands to fit one band.
+- **Wandering.** The existing cadence (6,700–7,300 ticks, then 1 in 6 every 400)
+  matches Rogue's one wanderer per 94 turns.
+- **Items.** Rogue's counts and category/subtype weights, as above.
+- **Traps.** Hidden traps stay at one or two per floor, averaging Rogue's count
+  over depths 1–26; generation has no depth-scaled trap count.
 
 ## Progression pacing
 
-Fit the XP threshold and reward and the threat weights so the reference build's
-level at depth tracks the model. Treat the Health roll per HD and the recovery
-period as part of the same fit.
+The locked build earns about 515 XP by depth 4 in seeded campaigns, reaching
+level 3 with the shared thresholds while the model expects level 4 to 5. The
+Rogue rules set the threshold to 60 + 40 per tier (from 100 + 100), which reaches
+level 5 at that XP. This is an early-floor fit; deeper pacing needs campaigns
+that survive past the first floors, which the fixed controller rarely does
+without using potions and scrolls.
 
 ## Milestones
 
-| Milestone | Delivers | Format change |
+| Milestone | Status | Format change |
 | --- | --- | --- |
-| 1 | Implemented: capability switches, growth schedules and the `scenarios/rogue` package | Yes: protocol 65, save 64, scenario 36 |
-| 2 | Reference model, targets script, run summary and campaign harness | No |
-| 3 | Species encounter tuning, all 26, in waves | No |
-| 4 | Food distribution and drought guarantee | Yes |
-| 5 | Population, wandering, items and traps | No |
-| 6 | Progression and recovery pacing; campaign acceptance | No |
+| 1 | Implemented: capability switches, growth schedules and the `scenarios/rogue` package | Protocol 65, save 64, scenario 36 |
+| 2 | Implemented: reference model, targets, encounter study, run summary and campaign harness | No |
+| 3 | Implemented: value tuning of all 26 species, eight passes, 104 of 111 ratios in band | No |
+| 4 | Implemented: Rogue item table, grouped missiles and the drought guarantee | Within the unreleased 64/36 bump |
+| 5 | Implemented: treasure rooms; wandering and initial counts already match | No |
+| 6 | Implemented first fit: recovery, regeneration cost and early XP thresholds; deep pacing open | No |
 
 Package edits regenerate certificates and run
 `python scripts/test_scenario_references.py`. Each milestone updates the

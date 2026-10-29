@@ -179,24 +179,168 @@ ai = "rogue_hostile"
 depth_growth = { kind = "racial_after", depth = 26 }
 avoid_protagonist_sight = true
 
+# BEGIN generated Rogue item table (scripts/rogue_item_table.py)
+# Rogue's ordinary item placement: nine attempts at 36%, weights are
+# category percent x subtype percent. Values match the research tables.
 [[floor_activation.profiles."rogue.low_depth".stages]]
-id = "rogue.rations"
+id = "rogue.items"
 version = 1
-kind = "items"
-count = [1, 1]
-bands = [{ depth = { kind = "open", minimum = 1 }, choices = [{ archetype = "rogue.ration", weight = 1 }] }]
+kind = "chance_items"
+attempts = 9
+chance = { numerator = 2232, denominator = 10000 }
 quantity = 1
+bands = [{ depth = { kind = "open", minimum = 1 }, choices = [
+  { archetype = "rogue.confusion", weight = 182 },
+  { archetype = "rogue.hallucination", weight = 208 },
+  { archetype = "rogue.poison", weight = 208 },
+  { archetype = "rogue.gain_strength", weight = 338 },
+  { archetype = "rogue.see_invisible", weight = 78 },
+  { archetype = "rogue.healing", weight = 338 },
+  { archetype = "rogue.monster_detection", weight = 156 },
+  { archetype = "rogue.magic_detection", weight = 156 },
+  { archetype = "rogue.raise_level", weight = 52 },
+  { archetype = "rogue.extra_healing", weight = 130 },
+  { archetype = "rogue.haste", weight = 130 },
+  { archetype = "rogue.restore_strength", weight = 338 },
+  { archetype = "rogue.blindness", weight = 130 },
+  { archetype = "rogue.levitation", weight = 156 },
+  { archetype = "rogue.monster_confusion", weight = 252 },
+  { archetype = "rogue.magic_mapping", weight = 144 },
+  { archetype = "rogue.hold_monster", weight = 72 },
+  { archetype = "rogue.sleep", weight = 108 },
+  { archetype = "rogue.enchant_armor", weight = 252 },
+  { archetype = "rogue.identify_potion", weight = 360 },
+  { archetype = "rogue.identify_scroll", weight = 360 },
+  { archetype = "rogue.identify_weapon", weight = 216 },
+  { archetype = "rogue.identify_armor", weight = 252 },
+  { archetype = "rogue.identify_wand", weight = 360 },
+  { archetype = "rogue.scare_monster", weight = 108 },
+  { archetype = "rogue.food_detection", weight = 72 },
+  { archetype = "rogue.teleportation", weight = 180 },
+  { archetype = "rogue.enchant_weapon", weight = 288 },
+  { archetype = "rogue.create_monster", weight = 144 },
+  { archetype = "rogue.remove_curse", weight = 252 },
+  { archetype = "rogue.aggravate_monster", weight = 108 },
+  { archetype = "rogue.protect_armor", weight = 72 },
+] }]
 
-# One finite attempt/unit per successfully entered floor is provisional TOR
-# tuning, not Rogue's subtype probability. NoEligibleCell can still omit it.
-# Append only: prior population stage IDs/order and independent streams stay fixed.
 [[floor_activation.profiles."rogue.low_depth".stages]]
-id = "rogue.restore_strength"
+id = "rogue.items_other"
 version = 1
-kind = "items"
-count = [1, 1]
-bands = [{ depth = { kind = "open", minimum = 1 }, choices = [{ archetype = "rogue.restore_strength", weight = 1 }] }]
+kind = "chance_items"
+attempts = 9
+chance = { numerator = 1368, denominator = 10000 }
 quantity = 1
+bands = [{ depth = { kind = "open", minimum = 1 }, choices = [
+  { archetype = "rogue.ration", weight = 1440 },
+  { archetype = "rogue.fruit", weight = 160 },
+  { archetype = "rogue.generated_mace", weight = 77 },
+  { archetype = "rogue.long_sword", weight = 77 },
+  { archetype = "rogue.shortbow", weight = 84 },
+  { archetype = "rogue.arrow", weight = 84, quantity = { kind = "uniform", minimum = 8, maximum = 15 } },
+  { archetype = "rogue.dagger", weight = 56 },
+  { archetype = "rogue.two_handed_sword", weight = 70 },
+  { archetype = "rogue.dart", weight = 84, quantity = { kind = "uniform", minimum = 8, maximum = 15 } },
+  { archetype = "rogue.shuriken", weight = 84, quantity = { kind = "uniform", minimum = 8, maximum = 15 } },
+  { archetype = "rogue.spear", weight = 84 },
+  { archetype = "rogue.leather_armor", weight = 140 },
+  { archetype = "rogue.generated_ring_mail", weight = 105 },
+  { archetype = "rogue.studded_leather", weight = 105 },
+  { archetype = "rogue.scale_mail", weight = 91 },
+  { archetype = "rogue.chain_mail", weight = 84 },
+  { archetype = "rogue.splint_mail", weight = 70 },
+  { archetype = "rogue.banded_mail", weight = 70 },
+  { archetype = "rogue.plate_mail", weight = 35 },
+  { archetype = "rogue.ring_protection", weight = 36 },
+  { archetype = "rogue.ring_add_strength", weight = 36 },
+  { archetype = "rogue.ring_sustain_strength", weight = 20 },
+  { archetype = "rogue.ring_searching", weight = 40 },
+  { archetype = "rogue.ring_see_invisible", weight = 40 },
+  { archetype = "rogue.ring_adornment", weight = 4 },
+  { archetype = "rogue.ring_aggravation", weight = 40 },
+  { archetype = "rogue.ring_dexterity", weight = 32 },
+  { archetype = "rogue.ring_increase_damage", weight = 32 },
+  { archetype = "rogue.ring_regeneration", weight = 16 },
+  { archetype = "rogue.ring_slow_digestion", weight = 36 },
+  { archetype = "rogue.ring_teleportation", weight = 20 },
+  { archetype = "rogue.ring_stealth", weight = 28 },
+  { archetype = "rogue.ring_maintain_armor", weight = 20 },
+  { archetype = "rogue.wand_light", weight = 48 },
+  { archetype = "rogue.wand_invisibility", weight = 24 },
+  { archetype = "rogue.wand_lightning", weight = 12 },
+  { archetype = "rogue.wand_fire", weight = 12 },
+  { archetype = "rogue.wand_cold", weight = 12 },
+  { archetype = "rogue.wand_polymorph", weight = 60 },
+  { archetype = "rogue.wand_magic_missile", weight = 40 },
+  { archetype = "rogue.wand_haste", weight = 40 },
+  { archetype = "rogue.wand_slow", weight = 44 },
+  { archetype = "rogue.wand_drain_life", weight = 36 },
+  { archetype = "rogue.wand_nothing", weight = 4 },
+  { archetype = "rogue.wand_teleport_away", weight = 24 },
+  { archetype = "rogue.wand_teleport_to", weight = 24 },
+  { archetype = "rogue.wand_cancellation", weight = 20 },
+] }]
+
+# Rogue forces food once more than three new floors in a row produced none.
+[[floor_activation.profiles."rogue.low_depth".stages]]
+id = "rogue.food_drought"
+version = 1
+kind = "food_drought"
+threshold = 3
+food = ["rogue.fruit", "rogue.ration"]
+quantity = 1
+bands = [{ depth = { kind = "open", minimum = 1 }, choices = [{ archetype = "rogue.ration", weight = 9 }, { archetype = "rogue.fruit", weight = 1 }] }]
+
+# Rogue's treasure room: 1 in 20 floors, monsters drawn as if one level
+# deeper. Counts are provisional tuning; rings and wands are omitted.
+[[floor_activation.profiles."rogue.low_depth".stages]]
+id = "rogue.treasure_room"
+version = 1
+kind = "room_cluster"
+chance = { numerator = 1, denominator = 20 }
+item_count = [2, 9]
+actor_count = [4, 11]
+quantity = 1
+actor_depth_offset = 1
+ai = "rogue_hostile"
+depth_growth = { kind = "racial_after", depth = 26 }
+avoid_protagonist_sight = false
+item_bands = [{ depth = { kind = "open", minimum = 1 }, choices = [{ archetype = "rogue.confusion", weight = 182 }, { archetype = "rogue.hallucination", weight = 208 }, { archetype = "rogue.poison", weight = 208 }, { archetype = "rogue.gain_strength", weight = 338 }, { archetype = "rogue.see_invisible", weight = 78 }, { archetype = "rogue.healing", weight = 338 }, { archetype = "rogue.monster_detection", weight = 156 }, { archetype = "rogue.magic_detection", weight = 156 }, { archetype = "rogue.raise_level", weight = 52 }, { archetype = "rogue.extra_healing", weight = 130 }, { archetype = "rogue.haste", weight = 130 }, { archetype = "rogue.restore_strength", weight = 338 }, { archetype = "rogue.blindness", weight = 130 }, { archetype = "rogue.levitation", weight = 156 }, { archetype = "rogue.monster_confusion", weight = 252 }, { archetype = "rogue.magic_mapping", weight = 144 }, { archetype = "rogue.hold_monster", weight = 72 }, { archetype = "rogue.sleep", weight = 108 }, { archetype = "rogue.enchant_armor", weight = 252 }, { archetype = "rogue.identify_potion", weight = 360 }, { archetype = "rogue.identify_scroll", weight = 360 }, { archetype = "rogue.identify_weapon", weight = 216 }, { archetype = "rogue.identify_armor", weight = 252 }, { archetype = "rogue.identify_wand", weight = 360 }, { archetype = "rogue.scare_monster", weight = 108 }, { archetype = "rogue.food_detection", weight = 72 }, { archetype = "rogue.teleportation", weight = 180 }, { archetype = "rogue.enchant_weapon", weight = 288 }, { archetype = "rogue.create_monster", weight = 144 }, { archetype = "rogue.remove_curse", weight = 252 }, { archetype = "rogue.aggravate_monster", weight = 108 }, { archetype = "rogue.protect_armor", weight = 72 }, { archetype = "rogue.ration", weight = 1440 }, { archetype = "rogue.fruit", weight = 160 }, { archetype = "rogue.generated_mace", weight = 77 }, { archetype = "rogue.long_sword", weight = 77 }, { archetype = "rogue.shortbow", weight = 84 }, { archetype = "rogue.arrow", weight = 84, quantity = { kind = "uniform", minimum = 8, maximum = 15 } }, { archetype = "rogue.dagger", weight = 56 }, { archetype = "rogue.two_handed_sword", weight = 70 }, { archetype = "rogue.dart", weight = 84, quantity = { kind = "uniform", minimum = 8, maximum = 15 } }, { archetype = "rogue.shuriken", weight = 84, quantity = { kind = "uniform", minimum = 8, maximum = 15 } }, { archetype = "rogue.spear", weight = 84 }, { archetype = "rogue.leather_armor", weight = 140 }, { archetype = "rogue.generated_ring_mail", weight = 105 }, { archetype = "rogue.studded_leather", weight = 105 }, { archetype = "rogue.scale_mail", weight = 91 }, { archetype = "rogue.chain_mail", weight = 84 }, { archetype = "rogue.splint_mail", weight = 70 }, { archetype = "rogue.banded_mail", weight = 70 }, { archetype = "rogue.plate_mail", weight = 35 }] }]
+actor_bands = [
+  { depth = { kind = "finite", minimum = 1, maximum = 1 }, choices = [{ archetype = "rogue.kestrel", weight = 1 }, { archetype = "rogue.emu", weight = 1 }, { archetype = "rogue.bat", weight = 1 }, { archetype = "rogue.snake", weight = 1 }, { archetype = "rogue.hobgoblin", weight = 1 }] },
+  { depth = { kind = "finite", minimum = 2, maximum = 2 }, choices = [{ archetype = "rogue.kestrel", weight = 9 }, { archetype = "rogue.emu", weight = 9 }, { archetype = "rogue.bat", weight = 9 }, { archetype = "rogue.snake", weight = 9 }, { archetype = "rogue.hobgoblin", weight = 9 }, { archetype = "rogue.ice_monster", weight = 5 }] },
+  { depth = { kind = "finite", minimum = 3, maximum = 3 }, choices = [{ archetype = "rogue.kestrel", weight = 8 }, { archetype = "rogue.emu", weight = 8 }, { archetype = "rogue.bat", weight = 8 }, { archetype = "rogue.snake", weight = 8 }, { archetype = "rogue.hobgoblin", weight = 8 }, { archetype = "rogue.ice_monster", weight = 5 }, { archetype = "rogue.rattlesnake", weight = 5 }] },
+  { depth = { kind = "finite", minimum = 4, maximum = 4 }, choices = [{ archetype = "rogue.kestrel", weight = 7 }, { archetype = "rogue.emu", weight = 7 }, { archetype = "rogue.bat", weight = 7 }, { archetype = "rogue.snake", weight = 7 }, { archetype = "rogue.hobgoblin", weight = 7 }, { archetype = "rogue.ice_monster", weight = 5 }, { archetype = "rogue.rattlesnake", weight = 5 }, { archetype = "rogue.orc", weight = 5 }] },
+  { depth = { kind = "finite", minimum = 5, maximum = 5 }, choices = [{ archetype = "rogue.kestrel", weight = 6 }, { archetype = "rogue.emu", weight = 6 }, { archetype = "rogue.bat", weight = 6 }, { archetype = "rogue.snake", weight = 6 }, { archetype = "rogue.hobgoblin", weight = 6 }, { archetype = "rogue.ice_monster", weight = 5 }, { archetype = "rogue.rattlesnake", weight = 5 }, { archetype = "rogue.zombie", weight = 5 }, { archetype = "rogue.orc", weight = 5 }] },
+  { depth = { kind = "finite", minimum = 6, maximum = 6 }, choices = [{ archetype = "rogue.kestrel", weight = 1 }, { archetype = "rogue.emu", weight = 1 }, { archetype = "rogue.bat", weight = 1 }, { archetype = "rogue.snake", weight = 1 }, { archetype = "rogue.hobgoblin", weight = 1 }, { archetype = "rogue.ice_monster", weight = 1 }, { archetype = "rogue.rattlesnake", weight = 1 }, { archetype = "rogue.zombie", weight = 1 }, { archetype = "rogue.orc", weight = 1 }, { archetype = "rogue.leprechaun", weight = 1, carried_loot = { version = 1, pool = "rogue.leprechaun_gold", chance = { numerator = 1, denominator = 1 } } }] },
+  { depth = { kind = "finite", minimum = 7, maximum = 7 }, choices = [{ archetype = "rogue.emu", weight = 1 }, { archetype = "rogue.bat", weight = 1 }, { archetype = "rogue.snake", weight = 1 }, { archetype = "rogue.hobgoblin", weight = 1 }, { archetype = "rogue.ice_monster", weight = 1 }, { archetype = "rogue.rattlesnake", weight = 1 }, { archetype = "rogue.zombie", weight = 1 }, { archetype = "rogue.centaur", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 3, denominator = 20 } } }, { archetype = "rogue.orc", weight = 1 }, { archetype = "rogue.leprechaun", weight = 1, carried_loot = { version = 1, pool = "rogue.leprechaun_gold", chance = { numerator = 1, denominator = 1 } } }] },
+  { depth = { kind = "finite", minimum = 8, maximum = 8 }, choices = [{ archetype = "rogue.bat", weight = 1 }, { archetype = "rogue.snake", weight = 1 }, { archetype = "rogue.hobgoblin", weight = 1 }, { archetype = "rogue.ice_monster", weight = 1 }, { archetype = "rogue.rattlesnake", weight = 1 }, { archetype = "rogue.zombie", weight = 1 }, { archetype = "rogue.centaur", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 3, denominator = 20 } } }, { archetype = "rogue.quagga", weight = 1 }, { archetype = "rogue.orc", weight = 1 }, { archetype = "rogue.leprechaun", weight = 1, carried_loot = { version = 1, pool = "rogue.leprechaun_gold", chance = { numerator = 1, denominator = 1 } } }] },
+  { depth = { kind = "finite", minimum = 9, maximum = 9 }, choices = [{ archetype = "rogue.snake", weight = 1 }, { archetype = "rogue.hobgoblin", weight = 1 }, { archetype = "rogue.ice_monster", weight = 1 }, { archetype = "rogue.rattlesnake", weight = 1 }, { archetype = "rogue.zombie", weight = 1 }, { archetype = "rogue.centaur", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 3, denominator = 20 } } }, { archetype = "rogue.quagga", weight = 1 }, { archetype = "rogue.orc", weight = 1 }, { archetype = "rogue.leprechaun", weight = 1, carried_loot = { version = 1, pool = "rogue.leprechaun_gold", chance = { numerator = 1, denominator = 1 } } }, { archetype = "rogue.aquator", weight = 1 }] },
+  { depth = { kind = "finite", minimum = 10, maximum = 10 }, choices = [{ archetype = "rogue.hobgoblin", weight = 1 }, { archetype = "rogue.ice_monster", weight = 1 }, { archetype = "rogue.rattlesnake", weight = 1 }, { archetype = "rogue.zombie", weight = 1 }, { archetype = "rogue.centaur", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 3, denominator = 20 } } }, { archetype = "rogue.quagga", weight = 1 }, { archetype = "rogue.orc", weight = 1 }, { archetype = "rogue.leprechaun", weight = 1, carried_loot = { version = 1, pool = "rogue.leprechaun_gold", chance = { numerator = 1, denominator = 1 } } }, { archetype = "rogue.nymph", weight = 1 }, { archetype = "rogue.aquator", weight = 1 }] },
+  { depth = { kind = "finite", minimum = 11, maximum = 11 }, choices = [{ archetype = "rogue.ice_monster", weight = 1 }, { archetype = "rogue.rattlesnake", weight = 1 }, { archetype = "rogue.zombie", weight = 1 }, { archetype = "rogue.centaur", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 3, denominator = 20 } } }, { archetype = "rogue.quagga", weight = 1 }, { archetype = "rogue.yeti", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 3, denominator = 10 } } }, { archetype = "rogue.orc", weight = 1 }, { archetype = "rogue.leprechaun", weight = 1, carried_loot = { version = 1, pool = "rogue.leprechaun_gold", chance = { numerator = 1, denominator = 1 } } }, { archetype = "rogue.nymph", weight = 1 }, { archetype = "rogue.aquator", weight = 1 }] },
+  { depth = { kind = "finite", minimum = 12, maximum = 12 }, choices = [{ archetype = "rogue.rattlesnake", weight = 1 }, { archetype = "rogue.zombie", weight = 1 }, { archetype = "rogue.centaur", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 3, denominator = 20 } } }, { archetype = "rogue.quagga", weight = 1 }, { archetype = "rogue.yeti", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 3, denominator = 10 } } }, { archetype = "rogue.venus_flytrap", weight = 1 }, { archetype = "rogue.orc", weight = 1 }, { archetype = "rogue.leprechaun", weight = 1, carried_loot = { version = 1, pool = "rogue.leprechaun_gold", chance = { numerator = 1, denominator = 1 } } }, { archetype = "rogue.nymph", weight = 1 }, { archetype = "rogue.aquator", weight = 1 }] },
+  { depth = { kind = "finite", minimum = 13, maximum = 13 }, choices = [{ archetype = "rogue.zombie", weight = 1 }, { archetype = "rogue.centaur", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 3, denominator = 20 } } }, { archetype = "rogue.quagga", weight = 1 }, { archetype = "rogue.yeti", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 3, denominator = 10 } } }, { archetype = "rogue.venus_flytrap", weight = 1 }, { archetype = "rogue.troll", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 2 } } }, { archetype = "rogue.orc", weight = 1 }, { archetype = "rogue.leprechaun", weight = 1, carried_loot = { version = 1, pool = "rogue.leprechaun_gold", chance = { numerator = 1, denominator = 1 } } }, { archetype = "rogue.nymph", weight = 1 }, { archetype = "rogue.aquator", weight = 1 }] },
+  { depth = { kind = "finite", minimum = 14, maximum = 14 }, choices = [{ archetype = "rogue.zombie", weight = 1 }, { archetype = "rogue.centaur", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 3, denominator = 20 } } }, { archetype = "rogue.quagga", weight = 1 }, { archetype = "rogue.yeti", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 3, denominator = 10 } } }, { archetype = "rogue.venus_flytrap", weight = 1 }, { archetype = "rogue.troll", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 2 } } }, { archetype = "rogue.wraith", weight = 1 }, { archetype = "rogue.leprechaun", weight = 1, carried_loot = { version = 1, pool = "rogue.leprechaun_gold", chance = { numerator = 1, denominator = 1 } } }, { archetype = "rogue.nymph", weight = 1 }, { archetype = "rogue.aquator", weight = 1 }] },
+  { depth = { kind = "finite", minimum = 15, maximum = 15 }, choices = [{ archetype = "rogue.centaur", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 3, denominator = 20 } } }, { archetype = "rogue.quagga", weight = 1 }, { archetype = "rogue.yeti", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 3, denominator = 10 } } }, { archetype = "rogue.venus_flytrap", weight = 1 }, { archetype = "rogue.troll", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 2 } } }, { archetype = "rogue.wraith", weight = 1 }, { archetype = "rogue.leprechaun", weight = 1, carried_loot = { version = 1, pool = "rogue.leprechaun_gold", chance = { numerator = 1, denominator = 1 } } }, { archetype = "rogue.nymph", weight = 1 }, { archetype = "rogue.phantom", weight = 1 }, { archetype = "rogue.aquator", weight = 1 }] },
+  { depth = { kind = "finite", minimum = 16, maximum = 16 }, choices = [{ archetype = "rogue.centaur", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 3, denominator = 20 } } }, { archetype = "rogue.quagga", weight = 1 }, { archetype = "rogue.yeti", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 3, denominator = 10 } } }, { archetype = "rogue.venus_flytrap", weight = 1 }, { archetype = "rogue.troll", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 2 } } }, { archetype = "rogue.wraith", weight = 1 }, { archetype = "rogue.nymph", weight = 1 }, { archetype = "rogue.phantom", weight = 1 }, { archetype = "rogue.xeroc", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 3, denominator = 10 } } }, { archetype = "rogue.aquator", weight = 1 }] },
+  { depth = { kind = "finite", minimum = 17, maximum = 17 }, choices = [{ archetype = "rogue.quagga", weight = 1 }, { archetype = "rogue.yeti", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 3, denominator = 10 } } }, { archetype = "rogue.venus_flytrap", weight = 1 }, { archetype = "rogue.troll", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 2 } } }, { archetype = "rogue.wraith", weight = 1 }, { archetype = "rogue.black_unicorn", weight = 1 }, { archetype = "rogue.nymph", weight = 1 }, { archetype = "rogue.phantom", weight = 1 }, { archetype = "rogue.xeroc", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 3, denominator = 10 } } }, { archetype = "rogue.aquator", weight = 1 }] },
+  { depth = { kind = "finite", minimum = 18, maximum = 18 }, choices = [{ archetype = "rogue.yeti", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 3, denominator = 10 } } }, { archetype = "rogue.venus_flytrap", weight = 1 }, { archetype = "rogue.troll", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 2 } } }, { archetype = "rogue.wraith", weight = 1 }, { archetype = "rogue.black_unicorn", weight = 1 }, { archetype = "rogue.nymph", weight = 1 }, { archetype = "rogue.medusa", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 2, denominator = 5 } } }, { archetype = "rogue.phantom", weight = 1 }, { archetype = "rogue.xeroc", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 3, denominator = 10 } } }, { archetype = "rogue.aquator", weight = 1 }] },
+  { depth = { kind = "finite", minimum = 19, maximum = 19 }, choices = [{ archetype = "rogue.yeti", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 3, denominator = 10 } } }, { archetype = "rogue.venus_flytrap", weight = 1 }, { archetype = "rogue.troll", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 2 } } }, { archetype = "rogue.wraith", weight = 1 }, { archetype = "rogue.black_unicorn", weight = 1 }, { archetype = "rogue.vampire", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 5 } } }, { archetype = "rogue.nymph", weight = 1 }, { archetype = "rogue.medusa", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 2, denominator = 5 } } }, { archetype = "rogue.phantom", weight = 1 }, { archetype = "rogue.xeroc", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 3, denominator = 10 } } }] },
+  { depth = { kind = "finite", minimum = 20, maximum = 20 }, choices = [{ archetype = "rogue.yeti", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 3, denominator = 10 } } }, { archetype = "rogue.venus_flytrap", weight = 1 }, { archetype = "rogue.troll", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 2 } } }, { archetype = "rogue.wraith", weight = 1 }, { archetype = "rogue.black_unicorn", weight = 1 }, { archetype = "rogue.vampire", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 5 } } }, { archetype = "rogue.griffin", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 5 } } }, { archetype = "rogue.medusa", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 2, denominator = 5 } } }, { archetype = "rogue.phantom", weight = 1 }, { archetype = "rogue.xeroc", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 3, denominator = 10 } } }] },
+  { depth = { kind = "finite", minimum = 21, maximum = 21 }, choices = [{ archetype = "rogue.venus_flytrap", weight = 1 }, { archetype = "rogue.troll", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 2 } } }, { archetype = "rogue.wraith", weight = 1 }, { archetype = "rogue.black_unicorn", weight = 1 }, { archetype = "rogue.vampire", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 5 } } }, { archetype = "rogue.griffin", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 5 } } }, { archetype = "rogue.jabberwock", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 7, denominator = 10 } } }, { archetype = "rogue.medusa", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 2, denominator = 5 } } }, { archetype = "rogue.phantom", weight = 1 }, { archetype = "rogue.xeroc", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 3, denominator = 10 } } }] },
+  { depth = { kind = "finite", minimum = 22, maximum = 22 }, choices = [{ archetype = "rogue.troll", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 2 } } }, { archetype = "rogue.wraith", weight = 1 }, { archetype = "rogue.black_unicorn", weight = 1 }, { archetype = "rogue.vampire", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 5 } } }, { archetype = "rogue.griffin", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 5 } } }, { archetype = "rogue.jabberwock", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 7, denominator = 10 } } }, { archetype = "rogue.medusa", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 2, denominator = 5 } } }, { archetype = "rogue.phantom", weight = 1 }, { archetype = "rogue.xeroc", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 3, denominator = 10 } } }, { archetype = "rogue.dragon", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 1 } }, advancement = [{ ordinal = 15, purchases = [{ pool = "advancement", selection = { kind = "skill_rank", skill = "breath" } }] }, { ordinal = 20, purchases = [{ pool = "advancement", selection = { kind = "skill_rank", skill = "breath" } }] }, { ordinal = 25, purchases = [{ pool = "advancement", selection = { kind = "skill_rank", skill = "breath" } }] }] }] },
+  { depth = { kind = "finite", minimum = 23, maximum = 23 }, choices = [{ archetype = "rogue.wraith", weight = 5 }, { archetype = "rogue.black_unicorn", weight = 5 }, { archetype = "rogue.vampire", weight = 6, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 5 } } }, { archetype = "rogue.griffin", weight = 6, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 5 } } }, { archetype = "rogue.jabberwock", weight = 6, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 7, denominator = 10 } } }, { archetype = "rogue.medusa", weight = 6, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 2, denominator = 5 } } }, { archetype = "rogue.phantom", weight = 5 }, { archetype = "rogue.xeroc", weight = 5, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 3, denominator = 10 } } }, { archetype = "rogue.dragon", weight = 6, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 1 } }, advancement = [{ ordinal = 15, purchases = [{ pool = "advancement", selection = { kind = "skill_rank", skill = "breath" } }] }, { ordinal = 20, purchases = [{ pool = "advancement", selection = { kind = "skill_rank", skill = "breath" } }] }, { ordinal = 25, purchases = [{ pool = "advancement", selection = { kind = "skill_rank", skill = "breath" } }] }] }] },
+  { depth = { kind = "finite", minimum = 24, maximum = 24 }, choices = [{ archetype = "rogue.black_unicorn", weight = 5 }, { archetype = "rogue.vampire", weight = 7, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 5 } } }, { archetype = "rogue.griffin", weight = 7, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 5 } } }, { archetype = "rogue.jabberwock", weight = 7, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 7, denominator = 10 } } }, { archetype = "rogue.medusa", weight = 7, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 2, denominator = 5 } } }, { archetype = "rogue.phantom", weight = 5 }, { archetype = "rogue.xeroc", weight = 5, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 3, denominator = 10 } } }, { archetype = "rogue.dragon", weight = 7, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 1 } }, advancement = [{ ordinal = 15, purchases = [{ pool = "advancement", selection = { kind = "skill_rank", skill = "breath" } }] }, { ordinal = 20, purchases = [{ pool = "advancement", selection = { kind = "skill_rank", skill = "breath" } }] }, { ordinal = 25, purchases = [{ pool = "advancement", selection = { kind = "skill_rank", skill = "breath" } }] }] }] },
+  { depth = { kind = "finite", minimum = 25, maximum = 25 }, choices = [{ archetype = "rogue.black_unicorn", weight = 5 }, { archetype = "rogue.vampire", weight = 8, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 5 } } }, { archetype = "rogue.griffin", weight = 8, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 5 } } }, { archetype = "rogue.jabberwock", weight = 8, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 7, denominator = 10 } } }, { archetype = "rogue.medusa", weight = 8, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 2, denominator = 5 } } }, { archetype = "rogue.xeroc", weight = 5, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 3, denominator = 10 } } }, { archetype = "rogue.dragon", weight = 8, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 1 } }, advancement = [{ ordinal = 15, purchases = [{ pool = "advancement", selection = { kind = "skill_rank", skill = "breath" } }] }, { ordinal = 20, purchases = [{ pool = "advancement", selection = { kind = "skill_rank", skill = "breath" } }] }, { ordinal = 25, purchases = [{ pool = "advancement", selection = { kind = "skill_rank", skill = "breath" } }] }] }] },
+  { depth = { kind = "finite", minimum = 26, maximum = 26 }, choices = [{ archetype = "rogue.black_unicorn", weight = 5 }, { archetype = "rogue.vampire", weight = 9, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 5 } } }, { archetype = "rogue.griffin", weight = 9, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 5 } } }, { archetype = "rogue.jabberwock", weight = 9, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 7, denominator = 10 } } }, { archetype = "rogue.medusa", weight = 9, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 2, denominator = 5 } } }, { archetype = "rogue.dragon", weight = 9, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 1 } }, advancement = [{ ordinal = 15, purchases = [{ pool = "advancement", selection = { kind = "skill_rank", skill = "breath" } }] }, { ordinal = 20, purchases = [{ pool = "advancement", selection = { kind = "skill_rank", skill = "breath" } }] }, { ordinal = 25, purchases = [{ pool = "advancement", selection = { kind = "skill_rank", skill = "breath" } }] }] }] },
+  { depth = { kind = "finite", minimum = 27, maximum = 27 }, choices = [{ archetype = "rogue.vampire", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 5 } } }, { archetype = "rogue.griffin", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 5 } } }, { archetype = "rogue.jabberwock", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 7, denominator = 10 } } }, { archetype = "rogue.medusa", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 2, denominator = 5 } } }, { archetype = "rogue.dragon", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 1 } }, advancement = [{ ordinal = 15, purchases = [{ pool = "advancement", selection = { kind = "skill_rank", skill = "breath" } }] }, { ordinal = 20, purchases = [{ pool = "advancement", selection = { kind = "skill_rank", skill = "breath" } }] }, { ordinal = 25, purchases = [{ pool = "advancement", selection = { kind = "skill_rank", skill = "breath" } }] }] }] },
+  { depth = { kind = "finite", minimum = 28, maximum = 28 }, choices = [{ archetype = "rogue.vampire", weight = 11, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 5 } } }, { archetype = "rogue.griffin", weight = 11, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 5 } } }, { archetype = "rogue.jabberwock", weight = 11, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 7, denominator = 10 } } }, { archetype = "rogue.medusa", weight = 6, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 2, denominator = 5 } } }, { archetype = "rogue.dragon", weight = 11, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 1 } }, advancement = [{ ordinal = 15, purchases = [{ pool = "advancement", selection = { kind = "skill_rank", skill = "breath" } }] }, { ordinal = 20, purchases = [{ pool = "advancement", selection = { kind = "skill_rank", skill = "breath" } }] }, { ordinal = 25, purchases = [{ pool = "advancement", selection = { kind = "skill_rank", skill = "breath" } }] }] }] },
+  { depth = { kind = "finite", minimum = 29, maximum = 29 }, choices = [{ archetype = "rogue.vampire", weight = 7, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 5 } } }, { archetype = "rogue.griffin", weight = 12, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 5 } } }, { archetype = "rogue.jabberwock", weight = 12, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 7, denominator = 10 } } }, { archetype = "rogue.medusa", weight = 7, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 2, denominator = 5 } } }, { archetype = "rogue.dragon", weight = 12, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 1 } }, advancement = [{ ordinal = 15, purchases = [{ pool = "advancement", selection = { kind = "skill_rank", skill = "breath" } }] }, { ordinal = 20, purchases = [{ pool = "advancement", selection = { kind = "skill_rank", skill = "breath" } }] }, { ordinal = 25, purchases = [{ pool = "advancement", selection = { kind = "skill_rank", skill = "breath" } }] }] }] },
+  { depth = { kind = "finite", minimum = 30, maximum = 30 }, choices = [{ archetype = "rogue.vampire", weight = 8, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 5 } } }, { archetype = "rogue.griffin", weight = 8, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 5 } } }, { archetype = "rogue.jabberwock", weight = 13, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 7, denominator = 10 } } }, { archetype = "rogue.medusa", weight = 8, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 2, denominator = 5 } } }, { archetype = "rogue.dragon", weight = 13, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 1 } }, advancement = [{ ordinal = 15, purchases = [{ pool = "advancement", selection = { kind = "skill_rank", skill = "breath" } }] }, { ordinal = 20, purchases = [{ pool = "advancement", selection = { kind = "skill_rank", skill = "breath" } }] }, { ordinal = 25, purchases = [{ pool = "advancement", selection = { kind = "skill_rank", skill = "breath" } }] }] }] },
+  { depth = { kind = "finite", minimum = 31, maximum = 31 }, choices = [{ archetype = "rogue.vampire", weight = 9, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 5 } } }, { archetype = "rogue.griffin", weight = 9, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 5 } } }, { archetype = "rogue.jabberwock", weight = 9, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 7, denominator = 10 } } }, { archetype = "rogue.medusa", weight = 9, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 2, denominator = 5 } } }, { archetype = "rogue.dragon", weight = 14, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 1 } }, advancement = [{ ordinal = 15, purchases = [{ pool = "advancement", selection = { kind = "skill_rank", skill = "breath" } }] }, { ordinal = 20, purchases = [{ pool = "advancement", selection = { kind = "skill_rank", skill = "breath" } }] }, { ordinal = 25, purchases = [{ pool = "advancement", selection = { kind = "skill_rank", skill = "breath" } }] }] }] },
+  { depth = { kind = "open", minimum = 32 }, choices = [{ archetype = "rogue.vampire", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 5 } } }, { archetype = "rogue.griffin", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 5 } } }, { archetype = "rogue.jabberwock", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 7, denominator = 10 } } }, { archetype = "rogue.medusa", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 2, denominator = 5 } } }, { archetype = "rogue.dragon", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 1 } }, advancement = [{ ordinal = 15, purchases = [{ pool = "advancement", selection = { kind = "skill_rank", skill = "breath" } }] }, { ordinal = 20, purchases = [{ pool = "advancement", selection = { kind = "skill_rank", skill = "breath" } }] }, { ordinal = 25, purchases = [{ pool = "advancement", selection = { kind = "skill_rank", skill = "breath" } }] }] }] },
+]
+# END generated Rogue item table
 
 # Independent appended stream: each present generated room gets one fair chance.
 [[floor_activation.profiles."rogue.low_depth".stages]]
@@ -206,81 +350,6 @@ kind = "room_items"
 chance = { numerator = 1, denominator = 2 }
 bands = [{ depth = { kind = "open", minimum = 1 }, choices = [{ archetype = "rogue.gold", weight = 1 }] }]
 quantity = { kind = "depth_scaled_uniform", minimum = 2, maximum_base = 51, per_depth = 10 }
-
-# Bounded finite first-entry item stock is provisional TOR tuning, not Rogue's
-# item probability table. Append after the existing stages to retain their RNG
-# stream ownership. Each stage makes one placement attempt, without replenishment.
-[[floor_activation.profiles."rogue.low_depth".stages]]
-id = "rogue.magic_potions"
-version = 1
-kind = "items"
-count = [1, 1]
-bands = [{ depth = { kind = "open", minimum = 1 }, choices = [{ archetype = "rogue.healing", weight = 1 }, { archetype = "rogue.confusion", weight = 1 }, { archetype = "rogue.blindness", weight = 1 }, { archetype = "rogue.poison", weight = 1 }, { archetype = "rogue.see_invisible", weight = 1 }, { archetype = "rogue.extra_healing", weight = 1 }, { archetype = "rogue.levitation", weight = 1 }] }]
-quantity = 1
-
-[[floor_activation.profiles."rogue.low_depth".stages]]
-id = "rogue.magic_scrolls"
-version = 1
-kind = "items"
-count = [1, 1]
-bands = [{ depth = { kind = "open", minimum = 1 }, choices = [{ archetype = "rogue.identify_potion", weight = 1 }, { archetype = "rogue.identify_scroll", weight = 1 }, { archetype = "rogue.identify_wand", weight = 1 }, { archetype = "rogue.sleep", weight = 1 }, { archetype = "rogue.teleportation", weight = 1 }] }]
-quantity = 1
-
-[[floor_activation.profiles."rogue.low_depth".stages]]
-id = "rogue.magic_devices"
-version = 1
-kind = "items"
-count = [1, 1]
-bands = [{ depth = { kind = "open", minimum = 1 }, choices = [{ archetype = "rogue.wand_fire", weight = 1 }, { archetype = "rogue.wand_cold", weight = 1 }, { archetype = "rogue.wand_lightning", weight = 1 }, { archetype = "rogue.wand_invisibility", weight = 1 }, { archetype = "rogue.wand_haste", weight = 1 }, { archetype = "rogue.wand_slow", weight = 1 }, { archetype = "rogue.wand_teleport_away", weight = 1 }, { archetype = "rogue.wand_teleport_to", weight = 1 }] }]
-quantity = 1
-
-
-# Append-only finite gear and equipment-scroll stock. One attempt each on first
-# entry; uniform subtype weights are provisional TOR tuning, never replenished.
-[[floor_activation.profiles."rogue.low_depth".stages]]
-id = "rogue.equipment"
-version = 1
-kind = "items"
-count = [1, 1]
-bands = [{ depth = { kind = "open", minimum = 1 }, choices = [{ archetype = "rogue.generated_mace", weight = 1 }, { archetype = "rogue.long_sword", weight = 1 }, { archetype = "rogue.dagger", weight = 1 }, { archetype = "rogue.two_handed_sword", weight = 1 }, { archetype = "rogue.spear", weight = 1 }, { archetype = "rogue.leather_armor", weight = 1 }, { archetype = "rogue.generated_ring_mail", weight = 1 }, { archetype = "rogue.studded_leather", weight = 1 }, { archetype = "rogue.scale_mail", weight = 1 }, { archetype = "rogue.chain_mail", weight = 1 }, { archetype = "rogue.splint_mail", weight = 1 }, { archetype = "rogue.banded_mail", weight = 1 }, { archetype = "rogue.plate_mail", weight = 1 }, { archetype = "rogue.shortbow", weight = 1 }] }]
-quantity = 1
-
-[[floor_activation.profiles."rogue.low_depth".stages]]
-id = "rogue.equipment_scrolls"
-version = 1
-kind = "items"
-count = [1, 1]
-bands = [{ depth = { kind = "open", minimum = 1 }, choices = [{ archetype = "rogue.enchant_armor", weight = 1 }, { archetype = "rogue.protect_armor", weight = 1 }, { archetype = "rogue.enchant_weapon", weight = 1 }, { archetype = "rogue.remove_curse", weight = 1 }, { archetype = "rogue.identify_weapon", weight = 1 }, { archetype = "rogue.identify_armor", weight = 1 }] }]
-quantity = 1
-
-# One finite six-arrow stack attempt per first-entered floor. This ammunition
-# quantity is provisional TOR tuning; no retry or replenishment follows a skip.
-# The shortbow joins the equipment pool above, changing only that pool's choices.
-[[floor_activation.profiles."rogue.low_depth".stages]]
-id = "rogue.ammunition"
-version = 1
-kind = "items"
-count = [1, 1]
-bands = [{ depth = { kind = "open", minimum = 1 }, choices = [{ archetype = "rogue.arrow", weight = 1 }] }]
-quantity = 6
-
-# Finite concealed ring stock, appended without changing earlier stage streams.
-[[floor_activation.profiles."rogue.low_depth".stages]]
-id = "rogue.rings"
-version = 1
-kind = "items"
-count = [1, 1]
-bands = [{ depth = { kind = "open", minimum = 1 }, choices = [{ archetype = "rogue.ring_protection", weight = 9 }, { archetype = "rogue.ring_add_strength", weight = 9 }, { archetype = "rogue.ring_sustain_strength", weight = 5 }, { archetype = "rogue.ring_see_invisible", weight = 10 }, { archetype = "rogue.ring_adornment", weight = 1 }, { archetype = "rogue.ring_dexterity", weight = 8 }, { archetype = "rogue.ring_increase_damage", weight = 8 }, { archetype = "rogue.ring_regeneration", weight = 4 }, { archetype = "rogue.ring_slow_digestion", weight = 9 }, { archetype = "rogue.ring_maintain_armor", weight = 5 }, { archetype = "rogue.ring_searching", weight = 5 }, { archetype = "rogue.ring_teleportation", weight = 5 }, { archetype = "rogue.ring_stealth", weight = 7 }, { archetype = "rogue.ring_aggravation", weight = 10 }] }]
-quantity = 1
-
-# One finite control-scroll attempt per floor; equal weights are provisional.
-[[floor_activation.profiles."rogue.low_depth".stages]]
-id = "rogue.control_scrolls"
-version = 1
-kind = "items"
-count = [1, 1]
-bands = [{ depth = { kind = "open", minimum = 1 }, choices = [{ archetype = "rogue.aggravate_monster", weight = 1 }, { archetype = "rogue.create_monster", weight = 1 }, { archetype = "rogue.hold_monster", weight = 1 }, { archetype = "rogue.monster_confusion", weight = 1 }, { archetype = "rogue.scare_monster", weight = 1 }] }]
-quantity = 1
 
 # Structure-only forecast, independent of depth, spawn rolls and hidden contents.
 [assets]

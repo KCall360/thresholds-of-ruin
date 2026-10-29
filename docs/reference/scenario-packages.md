@@ -440,6 +440,24 @@ the same once-only entry ledger. No legal placement cell produces a saved skip;
 it does not trigger a later retry or refill. It neither reorders earlier stages nor replaces geometry preparation,
 room topology or the unique retrieval objective.
 
+A `kind = "chance_items"` stage declares `attempts` (at least one) and a
+rational `chance` instead of a count range. Each attempt independently succeeds
+with that chance from the stage's count stream; the successes become the saved
+request, and each places one weighted choice exactly like an ordinary item
+stage. Rogue's nine 36% item attempts use this form.
+
+A `kind = "food_drought"` stage declares a `threshold` and a list of distinct
+`food` item archetypes, and places one weighted choice on a first entry only
+when more than `threshold` consecutive earlier first-entry floors, and this
+floor's earlier stages, placed no listed food item. The count is derived from
+the retained entry records in first-entry order, so revisits, queries,
+preparation and rollback never change it, and the receipt audit recomputes it.
+Its saved request is 0 or 1. A floor with no legal cell keeps the drought
+running into the next floor.
+
+Item band choices may carry their own `quantity` expression, overriding the
+stage quantity for that choice, such as grouped arrows.
+
 A `kind = "room_cluster"` stage makes one explicit rational chance decision and,
 on success, selects one canonical present room shared by its item and actor
 attempts. It declares `item_count` and `actor_count` inclusive positive ranges,
