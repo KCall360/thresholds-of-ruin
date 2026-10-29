@@ -462,7 +462,12 @@ fn identified_self_device_selection_emits_without_direction_modal() {
 
 #[test]
 fn portable_light_keys_choose_explicit_actions_cancel_and_show_fuel() {
-    for (lit, input, expected) in [(false, Key::Ignite, false), (true, Key::Extinguish, true)] {
+    for (lit, input, expected) in [
+        (false, Key::Ignite, false),
+        (true, Key::Extinguish, true),
+        (false, Key::Apply, false),
+        (true, Key::Apply, true),
+    ] {
         let mut snap = snapshot(false);
         Arc::make_mut(&mut snap.state).observation = test_support::portable_light_observation(lit);
         let item = snap.state.observation.inventory[0].id;
@@ -522,4 +527,137 @@ fn dual_device_direction_prompt_offers_explicit_self_without_defaulting_to_it() 
         }
     );
     assert!(app.zap_item().is_none());
+}
+
+#[test]
+fn apply_requires_disclosed_light_and_clears_on_refresh_control_loss_and_disconnect() {
+    let mut no_light = self::app(false);
+    let before = no_light.state.as_ref().unwrap().session().clone();
+    assert_eq!(key(&mut no_light, Key::Apply), Effect::None);
+    assert!(no_light.pickup.is_empty());
+    assert!(!no_light.applying);
+    assert!(no_light.status.contains("portable light"));
+    assert_eq!(no_light.state.as_ref().unwrap().session().clone(), before);
+    for change in ["refresh", "control", "disconnect"] {
+        let mut snap = snapshot(false);
+        Arc::make_mut(&mut snap.state).observation =
+            test_support::portable_light_observation(false);
+        let mut app = App::new();
+        app.role = AccessRole::Player;
+        app.set_state(ClientState::from_snapshot(snap.clone()).unwrap());
+        app.ready();
+        app.messages.skip();
+        assert_eq!(key(&mut app, Key::Apply), Effect::None);
+        assert!(app.applying);
+        // Counts do not turn Apply into a multi-item or pickup operation.
+        assert_eq!(app.input(Input::Text { text: "99".into() }), Effect::None);
+        assert!(app.quantity.is_empty());
+        match change {
+            "disconnect" => app.disconnect("test disconnect".into()),
+            "control" => {
+                snap.has_control = false;
+                snap.readiness.admission = false;
+                app.set_state(ClientState::from_snapshot(snap).unwrap());
+            }
+            _ => {
+                // Even a same-revision transport reset invalidates the selected light.
+                snap.context.epoch += 1;
+                app.replace_snapshot(snap).unwrap();
+            }
+        }
+        assert!(!app.applying, "{change}");
+        assert!(app.pickup.is_empty(), "{change}");
+        assert_eq!(key(&mut app, Key::Enter), Effect::None, "{change}");
+    }
+}
+
+#[test]
+fn equipment_keys_filter_public_classes_and_reuse_exact_equip_remove_actions() {
+    for equipped in [false, true] {
+        for (input, indices) in if equipped {
+            vec![
+                (Key::TakeOff, vec![1]),
+                (Key::RemoveAccessory, vec![2, 3]),
+                (Key::Unequip, vec![0, 1, 2, 3, 4]),
+            ]
+        } else {
+            vec![
+                (Key::Wield, vec![0]),
+                (Key::Wear, vec![1]),
+                (Key::PutOn, vec![2, 3]),
+                (Key::Equip, vec![0, 1, 2, 3, 4]),
+            ]
+        } {
+            let mut snap = snapshot(false);
+            let view = &mut Arc::make_mut(&mut snap.state).observation;
+            let prototype = view.inventory[0].clone();
+            let offer = view.interactions.as_ref().unwrap().inventory[0].clone();
+            view.inventory = [
+                ItemClass::Weapon,
+                ItemClass::Armor,
+                ItemClass::Ring,
+                ItemClass::Amulet,
+                ItemClass::Tool,
+            ]
+            .into_iter()
+            .enumerate()
+            .map(|(index, class)| ItemView {
+                id: super::item_target(index as u64 + 10),
+                class,
+                name: format!("fixture item {index}"),
+                ..prototype.clone()
+            })
+            .collect();
+            let slots: Vec<_> = (0..5)
+                .map(|index| {
+                    test_support::equipment_slot(
+                        &format!("fixture_socket_{index}"),
+                        "equipped",
+                        false,
+                    )
+                })
+                .collect();
+            let interactions = view.interactions.as_mut().unwrap();
+            interactions.slots = slots.clone();
+            interactions.inventory = view
+                .inventory
+                .iter()
+                .enumerate()
+                .map(|(index, item)| ItemInteractionView {
+                    item: item.id,
+                    slot: Some(slots[index].clone()),
+                    equipped_slot: equipped.then_some(index as u16),
+                    readable: false,
+                    ..offer.clone()
+                })
+                .collect();
+            let mut app = App::new();
+            app.role = AccessRole::Player;
+            app.set_state(ClientState::from_snapshot(snap).expect("valid equipment premise"));
+            app.ready();
+            app.messages.skip();
+            let before = app.state.as_ref().unwrap().session().clone();
+            assert_eq!(key(&mut app, input), Effect::None);
+            assert_eq!(
+                app.pickup.iter().map(|item| item.id).collect::<Vec<_>>(),
+                indices
+                    .iter()
+                    .map(|index| super::item_target(*index as u64 + 10))
+                    .collect::<Vec<_>>()
+            );
+            assert_eq!(app.state.as_ref().unwrap().session().clone(), before);
+            let item = super::item_target(indices[0] as u64 + 10);
+            assert_eq!(
+                action(key(&mut app, Key::Enter)),
+                if equipped {
+                    Action::Unequip { item }
+                } else {
+                    Action::Equip {
+                        item,
+                        slot: indices[0] as u16,
+                    }
+                }
+            );
+        }
+    }
 }

@@ -1147,7 +1147,8 @@ fn losing_control_or_disconnect_prevents_actions() {
     assert!(app.status.contains("observing"));
     app.disconnect("Lost connection".into());
     assert_eq!(app.input(Input::Key { key: Key::Control }), Effect::None);
-    assert_eq!(app.input(Input::Key { key: Key::Escape }), Effect::Quit);
+    assert_eq!(app.input(Input::Key { key: Key::Escape }), Effect::None);
+    assert_eq!(app.input(Input::Key { key: Key::SaveQuit }), Effect::Quit);
 }
 
 #[test]
@@ -1354,7 +1355,8 @@ fn spectator_can_browse_but_cannot_create_any_mutation_or_note_draft() {
     app.ready();
     assert_eq!(app.input(Input::Key { key: Key::Down }), Effect::None);
     assert_eq!(app.input(Input::Key { key: Key::Escape }), Effect::None);
-    assert_eq!(app.input(Input::Key { key: Key::Escape }), Effect::Quit);
+    assert_eq!(app.input(Input::Key { key: Key::Escape }), Effect::None);
+    assert_eq!(app.input(Input::Key { key: Key::SaveQuit }), Effect::Quit);
 }
 
 #[test]

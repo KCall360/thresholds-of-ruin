@@ -73,9 +73,15 @@ class SupplySelectionNativeProcesses(ProcessTestCase):
         native = self.native_keys(window)
 
         def press(name, reported):
+            if name == "Z":
+                native("Shift_L", True)
+                try:
+                    return self.native_press(window, native, "z", reported)
+                finally:
+                    native("Shift_L", False)
             return self.native_press(window, native, name, reported)
 
-        menu = press("z", "abilities")
+        menu = press("Z", "abilities")
         self.assertEqual([row["id"] for row in menu["ability_choices"]], ["bind_wounds"])
         press("Return", "enter")
         press("Up", "up")
@@ -94,7 +100,7 @@ class SupplySelectionNativeProcesses(ProcessTestCase):
         self.assertFalse(current["state"]["wizard_game"])
         self.assertIsNone(bandage(current))
         self.assertDisclosedStateEqual(self.request(observer, {"type": "snapshot"})["state"], current["state"])
-        press("z", "abilities"); press("Return", "enter"); press("Up", "up")
+        press("Z", "abilities"); press("Return", "enter"); press("Up", "up")
         shown = press("Return", "enter")
         self.assertIn("active ticks", " ".join(shown["supply_rows"]))
         self.assertEqual(shown["supply_selection"]["candidates"], [])

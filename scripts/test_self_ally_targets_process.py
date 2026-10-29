@@ -109,9 +109,15 @@ class SelfAllyTargetNativeProcesses(ProcessTestCase):
         native = self.native_keys(window)
 
         def press(name, reported):
+            if name == "Z":
+                native("Shift_L", True)
+                try:
+                    return self.native_press(window, native, "z", reported)
+                finally:
+                    native("Shift_L", False)
             return self.native_press(window, native, name, reported)
 
-        menu = press("z", "abilities")
+        menu = press("Z", "abilities")
         self.assertEqual([ability["id"] for ability in menu["ability_choices"]], ["mend"])
         targets = press("Return", "enter")
         self.assertIn("yourself", targets["status"])
@@ -130,7 +136,7 @@ class SelfAllyTargetNativeProcesses(ProcessTestCase):
         self.assertFalse(completed["state"]["wizard_game"])
         self.assertDisclosedStateEqual(completed["state"], self.request(observer, {"type": "snapshot"})["state"])
         tick = int(observation(completed)["tick"])
-        press("z", "abilities"); press("Return", "enter"); press("Up", "up")
+        press("Z", "abilities"); press("Return", "enter"); press("Up", "up")
         accepted = press("Return", "enter")
         completed = accepted if completed_after(tick)(accepted) else self.ascii_frame(window, completed_after(tick))
         self.assertFalse(completed["state"]["wizard_game"])

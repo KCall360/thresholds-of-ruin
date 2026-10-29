@@ -284,11 +284,7 @@ class RogueThrowingProcesses(ProcessTestCase):
             return self.native_press(window, native, name, key)
 
         def choose():
-            menu = press("z", "abilities")
-            index = [row["id"] for row in menu["ability_choices"]].index("rogue.throw")
-            for _ in range(index):
-                press("Down", "down")
-            sources = press("Return", "enter")
+            sources = press("t", "throw")
             rows = sources["projectile_selection"]["page"]["choices"]
             self.assertTrue(any("dart" in row for row in sources["projectile_rows"]))
             self.assertTrue(any("shuriken" in row for row in sources["projectile_rows"]))

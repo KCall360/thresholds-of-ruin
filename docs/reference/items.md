@@ -21,8 +21,8 @@ the noun) transfers the entire selected stack. Numeric quantities must be positi
 and fit an unsigned 64-bit integer. Ambiguous names require selection; a requested
 quantity stays attached through adventure clarification and walking to an item.
 
-ASCII uses G for pickup and D for drop; stairs use `<` and `>`. A single one-unit
-item transfers immediately. Otherwise Up/Down selects a stack, typed digits set
+ASCII uses `,` for pickup and `d` for drop; stairs use `<` and `>`. A single
+reachable stack is picked up immediately. Otherwise Up/Down selects a stack, typed digits set
 the quantity, Backspace edits it, Enter confirms, and Escape cancels. Blank means
 the entire stack. Inventory and ground lists show counts. Inspection is free.
 
@@ -107,8 +107,10 @@ The server accepts `equip` (carried item plus anatomy slot index), `unequip`
 admission. Targets are opaque observer-scoped inventory references. Text accepts
 `equip`/`wear`/`wield`, `remove`/`unequip`, `drink`/`quaff`, and `eat` with a carried
 item name or opaque target. Adventure resolves disclosed nouns with its existing
-choice rules. ASCII uses W to equip, T to remove and Q to drink and E to eat; Up/Down and Enter
-choose among items, and Escape cancels without spending a turn. These commands
+choice rules. ASCII uses `w` to wield a weapon, `W` to wear armor, `P` to put on an
+accessory, `T` to take off armor, and `R` to remove an accessory. `#equip` and
+`#remove` include other equipment such as tools. `q` drinks and `e` eats; Up/Down
+and Enter choose among items, and Escape cancels without spending a turn. These commands
 act on one item at a time and have no quantity editor. Clients choose the first free
 matching anatomy socket; replacing gear requires separate removal. Both clients
 use the shared `client-common` item checks, while the simulation validates the
@@ -490,9 +492,9 @@ refund. Both require the original opaque choice token. A stale, wrong-class or
 other actor's target rejects atomically. Another Read cannot bank another choice;
 death clears it. Declining is an explicit TOR usability adaptation: pinned Rogue
 insists on an eligible selection. Reading while blind is permitted, as in that
-source. ASCII uses F6 to Read and F12 to select a device and direction. Escape
-before submission cancels freely; Escape in the paid choice declines the spent
-scroll. R still releases control and Z still opens abilities.
+source. ASCII uses `r` (also F6) to Read and `z` (also F12) to select a device and
+direction. Escape before submission cancels freely; Escape in the paid choice
+declines the spent scroll. `#release` gives up control and `Z` opens abilities.
 
 Type identity and exact-instance charge knowledge are separate actor-owned facts.
 Identifying one device learns its type for matching instances, but only that

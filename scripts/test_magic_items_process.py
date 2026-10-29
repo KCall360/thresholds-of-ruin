@@ -469,7 +469,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         before = checkpoint(self, probe)
         born = actor_creature(before)
         self.assertEqual(born["build"]["body_build"]["active"]["id"], polymorph.BASE)
-        menu = self.native_press(window, native, "F12", "zap")
+        menu = self.native_press(window, native, "z", "zap")
         self.assertEqual(len(menu["item_rows"]), 1)
         self.assertIn("charges: 3", menu["item_rows"][0])
         aimed = self.native_press(window, native, "Return", "enter")
@@ -480,7 +480,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         self.assertEqual(cancelled["state"], shown["state"])
         self.assertEqual(charges(cancelled, wand["id"]), 3)
         self.assertEqual(checkpoint(self, probe), before, "Escape spends no time, charge or form draw")
-        self.native_press(window, native, "F12", "zap")
+        self.native_press(window, native, "z", "zap")
         aimed = self.native_press(window, native, "Return", "enter")
         self.assertEqual(aimed["zap_item"], wand["id"])
         # Unshifted period is the real native Wait key; in dual aim it selects
@@ -526,7 +526,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         native = self.native_keys(window)
         if shown["messages"]["more"]:
             self.native_press(window, native, "Escape", "escape")
-        opened = self.native_press(window, native, "F6", "read")
+        opened = self.native_press(window, native, "r", "read")
         self.assertEqual(len(opened["item_rows"]), 1)
         self.assertEqual(opened["state"], shown["state"], "opening Read preserves the exact native picture")
         self.assertDisclosedStateEqual(opened["state"], carried["state"])
@@ -538,7 +538,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         self.assertIsNone(aborted["identification"])
         self.assertEqual(items(aborted, "scroll")[0]["quantity"], "2", "paid cancellation cannot refund a scroll")
         self.assertEqual(observation(aborted)["tick"], observation(choice)["tick"], "answering a paid choice costs no second turn")
-        self.native_press(window, native, "F6", "read")
+        self.native_press(window, native, "r", "read")
         choice = self.native_press(window, native, "Return", "enter", wait_for_ready=True)
         choice_token = choice["identification"]["choice"]
         self.assertEqual(items(choice, "scroll")[0]["quantity"], "1")
@@ -571,7 +571,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         self.assertIsNone(charges(identified, first["id"]))
         self.assertTrue(first["identified"] and second["identified"])
         self.assertEqual(restored["identification"]["choice"], choice_token)
-        menu = self.native_press(window, native, "F12", "zap")
+        menu = self.native_press(window, native, "z", "zap")
         self.assertEqual(len(menu["item_rows"]), 2)
         self.assertNotIn("charges", menu["item_rows"][0])
         self.assertIn("charges: 3", menu["item_rows"][1])
@@ -581,7 +581,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         cancelled = self.native_press(window, native, "Escape", "escape")
         self.assertEqual(cancelled["state"], identified["state"], "aim cancellation is free")
         self.assertIsNone(cancelled["zap_item"])
-        self.native_press(window, native, "F12", "zap")
+        self.native_press(window, native, "z", "zap")
         self.native_press(window, native, "Down", "down")
         self.native_press(window, native, "Return", "enter")
         fired = self.native_press(window, native, "Right", "right", wait_for_ready=True)
@@ -2050,7 +2050,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         native = self.native_keys(window)
         def press(name, action, **completion):
             return self.native_press(window, native, name, action, **completion)
-        press("g", "pickup")
+        press("comma", "pickup")
         carried = press("Return", "enter", wait_for_ready=True, wait_for_admission=True)
         torch, = observation(carried)["inventory"]
         def light(frame):
@@ -2058,15 +2058,23 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
                         if row["item"] == torch["id"])["portable_light"]
         self.assertFalse(light(carried)["lit"])
         self.assertFalse(light(carried)["ignitable"])
-        press("w", "equip")
+        # Tools are equipped through the generic extended command, not weapon-only w.
+        native("Shift_L", True)
+        try:
+            press("3", "commands")
+        finally:
+            native("Shift_L", False)
+        self.native_text(window, "equip")
+        self.ascii_frame(window, lambda frame: frame.get("command_line") == "equip")
+        press("Return", "enter")
         held = press("Return", "enter", wait_for_ready=True, wait_for_admission=True)
         self.assertFalse(light(held)["lit"])
         self.assertTrue(light(held)["ignitable"])
-        asking = press("x", "ignite")
+        asking = press("a", "apply")
         self.assertEqual(observation(asking), observation(held), "opening chooser is free")
         cancelled = press("Escape", "escape")
         self.assertEqual(observation(cancelled), observation(held))
-        press("x", "ignite")
+        press("a", "apply")
         lit = press("Return", "enter", wait_for_ready=True, wait_for_admission=True)
         self.assertTrue(light(lit)["lit"])
         self.assertTrue(light(lit)["extinguishable"])
@@ -2074,7 +2082,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         self.assertTrue(any(cell["position"] == {"x": 3, "y": 0, "z": 0} and cell["lit"]
                             for cell in observation(lit)["visible_cells"]))
         self.assertEqual(lit["messages"]["turn"].count("You finish igniting the torch."), 1)
-        press("v", "extinguish")
+        press("a", "apply")
         off = press("Return", "enter", wait_for_ready=True, wait_for_admission=True)
         self.assertFalse(light(off)["lit"])
         self.assertEqual(int(light(off)["remaining"]), 99900)

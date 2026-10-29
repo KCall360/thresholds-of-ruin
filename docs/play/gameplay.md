@@ -19,7 +19,7 @@ You start as a two-cell-tall human delver, seeing from the upper body cell, with
 an equipped iron greatsword. The build starts with Heavy Weaponry and Discipline. Its four paid
 advancement choices buy Rattling Blow, Brace for Impact, another Heavy Weaponry
 rank and Measured Cut. `stats` in text or
-`@` in ASCII shows the derived character and available abilities; inventory
+Ctrl-X in ASCII shows the derived character and available abilities; inventory
 shows the carried weapon. These are current scenario choices, not hard-coded
 requirements for every character.
 
@@ -39,15 +39,15 @@ a promise that this adventure contains it.
 ## Explore and fight
 
 - Inspect before acting: text `look`, `examine <creature>` and `stats`, or ASCII
-  `;` and `@`, do not advance time.
+  `;` and Ctrl-X, do not advance time.
 - Text `east` chooses a way onward and may walk several steps; `step east` is
   one move. ASCII movement keys step once; shifted directions run.
-- Text `attack <creature>` approaches when needed. ASCII `a` selects a visible
+- Text `attack <creature>` approaches when needed. ASCII `#attack` selects a visible
   target, and moving into a hostile creature attacks by default. This is a client
   interpretation; backend movement itself never becomes an attack.
 - Granted techniques are selected separately: text `rattling blow <creature>`,
   `measured cut <creature>` or `brace for impact`, or
-  ASCII `z`. They validate reach and funding at execution; text techniques do not
+  ASCII `Z`. They validate reach and funding at execution; text techniques do not
   approach for you.
 - Travel uses only known routes. Newly seen actors, positive HP loss and stale
   obstacles can stop it; travel never attacks or opens a door automatically.
