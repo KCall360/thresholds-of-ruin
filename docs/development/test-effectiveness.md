@@ -1681,3 +1681,15 @@ hash-verified reversible compression of two superseded server rlib cache objects
 reclaimed 659,116,032 physical bytes. This resource interruption is not a test
 pass or production detection. The native physical-key status case remains a hosted
 gate because local xdotool is absent. No production source or time limits changed.
+
+A later Windows debug run exposed a distinct synchronization defect in the
+clarification/rewind fixture: its relay held Text's first travel envelope, not
+server execution. A fresh wizard Observe at tick 50 could therefore become stale
+while seven authoritative travel steps advanced to tick 750 before rewind. The
+fixture now waits for the independent wizard stream's matching Arrived status,
+asserts all seven steps, and submits one fresh-context rewind while Text is still
+held and cannot perform its compound pickup. Clarification remains byte-for-byte
+free, pending pickup is cleared, and exact branch/tick/inventory/reconnect checks
+remain. The actual affected process passes locally in 1.729 seconds. This adds one
+observed fixture synchronization failure, not a gameplay defect; no retry, timeout
+increase or production change was introduced.

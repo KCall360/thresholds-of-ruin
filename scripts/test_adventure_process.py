@@ -243,6 +243,17 @@ class AdventureProcesses(ProcessTestCase):
             self.assertTrue(held.wait(15), "Text never established pending travel")
             self.assertEqual(pending[0]["branch"], old_branch)
             self.assertEqual(pending[0]["body"]["status"]["completed_steps"], "0")
+            # The relay holds Text's presentation, not authoritative travel.
+            # Let that travel settle before the one fresh-context rewind; Text
+            # still cannot consume Arrived and submit its pending pickup.
+            arrived = self.frame(wizard, lambda frame:
+                (frame.get("travel") or {}).get("id") == pending[0]["body"]["status"]["id"]
+                and frame["travel"]["phase"] == "arrived")
+            self.assertEqual(arrived["travel"]["completed_steps"], "7")
+            at_destination = self.request(wizard, {"type": "observe"})
+            self.assertIsNone(at_destination["error"])
+            self.assertFalse(any(row["name"] == "stone tablet"
+                                 for row in at_destination["state"]["observation"]["inventory"]))
             rewound = self.wizard_command(wizard, "rewind initial")
             self.assertNotEqual(rewound["branch"], old_branch)
             self.assertEqual(rewound["state"]["observation"]["tick"], "0")
