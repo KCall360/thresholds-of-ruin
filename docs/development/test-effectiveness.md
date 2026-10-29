@@ -1624,3 +1624,26 @@ output-key set needed the shard-attempt fields, and each shard needed a distinct
 compiler role instead of a last-writer matrix output. Negative regressions retain
 both safeguards. Actionlint, Ruff and the focused coverage/attempt/seal tests pass;
 final hosted exhaustive qualification remains required.
+
+Once the full Rust suites passed, their downstream production Service catalog
+owner exposed seven stale methods across three contract migrations: two still
+mutated removed action display revisions instead of input authority generations;
+four compared newly issued picture identities/generations as immutable payload;
+and one expected an unsolicited hallucination picture instead of causal visual
+invalidation followed by display demand. These are three fixture roots affecting
+seven methods, not gameplay defects. All 29 Service methods now pass against the
+exact Cargo-produced current host, including exact stale/wrong-branch errors,
+hidden-hold retry/no-retarget behavior, complete disclosed payload comparisons,
+private discovery and exact hallucination phase samples for owner and follower.
+No production code or privacy/replay assertion was relaxed.
+
+Linux release's projectile process exposed one additional stale decision fixture:
+its headless peer had settled equipment, but Text still held the older picture
+when a new launch menu began. Retained stdout proves the client correctly refused
+the changed selection without sending an action; the fixture's shortbow substring
+accidentally matched preceding equipment narration. An explicit sync before the
+new menu verifies one real snapshot and its complete disclosed payload, then keeps
+the exact page count, expertise, payment, recovery and source-free restart checks.
+The full affected process passes. This adds one stale method/root, not a transport
+or gameplay defect. Both new Linux debug Python shard jobs also completed
+successfully; aggregate exact-coverage proof and final-head CI remain separate gates.

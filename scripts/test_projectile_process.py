@@ -181,6 +181,13 @@ class ProjectileProcesses(ProcessTestCase):
         self.assertLess(int(view(self.request(self.target, {"type": "snapshot"}))["combat"]["hp"]), self.target_health)
         self.assertNotIn("Server error", text.command("equip shortbow"))
         equipped = self.settle()
+        # Peer waits settle equipment on the server, not on this Text stream.
+        # Establish its completed picture before opening a NEW source menu;
+        # never retry or rebind an already issued projectile selection.
+        start = len(self.replies)
+        self.assertNotIn("Server error", text.command("sync"))
+        synchronized = self.reply("snapshot", start)["snapshot"]
+        self.assertDisclosedStateEqual(synchronized["state"], equipped["state"])
         bow = item(equipped, "shortbow")["id"]
         arrow = item(equipped, "arrow")["id"]
         start = len(self.replies)

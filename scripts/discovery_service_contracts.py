@@ -6,6 +6,7 @@ import unittest
 from discovery_package import doors, fixture, observation, observer_fixture, search, traps
 from service_contract_host import ServiceHost
 from utility_potions_service_contracts import UtilityServiceHarness
+from process_harness import ProcessTestCase
 
 
 class DiscoveryServiceContracts(unittest.TestCase):
@@ -88,7 +89,7 @@ class DiscoveryServiceContracts(unittest.TestCase):
         self.assertFalse(traps(initial))
         self.assertFalse(doors(initial))
         for _ in range(3):
-            self.assertEqual(self.snapshot()["state"], initial["state"])
+            ProcessTestCase.assertDisclosedStateEqual(self, self.snapshot()["state"], initial["state"])
         for _ in range(2):
             before = self.snapshot()
             after = self.act(search(before))
@@ -118,7 +119,7 @@ class DiscoveryObserverServiceContracts(UtilityServiceHarness):
         self.assertEqual(len(errors), 1)
         self.assertEqual(errors[0]["code"], "invalid_action")
         self.assertFalse(any(row["type"] == "ack" for row in rows))
-        self.assertEqual(self.snapshot(actor)["state"], before["state"])
+        ProcessTestCase.assertDisclosedStateEqual(self, self.snapshot(actor)["state"], before["state"])
         return errors[0]["message"]
 
     def test_actor_private_discovery_and_family_survive_other_observer_shared_open_and_close(self):
@@ -159,7 +160,7 @@ class DiscoveryObserverServiceContracts(UtilityServiceHarness):
                          "Seeing an open secret entrance remains knowledge when it closes")
         self.assertEqual(set(traps(closed)), {peer_hazard["id"]})
         for _ in range(2):
-            self.assertEqual(self.snapshot(2)["state"], closed["state"])
+            ProcessTestCase.assertDisclosedStateEqual(self, self.snapshot(2)["state"], closed["state"])
         searched = self.act(2, search(closed))
         self.assertEqual(set(traps(searched)), {peer_hazard["id"]})
         self.assertFalse(doors(searched)[seen["id"]]["open"])
