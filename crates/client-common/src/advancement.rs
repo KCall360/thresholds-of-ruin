@@ -3,6 +3,9 @@
 use std::collections::VecDeque;
 use tor_protocol::*;
 
+mod overview;
+pub use overview::OpenOverview;
+
 const STALE: &str = "Advancement preview is stale. Open advancement and explicitly preview again.";
 pub const HELP: &str = "overview | ledger | balances | skills | talents | expertises | intellect-expertises | next | previous\nsource racial | source class <class ID>\nintellect-expertise <threshold> <expertise ID>\npurchase <HD> <pool ID> <skill|talent|expertise> <ID> [form <form ID>]\nremove <HD> <purchase number> | replace <HD> <purchase number> <pool ID> <skill|talent|expertise> <ID> [form <form ID>]\ndetails <summary|removed|refunds|balances|skills|talents|expertises|conditions>\nsupplies | confirm [using carried|<name or #item>] | resume | cancel\nHD and purchase numbers start at 1. Choices preview first; only confirm commits.";
 
@@ -474,7 +477,7 @@ impl AdvancementPages {
             self.clear();
             return Err("Advancement requires control of your character.".into());
         }
-        let context = state.snapshot().reply_context();
+        let context = state.reply_context();
         self.observe(&context, true);
         let command = match input {
             AdvancementInput::Overview => {
@@ -522,12 +525,10 @@ impl AdvancementPages {
                 }
                 if resume {
                     Command::ResumeIntention {
-                        expected_revision: context.revision,
                         intention: progress.intention.clone(),
                     }
                 } else {
                     Command::CancelIntention {
-                        expected_revision: context.revision,
                         intention: progress.intention.clone(),
                         step: None,
                     }
@@ -630,10 +631,7 @@ impl AdvancementPages {
                 }
             }
         };
-        Ok(Command::Act {
-            expected_revision: confirmation.revision,
-            action,
-        })
+        Ok(Command::Act { action })
     }
     pub fn supply_costs(&self) -> Result<Vec<AbilitySupplyCost>, String> {
         let ration = &self.overview().ok_or("Open advancement first.")?.ration;

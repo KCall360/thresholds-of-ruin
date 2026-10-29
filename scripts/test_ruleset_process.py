@@ -160,7 +160,7 @@ melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, stri
 
         def inspect(client):
             offset = len(client.transcript)
-            self.assertFalse(self.command(client, {"type": "wizard", "command": "creature inspect 2"}).get("error"))
+            self.wizard_command(client, "creature inspect 2")
             messages = [json.loads(line).get("message") for line in client.transcript[offset:] if line.startswith("{")]
             return next(message["report"] for message in reversed(messages)
                         if message and message["type"] == "creature_inspection")
@@ -270,6 +270,7 @@ melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, stri
                    and frame["state"]["observation"]["ready"]
                    and int(frame["state"]["observation"]["tick"]) > 0
                    and frame["state"]["observation"]["combat"]["preparation_remaining"] is None)
+        self.assertIsNone(self.request(wizard, {"type": "observe"})["error"])
         record = next(record for record in report("combat inspect", "combat_diagnostics")["records"]
                       if record["ability"]["id"] == "fixture_sweep")
         self.assertEqual(sum(effect["amount"] for effect in record["outcome"]["effects"]
@@ -307,8 +308,8 @@ melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, stri
         self.wizard_command(wizard, "identify 1 10")
         wizard.stop()
         text, _ = self.text_client()
-        self.assertIn("ItemStarted", text.command("remove sword"))
-        self.assertIn("ItemStarted", text.command("wear sword"))
+        self.assertIn("You begin to remove the sword.", text.command("remove sword"))
+        self.assertIn("You begin to equip the sword.", text.command("wear sword"))
         snapshot = self.request(probe, {"type": "snapshot"})
         view = snapshot["state"]["observation"]
         self.assertEqual(int(view["tick"]), 600)
@@ -324,7 +325,7 @@ melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, stri
         rules_path.unlink()
         self.server(scenario=ROOT / "scenarios/two-room", seed=None, wizard=True)
         _, restored = self.client(observe=True)
-        self.assertEqual(restored["state"], snapshot["state"])
+        self.assertDisclosedStateEqual(restored["state"], snapshot["state"])
 
     def test_forged_ground_item_reference_rejects_restart_without_rewriting_save(self):
         import os

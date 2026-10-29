@@ -23,7 +23,7 @@ fn query(query: Value) -> Value {
     request(json!({"type":"advancement","expected_revision":"5","query":query}))
 }
 fn response(query: Value, entries: Value, total: u16, next: Option<u16>) -> Value {
-    json!({"type":"advancement_page","request_id":"advancement-request","context":{
+    json!({"type":"advancement_page","request_id":"advancement-request","context":{"snapshot":"advancement-picture",
         "input":{"stream":{"stream":"attachment","epoch":"1"},"readiness_revision":"3"},
         "actor":"1","branch":"branch","cursor":{"sequence":"5","tick":"12"},"revision":"5"},
         "page":{"basis":basis(),"revision":"5","query":query,"total":total,"next":next,"entries":entries}})
@@ -55,7 +55,7 @@ fn owner_advancement_actions_have_exact_basis_and_operation_without_client_candi
         json!({"type":"purchase","basis":basis(),"purchase":purchase()}),
         json!({"type":"respec","basis":basis(),"replacement":replacement(),"supplies":{"kind":"carried"}}),
     ] {
-        let value = request(json!({"type":"act","expected_revision":"5","action":action}));
+        let value = request(json!({"type":"act","action":action}));
         let decoded =
             decode_request(&value.to_string()).expect("ordinary advancement action must decode");
         assert_eq!(serde_json::to_value(decoded).unwrap(), value);
@@ -275,12 +275,10 @@ fn owner_advancement_named_map_contract_rejects_ordered_positional_aliases() {
 
 #[test]
 fn owner_advancement_request_containers_and_all_operands_require_named_maps() {
-    let good = request(
-        json!({"type":"act","expected_revision":"5","action":{"type":"respec",
+    let good = request(json!({"type":"act","action":{"type":"respec",
         "basis":basis(),"replacement":{"source":{"owner":"0","index":0},
         "replacement":{"pool":"discipline","selection":{"kind":"talent","talent":"alternate"}}},
-        "supplies":{"kind":"carried"}}}),
-    );
+        "supplies":{"kind":"carried"}}}));
     decode_request(&good.to_string()).unwrap();
     for (path, fields) in [
         (
@@ -400,7 +398,7 @@ fn owner_advancement_new_records_reject_missing_unknown_and_duplicate_fields() {
 #[test]
 fn owner_advancement_u64_id_and_source_bounds_are_strict_at_byte_decode() {
     let good = request(
-        json!({"type":"act","expected_revision":"5","action":{"type":"purchase","basis":basis(),"purchase":purchase()}}),
+        json!({"type":"act","action":{"type":"purchase","basis":basis(),"purchase":purchase()}}),
     );
     decode_request(&good.to_string()).unwrap();
     for field in ["actor", "reset", "build_epoch"] {
@@ -671,11 +669,9 @@ fn owner_advancement_skill_pages_accept_twenty_rows_and_reject_twenty_one() {
 #[test]
 fn owner_advancement_respec_explicit_ration_is_one_opaque_zero_ordinal_source() {
     let target = tor_protocol::ItemTarget::from_digest([7; 32]);
-    let good = request(
-        json!({"type":"act","expected_revision":"5","action":{"type":"respec",
+    let good = request(json!({"type":"act","action":{"type":"respec",
         "basis":basis(),"replacement":replacement(),
-        "supplies":{"kind":"explicit","items":[{"cost_ordinal":0,"item":target}]}}}),
-    );
+        "supplies":{"kind":"explicit","items":[{"cost_ordinal":0,"item":target}]}}}));
     decode_request(&good.to_string()).unwrap();
     for rows in [
         json!([]),
@@ -697,7 +693,7 @@ fn owner_form_operands_roundtrip_exactly_and_reject_lossy_or_positional_aliases(
         json!({"kind":"talent_form","talent":"evocation_initiate","form":"spark_lance.cold"});
     let mut operation = purchase();
     operation["selection"] = selection.clone();
-    let good = request(json!({"type":"act","expected_revision":"5","action":{
+    let good = request(json!({"type":"act","action":{
         "type":"purchase","basis":basis(),"purchase":operation}}));
     assert_eq!(
         serde_json::to_value(decode_request(&good.to_string()).unwrap()).unwrap(),
@@ -774,7 +770,7 @@ fn future_growth_source_actions_and_previews_are_exact_and_have_no_xp_authority(
         json!({"kind":"class","class":"warrior"}),
     ] {
         let action = json!({"type":"choose_growth_source","basis":basis(),"source":source});
-        let good = request(json!({"type":"act","expected_revision":"5","action":action}));
+        let good = request(json!({"type":"act","action":action}));
         assert_eq!(
             serde_json::to_value(decode_request(&good.to_string()).unwrap()).unwrap(),
             good
@@ -965,7 +961,7 @@ fn expertise_preview_section_rejects_wrong_rows() {
 fn intellect_expertise_action_and_preview_use_strict_distinct_operands() {
     for threshold in [1, 1000] {
         let choice = json!({"threshold":threshold,"expertise":"spear"});
-        let action = request(json!({"type":"act","expected_revision":"5","action":{
+        let action = request(json!({"type":"act","action":{
             "type":"choose_intellect_expertise","basis":basis(),"choice":choice}}));
         let preview = query(json!({"kind":"preview","basis":basis(),"proposal":{
             "kind":"intellect_expertise","choice":choice},"section":"summary","offset":0}));

@@ -256,6 +256,8 @@ fn reconfiguring_a_task_preserves_earned_visits() {
 fn simple_idle_roaming_needs_one_scene_and_no_route_searches() {
     let mut game = fixture(AiProfile::general());
     fill_history(&mut game);
+    // Retain a cold-build witness independent of fixture perception reads.
+    game.lifecycle.scenes = Default::default();
     let before = crate::diagnostics::work_counts();
     assert!(matches!(
         game.choose_ai(ActorId(2)).unwrap().action,

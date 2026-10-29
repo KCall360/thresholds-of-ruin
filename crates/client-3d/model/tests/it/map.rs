@@ -111,7 +111,7 @@ fn selection_is_read_only_and_requires_control_readiness_and_current_geometry() 
 fn selections_cannot_cross_actor_stream_branch_revision_or_readiness_changes() {
     let v = fixture();
     let s = MapSelection::select(&v, "opaque:1:0").unwrap();
-    for n in 0..6 {
+    for n in 0..7 {
         let mut changed = v.clone();
         match n {
             0 => changed.shown.actor = ActorId(99),
@@ -119,7 +119,8 @@ fn selections_cannot_cross_actor_stream_branch_revision_or_readiness_changes() {
             2 => changed.shown.input.stream.epoch += 1,
             3 => changed.shown.revision += 1,
             4 => changed.shown.input.readiness_revision += 1,
-            _ => changed.shown.cursor.sequence += 1,
+            5 => changed.shown.cursor.sequence += 1,
+            _ => changed.shown.snapshot = SnapshotId("other-issued-snapshot".into()),
         };
         assert!(s.command(&changed, true).is_none(), "context mutation{n}");
     }

@@ -40,7 +40,7 @@ pub(crate) struct Map {
     fit: Option<raster::Fit>,
     route_generation: u64,
 }
-fn active(screen: Option<Screen>) -> bool {
+fn active(screen: Option<&Screen>) -> bool {
     matches!(
         screen,
         Some(Screen::Places { .. } | Screen::History | Screen::Note { .. })
@@ -122,12 +122,12 @@ pub(crate) fn buttons(
         } else {
             chrome::HOT
         };
-        if *interaction != Interaction::Pressed || !active(game.screen) {
+        if *interaction != Interaction::Pressed || !active(game.screen.as_ref()) {
             continue;
         }
         match action {
             Action::Close => {
-                if let Some(open) = game.screen {
+                if let Some(open) = game.screen.clone() {
                     screen::toggle(&net, &mut game, open);
                 }
             }
@@ -140,9 +140,9 @@ pub(crate) fn buttons(
                 game.typed.clear();
             }
             Action::Note => {
-                if let Some(revision) = game.view.as_ref().map(|v| v.revision) {
+                if let Some(snapshot) = game.view.as_ref().map(|v| v.shown.snapshot.clone()) {
                     game.screen = Some(Screen::Note {
-                        revision,
+                        snapshot,
                         private: true,
                     });
                     game.typed.clear();
@@ -189,7 +189,7 @@ pub(crate) fn show(
         bodies,
         mut scrolls,
     } = layout;
-    let wanted = active(game.screen);
+    let wanted = active(game.screen.as_ref());
     let narrow = windows.single().is_ok_and(|w| w.width() < 900.);
     for (mut visibility, mut node) in &mut roots {
         visibility.set_if_neq(if wanted {
@@ -243,7 +243,7 @@ pub(crate) fn show(
         map.serial = serial;
         map.route_generation = generation;
     }
-    let now = (serial, game.screen, game.typed.clone());
+    let now = (serial, game.screen.clone(), game.typed.clone());
     if stamp.as_ref().is_none_or(|old| old.1 != game.screen) {
         for mut scroll in &mut scrolls {
             scroll.offset_y = 0.;
@@ -292,7 +292,7 @@ pub(crate) fn keyboard(
     game: Res<Game>,
     mut scrolls: Query<(&ComputedNode, &mut ScrollPosition), With<Scroll>>,
 ) {
-    if !active(game.screen) || !game.typed.is_empty() {
+    if !active(game.screen.as_ref()) || !game.typed.is_empty() {
         events.clear();
         return;
     }
@@ -354,7 +354,7 @@ mod tests {
         assert_eq!(
             app.world().resource::<Game>().screen,
             Some(Screen::Note {
-                revision: 7,
+                snapshot: tor_protocol::SnapshotId("fixture-display-7".into()),
                 private: true
             })
         );

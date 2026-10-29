@@ -29,7 +29,7 @@ const TO_HALL_4: usize = 76;
 
 fn walk(engine: &mut Engine, direction: Direction, steps: usize, sequence: &mut usize) {
     for _ in 0..steps {
-        let revision = engine.revision(ActorId(1)).unwrap();
+        let revision = engine.causal_boundary(ActorId(1)).unwrap();
         engine
             .command(
                 "player",
@@ -38,7 +38,7 @@ fn walk(engine: &mut Engine, direction: Direction, steps: usize, sequence: &mut 
                 &format!("step-{sequence}"),
                 &engine.branch().clone(),
                 Command::Act {
-                    expected_revision: revision,
+                    expected_boundary: revision,
                     action: Action::Move { direction },
                 },
             )
@@ -198,12 +198,13 @@ fn lighting_survives_eviction_checkpoint_journal_replay_and_rewind() {
             assert!(engine.recovery_profile().checkpoint_sequence > 0);
         }
         engine.enable_wizard().unwrap();
-        let expected_revision = engine.revision(ActorId(1)).unwrap();
+        let expected_revision = engine.causal_boundary(ActorId(1)).unwrap();
         act(
             &mut engine,
             "back-to-dark-room",
             Command::Wizard {
-                expected_revision,
+                display_basis: None,
+                expected_boundary: expected_revision,
                 operation: WizardOperation::Teleport {
                     actor: ActorId(1),
                     position: Position {
@@ -221,12 +222,13 @@ fn lighting_survives_eviction_checkpoint_journal_replay_and_rewind() {
         let back = engine.state(ActorId(1)).unwrap().observation;
         assert_eq!(back.visible_cells, initial.visible_cells);
         assert_eq!(back.ground_items, initial.ground_items);
-        let expected_revision = engine.revision(ActorId(1)).unwrap();
+        let expected_revision = engine.causal_boundary(ActorId(1)).unwrap();
         act(
             &mut engine,
             "rewind-dark-room",
             Command::Wizard {
-                expected_revision,
+                display_basis: None,
+                expected_boundary: expected_revision,
                 operation: WizardOperation::Rewind { target: None },
             },
         );
@@ -269,12 +271,12 @@ fn records_made_after_a_rewind_never_reuse_an_identity() {
     engine.enable_wizard().unwrap();
     let mut sequence = 0;
     walk(&mut engine, Direction::East, 4, &mut sequence);
-    let revision = engine.revision(ActorId(1)).unwrap();
+    let revision = engine.causal_boundary(ActorId(1)).unwrap();
     let early = act(
         &mut engine,
         "early",
         Command::Act {
-            expected_revision: revision,
+            expected_boundary: revision,
             action: Action::Move {
                 direction: Direction::East,
             },
@@ -286,12 +288,13 @@ fn records_made_after_a_rewind_never_reuse_an_identity() {
     assert_eq!(counts(&engine).detached, 2);
     engine.flush().unwrap();
 
-    let revision = engine.revision(ActorId(1)).unwrap();
+    let revision = engine.causal_boundary(ActorId(1)).unwrap();
     act(
         &mut engine,
         "rewind",
         Command::Wizard {
-            expected_revision: revision,
+            display_basis: None,
+            expected_boundary: revision,
             operation: tor_server::journal::WizardOperation::Rewind {
                 target: Some(early),
             },
@@ -301,12 +304,12 @@ fn records_made_after_a_rewind_never_reuse_an_identity() {
     // Taking the pebble this time makes hall 1's new record differ from the
     // abandoned one, which is still on disk.
     walk(&mut engine, Direction::East, 1, &mut sequence);
-    let revision = engine.revision(ActorId(1)).unwrap();
+    let revision = engine.causal_boundary(ActorId(1)).unwrap();
     act(
         &mut engine,
         "take",
         Command::Act {
-            expected_revision: revision,
+            expected_boundary: revision,
             action: Action::Take {
                 item: 10,
                 quantity: None,
@@ -334,12 +337,13 @@ fn a_wizard_can_teleport_into_a_region_that_was_never_built() {
     let mut engine = Engine::memory(corridor()).unwrap();
     engine.enable_wizard().unwrap();
     assert_eq!(counts(&engine).unbuilt, 5);
-    let revision = engine.revision(ActorId(1)).unwrap();
+    let revision = engine.causal_boundary(ActorId(1)).unwrap();
     act(
         &mut engine,
         "teleport",
         Command::Wizard {
-            expected_revision: revision,
+            display_basis: None,
+            expected_boundary: revision,
             operation: tor_server::journal::WizardOperation::Teleport {
                 actor: ActorId(1),
                 position: tor_server::journal::Position {
@@ -377,7 +381,7 @@ fn transition_work_does_not_grow_with_the_world() {
         let mut totals = [0usize; 11];
         let mut step = 0;
         let mut run = |engine: &mut Engine, actor: ActorId, action: Option<Action>| {
-            let revision = engine.revision(actor).unwrap();
+            let revision = engine.causal_boundary(actor).unwrap();
             step += 1;
             let (_, profile) = if let Some(action) = action {
                 engine
@@ -388,7 +392,7 @@ fn transition_work_does_not_grow_with_the_world() {
                         &format!("step-{step}"),
                         &engine.branch().clone(),
                         Command::Act {
-                            expected_revision: revision,
+                            expected_boundary: revision,
                             action,
                         },
                     )
@@ -475,7 +479,7 @@ fn generated_regions_cost_the_same_however_large_the_package() {
         for direction in
             std::iter::once(Direction::North).chain(std::iter::repeat_n(Direction::East, TO_HALL_4))
         {
-            let revision = engine.revision(ActorId(1)).unwrap();
+            let revision = engine.causal_boundary(ActorId(1)).unwrap();
             step += 1;
             let (_, profile) = engine
                 .command_profiled(
@@ -485,7 +489,7 @@ fn generated_regions_cost_the_same_however_large_the_package() {
                     &format!("step-{step}"),
                     &engine.branch().clone(),
                     Command::Act {
-                        expected_revision: revision,
+                        expected_boundary: revision,
                         action: Action::Move { direction },
                     },
                 )
@@ -542,7 +546,8 @@ fn an_actor_a_client_controls_keeps_its_region_in_play() {
 /// A transition must not disclose anything an observer can't see: when the
 /// character's move changes which regions are loaded, an actor elsewhere
 /// whose view didn't change (here a frozen guard, at the same tick) keeps
-/// its revision, so its clients get no update.
+/// its disclosed view. The private causal ordinal may still advance; it is not
+/// an observer-visible display generation.
 #[test]
 fn an_unseen_transition_leaves_other_observers_revisions_alone() {
     let root =
@@ -560,7 +565,7 @@ fn an_unseen_transition_leaves_other_observers_revisions_alone() {
     );
     let mut step = 0;
     let mut act = |engine: &mut Engine, actor: ActorId, action: Action| {
-        let revision = engine.revision(actor).unwrap();
+        let revision = engine.causal_boundary(actor).unwrap();
         step += 1;
         engine
             .command(
@@ -570,7 +575,7 @@ fn an_unseen_transition_leaves_other_observers_revisions_alone() {
                 &format!("step-{step}"),
                 &engine.branch().clone(),
                 Command::Act {
-                    expected_revision: revision,
+                    expected_boundary: revision,
                     action,
                 },
             )
@@ -581,8 +586,8 @@ fn an_unseen_transition_leaves_other_observers_revisions_alone() {
     // the loaded regions.
     let mut checked = 0;
     for _ in 0..40 {
-        let before = (counts(&engine), engine.revision(guard).unwrap());
-        let tick = engine.state(guard).unwrap().observation.tick;
+        let before = (counts(&engine), engine.state(guard).unwrap());
+        let tick = before.1.observation.tick;
         act(
             &mut engine,
             ActorId(1),
@@ -593,7 +598,7 @@ fn an_unseen_transition_leaves_other_observers_revisions_alone() {
         if counts(&engine) != before.0 {
             assert_eq!(engine.state(guard).unwrap().observation.tick, tick);
             assert_eq!(
-                engine.revision(guard).unwrap(),
+                engine.state(guard).unwrap(),
                 before.1,
                 "{:?}",
                 counts(&engine)

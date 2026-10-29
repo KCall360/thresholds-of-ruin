@@ -40,9 +40,9 @@ class TextProcesses(ProcessTestCase):
         self.assertIn("Spectator access is read-only", welcome)
         self.assertIn("stone tablet", welcome)
         self.assertNotIn(SPECTATOR_TOKEN, welcome)
-        for revision, (action, event) in enumerate([("take token", "Taken"), ("wait", "Waited"), ("east", "Moved")], 1):
+        for revision, (action, event) in enumerate([("take token", "You pick up the copper token."), ("wait", "Time passes."), ("east", "You move east.")], 1):
             player.command(action)
-            seen = spectator.until(lambda line: f"tick {50 + (revision - 1) * 100}." in line)
+            seen = spectator.until(lambda line: line == event)
             self.assertIn(event, seen)  # The result is presented as well as the new state.
         player.command("note Private player plan")
         player.command("annotate user actor note here Shared progress")
@@ -90,14 +90,15 @@ class TextProcesses(ProcessTestCase):
         self.assertIn("stone tablet", welcome)
         self.assertIn("Server error", client.command("take stone tablet"))
         self.assertIn("tick 0.", client.command("look"))
-        self.assertIn("Taken", client.command("take the token"))
+        self.assertIn("You pick up ", client.command("take the token"))
         self.assertIn("token", client.command("inventory"))
         self.assertIn("Private User", client.command("note Return here later."))
         note = client.command("annotate frontend actor explanation here The token is safe.")
         self.assertIn("Actor Frontend", note)
         self.assertIn('component: "text"', note)
         self.assertIn("tick 50.", client.command("look"))
-        self.assertIn("InvalidAnchor", client.command("annotate user private note state:99 Future"))
+        self.assertIn("Server error StaleContext: Snapshot is no longer available",
+                      client.command("annotate user private note state:99 Future"))
         self.assertIn("tick 50.", client.command("look"))
         for _ in range(4):
             movement = client.command("east")
@@ -129,10 +130,11 @@ class TextProcesses(ProcessTestCase):
         self.assertIn("live note", observer.until(lambda line: "live note" in line))
         # Same authenticated user sees its private notes in both frontends.
         controller.command("wait")
-        observer.until(lambda line: "tick 100." in line)
+        observer.until(lambda line: line == "Time passes.")
         controller.command("release")
         self.assertIn("Control: yours", observer.command("control"))
-        self.assertIn("tick 200.", observer.command("wait"))
+        self.assertIn("Time passes.", observer.command("wait"))
+        self.assertIn("tick 200.", observer.command("sync"))
         self.game.stop()
         self.assertNotEqual(observer.child.wait(timeout=15), 0)
         self.assertNotEqual(controller.child.wait(timeout=15), 0)
@@ -169,7 +171,7 @@ class TextProcesses(ProcessTestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("InvalidAction", result.stdout)  # Visible, but out of reach.
         self.assertIn("tick 250.", result.stdout)
-        self.assertIn("Taken", result.stdout)
+        self.assertIn("You pick up ", result.stdout)
         self.assertIn("piped note", result.stdout)
         self.assertIn("Goodbye.", result.stdout)
 

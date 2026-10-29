@@ -345,12 +345,13 @@ fn all_explicit_floors_are_reversible_and_generation_rewinds() {
     )
     .unwrap();
     let first_arrival = engine.state(ActorId(1)).unwrap();
-    let expected_revision = engine.revision(ActorId(1)).unwrap();
+    let expected_revision = engine.causal_boundary(ActorId(1)).unwrap();
     support::submit(
         &mut engine,
         ActorId(1),
         tor_server::journal::Command::Wizard {
-            expected_revision,
+            display_basis: None,
+            expected_boundary: expected_revision,
             operation: tor_server::journal::WizardOperation::Rewind { target: None },
         },
     )
@@ -429,12 +430,13 @@ fn exploration_floor_streams_independently_and_round_trip_survives_resume() {
             .unwrap();
         engine.enable_wizard().unwrap();
         for z in 0..2 {
-            let expected_revision = engine.revision(ActorId(1)).unwrap();
+            let expected_revision = engine.causal_boundary(ActorId(1)).unwrap();
             support::submit(
                 &mut engine,
                 ActorId(1),
                 tor_server::journal::Command::Wizard {
-                    expected_revision,
+                    display_basis: None,
+                    expected_boundary: expected_revision,
                     operation: tor_server::journal::WizardOperation::SetWall {
                         position: tor_server::journal::Position {
                             region: 1,

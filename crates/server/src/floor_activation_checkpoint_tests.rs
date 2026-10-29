@@ -65,7 +65,7 @@ fn unchanged_population_with_128_ordinary_boundaries_fits_checkpoint_codec() {
                 &format!("wait-{boundary}"),
                 &engine.branch().clone(),
                 Command::Act {
-                    expected_revision: engine.revision(ActorId(1)).unwrap(),
+                    expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
                     action: Action::Wait,
                 },
             )
@@ -291,7 +291,8 @@ fn omitted_group_capacity_failure_preserves_exact_checkpoint_and_region_authorit
             "rejected-group",
             &engine.branch().clone(),
             Command::Wizard {
-                expected_revision: engine.revision(ActorId(1)).unwrap(),
+                display_basis: None,
+                expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
                 operation: WizardOperation::Teleport {
                     actor: ActorId(1),
                     position: Position {
@@ -484,7 +485,8 @@ capacity = "reject"
             "rejected-group",
             &engine.branch().clone(),
             Command::Wizard {
-                expected_revision: engine.revision(ActorId(1)).unwrap(),
+                display_basis: None,
+                expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
                 operation: WizardOperation::Teleport {
                     actor: ActorId(1),
                     position: Position {

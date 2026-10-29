@@ -1,10 +1,11 @@
 //! Authoritative actors, anchor-region membership and derived portal-local bodies.
 //! Mutations cannot escape through a mutable map. Geometry witnesses and dirty
 //! identities control reuse; neither participates in saved state or equality.
+use crate::mutation::{MutationChange, MutationCursor, MutationLedger, MutationStamp};
 use crate::navigation_map::RegionMap;
 use crate::{Actor, ActorId, BodySpec};
 use std::collections::{BTreeMap, BTreeSet};
-use std::ops::{Deref, DerefMut};
+use std::ops::{Deref, DerefMut, Index};
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Mutex,
@@ -15,6 +16,14 @@ type Members = Shared<BTreeMap<RegionId, Shared<BTreeSet<ActorId>>>>;
 type Occupants = Shared<BTreeMap<ActorId, u8>>;
 pub(crate) type BodyCells = Shared<Vec<(Location, u8)>>;
 type PerceivedBodies = Vec<(ActorId, BodyCells)>;
+
+/// A touched identity is sufficient for region-contribution refresh. No actor
+/// or body payload is retained by mutation history.
+#[derive(Clone, Debug)]
+pub(crate) struct ActorMutation;
+impl MutationChange for ActorMutation {
+    fn append(&mut self, _later: &Self) {}
+}
 
 // Like World perception versions, this is only a branch-safe derived cache
 // witness. It is never persisted, ordered as gameplay, or compared by Game::eq.
@@ -157,7 +166,7 @@ struct Bodies {
 }
 
 impl Bodies {
-    fn refresh(&mut self, actors: &BTreeMap<ActorId, Actor>, world: &World) {
+    fn refresh(&mut self, actors: &BTreeMap<ActorId, Shared<Actor>>, world: &World) {
         let geometry = world.geometry_snapshot();
         if self.geometry.as_ref() != Some(&geometry) {
             *self = Self {
@@ -215,7 +224,7 @@ impl Bodies {
 
 #[derive(Default)]
 pub(crate) struct ActorStore {
-    entries: Shared<BTreeMap<ActorId, Actor>>,
+    entries: Shared<BTreeMap<ActorId, Shared<Actor>>>,
     regions: Members,
     held_owners: Members,
     timer_deadlines: Shared<BTreeSet<(u64, ActorId)>>,
@@ -229,12 +238,14 @@ pub(crate) struct ActorStore {
     perception_revision: u64,
     visibility_epoch: u64,
     bodies: Mutex<Bodies>,
+    mutations: MutationLedger<ActorId, ActorMutation>,
 }
 
 impl Clone for ActorStore {
     fn clone(&self) -> Self {
         Self {
             entries: self.entries.clone(),
+            mutations: self.mutations.clone(),
             regions: self.regions.clone(),
             held_owners: self.held_owners.clone(),
             timer_deadlines: self.timer_deadlines.clone(),
@@ -272,15 +283,69 @@ impl PartialEq for ActorStore {
 }
 impl Eq for ActorStore {}
 
-impl Deref for ActorStore {
-    type Target = BTreeMap<ActorId, Actor>;
-    fn deref(&self) -> &Self::Target {
-        &self.entries
+impl Index<&ActorId> for ActorStore {
+    type Output = Actor;
+
+    fn index(&self, id: &ActorId) -> &Self::Output {
+        &self.entries[id]
     }
 }
 
 impl ActorStore {
+    pub(crate) fn mutation_cursor(&self) -> MutationCursor<ActorId, ActorMutation> {
+        self.mutations.cursor()
+    }
+    pub(crate) fn mutation_stamp(&self, id: &ActorId) -> Option<MutationStamp> {
+        self.mutations.stamp(id)
+    }
+    pub(crate) fn changes_since(
+        &self,
+        cursor: &MutationCursor<ActorId, ActorMutation>,
+    ) -> Option<BTreeMap<ActorId, ActorMutation>> {
+        self.mutations.changes_since(cursor)
+    }
+    pub(crate) fn certifies_since(&self, cursor: &MutationCursor<ActorId, ActorMutation>) -> bool {
+        self.mutations.certifies_since(cursor)
+    }
+
+    pub(crate) fn shares_actor_payload(&self, other: &Self, id: ActorId) -> bool {
+        self.entries
+            .get(&id)
+            .zip(other.entries.get(&id))
+            .is_some_and(|(current, prior)| current.shares_storage(prior))
+    }
+    // Keep payload ownership private. Callers borrow Actors, not their COW
+    // handles, so existing clone/read semantics remain independent of storage.
+    pub fn get(&self, id: &ActorId) -> Option<&Actor> {
+        self.entries.get(id).map(|actor| &**actor)
+    }
+
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = (&ActorId, &Actor)> + ExactSizeIterator {
+        self.entries.iter().map(|(id, actor)| (id, &**actor))
+    }
+
+    pub fn values(&self) -> impl DoubleEndedIterator<Item = &Actor> + ExactSizeIterator {
+        self.entries.values().map(|actor| &**actor)
+    }
+
+    pub fn keys(&self) -> impl DoubleEndedIterator<Item = &ActorId> + ExactSizeIterator {
+        self.entries.keys()
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    pub fn contains_key(&self, id: &ActorId) -> bool {
+        self.entries.contains_key(id)
+    }
+
     pub fn from_entries(entries: BTreeMap<ActorId, Actor>) -> Self {
+        let mut mutations = MutationLedger::default();
         let mut regions = Members::default();
         let mut held_owners = Members::default();
         let mut timer_deadlines = BTreeSet::new();
@@ -289,6 +354,7 @@ impl ActorStore {
         let mut pending_aggravation = BTreeSet::new();
         let mut guised_owners = BTreeSet::new();
         for (&id, actor) in &entries {
+            mutations.publish(id, ActorMutation, true);
             add_member(&mut regions, actor.location.region, id);
             if actor.guise.appearance().is_some() {
                 guised_owners.insert(id);
@@ -318,7 +384,12 @@ impl ActorStore {
             .filter_map(|(&id, actor)| actor.motion.active_fall.map(|_| id))
             .collect();
         Self {
-            entries: Shared::new(entries),
+            entries: Shared::new(
+                entries
+                    .into_iter()
+                    .map(|(id, actor)| (id, Shared::new(actor)))
+                    .collect(),
+            ),
             regions,
             held_owners,
             timer_deadlines: Shared::new(timer_deadlines),
@@ -332,12 +403,15 @@ impl ActorStore {
             perception_revision: fresh_perception_revision(),
             visibility_epoch: fresh_perception_revision(),
             bodies: Mutex::default(),
+            mutations,
         }
     }
 
     #[cfg(test)]
-    pub fn raw_entries(&self) -> &BTreeMap<ActorId, Actor> {
-        &self.entries
+    pub fn owned_actor_entries(&self) -> BTreeMap<ActorId, Actor> {
+        self.iter()
+            .map(|(id, actor)| (*id, actor.clone()))
+            .collect()
     }
 
     pub fn scheduled_timers(&self) -> impl Iterator<Item = (u64, ActorId)> + '_ {
@@ -479,6 +553,40 @@ impl ActorStore {
         !self.guised_owners.is_empty()
     }
 
+    /// Detach only the ordered table of handles. Payloads remain shared until
+    /// an individual actor is edited or returned as an owned value.
+    fn entries_for_write(
+        entries: &mut Shared<BTreeMap<ActorId, Shared<Actor>>>,
+    ) -> &mut BTreeMap<ActorId, Shared<Actor>> {
+        let _diagnostic_span = crate::diagnostics::spans::span("actor_table_write");
+        let shared = entries.is_shared();
+        let before = std::ptr::from_ref(&**entries);
+        let entries = &mut **entries;
+        if shared && std::ptr::from_ref(entries) != before {
+            crate::diagnostics::actor_table_entries_copy(entries.len());
+        }
+        entries
+    }
+
+    fn actor_for_write(actor: &mut Shared<Actor>) -> &mut Actor {
+        let _diagnostic_span = crate::diagnostics::spans::span("actor_payload_write");
+        let shared = actor.is_shared();
+        let before = std::ptr::from_ref(&**actor);
+        let actor = &mut **actor;
+        if shared && std::ptr::from_ref(actor) != before {
+            crate::diagnostics::actor_table_copy(1);
+        }
+        actor
+    }
+
+    fn owned_actor(actor: Shared<Actor>) -> Actor {
+        let _diagnostic_span = crate::diagnostics::spans::span("actor_payload_return");
+        if actor.is_shared() {
+            crate::diagnostics::actor_table_copy(1);
+        }
+        actor.into_inner()
+    }
+
     pub fn insert(&mut self, id: ActorId, actor: Actor) -> Option<Actor> {
         update_pending_search(
             &mut self.guised_owners,
@@ -492,11 +600,11 @@ impl ActorStore {
             id,
             actor.periodic_relocations.pending(),
         );
-        if self
+        let visibility_changed = self
             .entries
             .get(&id)
-            .is_none_or(|old| VisibilityInputs::capture(old) != VisibilityInputs::capture(&actor))
-        {
+            .is_none_or(|old| VisibilityInputs::capture(old) != VisibilityInputs::capture(&actor));
+        if visibility_changed {
             self.visibility_epoch = fresh_perception_revision();
         }
         let changed = if self.contextual_recovery.is_empty() {
@@ -526,7 +634,9 @@ impl ActorStore {
             .then(|| next_timer(&actor))
             .flatten();
         let held = actor.holds.has_links();
-        let old = self.entries.insert(id, actor);
+        let old = Self::entries_for_write(&mut self.entries)
+            .insert(id, Shared::new(actor))
+            .map(Self::owned_actor);
         if let Some(old) = &old {
             if let Some(interval) = next_timer(old) {
                 self.timer_deadlines.remove(&(interval, id));
@@ -548,11 +658,12 @@ impl ActorStore {
             .unwrap_or_else(|e| e.into_inner())
             .dirty
             .insert(id);
+        self.mutations.publish(id, ActorMutation, true);
         old
     }
 
     pub fn remove(&mut self, id: &ActorId) -> Option<Actor> {
-        let old = self.entries.remove(id)?;
+        let old = Self::owned_actor(Self::entries_for_write(&mut self.entries).remove(id)?);
         self.visibility_epoch = fresh_perception_revision();
         if !self.contextual_recovery.is_empty() {
             self.perception_revision = fresh_perception_revision();
@@ -576,6 +687,7 @@ impl ActorStore {
             .unwrap_or_else(|e| e.into_inner())
             .dirty
             .insert(*id);
+        self.mutations.publish(*id, ActorMutation, false);
         Some(old)
     }
 
@@ -586,12 +698,7 @@ impl ActorStore {
     }
 
     pub fn get_mut(&mut self, id: &ActorId) -> Option<ActorEdit<'_>> {
-        let before = std::ptr::from_ref(&*self.entries);
-        let entries = &mut *self.entries;
-        if std::ptr::from_ref(entries) != before {
-            crate::diagnostics::actor_table_copy(entries.len());
-        }
-        let actor = entries.get_mut(id)?;
+        let actor = Self::actor_for_write(Self::entries_for_write(&mut self.entries).get_mut(id)?);
         let timer_active = !self.suspended_timers.contains(id);
         let before_deadline = timer_active.then(|| next_timer(actor)).flatten();
         self.bodies
@@ -600,6 +707,7 @@ impl ActorStore {
             .dirty
             .insert(*id);
         Some(ActorEdit {
+            mutations: &mut self.mutations,
             id: *id,
             before: actor.location.region,
             before_held: actor.holds.has_links(),
@@ -625,6 +733,7 @@ impl ActorStore {
 }
 
 pub(crate) struct ActorEdit<'a> {
+    mutations: &'a mut MutationLedger<ActorId, ActorMutation>,
     id: ActorId,
     before: RegionId,
     before_held: bool,
@@ -678,9 +787,11 @@ impl Drop for ActorEdit<'_> {
             self.id,
             self.actor.periodic_relocations.pending(),
         );
-        if self.before_visibility != VisibilityInputs::capture(self.actor) {
+        let visibility_changed = self.before_visibility != VisibilityInputs::capture(self.actor);
+        if visibility_changed {
             *self.visibility_epoch = fresh_perception_revision();
         }
+        self.mutations.publish(self.id, ActorMutation, true);
         let changed = self.before_perception.as_ref().map_or_else(
             || watches_recovery(self.actor),
             |before| !before.matches(self.actor),
@@ -834,6 +945,190 @@ mod tests {
     }
 
     #[test]
+    fn shared_actor_edit_copies_only_touched_payload_and_retains_snapshot() {
+        let mut game = game();
+        let first = ActorId(1);
+        let second = game
+            .spawn_actor(at(2, 4), NonZeroU64::new(100).unwrap())
+            .unwrap();
+        let third = game
+            .spawn_actor(at(2, 8), NonZeroU64::new(100).unwrap())
+            .unwrap();
+        let original = game.actors;
+        let mut candidate = original.clone();
+        assert_eq!(candidate, original);
+        let before_entries = crate::diagnostics::work_counts().actor_table_entries_copied;
+        let before = crate::diagnostics::work_counts().actor_table_copies;
+        candidate.get_mut(&first).unwrap().ready_at = 7;
+        assert_eq!(original[&first].ready_at, 0);
+        assert_eq!(candidate[&first].ready_at, 7);
+        assert_eq!(
+            crate::diagnostics::work_counts().actor_table_copies - before,
+            1,
+            "editing one shared actor must not clone unrelated actor payloads"
+        );
+        assert!(std::ptr::eq(
+            candidate.get(&second).unwrap(),
+            original.get(&second).unwrap()
+        ));
+        assert!(std::ptr::eq(
+            candidate.get(&third).unwrap(),
+            original.get(&third).unwrap()
+        ));
+        candidate.get_mut(&first).unwrap().ready_at = 8;
+        assert_eq!(
+            crate::diagnostics::work_counts().actor_table_copies - before,
+            1
+        );
+        candidate.get_mut(&second).unwrap().ready_at = 9;
+        assert_eq!(
+            crate::diagnostics::work_counts().actor_table_copies - before,
+            2
+        );
+        assert_eq!(original[&second].ready_at, 0);
+        assert!(std::ptr::eq(
+            candidate.get(&third).unwrap(),
+            original.get(&third).unwrap()
+        ));
+        assert_eq!(
+            candidate.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+            vec![first, second, third]
+        );
+        assert_eq!(
+            crate::diagnostics::work_counts().actor_table_entries_copied - before_entries,
+            3,
+            "outer detach still copies three handles, but subsequent unique-table edits do not"
+        );
+        drop(candidate);
+        assert_eq!(original[&first].ready_at, 0);
+        assert_eq!(original[&second].ready_at, 0);
+    }
+
+    #[test]
+    fn actor_table_copy_counter_includes_shared_insert_and_replacement() {
+        let mut game = game();
+        let first = ActorId(1);
+        let second = game
+            .spawn_actor(at(2, 4), NonZeroU64::new(100).unwrap())
+            .unwrap();
+        let original = game.actors;
+        for id in [first, ActorId(3)] {
+            let mut candidate = original.clone();
+            let mut replacement = original[&first].clone();
+            replacement.ready_at += 1;
+            let before = crate::diagnostics::work_counts().actor_table_copies;
+            let old = candidate.insert(id, replacement.clone());
+            assert_eq!(
+                old.as_ref().map(|actor| actor.ready_at),
+                (id == first).then_some(0)
+            );
+            assert_eq!(
+                crate::diagnostics::work_counts().actor_table_copies - before,
+                usize::from(id == first),
+                "only returning a shared replaced payload requires an Actor copy"
+            );
+            assert!(std::ptr::eq(
+                candidate.get(&second).unwrap(),
+                original.get(&second).unwrap()
+            ));
+            assert!(!candidate.entries.shares_storage(&original.entries));
+            assert_eq!(original.len(), 2);
+            assert_eq!(original[&first].ready_at, 0);
+            assert!(original.contains_key(&second));
+            candidate.insert(id, replacement);
+            candidate.get_mut(&first).unwrap().ready_at += 1;
+            assert_eq!(
+                crate::diagnostics::work_counts().actor_table_copies - before,
+                1,
+                "only the original first actor is copied, by replacement or its first edit"
+            );
+        }
+    }
+
+    #[test]
+    fn actor_table_copy_counter_includes_shared_remove_and_edit() {
+        let mut game = game();
+        let first = ActorId(1);
+        let second = game
+            .spawn_actor(at(2, 4), NonZeroU64::new(100).unwrap())
+            .unwrap();
+        let original = game.actors;
+        for remove in [true, false] {
+            let mut candidate = original.clone();
+            let before = crate::diagnostics::work_counts().actor_table_copies;
+            if remove {
+                let old = candidate.remove(&second).unwrap();
+                assert_eq!(old.ready_at, 0);
+            } else {
+                candidate.get_mut(&second).unwrap().ready_at += 1;
+            }
+            assert_eq!(
+                crate::diagnostics::work_counts().actor_table_copies - before,
+                1,
+                "removing or editing copies only the selected shared payload"
+            );
+            assert!(!candidate.entries.shares_storage(&original.entries));
+            assert_eq!(original.len(), 2);
+            assert_eq!(original[&second].ready_at, 0);
+            candidate.get_mut(&first).unwrap().ready_at += 1;
+            candidate.remove(&second);
+            assert_eq!(
+                crate::diagnostics::work_counts().actor_table_copies - before,
+                2,
+                "each touched original payload is copied once; unique removal adds no copy"
+            );
+        }
+    }
+
+    #[test]
+    fn actor_table_copy_counter_excludes_weak_only_disassociation() {
+        let mut actors = game().actors;
+        let identity = actors.entries.weak_identity();
+        assert!(identity.matches(&actors.entries));
+        assert!(!actors.entries.is_shared());
+        let before = crate::diagnostics::work_counts().actor_table_copies;
+        actors.get_mut(&ActorId(1)).unwrap().ready_at += 1;
+        assert!(!identity.matches(&actors.entries));
+        assert_eq!(
+            crate::diagnostics::work_counts().actor_table_copies,
+            before,
+            "Arc weak identity disassociation moves ownership without cloning actors"
+        );
+    }
+
+    #[test]
+    fn actor_payload_weak_only_disassociation_does_not_copy() {
+        let mut actors = game().actors;
+        let id = ActorId(1);
+        let identity = actors.entries[&id].weak_identity();
+        assert!(identity.matches(&actors.entries[&id]));
+        assert!(!actors.entries[&id].is_shared());
+        let before = crate::diagnostics::work_counts().actor_table_copies;
+        actors.get_mut(&id).unwrap().ready_at = 9;
+        assert!(!identity.matches(&actors.entries[&id]));
+        assert_eq!(actors[&id].ready_at, 9);
+        assert_eq!(crate::diagnostics::work_counts().actor_table_copies, before);
+    }
+
+    #[test]
+    fn unique_actor_replacement_and_removal_return_owned_values_without_copy() {
+        let mut actors = game().actors;
+        let id = ActorId(1);
+        let mut replacement = actors[&id].clone();
+        replacement.ready_at = 13;
+        let before = crate::diagnostics::work_counts().actor_table_copies;
+        let mut old = actors.insert(id, replacement).unwrap();
+        assert_eq!(old.ready_at, 0);
+        old.ready_at = 21;
+        assert_eq!(actors[&id].ready_at, 13);
+        let removed = actors.remove(&id).unwrap();
+        assert_eq!(removed.ready_at, 13);
+        assert_eq!(old.ready_at, 21);
+        assert!(actors.is_empty());
+        assert_eq!(crate::diagnostics::work_counts().actor_table_copies, before);
+    }
+
+    #[test]
     fn pending_search_index_follows_actor_publication_edit_clone_rebuild_and_removal() {
         let mut game = game();
         let id = ActorId(1);
@@ -855,7 +1150,7 @@ mod tests {
             .is_some());
         assert!(branch.pending_searches().next().is_none());
         assert_eq!(game.actors.pending_searches().collect::<Vec<_>>(), vec![id]);
-        let rebuilt = ActorStore::from_entries(game.actors.raw_entries().clone());
+        let rebuilt = ActorStore::from_entries(game.actors.owned_actor_entries());
         assert_eq!(rebuilt.pending_searches().collect::<Vec<_>>(), vec![id]);
         game.actors.insert(id, branch[&id].clone());
         assert!(game.actors.pending_searches().next().is_none());
@@ -863,6 +1158,78 @@ mod tests {
         assert_eq!(game.actors.pending_searches().collect::<Vec<_>>(), vec![id]);
         game.actors.remove(&id).unwrap();
         assert!(game.actors.pending_searches().next().is_none());
+    }
+
+    #[test]
+    fn mutation_publication_is_immediate_branch_local_and_not_actor_authority() {
+        let mut store = game().actors;
+        let id = ActorId(1);
+        let original = store.clone();
+        let cursor = store.mutation_cursor();
+        let stamp = store.mutation_stamp(&id).expect("initial publication");
+        let epoch = store.visibility_epoch();
+        let copies = crate::diagnostics::work_counts().actor_table_copies;
+        store.get_mut(&id).unwrap().ready_at += 1;
+        assert_ne!(store.mutation_stamp(&id), Some(stamp));
+        assert_eq!(original.mutation_stamp(&id), Some(stamp));
+        assert_eq!(store.visibility_epoch(), epoch);
+        assert_eq!(
+            crate::diagnostics::work_counts().actor_table_copies - copies,
+            1
+        );
+        let changes = store.changes_since(&cursor).unwrap();
+        assert_eq!(changes.len(), 1);
+        assert!(changes.contains_key(&id));
+        // A second publication inside the same action is immediately visible.
+        let middle = store.mutation_cursor();
+        let middle_stamp = store.mutation_stamp(&id);
+        store.get_mut(&id).unwrap().location = at(2, 5);
+        assert_ne!(store.mutation_stamp(&id), middle_stamp);
+        assert!(store.changes_since(&middle).unwrap().contains_key(&id));
+        assert_eq!(
+            crate::diagnostics::work_counts().actor_table_copies - copies,
+            1,
+            "mutation evidence must not retain an Actor payload"
+        );
+        store.get_mut(&id).unwrap().location = original[&id].location;
+        store.get_mut(&id).unwrap().ready_at = original[&id].ready_at;
+        assert_eq!(store, original, "publication identities are not game state");
+        let changes = store.changes_since(&cursor).unwrap();
+        assert!(
+            changes.contains_key(&id),
+            "ABA must retain the touched identity"
+        );
+        assert_ne!(store.mutation_stamp(&id), Some(stamp));
+        assert!(store.certifies_since(&cursor));
+        assert!(!original.certifies_since(&middle));
+        let before_touch = store.mutation_stamp(&id);
+        drop(store.get_mut(&id).unwrap());
+        assert_ne!(
+            store.mutation_stamp(&id),
+            before_touch,
+            "even conservative payload touches publish"
+        );
+        assert_eq!(store, original);
+    }
+
+    #[test]
+    fn mutation_removal_reinsertion_and_reconstruction_do_not_reuse_stamps() {
+        let mut store = game().actors;
+        let id = ActorId(1);
+        let cursor = store.mutation_cursor();
+        let stamp = store.mutation_stamp(&id);
+        let removed = store.remove(&id).unwrap();
+        assert_eq!(store.mutation_stamp(&id), None);
+        assert!(store.changes_since(&cursor).unwrap().contains_key(&id));
+        store.insert(id, removed);
+        assert_ne!(store.mutation_stamp(&id), stamp);
+        let delta = store.changes_since(&cursor).unwrap();
+        assert!(delta.contains_key(&id));
+        let restored = ActorStore::from_entries(store.owned_actor_entries());
+        assert_eq!(restored, store);
+        assert!(restored.mutation_stamp(&id).is_some());
+        assert!(!restored.certifies_since(&cursor));
+        assert!(restored.changes_since(&cursor).is_none());
     }
 
     fn assert_reference(game: &Game) {
@@ -1026,7 +1393,7 @@ mod tests {
         );
         assert!(game.actors.scheduled_timers().next().is_none());
         assert_eq!(timed_ids(&retained), vec![ActorId(1)]);
-        let mut reconstructed = ActorStore::from_entries((*retained.entries).clone());
+        let mut reconstructed = ActorStore::from_entries(retained.owned_actor_entries());
         let actor = reconstructed.remove(&ActorId(1)).unwrap();
         assert!(reconstructed.scheduled_timers().next().is_none());
         reconstructed.insert(ActorId(1), actor);
@@ -1132,7 +1499,7 @@ mod tests {
         assert!(game.actors.at(&game.world, at(2, 0)).is_empty());
         game.set_body(ActorId(1), BodySpec::default()).unwrap();
         assert_reference(&game);
-        let entries = (*game.actors.entries).clone();
+        let entries = game.actors.owned_actor_entries();
         game.actors = ActorStore::from_entries(entries);
         assert_reference(&game);
         game.actors.remove(&ActorId(1)).unwrap();
@@ -1143,12 +1510,20 @@ mod tests {
     fn interrupted_edits_still_update_region_membership_and_body_queries() {
         let mut game = game();
         assert_reference(&game);
+        let cursor = game.actors.mutation_cursor();
+        let stamp = game.actors.mutation_stamp(&ActorId(1));
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let mut actor = game.actors.get_mut(&ActorId(1)).unwrap();
             actor.location = at(2, 5);
             panic!("interrupted edit");
         }));
         assert!(result.is_err());
+        assert_ne!(game.actors.mutation_stamp(&ActorId(1)), stamp);
+        assert!(game
+            .actors
+            .changes_since(&cursor)
+            .unwrap()
+            .contains_key(&ActorId(1)));
         assert_reference(&game);
         assert!(game.actors.in_region(RegionId(1)).next().is_none());
         assert_eq!(

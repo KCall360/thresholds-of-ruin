@@ -12,7 +12,7 @@ use tor_protocol::MAX_NOTE_BYTES;
 const MAX_COMMAND: usize = 200;
 
 /// Which screen holds the keyboard.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Screen {
     Advancement,
     /// The known places; with a selection, the line names that place.
@@ -23,10 +23,10 @@ pub(crate) enum Screen {
     Charts,
     /// The latest retained history, read-only.
     History,
-    /// A note anchored to the state at this revision; Tab switches between
+    /// A note anchored to the snapshot opened by this editor; Tab switches between
     /// private and visible to the actor's other observers.
     Note {
-        revision: u64,
+        snapshot: tor_protocol::SnapshotId,
         private: bool,
     },
 }
@@ -73,16 +73,16 @@ pub(crate) fn setup(mut commands: Commands) {
 /// Open this screen, or close it if it is the one open. Opening the
 /// advancement screen asks for the overview.
 pub(crate) fn toggle(net: &Net, game: &mut Game, screen: Screen) {
-    let same = match (game.screen, screen) {
+    let same = match (game.screen.clone(), screen.clone()) {
         (Some(Screen::Places { .. }), Screen::Places { .. })
         | (Some(Screen::Note { .. }), Screen::Note { .. }) => true,
         (open, wanted) => open == Some(wanted),
     };
-    let closing = game.screen;
+    let closing = game.screen.clone();
     game.screen = (!same).then_some(screen);
     game.typed.clear();
     use tor_client_common::charts::ChartInput;
-    match (closing, game.screen) {
+    match (closing, game.screen.clone()) {
         // Leaving the charts cancels their local page assembly.
         (Some(Screen::Charts), _) => {
             game.send(net, Cmd::Chart(ChartInput::Cancel));
@@ -105,8 +105,9 @@ pub(crate) fn typing(
     mut game: ResMut<Game>,
     mut section: Local<usize>,
 ) {
-    let Some(screen) = game.screen else {
+    let Some(screen) = game.screen.clone() else {
         *section = 0;
+
         input.clear();
         return;
     };
@@ -139,7 +140,7 @@ pub(crate) fn typing(
         }
         return;
     }
-    let limit = match screen {
+    let limit = match &screen {
         Screen::Advancement => MAX_COMMAND,
         Screen::Places { .. } => MAX_PLACE_NAME,
         Screen::Note { .. } => MAX_NOTE_BYTES,
@@ -167,9 +168,10 @@ pub(crate) fn typing(
             }
             continue;
         }
-        if let (Screen::Note { revision, private }, Key::Tab) = (screen, &event.logical_key) {
+        if let (Screen::Note { snapshot, private }, Key::Tab) = (screen.clone(), &event.logical_key)
+        {
             game.screen = Some(Screen::Note {
-                revision,
+                snapshot,
                 private: !private,
             });
             continue;
@@ -197,12 +199,12 @@ pub(crate) fn typing(
                 if line.trim().is_empty() {
                     continue;
                 }
-                let command = match screen {
+                let command = match screen.clone() {
                     Screen::Charts | Screen::History => None,
-                    Screen::Note { revision, private } => {
+                    Screen::Note { snapshot, private } => {
                         game.screen = None;
                         Some(Cmd::Note {
-                            revision,
+                            snapshot,
                             text: line,
                             private,
                         })
@@ -248,7 +250,7 @@ pub(crate) fn origin(origin: tor_protocol::PlaceNameOrigin) -> &'static str {
 
 pub(crate) fn lines(game: &Game) -> Vec<String> {
     let mut lines = Vec::new();
-    match game.screen {
+    match game.screen.clone() {
         None => {}
         Some(Screen::Advancement) => {
             lines.extend(["Advancement".to_string(), String::new()]);
@@ -337,7 +339,7 @@ pub(crate) fn show(
         return;
     }
     if let Ok(mut visibility) = root.single_mut() {
-        let wanted = if game.screen.is_some_and(|screen| screen == Screen::Charts) {
+        let wanted = if game.screen == Some(Screen::Charts) {
             Visibility::Visible
         } else {
             Visibility::Hidden
@@ -461,14 +463,22 @@ mod tests {
     }
 
     #[test]
-    fn tab_switches_the_note_audience_and_enter_saves_it_on_the_opened_revision() {
+    fn tab_switches_the_note_audience_and_enter_saves_the_opened_snapshot() {
         let mut view = crate::test_support::view(0);
         view.has_control = true;
         let (mut app, mut commands) = app(view);
         app.world_mut().resource_mut::<Game>().screen = Some(Screen::Note {
-            revision: 7,
+            snapshot: tor_protocol::SnapshotId("opened-note-snapshot".into()),
             private: true,
         });
+        // A later display must not silently retarget the open note.
+        app.world_mut()
+            .resource_mut::<Game>()
+            .view
+            .as_mut()
+            .unwrap()
+            .shown
+            .snapshot = tor_protocol::SnapshotId("newer-display-snapshot".into());
         press(&mut app, Key::Tab);
         for c in ["o", "k"] {
             press(&mut app, Key::Character(c.into()));
@@ -477,7 +487,7 @@ mod tests {
         let sent = commands.try_recv().expect("Enter saves the note");
         assert!(matches!(
             sent.command,
-            Cmd::Note { revision: 7, text, private: false } if text == "ok"
+            Cmd::Note { snapshot, text, private: false } if text == "ok" && snapshot.0 == "opened-note-snapshot"
         ));
         assert_eq!(app.world().resource::<Game>().screen, None, "saving closes");
     }

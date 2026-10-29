@@ -311,7 +311,7 @@ pub(super) fn capture(
                 choices
             }),
         })),
-        "screen": game.as_ref().and_then(|game| game.screen).map(|screen| format!("{screen:?}")),
+        "screen": game.as_ref().and_then(|game| game.screen.as_ref()).map(|screen| format!("{screen:?}")),
         // The open screen as drawn, and the line being typed on it.
         "screen_text": screen_text,
         "typed": typed,

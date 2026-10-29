@@ -74,7 +74,7 @@ impl Scripted {
         let snapshot = Snapshot {
             readiness: tor_protocol::Readiness {
                 revision: 0,
-                admission: true,
+                admission: state.observation.ready,
                 resume: vec![],
                 cancel: vec![],
             },
@@ -136,14 +136,12 @@ impl Scripted {
 
     /// The tick and revision the queued messages will have reached.
     fn last(&self) -> (u64, u64) {
-        let mut at = (
-            self.client.state().observation.tick,
-            self.client.state().revision,
-        );
+        let mut at = (self.client.cursor().tick, self.client.state().revision);
         for message in &self.queue {
             if let ServerMessage::Update { update } = message {
+                at.0 = update.cursor.tick;
                 if let UpdateBody::Observation { state, .. } = &update.body {
-                    at = (state.observation.tick, state.revision);
+                    at.1 = state.revision;
                 }
             }
         }
@@ -152,6 +150,12 @@ impl Scripted {
 }
 
 impl Link for Scripted {
+    fn completed_observation_request(&self, id: &str, message: &ServerMessage) -> bool {
+        matches!(message, ServerMessage::Update { update }
+            if matches!(&update.body, UpdateBody::Observation { state, .. }
+                if state.snapshot == SnapshotId(format!("observe-{id}"))))
+    }
+
     fn is_synchronized(&self) -> bool {
         true
     }
@@ -174,7 +178,54 @@ impl Link for Scripted {
     ) -> Result<String, tor_client_text::engine::turn::Error> {
         self.requests += 1;
         let id = format!("r{}", self.requests);
-        let frames = (self.respond)(&request, self.client.state());
+        if matches!(request, Request::Observe) {
+            let mut projected = self.client.clone();
+            for message in &self.queue {
+                if let ServerMessage::Update { update } = message {
+                    projected.apply(*update.clone()).unwrap();
+                }
+            }
+            let mut state = projected.state().clone();
+            state.snapshot = SnapshotId(format!("observe-{id}"));
+            state.revision += 1;
+            let message = self.update(
+                projected.cursor().tick,
+                UpdateBody::Observation {
+                    state: state.into(),
+                    event: None,
+                },
+            );
+            self.queue.push_back(message);
+            self.sent.push(request);
+            return Ok(id);
+        }
+        let mut frames = (self.respond)(&request, self.client.state());
+        // Immediate synthetic action receipts follow their committed effects.
+        // Tests of queued lifecycle ordering use explicit Admitted frames.
+        if matches!(
+            request,
+            Request::Command {
+                command: Command::Act { .. },
+                ..
+            }
+        ) && !frames.iter().any(|frame| matches!(frame, Frame::Admitted))
+            && frames.iter().any(|frame| matches!(frame, Frame::View(..)))
+        {
+            if let Some(ack) = frames.iter().position(|frame| matches!(frame, Frame::Ack)) {
+                let receipt = frames.remove(ack);
+                let after_effects = frames
+                    .iter()
+                    .rposition(|frame| matches!(frame, Frame::View(..)))
+                    .expect("view checked above")
+                    + 1;
+                // A later actor's frames after Waiting are not this receipt's effects.
+                let before_wait = frames
+                    .iter()
+                    .position(|frame| matches!(frame, Frame::Waiting(_)))
+                    .unwrap_or(after_effects);
+                frames.insert(after_effects.min(before_wait), receipt);
+            }
+        }
         let destination = match &request {
             Request::Command {
                 command: Command::Travel { destination, .. },
@@ -185,7 +236,7 @@ impl Link for Scripted {
         for frame in frames {
             let message = match frame {
                 Frame::SnapshotReply => {
-                    let mut snapshot = self.client.snapshot();
+                    let mut snapshot = self.client.reset_snapshot().unwrap();
                     snapshot.context.epoch += 1;
                     self.context = snapshot.context.clone();
                     ServerMessage::Snapshot {
@@ -277,7 +328,7 @@ impl Link for Scripted {
                             projected.apply(*update.clone()).unwrap();
                         }
                     }
-                    let mut snapshot = projected.snapshot();
+                    let mut snapshot = projected.reset_snapshot().unwrap();
                     snapshot.context.epoch += 1;
                     self.context = snapshot.context.clone();
                     ServerMessage::Snapshot {
@@ -288,6 +339,7 @@ impl Link for Scripted {
                 Frame::View(mut state, event) => {
                     let (tick, revision) = self.last();
                     state.revision = revision + 1;
+                    state.snapshot = SnapshotId(format!("view-{id}-{}", self.sequence));
                     state.observation.tick = state.observation.tick.max(tick);
                     let tick = state.observation.tick;
                     let event = event.map(|event| {
@@ -300,11 +352,35 @@ impl Link for Scripted {
                             },
                         ))
                     });
+                    let mut preceding = self.client.clone();
+                    for message in &self.queue {
+                        if let ServerMessage::Update { update } = message {
+                            preceding.apply(*update.clone()).unwrap();
+                        }
+                    }
+                    let action = event.as_deref().and_then(|entry| match &entry.content {
+                        HistoryContent::Action { event, .. } => Some(event.as_ref()),
+                        _ => None,
+                    });
+                    let facts = OutcomeFacts::capture(
+                        &preceding.state().observation,
+                        &state.observation,
+                        action,
+                    );
+                    let outcome = self.update(
+                        tick,
+                        UpdateBody::Outcome {
+                            visual_changed: true,
+                            facts,
+                            event,
+                        },
+                    );
+                    self.queue.push_back(outcome);
                     self.update(
                         tick,
                         UpdateBody::Observation {
                             state: state.into(),
-                            event,
+                            event: None,
                         },
                     )
                 }
@@ -369,9 +445,41 @@ impl Link for Scripted {
     }
 }
 
+fn publish_between_turns(
+    link: &mut Scripted,
+    engine: &mut Engine,
+    mut after: StateView,
+) -> Vec<tor_client_text::engine::chronicle::Beat> {
+    let before = link.client.state().clone();
+    after.revision = before.revision + 1;
+    after.snapshot = SnapshotId(format!("between-{}", link.sequence));
+    let tick = after.observation.tick;
+    let facts = OutcomeFacts::capture(&before.observation, &after.observation, None);
+    let mut beats = Vec::new();
+    for body in [
+        UpdateBody::Outcome {
+            facts,
+            event: None,
+            visual_changed: true,
+        },
+        UpdateBody::Observation {
+            state: after.into(),
+            event: None,
+        },
+    ] {
+        let previous = link.client.state().clone();
+        let message = link.update(tick, body);
+        if let ServerMessage::Update { update } = &message {
+            link.client.apply(*update.clone()).unwrap();
+        }
+        beats.extend(engine.between_turns(link, &previous, &message));
+    }
+    beats
+}
+
 fn state() -> StateView {
     serde_json::from_value(serde_json::json!({
-        "wizard_game":false,"revision":"0","observation":{
+        "snapshot":"turn-fixture","wizard_game":false,"revision":"0","observation":{
         "actor":"1","self_target":super::actor_target(1),"tick":"0","position":{"x":0,"y":0,"z":0},"ready":true,
         "places":[],"visible_cells":(0..7).map(|x| serde_json::json!({
             "key":format!("cell-{x}"),"position":{"x":x,"y":0,"z":0},
@@ -730,7 +838,26 @@ async fn a_pickup_waits_for_the_character_to_be_ready_after_the_journey() {
         text.lines().next(),
         Some("You walk over to the stone tablet and pick it up.")
     );
-    assert_eq!(link.sent.len(), 2);
+    assert!(
+        matches!(
+            link.sent.as_slice(),
+            [
+                Request::Command {
+                    command: Command::Travel { .. },
+                    ..
+                },
+                Request::Observe,
+                Request::Command {
+                    command: Command::Act {
+                        action: Action::Take { .. }
+                    },
+                    ..
+                },
+            ]
+        ),
+        "one journey, one demanded picture, and one pickup: {:?}",
+        link.sent
+    );
     assert_eq!(link.client.state().observation.inventory.len(), 1);
 }
 
@@ -962,7 +1089,7 @@ async fn an_exchange_of_blows_is_told_in_order_and_a_death_ends_it() {
             return vec![Frame::Ack];
         };
         blows.set(blows.get() + 1);
-        if blows.get() == 1 {
+        let results = if blows.get() == 1 {
             vec![
                 Frame::View(
                     not_ready(now.clone()),
@@ -971,7 +1098,6 @@ async fn an_exchange_of_blows_is_told_in_order_and_a_death_ends_it() {
                         target: super::actor_target(2),
                     }),
                 ),
-                Frame::Ack,
                 Frame::View(
                     combat(
                         now.clone(),
@@ -1010,17 +1136,39 @@ async fn an_exchange_of_blows_is_told_in_order_and_a_death_ends_it() {
                 ],
             );
             after.observation.visible_actors.clear();
-            vec![
-                Frame::Ack,
-                Frame::View(
-                    after,
-                    Some(Event::AbilityStarted {
-                        ability: tor_client_common::test_support::content("basic_melee"),
-                        target: super::actor_target(2),
-                    }),
-                ),
-            ]
-        }
+            vec![Frame::View(
+                after,
+                Some(Event::AbilityStarted {
+                    ability: tor_client_common::test_support::content("basic_melee"),
+                    target: super::actor_target(2),
+                }),
+            )]
+        };
+        // Act is admitted work, not an immediate completed request. Visual
+        // readiness is presentation only; execution and fresh permissions own
+        // settlement even when intermediate views arrive before the last blow.
+        let mut frames = vec![
+            Frame::Admitted,
+            // An admission receipt is not an Intention stream update. The
+            // attachment must first learn this ID in its Queued phase.
+            Frame::Intention(IntentionPhase::Queued),
+            Frame::Intention(IntentionPhase::Started),
+            Frame::Readiness(Readiness {
+                revision: blows.get() * 2 - 1,
+                admission: false,
+                resume: vec![],
+                cancel: vec![],
+            }),
+        ];
+        frames.extend(results);
+        frames.push(Frame::Intention(IntentionPhase::Resolved));
+        frames.push(Frame::Readiness(Readiness {
+            revision: blows.get() * 2,
+            admission: true,
+            resume: vec![],
+            cancel: vec![],
+        }));
+        frames
     });
     let mut engine = Engine::default();
     assert_eq!(
@@ -1278,18 +1426,28 @@ async fn timed_attack_finishes_its_lifecycle_before_chained_pickup_or_refusal() 
             )
             .await;
             assert!(text.contains("falls dead"), "{text}");
+            let picture_demands = link
+                .sent
+                .iter()
+                .filter(|request| matches!(request, Request::Observe))
+                .count();
+            assert_eq!(picture_demands, usize::from(!ready_before_resolution));
+            assert!(link
+                .sent
+                .iter()
+                .all(|request| matches!(request, Request::Observe | Request::Command { .. })));
+            let gameplay_requests = link.sent.len() - picture_demands;
             if refuse_pickup {
                 assert!(text.contains("can't pick that up"), "{text}");
                 assert_eq!(
-                    link.sent.len(),
-                    2,
+                    gameplay_requests, 2,
                     "genuine refusal stops the chain without retrying"
                 );
                 assert!(link.client.state().observation.inventory.is_empty());
             } else {
                 assert!(text.contains("pick"), "{text}");
                 assert!(text.contains("drop"), "{text}");
-                assert_eq!(link.sent.len(), 3);
+                assert_eq!(gameplay_requests, 3);
             }
             assert!(
                 link.queue.is_empty(),
@@ -1698,22 +1856,7 @@ async fn what_happens_between_turns_is_one_passage() {
         .observation
         .visible_actors
         .push(figure(5, "stone guardian", 3));
-    let message = link.update(
-        0,
-        UpdateBody::Observation {
-            state: ({
-                let mut a = after.clone();
-                a.revision = 1;
-                a
-            })
-            .into(),
-            event: None,
-        },
-    );
-    if let ServerMessage::Update { update } = &message {
-        link.client.apply(*update.clone()).unwrap();
-    }
-    let beats = engine.between_turns(&link, &before, &message);
+    let beats = publish_between_turns(&mut link, &mut engine, after);
     assert_eq!(
         engine.passage(&link, beats),
         "You notice a stone guardian to the east."
@@ -2130,8 +2273,8 @@ async fn a_turn_ends_when_the_server_says_another_player_is_next() {
     assert_eq!(play(&mut link, &mut engine, "wait").await, "Time passes.");
     assert_eq!(
         link.queue.len(),
-        1,
-        "the rat's arrival waits for between turns"
+        2,
+        "the rat's outcome and picture wait for between turns"
     );
 }
 
@@ -2211,19 +2354,8 @@ async fn a_move_told_between_turns_describes_where_it_arrives() {
     let mut engine = Engine::default();
     engine.welcome(&link);
     let before = link.client.state().clone();
-    let mut after = east(before.clone(), 6);
-    after.revision = 1;
-    let message = link.update(
-        60,
-        UpdateBody::Observation {
-            state: after.into(),
-            event: None,
-        },
-    );
-    if let ServerMessage::Update { update } = &message {
-        link.client.apply(*update.clone()).unwrap();
-    }
-    let beats = engine.between_turns(&link, &before, &message);
+    let after = east(before.clone(), 6);
+    let beats = publish_between_turns(&mut link, &mut engine, after);
     let passage = engine.passage(&link, beats);
     assert!(passage.contains("You are in an open"), "{passage}");
 }
@@ -2261,12 +2393,13 @@ fn fixture_context() -> tor_protocol::StreamContext {
 async fn ordered_strikes_text_escape_uses_current_permission_and_exact_preparation_identity() {
     for permitted in [true, false] {
         let state = StateView {
+            snapshot: SnapshotId("sequence-fixture".into()),
             wizard_game: false,
             revision: 0,
             observation: tor_client_common::test_support::observation(),
         };
         let mut link = Scripted::new(state, |_, _| vec![Frame::Ack]);
-        let mut snapshot = link.client.snapshot();
+        let mut snapshot = link.client.reset_snapshot().unwrap();
         let view = &mut std::sync::Arc::make_mut(&mut snapshot.state).observation;
         let mut combat = serde_json::to_value(view.combat.as_ref().unwrap()).unwrap();
         combat["preparation_remaining"] = serde_json::json!("5");
@@ -2288,7 +2421,7 @@ async fn ordered_strikes_text_escape_uses_current_permission_and_exact_preparati
             phase: IntentionPhase::Paused,
         }];
         link.client = ClientState::from_snapshot(snapshot).unwrap();
-        let before = link.client.snapshot();
+        let before = link.client.session().clone();
         let output = Engine::default()
             .play(&mut link, "escape west")
             .await
@@ -2303,7 +2436,7 @@ async fn ordered_strikes_text_escape_uses_current_permission_and_exact_preparati
             assert!(link.sent.is_empty(), "no permission means no request");
         }
         assert_eq!(
-            link.client.snapshot(),
+            link.client.session().clone(),
             before,
             "a request spends nothing locally"
         );
@@ -2328,7 +2461,6 @@ async fn ordered_strikes_adventure_source_navigation_checks_wizard_authority_bef
 
 fn growth_source_request(link: &Scripted) -> Request {
     link.client.command_request(Command::Act {
-        expected_revision: link.client.state().revision,
         action: Action::ChooseGrowthSource {
             basis: Box::new(AdvancementBasis {
                 actor: ActorId(1),
@@ -3327,7 +3459,7 @@ async fn creature_catalog_text_turn_prints_rows_and_finishes_correlated_query() 
         })]
     });
     link.role = AccessRole::Wizard;
-    let before = link.client.snapshot();
+    let before = link.client.session().clone();
     let result = Engine::default()
         .play(&mut link, "wizard creature list depth 27")
         .await
@@ -3345,7 +3477,7 @@ async fn creature_catalog_text_turn_prints_rows_and_finishes_correlated_query() 
         "{text}"
     );
     assert_eq!(link.sent.len(), 1);
-    assert_eq!(link.client.snapshot(), before);
+    assert_eq!(link.client.session().clone(), before);
 }
 
 #[test]
@@ -3404,9 +3536,9 @@ fn a_cold_hydrated_doorway_is_descriptive_and_current_sight_wins() {
     };
     let page = MapPage {
         transfer: "cold-transfer".into(),
-        actor: link.client.snapshot().actor,
+        actor: link.client.actor(),
         branch: query.branch.clone(),
-        base: query.base,
+        base: query.base.clone(),
         window: query.window,
         start: 0,
         page: 0,
@@ -3458,7 +3590,7 @@ fn a_cold_hydrated_doorway_is_descriptive_and_current_sight_wins() {
         .iter()
         .any(|way| matches!(&way.kind, place::Opening::RememberedDoor { open: true, .. })));
 
-    let mut snapshot = link.client.snapshot();
+    let mut snapshot = link.client.reset_snapshot().unwrap();
     snapshot.context.epoch += 1;
     std::sync::Arc::make_mut(&mut snapshot.state)
         .observation
@@ -3563,7 +3695,7 @@ async fn adventure_bare_escape_uses_the_sole_hold_and_respects_control() {
     let text = play(&mut link, &mut engine, "escape").await;
     assert!(text.contains("You fail to escape the hold."), "{text}");
     assert_eq!(link.sent.len(), 1);
-    let mut snapshot = link.client.snapshot();
+    let mut snapshot = link.client.reset_snapshot().unwrap();
     snapshot.has_control = false;
     snapshot.readiness.admission = false;
     link.client = ClientState::from_snapshot(snapshot).unwrap();
@@ -3932,8 +4064,12 @@ async fn explicit_weapon_text_no_wrong_echo_and_changed_revision_send_no_action(
         if failure == 1 {
             assert!(text.contains("does not match"), "{text}");
         } else if failure == 2 {
-            let mut snapshot = link.client.snapshot();
+            let mut snapshot = link.client.reset_snapshot().unwrap();
             std::sync::Arc::make_mut(&mut snapshot.state).revision += 1;
+            std::sync::Arc::make_mut(&mut snapshot.state)
+                .snapshot
+                .0
+                .push_str("-next");
             link.client = ClientState::from_snapshot(snapshot).unwrap();
             let text = play(&mut link, &mut engine, "yes").await;
             assert!(text.contains("changed"), "{text}");
@@ -4219,7 +4355,7 @@ async fn projectile_text_cancel_wrong_preview_and_changed_inventory_never_commit
         play(&mut link, &mut engine, "1").await;
         play(&mut link, &mut engine, "north").await;
         if fault == 3 || fault == 4 {
-            let mut snapshot = link.client.snapshot();
+            let mut snapshot = link.client.reset_snapshot().unwrap();
             let view = &mut std::sync::Arc::make_mut(&mut snapshot.state).observation;
             if fault == 3 {
                 view.inventory

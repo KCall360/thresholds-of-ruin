@@ -31,7 +31,7 @@ fn snapshot() -> Snapshot {
     serde_json::from_value(serde_json::json!({
         "readiness":{"revision":"0","admission":true,"resume":[],"cancel":[]},"context":{"stream":"fixture-attachment","epoch":"0"},"actor":"1","branch":"turns","cursor":{"sequence":"0","tick":"100"},"has_control":true,"intentions":[],
         "history":{"entries":[],"older_before":null},
-        "state":{"wizard_game":false,"revision":"5","observation":{"charts":[],"linked_holds":[],
+        "state":{"snapshot":"fixture-snapshot","wizard_game":false,"revision":"5","observation":{"charts":[],"linked_holds":[],
             "actor":"1","self_target":super::actor_target(1),"tick":"100","position":{"x":0,"y":0,"z":0},
             "places":[],"visible_cells":cells,
             "ground_items":[{"presentation":null,"supply_reachable":false,"reachable":true,"item":{"known_currency":null,"known_supply":null,"quantity":"1","class":"weapon","appearance":"sword","identified":true,"id":super::item_target(7),"name":"sword"},"position":{"x":-1,"y":0,"z":0}}],
@@ -66,8 +66,9 @@ fn view() -> Observation {
 
 fn update(app: &mut App, sequence: u64, change: impl FnOnce(&mut Observation)) {
     let initial = snapshot();
-    let mut state = Arc::unwrap_or_clone(app.state.as_ref().unwrap().snapshot().state);
+    let mut state = app.state.as_ref().unwrap().state().clone();
     state.revision += 1;
+    state.snapshot = tor_protocol::SnapshotId(format!("fixture-display-{}", state.revision));
     state.observation.tick += 100;
     change(&mut state.observation);
     let tick = state.observation.tick;
@@ -85,6 +86,32 @@ fn update(app: &mut App, sequence: u64, change: impl FnOnce(&mut Observation)) {
         },
     })
     .unwrap();
+}
+
+/// Causal narration/status is delivered before the independently requested picture.
+fn outcome(app: &mut App, sequence: u64, after: &Observation, event: Option<HistoryEntry>) {
+    let state = app.state.as_ref().unwrap();
+    let before = &state.state().observation;
+    let action_event = event.as_ref().and_then(|entry| match &entry.content {
+        HistoryContent::Action { event, .. } => Some(event.as_ref()),
+        _ => None,
+    });
+    let facts = OutcomeFacts::capture(before, after, action_event);
+    let update = StreamUpdate {
+        context: state.context().clone(),
+        actor: after.actor,
+        branch: state.branch().clone(),
+        cursor: StreamCursor {
+            sequence,
+            tick: after.tick,
+        },
+        body: UpdateBody::Outcome {
+            facts,
+            event: event.map(Box::new),
+            visual_changed: OutcomeFacts::picture_changed(before, after),
+        },
+    };
+    app.update(update).unwrap();
 }
 
 fn basic_attack_view() -> Observation {
@@ -171,6 +198,8 @@ fn streamed_basic_attack_keeps_history_and_stays_quiet_until_its_result() {
     app.set_state(ClientState::from_snapshot(initial.clone()).unwrap());
     let mut preparing = Arc::unwrap_or_clone(initial.state.clone());
     preparing.revision += 1;
+    preparing.snapshot =
+        tor_protocol::SnapshotId(format!("fixture-display-{}", preparing.revision));
     preparing.observation.tick += 1;
     preparing.observation.ready = false;
     let combat = preparing.observation.combat.as_mut().unwrap();
@@ -204,20 +233,7 @@ fn streamed_basic_attack_keeps_history_and_stays_quiet_until_its_result() {
             }),
         },
     };
-    app.update(StreamUpdate {
-        context: initial.context.clone(),
-        actor: initial.actor,
-        branch: initial.branch.clone(),
-        cursor: StreamCursor {
-            sequence: 1,
-            tick: preparing.observation.tick,
-        },
-        body: UpdateBody::Observation {
-            state: preparing.into(),
-            event: Some(Box::new(started.clone())),
-        },
-    })
-    .unwrap();
+    outcome(&mut app, 1, &preparing.observation, Some(started.clone()));
     assert_eq!(app.messages.text(), "");
     assert!(app
         .state
@@ -227,14 +243,16 @@ fn streamed_basic_attack_keeps_history_and_stays_quiet_until_its_result() {
         .iter()
         .any(|line| line == "You prepare to use Ordinary attack."));
 
-    update(&mut app, 2, |view| {
-        let strike = own_strike(view, AbilityOutcome::Applied);
-        view.ready = true;
-        let combat = view.combat.as_mut().unwrap();
-        combat.preparation_remaining = None;
-        combat.preparation_active = false;
-        combat.events = vec![strike];
-    });
+    update(&mut app, 2, |view| *view = preparing.observation.clone());
+    let mut completed = preparing.observation.clone();
+    completed.tick += 100;
+    completed.ready = true;
+    let strike = own_strike(&completed, AbilityOutcome::Applied);
+    let combat = completed.combat.as_mut().unwrap();
+    combat.preparation_remaining = None;
+    combat.preparation_active = false;
+    combat.events = vec![strike];
+    outcome(&mut app, 3, &completed, None);
     assert_eq!(app.messages.text(), "You hit the ruin scout.");
     let state = app.state.as_ref().unwrap();
     assert_eq!(state.history(), [started]);
@@ -242,10 +260,13 @@ fn streamed_basic_attack_keeps_history_and_stays_quiet_until_its_result() {
         .narration()
         .iter()
         .any(|line| line == "You used Ordinary attack on the ruin scout."));
-    update(&mut app, 3, |view| {
-        view.combat.as_mut().unwrap().events.clear()
-    });
+    completed.combat.as_mut().unwrap().events.clear();
+    update(&mut app, 4, |view| *view = completed);
     assert_eq!(app.messages.text(), "You hit the ruin scout.");
+    assert!(
+        app.state.as_ref().unwrap().narration().is_empty(),
+        "a picture neither replays nor owns the ordered result"
+    );
 }
 
 #[test]
@@ -540,6 +561,107 @@ fn moving_onto_things_says_what_is_here() {
 }
 
 #[test]
+fn coalesced_moves_keep_event_time_underfoot_names_quantities_and_order() {
+    let mut app = app();
+    let original = app.state.as_ref().unwrap().state().clone();
+    let mut destination = original.observation.clone();
+    destination.ground_items.truncate(1);
+    destination.ground_items[0].position = destination.position;
+    destination.ground_items[0].presentation = None;
+    let branch = app.state.as_ref().unwrap().branch().clone();
+    for (sequence, name, quantity) in [(1, "apple", 3), (2, "arrow", 7)] {
+        destination.tick += 100;
+        destination.ground_items[0].item.name = name.into();
+        destination.ground_items[0].item.quantity = quantity;
+        let event = HistoryEntry {
+            id: EntryId(format!("underfoot-move-{sequence}")),
+            branch: branch.clone(),
+            actor: destination.actor,
+            tick: destination.tick,
+            author: Author::User {
+                user: "test".into(),
+            },
+            audience: Audience::Actor,
+            content: HistoryContent::Action {
+                action: Action::Move {
+                    direction: Direction::East,
+                },
+                event: Box::new(Event::Moved {
+                    direction: Direction::East,
+                }),
+            },
+        };
+        outcome(&mut app, sequence, &destination, Some(event));
+        // No picture has been published for either committed move.
+        assert_eq!(app.state.as_ref().unwrap().state(), &original);
+    }
+    assert_eq!(
+        app.messages.text(),
+        "You see here 3 x apple.  You see here 7 x arrow."
+    );
+    let narrated = app.messages.text();
+    destination.ground_items[0].item.name = "later picture only".into();
+    destination.ground_items[0].item.quantity = 99;
+    update(&mut app, 3, |view| *view = destination);
+    assert_eq!(
+        app.messages.text(),
+        narrated,
+        "picture must not add or replay underfoot prose"
+    );
+    assert_eq!(app.state.as_ref().unwrap().history().len(), 2);
+}
+
+#[test]
+fn underfoot_capture_uses_only_local_authorized_appearance_and_feature_priority() {
+    let mut destination = view();
+    destination.ground_items.truncate(1);
+    destination.ground_items[0].position = destination.position;
+    destination.ground_items[0].item.quantity = 4;
+    destination.ground_items[0].item.name = "undisclosed original".into();
+    destination.ground_items[0].presentation = Some(ObjectPresentation {
+        name: "apparent coins".into(),
+        asset: None,
+        kind: ObjectPresentationKind::Stairs,
+    });
+    let floor = destination
+        .visible_cells
+        .iter_mut()
+        .find(|cell| cell.position == destination.position)
+        .unwrap();
+    floor.stairs_down = true;
+    floor.stairs_up = true;
+    floor.object_presentation = Some(ObjectPresentation {
+        name: String::new(),
+        asset: None,
+        kind: ObjectPresentationKind::Stairs,
+    });
+    let mut remote = destination.ground_items[0].clone();
+    remote.position.x += 1;
+    remote.item.name = "remote secret".into();
+    destination.ground_items.push(remote);
+    let contents = OutcomeUnderfoot::from(&destination);
+    assert_eq!(contents.items.len(), 1);
+    assert_eq!(contents.items[0].quantity, 4);
+    let mut messages = Messages::default();
+    let moved = line(
+        Topic::Own(Event::Moved {
+            direction: Direction::East,
+        }),
+        "You move east.",
+    );
+    messages.absorb_outcome_with_underfoot(&[moved], destination.tick, None, Some(&contents));
+    let mut legacy = Messages::default();
+    legacy.here(&destination);
+    assert_eq!(messages.text(), legacy.text());
+    assert!(!messages.text().contains("remote secret"));
+    assert!(!messages.text().contains("undisclosed original"));
+    assert_eq!(
+        messages.text(),
+        "You see here 4 x apparent coins.  You see here a stairs."
+    );
+}
+
+#[test]
 fn a_creature_is_announced_again_only_after_a_long_absence() {
     let scout = super::actor_target(2);
     let mut messages = Messages::default();
@@ -563,15 +685,16 @@ fn a_creature_is_announced_again_only_after_a_long_absence() {
 #[test]
 fn messages_stay_until_the_next_command_and_then_move_to_the_log() {
     let mut app = app();
-    update(&mut app, 1, |o| {
-        o.combat.as_mut().unwrap().events = vec![CombatEventView::Ability {
-            strike: None,
-            ability: tor_client_common::test_support::content("basic_melee"),
-            caster: Some(super::actor_target(2)),
-            target: Some(super::actor_target(1)),
-            outcome: AbilityOutcome::Applied,
-        }]
-    });
+    let mut struck = app.state.as_ref().unwrap().state().observation.clone();
+    struck.tick += 100;
+    struck.combat.as_mut().unwrap().events = vec![CombatEventView::Ability {
+        strike: None,
+        ability: tor_client_common::test_support::content("basic_melee"),
+        caster: Some(super::actor_target(2)),
+        target: Some(super::actor_target(1)),
+        outcome: AbilityOutcome::Applied,
+    }];
+    outcome(&mut app, 1, &struck, None);
     // Later updates with nothing to say don't clear what was said.
     update(&mut app, 2, |o| o.combat.as_mut().unwrap().events.clear());
     assert_eq!(
@@ -867,7 +990,10 @@ fn automatic_run_waits_for_character_readiness_after_acknowledgement_and_executi
         // The request acknowledgement releases transport busy, not gameplay.
         app.ready();
         assert_eq!(app.continue_run(), Effect::None, "move is still queued");
-        update(&mut app, 3, |view| view.ready = ready_before_permissions);
+        let mut pacing = app.state.as_ref().unwrap().state().observation.clone();
+        pacing.ready = ready_before_permissions;
+        outcome(&mut app, 3, &pacing, None);
+        update(&mut app, 4, |view| *view = pacing);
         assert_eq!(
             app.continue_run(),
             Effect::None,
@@ -908,19 +1034,26 @@ fn automatic_run_waits_for_character_readiness_after_acknowledgement_and_executi
                 "admission is not character readiness"
             );
             assert_eq!(app.running, Some(Direction::East));
-            update(&mut app, 6, |view| view.ready = true);
+            let mut pacing = app.state.as_ref().unwrap().state().observation.clone();
+            pacing.ready = true;
+            let sequence = app.state.as_ref().unwrap().cursor().sequence + 1;
+            outcome(&mut app, sequence, &pacing, None);
+            update(&mut app, sequence + 1, |view| *view = pacing);
         }
-        let expected_revision = app.state.as_ref().unwrap().state().revision;
         assert!(matches!(
             super::request(app.continue_run()),
             Some(Request::Command {
-                context: InputContext { readiness_revision: 2, .. },
+                context: InputContext {
+                    readiness_revision: 2,
+                    ..
+                },
                 command: Command::Act {
-                    expected_revision: actual_revision,
-                    action: Action::Move { direction: Direction::East },
+                    action: Action::Move {
+                        direction: Direction::East
+                    },
                 },
                 ..
-            }) if actual_revision == expected_revision
+            })
         ));
         assert_eq!(
             app.continue_run(),
@@ -1016,7 +1149,7 @@ fn running_stops_for_messages_and_a_fresh_key_without_an_extra_action() {
             Effect::Request(_)
         ));
         app.ready();
-        let before = app.state.as_ref().unwrap().snapshot();
+        let before = app.state.as_ref().unwrap().session().clone();
         if stop_with_key {
             assert_eq!(app.input(Input::Key { key: Key::Right }), Effect::None);
         } else {
@@ -1024,7 +1157,7 @@ fn running_stops_for_messages_and_a_fresh_key_without_an_extra_action() {
             assert_eq!(app.continue_run(), Effect::None);
         }
         assert_eq!(app.running, None);
-        assert_eq!(app.state.as_ref().unwrap().snapshot(), before);
+        assert_eq!(app.state.as_ref().unwrap().session().clone(), before);
     }
 }
 
@@ -1422,11 +1555,17 @@ fn refusals_status_lines_and_the_end_screen_use_plain_words() {
     let [first, second] = tor_client_ascii::status_lines(&app, app.state.as_ref().unwrap());
     assert!(first.contains("Retrieve the objective item"));
     assert_eq!(second, "HP:40(50)  Gold:0  T:100");
-    update(&mut app, 1, |o| {
-        let combat = o.combat.as_mut().unwrap();
-        combat.victory = true;
-        combat.terminal = true;
-    });
+    let mut won = app.state.as_ref().unwrap().state().observation.clone();
+    won.tick += 100;
+    let combat = won.combat.as_mut().unwrap();
+    combat.victory = true;
+    combat.terminal = true;
+    outcome(&mut app, 1, &won, None);
+    // Terminal facts forbid another action even before picture/readiness delivery.
+    assert!(app.state.as_ref().unwrap().can_admit_intention());
+    assert_eq!(app.input(Input::Key { key: Key::Left }), Effect::None);
+    assert_eq!(app.status, "This run has ended.");
+    update(&mut app, 2, |view| *view = won);
     assert!(app.messages.text().contains("Victory! This run has ended."));
     // A run in progress ends with the game, and moves say why they're refused.
     app.running = Some(Direction::East);
@@ -1462,7 +1601,7 @@ fn map_look_and_inventory_share_assets_without_renaming_disclosed_things() {
         },
     });
     let state = app.state.as_ref().unwrap();
-    let unchanged = state.snapshot();
+    let unchanged = state.session().clone();
     let tiles = render::map_tiles(state, &app.palette);
     let actor = tiles
         .iter()
@@ -1488,7 +1627,7 @@ fn map_look_and_inventory_share_assets_without_renaming_disclosed_things() {
         tor_client_ascii::describe(state, &app.palette, -1, 0),
         "\" - a sword."
     );
-    assert_eq!(state.snapshot(), unchanged);
+    assert_eq!(state.session().clone(), unchanged);
 
     // A palette-only loss and recovery changes appearance without changing
     // observation, inventory handles, commands, memory or authored names.
@@ -1523,7 +1662,7 @@ fn map_look_and_inventory_share_assets_without_renaming_disclosed_things() {
         },
     });
     assert_eq!(render::map_tiles(state, &app.palette), tiles);
-    assert_eq!(state.snapshot(), unchanged);
+    assert_eq!(state.session().clone(), unchanged);
 }
 
 #[test]

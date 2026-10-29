@@ -309,7 +309,8 @@ fn data_range_modifier_changes_both_disclosure_and_authoritative_targeting() {
         .combat
         .unwrap()
         .own_stats
-        .unwrap();
+        .unwrap()
+        .into_owned();
     assert_eq!(
         view.ability_reaches[&id("fixture_mana_ray")],
         Reach::Sight { range: 9 }
@@ -565,6 +566,7 @@ fn phase5_supportive_sight_range_modifiers_are_frozen_and_disclosed() {
             .unwrap()
             .own_stats
             .unwrap()
+            .into_owned()
             .ability_reaches[&id("fixture_mana_ray")],
         expected
     );

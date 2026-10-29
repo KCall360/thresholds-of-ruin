@@ -23,7 +23,7 @@ fn physics_replay_checkpoint_retry_and_rewind_preserve_motion() {
         let initial = engine.state(actor).unwrap().observation;
         let branch = engine.branch().clone();
         let command = Command::Act {
-            expected_revision: engine.revision(actor).unwrap(),
+            expected_boundary: engine.causal_boundary(actor).unwrap(),
             action: Action::Wait,
         };
         engine
@@ -56,7 +56,8 @@ fn physics_replay_checkpoint_retry_and_rewind_preserve_motion() {
                 "rewind",
                 &branch,
                 Command::Wizard {
-                    expected_revision: engine.revision(actor).unwrap(),
+                    display_basis: None,
+                    expected_boundary: engine.causal_boundary(actor).unwrap(),
                     operation: WizardOperation::Rewind { target: None },
                 },
             )
@@ -70,7 +71,7 @@ fn physics_replay_checkpoint_retry_and_rewind_preserve_motion() {
                 "fall-again",
                 &engine.branch().clone(),
                 Command::Act {
-                    expected_revision: engine.revision(actor).unwrap(),
+                    expected_boundary: engine.causal_boundary(actor).unwrap(),
                     action: Action::Wait,
                 },
             )
@@ -90,6 +91,7 @@ fn privileged_physics_edits_are_journaled_and_invalid_bodies_are_atomic() {
     engine.enable_wizard().unwrap();
     let actor = ActorId(1);
     let before = engine.state(actor).unwrap();
+    let before_boundary = engine.causal_boundary(actor).unwrap();
     let branch = engine.branch().clone();
     assert!(engine
         .command(
@@ -99,7 +101,8 @@ fn privileged_physics_edits_are_journaled_and_invalid_bodies_are_atomic() {
             "bad-body",
             &branch,
             Command::Wizard {
-                expected_revision: before.revision,
+                display_basis: None,
+                expected_boundary: before_boundary,
                 operation: WizardOperation::SetBody {
                     actor,
                     cells: vec![[0, 0, 0], [0, 0, 8]],
@@ -118,7 +121,8 @@ fn privileged_physics_edits_are_journaled_and_invalid_bodies_are_atomic() {
             "zero-g",
             &branch,
             Command::Wizard {
-                expected_revision: before.revision,
+                display_basis: None,
+                expected_boundary: before_boundary,
                 operation: WizardOperation::SetGravity {
                     region: 1,
                     vector: [0; 3],
@@ -134,7 +138,7 @@ fn privileged_physics_edits_are_journaled_and_invalid_bodies_are_atomic() {
             "wait",
             &branch,
             Command::Act {
-                expected_revision: engine.revision(actor).unwrap(),
+                expected_boundary: engine.causal_boundary(actor).unwrap(),
                 action: Action::Wait,
             },
         )
@@ -168,7 +172,7 @@ fn resting_gravity_wait_uses_readiness_fast_path() {
                 &format!("settle-{turn}"),
                 &engine.branch().clone(),
                 Command::Act {
-                    expected_revision: engine.revision(actor).unwrap(),
+                    expected_boundary: engine.causal_boundary(actor).unwrap(),
                     action: Action::Wait,
                 },
             )
@@ -182,7 +186,7 @@ fn resting_gravity_wait_uses_readiness_fast_path() {
             "resting",
             &engine.branch().clone(),
             Command::Act {
-                expected_revision: engine.revision(actor).unwrap(),
+                expected_boundary: engine.causal_boundary(actor).unwrap(),
                 action: Action::Wait,
             },
         )
@@ -243,15 +247,29 @@ fn unsettled_physics_refreshes_navigation_only_when_its_inputs_change() {
                 &format!("wait-{step}"),
                 &engine.branch().clone(),
                 Command::Act {
-                    expected_revision: engine.revision(actor).unwrap(),
+                    expected_boundary: engine.causal_boundary(actor).unwrap(),
                     action: Action::Wait,
                 },
             )
             .unwrap();
         if step > 0 {
+            assert_eq!(
+                profile.perception_calls, 0,
+                "unsettled physics commits without eagerly constructing display pictures"
+            );
+            let before = tor_simulation::diagnostics::work_counts().observations;
+            let records = engine.profile_counts();
+            for id in engine.actors() {
+                engine.state(id).unwrap();
+            }
             assert!(
-                profile.perception_calls > 0,
-                "unsettled physics still requires fresh observation disclosure"
+                tor_simulation::diagnostics::work_counts().observations > before,
+                "explicit picture demand must still materialize current disclosure"
+            );
+            assert_eq!(
+                engine.profile_counts(),
+                records,
+                "picture reads are not gameplay"
             );
         }
         assert_eq!(profile.navigation_refreshes, refreshes);
@@ -300,7 +318,7 @@ fn translating_an_unchanged_visible_chart_does_not_refresh_navigation() {
             "translate",
             &engine.branch().clone(),
             Command::Act {
-                expected_revision: engine.revision(actor).unwrap(),
+                expected_boundary: engine.causal_boundary(actor).unwrap(),
                 action: Action::Move {
                     direction: tor_server::journal::Direction::East,
                 },

@@ -12,6 +12,38 @@ ROOT = Path(__file__).resolve().parents[1]
 SPEC = json.loads((ROOT/"crates/server/fixtures/performance-v1.json").read_text())
 
 
+OBSERVER_WORK_CONTRACT = "causal_facts_demand_display_v1"
+ACTION_OBSERVER_COUNTS = ("action_observer_boundaries", "action_event_receipts_recorded",
+                          "action_projection_validated", "action_navigation_reviewed")
+EAGER_DISPLAY_COUNTS = ("revision_comparisons", "observation_changes_proven",
+                        "observations_unchanged_proven", "observation_projection_fallbacks")
+
+
+def observer_profile_version(metadata):
+    version = metadata.get("profile_version", 1)
+    require(type(version) is int and version in (1, 2, 3), "Unknown work profile version")
+    marker = metadata.get("observer_work_contract")
+    if version == 3:
+        require(marker == OBSERVER_WORK_CONTRACT, "Missing or unknown observer work contract")
+    else:
+        require("observer_work_contract" not in metadata, "Mixed legacy and demand-driven work contract")
+    return version
+
+
+def validate_demand_observer_work(profile, cohort=None, *, positive=False):
+    nonnegative_counts(profile, (*ACTION_OBSERVER_COUNTS, *EAGER_DISPLAY_COUNTS, "actors_observed"))
+    actual = profile[ACTION_OBSERVER_COUNTS[0]]
+    require(all(profile[field] == actual for field in ACTION_OBSERVER_COUNTS),
+            "Every selected observer must complete event, projection and navigation work")
+    if cohort is not None:
+        require(actual == cohort, "Causal observer coverage differs from the fixed workload")
+    if positive:
+        require(actual > 0, "Active workload requires positive causal observer coverage")
+    require(all(profile[field] == 0 for field in EAGER_DISPLAY_COUNTS),
+            "Demand-driven rules commits must not perform eager display comparisons")
+    require(profile["actors_observed"] == 0, "Rules commits must not materialize presentation views")
+
+
 def expected_actions(regions, actors, history, cycles):
     # Independent scheduler oracle: equal 100-tick turns, diagonal cost 142,
     # rejected attempts free, identity breaks ties. No server state is consulted.
@@ -236,6 +268,7 @@ def validate_stream(rows, case):
     ends = [r for r in rows if r["kind"] == "stream_end" and r["case"] == case]
     require(len(meta) == 1 and len(ends) == 1, "Missing or duplicate streaming metadata or completion")
     meta, end = meta[0], ends[0]
+    profile_version = observer_profile_version(meta)
     require(meta["workload"] == "streaming-v1", 'Invalid evidence: meta["workload"] == "streaming-v1"')
     require(meta.get('region_acquisition_version', 1) == 1, 'Unknown acquisition profile version')
     samples = [r for r in rows if r["kind"] == "sample"]
@@ -250,6 +283,10 @@ def validate_stream(rows, case):
         require(sample["history_start"] == history, (case, "history"))
         history += 1
         profile = sample["profile"]
+        if profile_version == 3:
+            validate_demand_observer_work(profile)
+        else:
+            require(not any(field in profile for field in ACTION_OBSERVER_COUNTS), "Unmarked causal observer accounting")
         validate_region_acquisition(profile, 'region_acquisition_version' in meta)
         require(profile["simulation_transitions"] == 1, 'Invalid evidence: profile["simulation_transitions"] == 1')
         require(profile["candidate_captures"] == 1 and profile["rollback_snapshots"] == 1, 'Invalid evidence: profile["candidate_captures"] == 1 and profile["rollback_snapshots"] == 1')
@@ -363,6 +400,10 @@ def validate(rows, quick=False, phase_b=False, phase_c=False, selected_case=None
         expected_cases = set()
     require(set(cases) == set(ends) == expected_cases, "Missing or unexpected completed matrix case")
     for case, meta in cases.items():
+        if observer_profile_version(meta) != 3:
+            require(not any(field in (sample.get("profile") or {})
+                            for sample in samples[case] for field in ACTION_OBSERVER_COUNTS),
+                    "Unmarked causal observer accounting")
         expected = expected_actions(meta["regions"],meta["actors"],meta["history_start"],meta["cycles"])
         actual = samples[case]
         require(len(expected) == len(actual), (case,"sample count",len(expected),len(actual)))
@@ -382,7 +423,8 @@ def validate(rows, quick=False, phase_b=False, phase_c=False, selected_case=None
                 require(profile["actors_observed"] <= 2*meta["actors"], 'Invalid evidence: profile["actors_observed"] <= 2*meta["actors"]')
                 require(profile["revision_comparisons"] <= meta["actors"], 'Invalid evidence: profile["revision_comparisons"] <= meta["actors"]')
                 if meta.get("profile_version", 1) >= 2:
-                    validate_work(profile, resolved, meta["actors"])
+                    validate_work(profile, resolved, meta["actors"], profile_version=meta.get("profile_version", 1),
+                                  observer_work_contract=meta.get("observer_work_contract"))
                 require(profile["records_serialized"] <= history, 'Invalid evidence: profile["records_serialized"] <= history')
                 if meta["storage"] == "background_sqlite_journal":
                     require(profile["records_serialized"] == 1, 'Invalid evidence: profile["records_serialized"] == 1')
@@ -439,6 +481,10 @@ def validate(rows, quick=False, phase_b=False, phase_c=False, selected_case=None
         require(actual[-1]["history_end"] == len(actual), 'Invalid evidence: actual[-1]["history_end"] == len(actual)')
         expected = SPEC["traversal"] * cycles
         metadata = traversals.get(case, {})
+        if observer_profile_version(metadata) != 3:
+            require(not any(field in (sample.get("profile") or {})
+                            for sample in actual for field in ACTION_OBSERVER_COUNTS),
+                    "Unmarked causal observer accounting")
         end = traversal_ends[case]
         require(end["history_end"] == len(actual) and end["client_memory"] == actual[-1]["client_memory"], 'Invalid evidence: end["history_end"] == len(actual) and end["client_memory"] == actual[-1]["client_memory"]')
         if metadata:
@@ -455,7 +501,8 @@ def validate(rows, quick=False, phase_b=False, phase_c=False, selected_case=None
             require(sample["label"] == step["label"] and sample["expected"] == step["expected"], 'Invalid evidence: sample["label"] == step["label"] and sample["expected"] == step["expected"]')
             require(sample["history_start"] == index and sample["history_end"] == index + 1, 'Invalid evidence: sample["history_start"] == index and sample["history_end"] == index + 1')
             if metadata.get("profile_version", 1) >= 2:
-                validate_work(sample["profile"], sample["action"], 1)
+                validate_work(sample["profile"], sample["action"], 1, profile_version=metadata.get("profile_version", 1),
+                              observer_work_contract=metadata.get("observer_work_contract"))
     return cases, samples, ends
 
 
@@ -494,21 +541,69 @@ def validate_saved_discovery(meta, samples, end):
         require(sample["profile"]["records_serialized"] == 1, 'Invalid evidence: sample["profile"]["records_serialized"] == 1')
 
 
-def validate_work(profile, action, actors):
+def validate_work(profile, action, actors, *, profile_version=2, observer_work_contract=None):
     """Version 2 contracts describe actual calls, separate from fixture version 1."""
+    metadata = {"profile_version": profile_version}
+    if observer_work_contract is not None:
+        metadata["observer_work_contract"] = observer_work_contract
+    observer_profile_version(metadata)
     validate_profile_measurements(profile)
     nonnegative_counts(profile, ("actors_observed", "scene_calls", "perception_calls", "candidate_captures", "rollback_snapshots"))
+    if profile_version == 3:
+        stationary = action["type"] == "wait"
+        validate_demand_observer_work(profile, 0 if stationary else actors)
+        if stationary:
+            nonnegative_counts(profile, ("navigation_refreshes",))
+            require((profile["perception_calls"], profile["scene_calls"], profile["navigation_refreshes"]) == (0, 0, 0),
+                    "Stationary waits must not rebuild observer projections or navigation")
+        else:
+            require(profile["scene_calls"] <= 2*actors + int(action["type"] == "set_door"),
+                    "Repeated fresh scene computations")
+        require(profile["candidate_captures"] == 1 and profile["rollback_snapshots"] == 1,
+                "Each committed action retains candidate and rollback ownership")
+        return
+    require(not any(field in profile for field in ACTION_OBSERVER_COUNTS), "Unmarked causal observer accounting")
     for field, work in (("scene_calls", "fresh scene computations"),
                         ("perception_calls", "fresh observation disclosures")):
         require(type(profile[field]) is int and profile[field] >= 0, f"{work} must be a nonnegative integer count")
+    proof_fields = ("observation_changes_proven", "observations_unchanged_proven",
+                    "observation_projection_fallbacks")
+    has_proofs = any(field in profile for field in proof_fields)
+    if has_proofs:
+        # A partially emitted proof schema must not silently select legacy or
+        # relaxed accounting. Each observer has exactly one disposition.
+        nonnegative_counts(profile, (*proof_fields, "revision_comparisons"))
     if action["type"] == "wait":
+        if has_proofs:
+            nonnegative_counts(profile, ("navigation_refreshes",))
+            require(sum(profile[field] for field in proof_fields) == 0,
+                    "stationary waits must not perform boundary projection work")
         require((profile["actors_observed"], profile["perception_calls"], profile["scene_calls"], profile["navigation_refreshes"]) == (0,0,0,0), 'Invalid evidence: (profile["actors_observed"], profile["perception_calls"], profile["scene_calls"], profile["navigation_refreshes"]) == (0,0,0,0)')
         require(profile["revision_comparisons"] == actors, 'Invalid evidence: profile["revision_comparisons"] == actors')
     else:
-        require(profile["actors_observed"] == 2*actors, 'Invalid evidence: profile["actors_observed"] == 2*actors')
-        limit = 2*actors + (action["type"] == "set_door")
+        door_validation = int(action["type"] == "set_door")
+        limit = 2*actors + door_validation
         require(profile["scene_calls"] <= limit, "repeated fresh scene computations")
-        require(actors <= profile["perception_calls"] <= limit, "each actor needs fresh post-action disclosure within the work bound")
+        if has_proofs:
+            require(sum(profile[field] for field in proof_fields) == actors,
+                    "every observer requires one changed/unchanged proof or cold comparison")
+            require(profile["revision_comparisons"] == actors,
+                    "boundary decisions must cover every observer exactly once")
+            fallbacks = profile["observation_projection_fallbacks"]
+            observed = profile["actors_observed"]
+            # A fallback accounts for two logical views even if its old view
+            # comes from cache. Other observers can need at most one rich view
+            # for map recording; already materialized fallback views are reused.
+            require(2*fallbacks <= observed <= actors+fallbacks,
+                    "rich view accounting must cover cold comparisons without repeated materialization")
+            # Every fallback builds its current view; only its old view may hit
+            # cache. Door validation permits one additional fresh observation.
+            require(observed-fallbacks <= profile["perception_calls"] <= observed+door_validation,
+                    "fresh disclosure count must match materialized views and bounded cache reuse")
+        else:
+            require(profile["actors_observed"] == 2*actors, 'Invalid evidence: profile["actors_observed"] == 2*actors')
+            require(actors <= profile["perception_calls"] <= limit,
+                    "each actor needs fresh post-action disclosure within the work bound")
     require(profile["candidate_captures"] == 1 and profile["rollback_snapshots"] == 1, 'Invalid evidence: profile["candidate_captures"] == 1 and profile["rollback_snapshots"] == 1')
 
 

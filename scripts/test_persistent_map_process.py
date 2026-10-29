@@ -226,7 +226,7 @@ class PersistentMapProcesses(ProcessTestCase):
             fresh = self.frame(fresh_client, lambda frame: frame.get("map_hydration", {}).get("complete"))
         self.assertIsNot(fresh_client, player)
         self.assertEqual(fresh["branch"], hidden["branch"], "setup: reopen must restore the same branch")
-        self.assertEqual(fresh["state"], hidden["state"], "setup: reopen must restore the saved state")
+        self.assertDisclosedStateEqual(fresh["state"], hidden["state"], "setup: reopen must restore the saved state")
         self.assertNotIn(key, {cell["key"] for cell in fresh["state"]["observation"]["visible_cells"]},
                          "setup: the remembered tile must remain out of current sight")
         restored = [cell for cell in fresh["memory"] if cell["key"] == key]

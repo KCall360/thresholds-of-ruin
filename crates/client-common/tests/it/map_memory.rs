@@ -7,7 +7,7 @@ fn snapshot(cells: &[(&str, i32, i32)], revision: u64) -> Snapshot {
         "readiness":{"revision":"0","admission":false,"resume":[],"cancel":[]},"context":super::stream_context(0),
         "actor":"1","branch":"map","cursor":{"sequence":"0","tick":revision.to_string()},
         "has_control":true, "intentions":[],"history":{"entries":[],"older_before":null},
-        "state":{"wizard_game":false,"revision":revision.to_string(),"observation":{
+        "state":{"snapshot":format!("fixture-{revision}"), "wizard_game":false,"revision":revision.to_string(),"observation":{
             "actor":"1","self_target":tor_protocol::ActorTarget::from_digest([1; 32]),"tick":revision.to_string(),"position":{"x":0,"y":0,"z":0},
             "places":[],"visible_cells":cells.iter().map(|(key,x,y)| serde_json::json!({
                 "key":key,"position":{"x":x,"y":y,"z":0},"wall":false,
@@ -37,6 +37,26 @@ fn advance(client: &mut ClientState, next: Snapshot) {
         .unwrap();
 }
 
+fn publish_outcome(client: &mut ClientState, next: &Snapshot) {
+    let facts = OutcomeFacts::capture(&client.state().observation, &next.state.observation, None);
+    client
+        .apply(StreamUpdate {
+            context: client.context().clone(),
+            actor: next.actor,
+            branch: next.branch.clone(),
+            cursor: StreamCursor {
+                sequence: client.cursor().sequence + 1,
+                tick: next.cursor.tick,
+            },
+            body: UpdateBody::Outcome {
+                visual_changed: true,
+                facts,
+                event: None,
+            },
+        })
+        .unwrap();
+}
+
 #[test]
 fn narration_rejects_gaps_atomically_and_resets_on_snapshot() {
     let mut client = ClientState::from_snapshot(snapshot(&[("a", 0, 0)], 0)).unwrap();
@@ -53,8 +73,13 @@ fn narration_rejects_gaps_atomically_and_resets_on_snapshot() {
             description: String::new(),
             position: Position { x: 1, y: 0, z: 0 },
         });
-    advance(&mut client, seen);
+    publish_outcome(&mut client, &seen);
     assert_eq!(client.narration(), ["You notice a figure."]);
+    advance(&mut client, seen);
+    assert!(
+        client.narration().is_empty(),
+        "a picture must not repeat the outcome"
+    );
     let unchanged = client.clone();
     let mut next = snapshot(&[("a", 0, 0)], 2);
     assert!(client
@@ -63,7 +88,7 @@ fn narration_rejects_gaps_atomically_and_resets_on_snapshot() {
             actor: next.actor,
             branch: next.branch.clone(),
             cursor: StreamCursor {
-                sequence: 3,
+                sequence: 4,
                 tick: 2
             },
             body: UpdateBody::Observation {
@@ -271,6 +296,7 @@ fn deltas_rebuild_the_full_view_and_reject_another_base_atomically() {
     let stale = StateDelta::between(&snapshot(&cells(&first), 0).state, &next);
     let mut stale = stale.unwrap();
     stale.revision = 2;
+    stale.snapshot = tor_protocol::SnapshotId(format!("fixture-{}", stale.revision));
     stale.tick = 2;
     assert_eq!(
         client.apply(delta_update(&client, stale)),
@@ -289,6 +315,7 @@ fn overflowing_delta_preserves_the_entire_client_model() {
         let mut client = ClientState::from_snapshot(initial.clone()).unwrap();
         let mut next = Arc::unwrap_or_clone(initial.state);
         next.revision = 1;
+        next.snapshot = tor_protocol::SnapshotId(format!("fixture-{}", next.revision));
         next.observation.tick = 1;
         let mut delta = StateDelta::between(client.state(), &next).unwrap();
         delta.cells.shift.x = shift;
@@ -1030,8 +1057,10 @@ fn trap_memory_keeps_only_last_disclosed_family_and_never_an_action_reference() 
         family: Some(TrapFamily::SleepingGas),
         reachable: true,
     });
-    advance(&mut client, examined);
+    publish_outcome(&mut client, &examined);
     assert_eq!(client.narration(), ["You recognize a sleeping gas trap."]);
+    advance(&mut client, examined);
+    assert!(client.narration().is_empty());
     advance(&mut client, snapshot(&[("a", 0, 0)], 2));
     assert!(client
         .state()

@@ -202,7 +202,6 @@ fn movement_queries_and_control_have_distinct_intents() {
     assert_eq!(
         parse("GO East", &state()).unwrap(),
         Input::Command(Command::Act {
-            expected_revision: 7,
             action: Action::Move {
                 direction: Direction::East
             }
@@ -225,7 +224,7 @@ fn movement_queries_and_control_have_distinct_intents() {
 
 fn state() -> StateView {
     serde_json::from_value(serde_json::json!({
-        "wizard_game":false,"revision": "7", "observation": {
+        "snapshot":"fixture-snapshot","wizard_game":false,"revision": "7", "observation": {
             "actor": "1", "self_target":super::actor_target(1),"tick": "100", "position": {"x":1,"y":1,"z":0},
 
             "places":[],"visible_cells": (0..5).flat_map(|x| (0..3).map(move |y| serde_json::json!({"key":format!("{x}:{y}"),"trap":null,"object_presentation":null,"stairs_up":false,"stairs_down":false,"position":{"x":x,"y":y,"z":0},"wall":false,"lit":true,"place_hint":false}))).collect::<Vec<_>>(),
@@ -247,7 +246,6 @@ fn resolves_only_disclosed_nouns_and_requires_clarification() {
     assert_eq!(
         parse("take the COPPER token", &state).unwrap(),
         Input::Command(Command::Act {
-            expected_revision: 7,
             action: Action::Take {
                 item: super::item_target(10),
                 quantity: None
@@ -261,7 +259,6 @@ fn resolves_only_disclosed_nouns_and_requires_clarification() {
         )
         .unwrap(),
         Input::Command(Command::Act {
-            expected_revision: 7,
             action: Action::Take {
                 item: super::item_target(11),
                 quantity: None
@@ -278,7 +275,9 @@ fn annotations_preserve_text_and_explicit_scope_without_an_action() {
     assert_eq!(
         parse("note Remember the Gallery.", &state()).unwrap(),
         Input::Command(Command::Annotate {
-            anchor: Anchor::State { revision: 7 },
+            anchor: Anchor::State {
+                snapshot: state().snapshot
+            },
             text: "Remember the Gallery.".into(),
             source: ClientSource::User,
             audience: Audience::Private,
@@ -306,7 +305,7 @@ fn annotations_preserve_text_and_explicit_scope_without_an_action() {
         "note bad\u{1b}[2J",
         "annotate backend actor note here spoiler",
         "annotate user public note here text",
-        "annotate user private note state:no text",
+        "annotate user private note state: text",
     ] {
         assert!(parse(bad, &state()).is_err(), "{bad}");
     }
@@ -386,6 +385,7 @@ fn wizard_creature_catalog_is_discoverable_in_text_help() {
 #[test]
 fn directional_ray_commands_select_direction_without_a_visible_creature() {
     let mut state = StateView {
+        snapshot: tor_protocol::SnapshotId("fixture-snapshot".into()),
         wizard_game: false,
         revision: 0,
         observation: tor_client_common::test_support::observation(),
@@ -513,10 +513,7 @@ fn ordinary_magic_commands_select_one_disclosed_item_and_direction() {
     ] {
         assert_eq!(
             parse(&text, &view).unwrap(),
-            Input::Command(Command::Act {
-                expected_revision: view.revision,
-                action
-            })
+            Input::Command(Command::Act { action })
         );
     }
     for bad in [
@@ -551,7 +548,6 @@ fn staff_zap_names_retain_device_capability_and_aim_authority() {
             assert_eq!(
                 parse(&format!("zap {name} east"), &view).unwrap(),
                 Input::Command(Command::Act {
-                    expected_revision: view.revision,
                     action: Action::Zap {
                         item,
                         aim: DeviceAim::Direction {
@@ -584,7 +580,6 @@ fn identification_commands_bind_current_choice_and_exact_category() {
     assert_eq!(
         parse("identify ivory wand", &view).unwrap(),
         Input::Command(Command::Act {
-            expected_revision: view.revision,
             action: Action::Identify {
                 choice: choice.clone(),
                 item: Some(wand)
@@ -594,7 +589,6 @@ fn identification_commands_bind_current_choice_and_exact_category() {
     assert_eq!(
         parse("identify cancel", &view).unwrap(),
         Input::Command(Command::Act {
-            expected_revision: view.revision,
             action: Action::Identify { choice, item: None }
         })
     );
@@ -659,6 +653,7 @@ fn intellect_expertise_commands_use_distinct_ordinary_entitlements() {
 #[test]
 fn projectile_commands_open_source_picker_without_actor_ray_or_step_fallback() {
     let mut state = StateView {
+        snapshot: tor_protocol::SnapshotId("fixture-snapshot".into()),
         wizard_game: false,
         revision: 0,
         observation: tor_client_common::test_support::observation(),
@@ -716,7 +711,6 @@ fn identified_self_device_command_needs_no_direction() {
     assert_eq!(
         parse(&format!("zap #{item}"), &view).unwrap(),
         Input::Command(Command::Act {
-            expected_revision: view.revision,
             action: Action::Zap {
                 item,
                 aim: DeviceAim::SelfTarget {}
@@ -776,7 +770,6 @@ fn known_dual_device_requires_explicit_self_or_direction() {
         assert_eq!(
             parse(&format!("zap #{item} {suffix}"), &view).unwrap(),
             Input::Command(Command::Act {
-                expected_revision: view.revision,
                 action: Action::Zap {
                     item,
                     aim: DeviceAim::SelfTarget {}

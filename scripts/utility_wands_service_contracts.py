@@ -3,6 +3,7 @@ import json
 
 from utility_potions_package import observation
 from utility_potions_service_contracts import UtilityServiceHarness
+from process_harness import ProcessTestCase
 from utility_wands_package import (
     assert_anonymous_recipient_feedback, assert_invisibility, assert_persistent, fixture, initial_items, live_combat_events,
 )
@@ -110,7 +111,7 @@ class UtilityWandsServiceContracts(UtilityServiceHarness):
             self.assertFalse(any(row["type"] == "ability_weapon_preview" for row in rows))
             failures.append((errors[0]["code"], errors[0]["message"]))
         self.assertEqual(failures[0], failures[1])
-        self.assertEqual(self.snapshot()["state"], before["state"], "Denied previews are read-only")
+        ProcessTestCase.assertDisclosedStateEqual(self, self.snapshot()["state"], before["state"], "Denied previews are read-only")
         for streams in (self.player_frames, self.spectator_frames):
             for rows in streams.values():
                 self.assertFalse(any(row["type"] == "combat_diagnostics" for row in rows))

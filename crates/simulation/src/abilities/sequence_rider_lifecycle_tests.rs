@@ -659,3 +659,46 @@ fn sequence_rider_failed_cancel_step_rolls_back_paid_hit_history_and_once_receip
     }
     assert_eq!(rider_count(&game), 1);
 }
+
+#[test]
+fn not_due_and_paused_preparations_are_validated_without_owned_snapshots() {
+    for paused in [false, true] {
+        let mut game = lifecycle_game();
+        let owner = ActorId(1);
+        let pending = game.preparation(owner).expect("real paid fixture");
+        assert!(pending.active);
+        assert!(pending.started + pending.remaining > game.tick);
+        assert!(game.preparation_still_available(pending, None));
+        if paused {
+            game.pause_preparation(owner).unwrap();
+        }
+        let before = game.clone();
+        let counts = crate::diagnostics::work_counts();
+        let count = counts.preparation_snapshots;
+        for _ in 0..4 {
+            game.resolve_preparations().unwrap();
+        }
+        assert_eq!(
+            game, before,
+            "free validation preserves RNG, holds and lifecycle"
+        );
+        assert_eq!(
+            crate::diagnostics::work_counts().preparation_snapshots - count,
+            0,
+            "not-due work must remain borrowed, including paused tails"
+        );
+        let after = crate::diagnostics::work_counts();
+        assert_eq!(
+            after.preparation_owner_visits - counts.preparation_owner_visits,
+            4
+        );
+        assert_eq!(
+            after.preparation_validation_evaluations - counts.preparation_validation_evaluations,
+            4
+        );
+        assert_eq!(
+            after.preparation_residency_evaluations - counts.preparation_residency_evaluations,
+            if paused { 0 } else { 4 }
+        );
+    }
+}

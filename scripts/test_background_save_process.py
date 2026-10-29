@@ -47,7 +47,7 @@ class BackgroundSaveProcesses(ProcessTestCase):
         server = self.server(scenario="two-room")
         player, restored = self.client()
         self.assert_startup_stages(server, complete=True)
-        self.assertEqual(restored["state"], completed["state"])
+        self.assertDisclosedStateEqual(restored["state"], completed["state"])
         self.assertEqual(restored["history"], completed["history"])
         player.stop()
         server.stop()
@@ -101,7 +101,7 @@ class BackgroundSaveProcesses(ProcessTestCase):
             server.stop()
             server = self.server("--checkpoint-interval", 1, scenario="two-room")
             player, restored = self.client()
-            self.assertEqual(restored["state"], completed["state"])
+            self.assertDisclosedStateEqual(restored["state"], completed["state"])
             self.assertEqual(restored["history"], completed["history"])
 
     def saving_server(self, target=3600000, maximum=7200000, idle=750, *, writer_barrier=False):
@@ -130,7 +130,7 @@ class BackgroundSaveProcesses(ProcessTestCase):
         completed = self.act(player, {"type": "wait"})
         note = self.request(player, {
             "type": "command", "context": completed["input_context"], "branch": completed["branch"],
-            "command": {"type": "annotate", "anchor": {"type": "state", "revision": completed["state"]["revision"]},
+            "command": {"type": "annotate", "anchor": {"type": "state", "snapshot": completed["state"]["snapshot"]},
                         "text": "Stored schema boundary", "source": "frontend",
                         "audience": "actor", "category": "bookmark"}})
         self.assertIsNone(note["error"])
@@ -155,11 +155,13 @@ class BackgroundSaveProcesses(ProcessTestCase):
         self.assertEqual(stored_note["author"]["type"], "frontend")
         self.assertEqual(stored_note["audience"], "actor")
         self.assertEqual(stored_note["content"]["category"], "bookmark")
-        self.assertIs(type(stored_note["content"]["anchor"]["revision"]), int)
+        self.assertEqual(stored_note["content"]["anchor"], {
+            "type": "state", "snapshot": completed["state"]["snapshot"],
+            "boundary": records[1]["entry"]["id"]})
         server.stop()
         self.saving_server()
         _, restored = self.client()
-        self.assertEqual(restored["state"], note["state"])
+        self.assertDisclosedStateEqual(restored["state"], note["state"])
         self.assertEqual(restored["history"], note["history"])
         self.assertEqual(restored["intentions"], [])
 
@@ -232,7 +234,7 @@ class BackgroundSaveProcesses(ProcessTestCase):
         # A round-trip consumes all earlier ordered attachment messages. A
         # successful retry clears the remembered warning for later attachments.
         self.assertIsNone(self.request(clean, {"type": "snapshot"})["error"])
-        self.assertEqual(restored["state"], snapshot["state"])
+        self.assertDisclosedStateEqual(restored["state"], snapshot["state"])
         messages = [json.loads(line).get("message") for line in clean.transcript if line.startswith("{")]
         self.assertFalse(any(message and message["type"] == "error" and
                              message["code"] == "storage_failure" for message in messages))

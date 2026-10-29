@@ -164,7 +164,7 @@ class AssetPresentationProcesses(ProcessTestCase):
         self.assert_asset_map(resumed)
         self.assertEqual(resumed["role"], "spectator")
         self.assertFalse(resumed["has_control"])
-        self.assertEqual(resumed["state"], initial["state"])
+        self.assertDisclosedStateEqual(resumed["state"], initial["state"])
 
 
 if __name__ == "__main__":

@@ -35,11 +35,14 @@ struct TransportSocket {
 }
 
 impl TransportSocket {
-    fn new(stream: TcpStream) -> Self {
-        Self {
+    fn new(stream: TcpStream) -> io::Result<Self> {
+        // Publish small interactive responses without Nagle's batching delay.
+        // A failure rejects this connection rather than silently changing policy.
+        stream.set_nodelay(true)?;
+        Ok(Self {
             stream,
             graceful: false,
-        }
+        })
     }
 
     fn preserve_output_on_drop(&mut self) {
@@ -241,7 +244,10 @@ async fn connection(
         .max_frame_size(Some(MAX_REQUEST_BYTES));
     // HTTP upgrade rejection may carry a response. Only an upgraded protocol
     // connection owns the abort-on-failure policy below.
-    let mut socket = TransportSocket::new(socket);
+    let Ok(mut socket) = TransportSocket::new(socket) else {
+        // Socket configuration failed before upgrade; close this peer only.
+        return;
+    };
     socket.preserve_output_on_drop();
     let upgrade = accept_hdr_async_with_config(socket, native_origin, Some(config));
     let Ok(Ok(mut socket)) = timeout(IO_TIMEOUT, upgrade).await else {
@@ -415,7 +421,13 @@ mod tests {
             .await
             .unwrap();
         let (stream, _) = listener.accept().await.unwrap();
-        (TransportSocket::new(stream), peer)
+        (TransportSocket::new(stream).unwrap(), peer)
+    }
+
+    #[tokio::test]
+    async fn accepted_connection_disables_nagle() {
+        let (socket, _peer) = tcp_pair().await;
+        assert!(socket.stream.nodelay().unwrap());
     }
 
     async fn read_closed_peer(peer: &mut TcpStream) -> (io::Result<usize>, Vec<u8>) {
@@ -535,6 +547,7 @@ mod tests {
     ) {
         let message = ServerMessage::Ack {
             context: ReplyContext {
+                snapshot: tor_protocol::SnapshotId("fixture".into()),
                 input: InputContext {
                     stream: StreamContext {
                         stream: StreamId("transport-test".into()),

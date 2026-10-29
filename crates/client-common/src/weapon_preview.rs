@@ -37,7 +37,7 @@ impl WeaponPreview {
             };
         Ok(Self {
             projectile_binding,
-            context: state.snapshot().reply_context(),
+            context: state.reply_context(),
             action,
             request_id: None,
             preview: None,
@@ -68,7 +68,7 @@ impl WeaponPreview {
     }
     pub fn current(&self, state: &ClientState) -> bool {
         state.has_control()
-            && state.snapshot().reply_context() == self.context
+            && state.reply_context() == self.context
             && self
                 .projectile_binding
                 .as_ref()
@@ -237,7 +237,7 @@ mod tests {
                 charges: None,
             }],
         });
-        let snapshot=serde_json::from_value(serde_json::json!({"readiness":{"revision":"0","admission":true,"resume":[],"cancel":[]},"context":{"stream":"fixture","epoch":"0"},"actor":"1","branch":"main","cursor":{"sequence":"0","tick":"0"},"has_control":true,"intentions":[],"history":{"entries":[],"older_before":null},"state":{"wizard_game":false,"revision":"1","observation":view}})).unwrap();
+        let snapshot=serde_json::from_value(serde_json::json!({"readiness":{"revision":"0","admission":true,"resume":[],"cancel":[]},"context":{"stream":"fixture","epoch":"0"},"actor":"1","branch":"main","cursor":{"sequence":"0","tick":"0"},"has_control":true,"intentions":[],"history":{"entries":[],"older_before":null},"state":{"snapshot":"weapon-preview-picture","wizard_game":false,"revision":"1","observation":view}})).unwrap();
         ClientState::from_snapshot(snapshot).unwrap()
     }
     fn action(state: &ClientState) -> Action {
@@ -343,7 +343,7 @@ mod tests {
             .accept(&state, &state.reply_context(), "preview", &response)
             .unwrap();
         for change in 0..5 {
-            let mut snapshot = state.snapshot();
+            let mut snapshot = state.reset_snapshot().unwrap();
             match change {
                 0 => {
                     snapshot.has_control = false;

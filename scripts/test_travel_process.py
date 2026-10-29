@@ -5,14 +5,20 @@ import subprocess
 import sqlite3
 from pathlib import Path
 import time
+import threading
 import unittest
 
 from process_harness import ProcessTestCase, SPECTATOR_TOKEN, non_graphical, read_capture
+from stream_relay import StreamRelay
 
 
 class TravelJournalProcesses(ProcessTestCase):
     def terminal(self, client):
-        return self.frame(client, lambda frame: frame.get("travel") and frame["travel"]["phase"] != "active")
+        terminal = self.frame(client, lambda frame: frame.get("travel") and frame["travel"]["phase"] != "active")
+        current = self.request(client, {"type": "observe"})
+        self.assertIsNone(current["error"])
+        self.assertEqual(current["travel"], terminal["travel"])
+        return current
 
     def test_backend_steps_have_private_admission_linked_execution_and_durable_history(self):
         server = self.server(scenario="travel")
@@ -32,7 +38,7 @@ class TravelJournalProcesses(ProcessTestCase):
         self.assertEqual(arrived["travel"]["completed_steps"], "5")
         self.assertEqual(arrived["state"]["observation"]["tick"], '500')
         observed = self.terminal(watcher)
-        self.assertEqual(observed["state"], arrived["state"])
+        self.assertDisclosedStateEqual(observed["state"], arrived["state"])
         self.assertEqual(observed["travel"], arrived["travel"])
         boundary = self.request(player, {"type": "snapshot"})
         actions = [entry for entry in boundary["history"] if entry["content"]["type"] == "action"]
@@ -70,7 +76,7 @@ class TravelJournalProcesses(ProcessTestCase):
         server.stop(); player.stop(); watcher.stop()
         self.server(scenario="travel")
         _, recovered = self.client(SPECTATOR_TOKEN)
-        self.assertEqual(recovered["state"], boundary["state"])
+        self.assertDisclosedStateEqual(recovered["state"], boundary["state"])
         self.assertEqual(recovered["history"], boundary["history"])
         self.assertEqual(recovered["intentions"], [])
         self.assertIsNone(recovered["travel"])
@@ -80,13 +86,31 @@ class TravelProcesses(ProcessTestCase):
     graphical = True
 
     def terminal(self, client):
-        return self.frame(client, lambda f: f.get("travel") and f["travel"]["phase"] != "active")
+        terminal = self.frame(client, lambda frame: frame.get("travel") and frame["travel"]["phase"] != "active")
+        current = self.request(client, {"type": "observe"})
+        self.assertIsNone(current["error"])
+        self.assertEqual(current["travel"], terminal["travel"])
+        return current
 
     def test_ascii_selection_click_skip_and_resume(self):
         server = self.server(wizard=True, scenario="travel")
         spectator, _ = self.client(SPECTATOR_TOKEN)
-        # A slow pace keeps the third journey on screen long enough to skip.
-        ascii_client = self.launch("tor-client-ascii", ["--connect", self.address, "--automation", "--pace", "500"])
+        # Deliver Active and its command acknowledgement before holding later
+        # steps. Automation reads keys only once its command is acknowledged;
+        # withholding that reply tests a transport timeout, not Skip-ahead.
+        arm_skip = threading.Event()
+        active_seen = threading.Event()
+        def hold_after_active(message):
+            body = message.get("update", {}).get("body", {})
+            if (arm_skip.is_set() and body.get("type") == "travel"
+                    and body["status"]["phase"] == "active"):
+                active_seen.set()
+            if arm_skip.is_set() and active_seen.is_set() and message.get("type") == "ack":
+                arm_skip.clear()
+                relay.gate.clear()
+        relay = StreamRelay(self.address, on_server_message=hold_after_active)
+        self.addCleanup(relay.close)
+        ascii_client = self.launch("tor-client-ascii", ["--connect", relay.address, "--automation", "--pace", "500"])
         initial = self.ascii_frame(ascii_client, lambda f: f["state"] is not None and not f["busy"])
         self.assertTrue(initial["has_control"])
         self.key(ascii_client, "travel")
@@ -94,25 +118,47 @@ class TravelProcesses(ProcessTestCase):
             selected = self.key(ascii_client, "right")
         self.assertEqual(selected["state"]["observation"]["tick"], '0')
         self.assertEqual(selected["travel_cursor"], {"x": 5, "y": 0, "z": 0})
-        self.key(ascii_client, "enter")
-        arrived = self.ascii_frame(ascii_client, lambda f: (f.get("travel") or {}).get("phase") == "arrived" and f["can_admit_intention"])
+        submitted = self.key(ascii_client, "enter")
+        def arrived_picture(frame):
+            return ((frame.get("travel") or {}).get("phase") == "arrived"
+                    and frame["can_admit_intention"] and frame["observation_current"])
+        arrived = submitted if arrived_picture(submitted) else self.ascii_frame(ascii_client, arrived_picture)
         self.assertEqual(arrived["travel"]["completed_steps"], "5")
         self.assertEqual(arrived["state"]["observation"]["tick"], '500')
         watched = self.terminal(spectator)
-        self.assertEqual(watched["state"], arrived["state"])
+        self.assertDisclosedStateEqual(watched["state"], arrived["state"])
         self.assertEqual(watched["travel"], arrived["travel"])
         # Click the corridor's first cell (world x=0), five cells west.
         start = next(t for t in arrived["map_tiles"] if t["position"] == {"x": -5, "y": 0, "z": 0})
         ascii_client.child.stdin.write(json.dumps({"type": "click", "x": start["center"][0], "y": start["center"][1]}) + "\n")
         ascii_client.child.stdin.flush()
-        returned = self.ascii_frame(ascii_client, lambda f: f.get("travel") and f["travel"]["id"] != arrived["travel"]["id"] and f["travel"]["phase"] == "arrived" and f["can_admit_intention"])
+        # Arrival is authoritative before the optional picture refresh. The
+        # position/tick assertion requires the same current-picture barrier as
+        # the outbound journey, not just the causal travel status.
+        returned = self.ascii_frame(ascii_client, lambda f: arrived_picture(f)
+            and f["travel"]["id"] != arrived["travel"]["id"])
         self.assertEqual(returned["state"]["observation"]["tick"], '1000')
         self.key(ascii_client, "travel")
         for _ in range(7): self.key(ascii_client, "right")
-        self.key(ascii_client, "enter")
-        # Only the server ends a journey: Escape shows the rest of it at once.
-        skipped = self.key(ascii_client, "escape")
-        self.assertEqual(skipped["status"], "Skipping ahead.")
+        arm_skip.set()
+        try:
+            # Let the acknowledgement settle, while later server steps stay
+            # held so Skip-ahead remains observable independently of CPU speed.
+            ascii_client.child.stdin.write('{"type":"key","key":"enter"}\n')
+            ascii_client.child.stdin.flush()
+            self.ascii_frame(ascii_client, lambda f: f.get("travel")
+                and f["travel"]["id"] != returned["travel"]["id"]
+                and f["travel"]["phase"] == "active" and not f["busy"])
+            self.assertTrue(relay.held.wait(5), "Relay did not hold a later journey frame")
+            ascii_client.child.stdin.write('{"type":"key","key":"escape"}\n')
+            ascii_client.child.stdin.flush()
+            skipped = self.ascii_frame(ascii_client,
+                lambda f: f["status"] == "Skipping ahead.")
+            self.assertEqual(skipped["travel"]["phase"], "active")
+        finally:
+            relay.gate.set()
+        # Only the server ends a journey. Skip changes presentation, not the
+        # seven authoritative steps or their ordered journal.
         finished = self.ascii_frame(ascii_client, lambda f: f.get("travel") and f["travel"]["id"] != returned["travel"]["id"] and f["travel"]["phase"] != "active")
         self.assertEqual(finished["travel"]["phase"], "arrived")
         self.assertEqual(finished["travel"]["completed_steps"], "7")
@@ -131,7 +177,7 @@ class TravelProcesses(ProcessTestCase):
         server.stop()
         self.server(wizard=True)
         observer, resumed = self.client(SPECTATOR_TOKEN)
-        self.assertEqual(resumed["state"], synced["state"])
+        self.assertDisclosedStateEqual(resumed["state"], synced["state"])
         self.assertIsNone(resumed["travel"])
         wizard = self.wizard()
         self.wizard_command(wizard, "rewind initial")
@@ -263,9 +309,11 @@ class TravelProcesses(ProcessTestCase):
         destination = next(c["key"] for c in initial["state"]["observation"]["visible_cells"] if c["position"] == {"x":7,"y":0,"z":0})
         self.request(player, {"type":"command", "context": initial["input_context"], "branch":initial["branch"], "command":{"type":"travel", "expected_revision":initial["state"]["revision"], "destination":destination}})
         stopped = self.terminal(player)
-        shown = self.ascii_frame(ascii_client, lambda f: f.get("travel") and f["travel"]["phase"] != "active")
+        shown = self.ascii_frame(ascii_client, lambda f: f.get("travel")
+                                and f["travel"] == stopped["travel"]
+                                and f["state"]["observation"] == stopped["state"]["observation"])
         self.assertEqual(shown["travel"], stopped["travel"])
-        self.assertEqual(shown["state"], stopped["state"])
+        self.assertDisclosedStateEqual(shown["state"], stopped["state"])
         self.assertFalse(shown["has_control"])
         return player, initial, stopped
 
@@ -288,7 +336,7 @@ class TravelProcesses(ProcessTestCase):
         self.assertEqual(stopped["travel"]["completed_steps"], "1")
         self.assertTrue(stopped["state"]["observation"]["visible_actors"])
         synced = self.request(player, {"type":"snapshot"})
-        self.assertEqual(synced["state"], stopped["state"])
+        self.assertDisclosedStateEqual(synced["state"], stopped["state"])
         self.assertEqual(synced["travel"], stopped["travel"])
 
 

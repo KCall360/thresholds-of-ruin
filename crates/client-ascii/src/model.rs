@@ -93,6 +93,8 @@ pub enum Input {
 pub enum Effect {
     /// Stop only chart hydration; never a gameplay request.
     CancelCharts,
+    /// A fresh, basis-free overview. The worker presents Observe before querying.
+    OpenOverview(Box<tor_client_common::advancement::OpenOverview>),
     None,
     Quit,
     Request(Box<Request>),
@@ -111,7 +113,7 @@ pub const DEFAULT_PACE_MS: u64 = 75;
 pub struct NoteDraft {
     pub text: String,
     pub audience: Audience,
-    revision: u64,
+    snapshot: SnapshotId,
 }
 
 #[derive(serde::Serialize)]
@@ -323,6 +325,14 @@ impl App {
             update.body,
             UpdateBody::Observation { .. } | UpdateBody::ObservationDelta { .. }
         );
+        let outcome = matches!(update.body, UpdateBody::Outcome { .. });
+        let underfoot = match &update.body {
+            UpdateBody::Outcome { facts, .. } => facts.facts.iter().find_map(|fact| match fact {
+                tor_protocol::OutcomeFact::OwnAction { underfoot, .. } => underfoot.clone(),
+                _ => None,
+            }),
+            _ => None,
+        };
         let control_changed = matches!(update.body, UpdateBody::Control { .. });
         let travel = match &update.body {
             UpdateBody::Travel { status, .. } => Some(status.phase),
@@ -351,7 +361,7 @@ impl App {
             self.identification_selected = 0;
             self.hold_choices.clear();
         }
-        if observed {
+        if outcome {
             let lines = state.narration_lines();
             // A spectator never sends commands; the followed actor's next
             // action starts its turn instead.
@@ -362,7 +372,12 @@ impl App {
             {
                 self.messages.begin_turn();
             }
-            self.messages.absorb(lines, &state.state().observation);
+            self.messages.absorb_outcome_with_underfoot(
+                lines,
+                state.cursor().tick,
+                state.outcome_status(),
+                underfoot.as_ref(),
+            );
         }
         if let Some(reason) = travel.and_then(travel_stop) {
             self.messages.push(reason);
@@ -445,7 +460,7 @@ impl App {
         if let Some(state) = &self.state {
             let had_private_page = self.advancement_pages.page().is_some();
             self.advancement_pages
-                .observe(&state.snapshot().reply_context(), state.has_control());
+                .observe(&state.reply_context(), state.has_control());
             if !state.has_control() || (had_private_page && self.advancement_pages.page().is_none())
             {
                 self.close_advancement();
@@ -455,7 +470,7 @@ impl App {
         if self
             .zap_selection
             .as_ref()
-            .is_some_and(|(_, context)| *context != state.snapshot().reply_context())
+            .is_some_and(|(_, context)| *context != state.reply_context())
         {
             self.zap_selection = None;
         }
@@ -690,7 +705,11 @@ impl App {
         // Admission opens a queue slot even while other actors are advancing.
         // A run must inspect their settled results before choosing its next step;
         // unlike explicit one-step input it must not queue from an intermediate view.
-        if self.busy || !state.state().observation.ready || !state.can_admit_intention() {
+        if self.busy
+            || !state.observation_current()
+            || !state.character_ready()
+            || !state.can_admit_intention()
+        {
             return Effect::None;
         }
         if !self.messages.text().is_empty()
@@ -774,7 +793,6 @@ impl App {
             .state
             .as_ref()
             .ok_or("No current attachment")?
-            .snapshot()
             .reply_context();
         self.strike_pages.set_report(report, &context)?;
         self.strike_sources_open = false;
@@ -812,7 +830,6 @@ impl App {
             .state
             .as_ref()
             .ok_or("No current attachment")?
-            .snapshot()
             .reply_context();
         if &current != context {
             self.strike_pages.clear();
@@ -1360,15 +1377,11 @@ impl App {
                             *invocation,
                             selection,
                         )
-                        .map(|action| Command::Act {
-                            expected_revision: state.state().revision,
-                            action,
-                        }),
-                        SupplyPurpose::Respec => self.advancement_pages.confirm(
-                            &state.snapshot().reply_context(),
-                            view,
-                            selection,
-                        ),
+                        .map(|action| Command::Act { action }),
+                        SupplyPurpose::Respec => {
+                            self.advancement_pages
+                                .confirm(&state.reply_context(), view, selection)
+                        }
                     });
                     match command {
                         Ok(command) => {
@@ -1414,6 +1427,15 @@ impl App {
             .collect()
     }
 
+    pub fn prepare_overview(&mut self, revision: u64) -> Result<(), String> {
+        let state = self.state.as_ref().ok_or("No current attachment.")?;
+        if !self.advancement_open || !state.has_control() || state.state().revision != revision {
+            return Err("Advancement is no longer open on this picture.".into());
+        }
+        self.advancement_pending = Some((revision, AdvancementQuery::Overview {}));
+        Ok(())
+    }
+
     pub fn bind_advancement_request(&mut self, id: &str) -> Result<(), String> {
         let Some((revision, query)) = self.advancement_pending.take() else {
             return Err("Advancement request is no longer open.".into());
@@ -1422,7 +1444,6 @@ impl App {
             .state
             .as_ref()
             .ok_or("No current attachment.")?
-            .snapshot()
             .reply_context();
         self.advancement_pages.track(&context, id, revision, &query)
     }
@@ -1437,7 +1458,7 @@ impl App {
         if !self.advancement_open
             || !state.has_control()
             || self.role == AccessRole::Spectator
-            || state.snapshot().reply_context() != *context
+            || state.reply_context() != *context
         {
             self.close_advancement();
             return Err("Advancement page is no longer current.".into());
@@ -1459,6 +1480,21 @@ impl App {
         let Some(state) = &self.state else {
             return Effect::None;
         };
+        if matches!(input, AdvancementInput::Overview) {
+            return match tor_client_common::advancement::OpenOverview::new(state) {
+                Ok(plan) => {
+                    self.advancement_pages.clear();
+                    self.advancement_pending = None;
+                    self.busy = true;
+                    self.status = "Refreshing advancement...".into();
+                    Effect::OpenOverview(Box::new(plan))
+                }
+                Err(error) => {
+                    self.status = error;
+                    Effect::None
+                }
+            };
+        }
         let choose_ration = matches!(input, AdvancementInput::Confirm(None));
         match self.advancement_pages.request(input, state) {
             Ok(Some(request)) => {
@@ -1639,7 +1675,7 @@ impl App {
         (self.connected
             && self.role != AccessRole::Spectator
             && state.has_control()
-            && state.snapshot().reply_context() == *context)
+            && state.reply_context() == *context)
             .then_some(*item)
     }
 
@@ -1924,7 +1960,7 @@ impl App {
                                 self.strike_pages.sources().get(self.strike_source_selected),
                             ) {
                                 let source = source.source.clone();
-                                let context = state.snapshot().reply_context();
+                                let context = state.reply_context();
                                 match self.strike_pages.select(source, &context) {
                                     Ok(command) => return self.command(command),
                                     Err(error) => self.status = error,
@@ -1938,7 +1974,7 @@ impl App {
                 if self.strike_detail_open && matches!(key, Key::Slower | Key::Faster) && !self.busy
                 {
                     if let Some(state) = &self.state {
-                        let context = state.snapshot().reply_context();
+                        let context = state.reply_context();
                         let query = if *key == Key::Slower {
                             self.strike_pages.previous(&context)
                         } else {
@@ -2362,7 +2398,7 @@ impl App {
                 Input::Key { key: Key::Enter } if !draft.text.trim().is_empty() => {
                     let command = Command::Annotate {
                         anchor: Anchor::State {
-                            revision: draft.revision,
+                            snapshot: draft.snapshot.clone(),
                         },
                         text: draft.text.clone(),
                         audience: draft.audience,
@@ -2503,7 +2539,7 @@ impl App {
                                 self.zap_selection = None;
                                 return self.act(action);
                             }
-                            self.zap_selection = Some((item, state.snapshot().reply_context()));
+                            self.zap_selection = Some((item, state.reply_context()));
                             self.pickup.clear();
                             let dual = state
                                 .state()
@@ -3024,7 +3060,7 @@ impl App {
                     self.note = Some(NoteDraft {
                         text: String::new(),
                         audience: Audience::Private,
-                        revision: state.state().revision,
+                        snapshot: state.state().snapshot.clone(),
                     });
                 }
                 Effect::None
@@ -3297,6 +3333,11 @@ impl App {
             self.status = "You are observing. Press F3 to request control.".into();
             return Effect::None;
         }
+        // Ordered terminal facts can precede both the next picture and readiness.
+        if ended(state) {
+            self.status = "This run has ended.".into();
+            return Effect::None;
+        }
         if let Action::Move { direction } = action {
             if let Some(request) = state.cancel_intention_with_step_request(direction) {
                 self.messages.begin_turn();
@@ -3306,15 +3347,7 @@ impl App {
             }
         }
         if !state.can_admit_intention() {
-            if !state.state().observation.ready
-                && matches!(action, Action::Wait)
-                && state
-                    .state()
-                    .observation
-                    .combat
-                    .as_ref()
-                    .is_some_and(|c| !c.terminal)
-            {
+            if matches!(action, Action::Wait) && !ended(state) {
                 self.messages.begin_turn();
                 return self.request(Request::Continue);
             }
@@ -3378,9 +3411,7 @@ impl App {
                 }
             }
         }
-        let expected_revision = state.state().revision;
         let effect = self.command(Command::Act {
-            expected_revision,
             action: action.clone(),
         });
         self.last_move = matches!(action, Action::Move { .. });
@@ -3392,7 +3423,7 @@ impl App {
             return Effect::None;
         };
         if matches!(command, Command::Act { .. } | Command::Travel { .. }) {
-            if !state.can_admit_intention() {
+            if ended(state) || !state.can_admit_intention() {
                 self.status = if ended(state) {
                     "This run has ended."
                 } else {
@@ -4008,11 +4039,8 @@ pub const HELP: &[&str] = &[
 /// Whether the run is over: won or lost with no further play.
 fn ended(state: &ClientState) -> bool {
     state
-        .state()
-        .observation
-        .combat
-        .as_ref()
-        .is_some_and(|c| c.terminal)
+        .outcome_status()
+        .is_some_and(|status| status.terminal || status.dead)
 }
 
 impl Key {

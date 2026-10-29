@@ -940,6 +940,7 @@ impl Game {
                 .transpose()?,
             population_entry_boundary: None,
             preparation_region_boundary: None,
+            preparation_facts: crate::preparation_facts::PreparationFacts::default(),
             trap_region_boundary: None,
             light_region_boundary: None,
             light_settled_witness: None,
@@ -1399,7 +1400,7 @@ mod tests {
             .map(|_| {
                 let mut independently_owned = game.clone();
                 independently_owned.actors =
-                    crate::actor_store::ActorStore::from_entries(game.actors.raw_entries().clone());
+                    crate::actor_store::ActorStore::from_entries(game.actors.owned_actor_entries());
                 independently_owned.checkpoint(&mut shared)
             })
             .collect();

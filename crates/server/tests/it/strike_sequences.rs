@@ -95,20 +95,20 @@ fn command(engine: &mut Engine, actor: ActorId, id: &str, command: Command) -> C
         .unwrap()
 }
 fn target_wait(engine: &mut Engine, id: &str) -> CommandResult {
-    let revision = engine.revision(ActorId(2)).unwrap();
+    let revision = engine.causal_boundary(ActorId(2)).unwrap();
     command(
         engine,
         ActorId(2),
         id,
         Command::Act {
-            expected_revision: revision,
+            expected_boundary: revision,
             action: Action::Wait,
         },
     )
 }
 fn start_sequence(engine: &mut Engine) -> (CommandResult, Command) {
     let attack = Command::AdmitIntention {
-        expected_revision: engine.revision(ActorId(1)).unwrap(),
+        expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
         action: Action::UseAbility {
             id: tor_simulation::content_ids::AbilityId::new("triple_strike").unwrap(),
             invocation: tor_server::journal::AbilityInvocation {
@@ -215,10 +215,11 @@ fn ordered_strikes_cancel_and_escape_are_atomic_exact_retryable_transactions() {
         let mut engine = Engine::memory(scenario()).unwrap();
         let (admitted, _) = start_prefix(&mut engine);
         let before = engine.state(ActorId(1)).unwrap();
+        let before_boundary = engine.causal_boundary(ActorId(1)).unwrap();
         let target = engine.state(ActorId(2)).unwrap();
         let counts = engine.profile_counts();
         let rejected = Command::CancelIntention {
-            expected_revision: before.revision,
+            expected_boundary: before_boundary,
             admission: admitted.entry.id.clone(),
             step: Some(Direction::East),
         };
@@ -236,7 +237,7 @@ fn ordered_strikes_cancel_and_escape_are_atomic_exact_retryable_transactions() {
         assert_eq!(engine.state(ActorId(2)).unwrap(), target);
         assert_eq!(engine.profile_counts(), counts);
         let cancel = Command::CancelIntention {
-            expected_revision: before.revision,
+            expected_boundary: before_boundary,
             admission: admitted.entry.id.clone(),
             step,
         };
@@ -258,7 +259,7 @@ fn ordered_strikes_cancel_and_escape_are_atomic_exact_retryable_transactions() {
         assert_eq!(replayed.entry, accepted.entry);
         assert_eq!(engine.state(ActorId(1)).unwrap(), after);
         let changed = Command::CancelIntention {
-            expected_revision: before.revision,
+            expected_boundary: before_boundary,
             admission: admitted.entry.id,
             step: Some(Direction::North),
         };
@@ -433,6 +434,7 @@ fn ordered_strikes_saved_prefix_resumes_without_replaying_paid_strikes_or_admiss
             let pause = engine.pause_preparation(ActorId(1)).unwrap().unwrap();
             assert!(pause.entry.intention_ends.is_empty());
             let restored = engine.state(ActorId(1)).unwrap();
+            let restored_boundary = engine.causal_boundary(ActorId(1)).unwrap();
             let combat = restored.observation.combat.as_ref().unwrap();
             assert_eq!(combat.sequence.as_ref(), Some(&sequence));
             assert!(!combat.preparation_active);
@@ -459,7 +461,7 @@ fn ordered_strikes_saved_prefix_resumes_without_replaying_paid_strikes_or_admiss
                 ActorId(1),
                 &format!("resume-{completed}"),
                 Command::ResumeIntention {
-                    expected_revision: restored.revision,
+                    expected_boundary: restored_boundary,
                     admission: admitted.entry.id.clone(),
                 },
             );
@@ -565,8 +567,9 @@ fn failed_sequence_rider_journal_admission_preserves_prefix_and_replays_the_same
     ];
     let counts = rejected.profile_counts();
     let sequence = rejected.save_status().accepted_sequence;
+    let before_boundary = rejected.causal_boundary(ActorId(2)).unwrap();
     let next = Command::Act {
-        expected_revision: before[1].revision,
+        expected_boundary: before_boundary,
         action: Action::Wait,
     };
     for _ in 0..2 {

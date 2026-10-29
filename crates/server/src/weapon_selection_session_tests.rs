@@ -143,10 +143,7 @@ impl Wire {
         Request::Command {
             context: snapshot.reply_context().input,
             branch: snapshot.branch.clone(),
-            command: Command::Act {
-                expected_revision: snapshot.state.revision,
-                action,
-            },
+            command: Command::Act { action },
         }
     }
 }
@@ -408,7 +405,6 @@ fn encoded_selected_weapon_mixed_cost_pending_completed_reopen_and_receipts_are_
             context: snapshot.reply_context().input,
             branch: snapshot.branch.clone(),
             command: Command::ResumeIntention {
-                expected_revision: snapshot.state.revision,
                 intention: identity.0.clone(),
             },
         };
@@ -695,10 +691,11 @@ fn encoded_exact_weapon_preview_matches_capture_and_reservations_and_refusals_do
             "{messages:?}"
         );
         if bad == 0 {
+            // A future display generation is not an issued picture capability.
             assert!(messages.iter().any(|message| matches!(
                 message,
                 ServerMessage::Error {
-                    code: ErrorCode::StaleRevision,
+                    code: ErrorCode::StaleContext,
                     ..
                 }
             )));
@@ -1023,7 +1020,6 @@ fn encoded_frozen_equip_allocation_pending_completed_source_free_reopen_is_exact
             context: snapshot.reply_context().input,
             branch: snapshot.branch.clone(),
             command: Command::ResumeIntention {
-                expected_revision: snapshot.state.revision,
                 intention: identity.0.clone(),
             },
         };

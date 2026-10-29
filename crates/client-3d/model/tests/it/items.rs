@@ -101,7 +101,7 @@ fn state(identifying: bool) -> ClientState {
         "context": StreamContext { stream: StreamId("items".into()), epoch: 0 },
         "actor": observed.actor, "branch": "play", "cursor": {"sequence": "0", "tick": "0"},
         "has_control": true, "intentions": [], "history": {"entries": [], "older_before": null},
-        "state": {"wizard_game": false, "revision": "0", "observation": observed},
+        "state": {"snapshot":"fixture-snapshot","wizard_game": false, "revision": "0", "observation": observed},
     }))
     .unwrap();
     ClientState::from_snapshot(snapshot).unwrap()

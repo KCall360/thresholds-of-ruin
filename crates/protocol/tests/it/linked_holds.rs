@@ -82,6 +82,7 @@ fn escape_lifecycle_wire_records_cannot_carry_hidden_holder_details() {
 #[test]
 fn linked_hold_delta_replaces_exact_offers_and_validation_rejects_forged_disclosure() {
     let base = StateView {
+        snapshot: tor_protocol::SnapshotId("fixture".into()),
         wizard_game: false,
         revision: 1,
         observation: serde_json::from_value(observation()).unwrap(),

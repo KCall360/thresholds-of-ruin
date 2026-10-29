@@ -5,6 +5,7 @@ These are Service witnesses, not transport/native-client or durable-store tests.
 import json
 
 from hallucination_package import assert_sample, fixture, initial_items
+from process_harness import ProcessTestCase
 from utility_potions_package import condition, deadline, inventory_item, observation
 from utility_potions_service_contracts import UtilityServiceHarness
 
@@ -35,7 +36,10 @@ class HallucinationServiceContracts(UtilityServiceHarness):
         self.assertEqual(observation(first)["ground_items"][0]["item"]["id"],
                          observation(initial)["ground_items"][0]["item"]["id"])
         for _ in range(4):
-            self.assertEqual(self.snapshot()["state"], first["state"])
+            current = self.snapshot()["state"]
+            self.assertNotEqual(current["snapshot"], first["state"]["snapshot"])
+            self.assertGreater(int(current["revision"]), int(first["state"]["revision"]))
+            ProcessTestCase.assertDisclosedStateEqual(self, current, first["state"])
         peer = self.snapshot(2)
         self.assertIsNone(condition(peer, CONDITION))
         self.assertTrue(all(row["presentation"] is None for row in observation(peer)["ground_items"]))
@@ -67,7 +71,7 @@ class HallucinationServiceContracts(UtilityServiceHarness):
         self.assertIsNone(observation(cured)["ground_items"][0]["presentation"])
         self.assertTrue(any(row["name"] == "actual visible peer" for row in observation(cured)["visible_actors"]))
 
-    def test_peer_time_publishes_phase_to_owner_and_follower_without_owner_snapshot(self):
+    def test_peer_time_marks_owner_and_follower_visual_demand_before_requested_phase_pictures(self):
         ids = initial_items(self, self.snapshot())
         first = self.drink(ids["hallucination"])
         assert_sample(self, observation(first), 0)
@@ -93,10 +97,14 @@ class HallucinationServiceContracts(UtilityServiceHarness):
 
         def collect(rows, output):
             for row in rows:
-                if row["type"] == "update" and row["update"]["body"]["type"] in ("observation", "observation_delta"):
-                    output.append(row["update"])
-                    for private in ("remaining_to_shift", "palette_index", "presentation_catalog"):
-                        self.assertNotIn(private, json.dumps(row))
+                for private in ("remaining_to_shift", "palette_index", "presentation_catalog"):
+                    self.assertNotIn(private, json.dumps(row))
+                if row["type"] == "update":
+                    body = row["update"]["body"]
+                    self.assertNotIn(body["type"], ("observation", "observation_delta"),
+                                     "No picture was requested for this attachment")
+                    if body["type"] == "outcome":
+                        output.append(row["update"])
 
         for _ in range(16):
             status = self.host.call("step", case=self.case)["status"]
@@ -113,17 +121,18 @@ class HallucinationServiceContracts(UtilityServiceHarness):
             else:
                 self.assertEqual(status, "progress")
 
-        def rows(update, key):
-            body = update["body"]
-            if body["type"] == "observation":
-                return body["state"]["observation"][key]
-            return [row for edit in body["state"][key] for row in edit["insert"]]
-
         for updates in (owner_updates, follower_updates):
             shifted = [row for row in updates if row["cursor"]["tick"] == "200"]
-            self.assertTrue(shifted, "actual unsolicited phase publication is required")
-            self.assertTrue(any(row["name"] == "bat" for update in shifted for row in rows(update, "visible_actors")))
-            self.assertTrue(any(row["presentation"] == {"name": "cedar staff", "asset": "item.wand",
-                "kind": {"kind": "item", "class": "wand"}} for update in shifted for row in rows(update, "ground_items")))
+            self.assertTrue(shifted, "actual unsolicited causal publication is required")
+            self.assertTrue(any(row["body"]["visual_changed"] for row in shifted),
+                            "The changed phase must invalidate both attachments' pictures")
+        # The causal boundary changes the phase independently of display demand.
+        # Each attachment can then request its own complete, consistent picture.
         current = self.snapshot()
         assert_sample(self, observation(current), 1)
+        self.host.request(case=self.case, connection=follower, request_id="phase-picture",
+                          request={"type": "snapshot"})
+        refreshed = [row["snapshot"] for row in drain_follower() if row["type"] == "snapshot"]
+        self.assertEqual(len(refreshed), 1)
+        self.assertEqual(observation(refreshed[0])["tick"], "200")
+        assert_sample(self, observation(refreshed[0]), 1)

@@ -1,4 +1,4 @@
-"""Two explicit per-profile Windows Python owners; never reduce the full inventory.
+"""Two explicit per-profile Python owners; never reduce the full inventory.
 
 Whole modules preserve class/module fixture ownership. Native graphical tests
 remain serialized within each isolated runner; the shards share no desktop,
@@ -75,6 +75,19 @@ def attempt_number(value):
     require(isinstance(value, str) and re.fullmatch(r'[1-9][0-9]{0,8}', value) is not None,
             'Invalid execution attempt')
     return int(value)
+
+
+def linux_debug_cohort(profiles, current_attempt):
+    """Bind both independently built Linux owners to one successful run attempt."""
+    current = attempt_number(current_attempt)
+    require(isinstance(profiles, dict) and profiles.get('result') == 'success',
+            'Current profile group did not succeed')
+    outputs = profiles.get('outputs')
+    require(isinstance(outputs, dict), 'Missing profile outputs')
+    values = [attempt_number(outputs.get(f'linux_debug_shard_{index}')) for index in (1, 2)]
+    require(values[0] == values[1] and values[0] <= current,
+            'Mixed or future Linux execution attempts; rerun both shards')
+    return {'origin_attempt': str(values[0]), 'aggregate_attempt': current_attempt}
 
 
 def cohort_attempt(producers, shards, current_attempt):
@@ -214,16 +227,19 @@ def main():
     parser.add_argument('--profile', choices=('debug', 'release'), default='release')
     parser.add_argument('--directory', type=Path)
     parser.add_argument('--origin-attempt')
-    parser.add_argument('--cohort', action='store_true')
+    cohort = parser.add_mutually_exclusive_group()
+    cohort.add_argument('--cohort', action='store_true')
+    cohort.add_argument('--linux-debug-cohort', action='store_true')
     parser.add_argument('--current-attempt')
     parser.add_argument('--source-sha', required=True)
     parser.add_argument('--run-id', required=True)
     args = parser.parse_args()
     require(re.fullmatch(r'[0-9a-f]{40}', args.source_sha) is not None, 'Invalid shard source')
     require(re.fullmatch(r'[1-9][0-9]*', args.run_id) is not None, 'Invalid shard run')
-    if args.cohort:
+    if args.cohort or args.linux_debug_cohort:
         require(args.directory is None and args.origin_attempt is None, 'Ambiguous cohort request')
-        result = cohort_attempt(
+        result = linux_debug_cohort(
+            json.loads(os.environ['PROFILES'], object_pairs_hook=unique_object), args.current_attempt) if args.linux_debug_cohort else cohort_attempt(
             json.loads(os.environ['WINDOWS_BINARIES'], object_pairs_hook=unique_object),
             json.loads(os.environ['WINDOWS_PYTHON'], object_pairs_hook=unique_object), args.current_attempt)
         result.update(source_sha=args.source_sha, run_id=args.run_id)

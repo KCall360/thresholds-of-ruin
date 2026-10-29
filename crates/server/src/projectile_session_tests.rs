@@ -389,7 +389,6 @@ fn paid_projectile_reopens(delivery: ProjectileDeliveryKind) {
             context: snapshot.reply_context().input,
             branch: snapshot.branch.clone(),
             command: Command::ResumeIntention {
-                expected_revision: snapshot.state.revision,
                 intention: identity.0.clone(),
             },
         };
@@ -673,7 +672,7 @@ fn encoded_standalone_stack_storage_rejection_preserves_admission_and_actual_rel
         let actor = engine.next_actor().unwrap_or(SOURCE);
         let branch = engine.branch().clone();
         let command = crate::journal::Command::Act {
-            expected_revision: engine.revision(actor).unwrap(),
+            expected_boundary: engine.causal_boundary(actor).unwrap(),
             action: crate::actions::Action::Wait,
         };
         let before = saved_engine(&engine);

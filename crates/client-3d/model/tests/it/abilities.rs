@@ -40,7 +40,7 @@ fn state() -> ClientState {
         "context": StreamContext { stream: StreamId("abilities".into()), epoch: 0 },
         "actor": observed.actor, "branch": "play", "cursor": {"sequence": "0", "tick": "0"},
         "has_control": true, "intentions": [], "history": {"entries": [], "older_before": null},
-        "state": {"wizard_game": false, "revision": "0", "observation": observed},
+        "state": {"snapshot":"fixture-snapshot","wizard_game": false, "revision": "0", "observation": observed},
     }))
     .unwrap();
     ClientState::from_snapshot(snapshot).unwrap()
@@ -156,7 +156,7 @@ fn only_a_disclosed_hold_can_be_escaped_and_it_names_its_holder() {
         "context": StreamContext { stream: StreamId("holds".into()), epoch: 0 },
         "actor": observed.actor, "branch": "play", "cursor": {"sequence": "0", "tick": "0"},
         "has_control": true, "intentions": [], "history": {"entries": [], "older_before": null},
-        "state": {"wizard_game": false, "revision": "0", "observation": observed},
+        "state": {"snapshot":"fixture-snapshot","wizard_game": false, "revision": "0", "observation": observed},
     }))
     .unwrap();
     let state = ClientState::from_snapshot(snapshot).unwrap();
@@ -199,7 +199,7 @@ fn examining_a_trap_sends_only_for_an_unknown_one_within_reach() {
         "context": StreamContext { stream: StreamId("traps".into()), epoch: 0 },
         "actor": observed.actor, "branch": "play", "cursor": {"sequence": "0", "tick": "0"},
         "has_control": true, "intentions": [], "history": {"entries": [], "older_before": null},
-        "state": {"wizard_game": false, "revision": "0", "observation": observed},
+        "state": {"snapshot":"fixture-snapshot","wizard_game": false, "revision": "0", "observation": observed},
     }))
     .unwrap();
     let state = ClientState::from_snapshot(snapshot).unwrap();
@@ -227,7 +227,7 @@ fn paused_work_is_resumed_or_cancelled_only_when_the_server_offers_it() {
             "intentions": [{"actor": observed.actor, "branch": "play", "intention": "work",
                             "entry_id": "root", "phase": "suspended"}],
             "history": {"entries": [], "older_before": null},
-            "state": {"wizard_game": false, "revision": "0", "observation": observed},
+            "state": {"snapshot":"fixture-snapshot","wizard_game": false, "revision": "0", "observation": observed},
         }))
         .unwrap();
         ClientState::from_snapshot(snapshot).unwrap()
@@ -256,14 +256,14 @@ fn paused_work_is_resumed_or_cancelled_only_when_the_server_offers_it() {
 }
 
 #[test]
-fn a_note_is_anchored_to_its_revision_with_the_chosen_audience_and_bounded() {
+fn a_note_retains_its_opened_snapshot_with_the_chosen_audience_and_bounded() {
     let state = state();
     let note = |text: String, private| {
         request_from(
             &state,
             &state.reply_context(),
             Cmd::Note {
-                revision: 4,
+                snapshot: SnapshotId("opened-note-snapshot".into()),
                 text,
                 private,
             },
@@ -273,14 +273,14 @@ fn a_note_is_anchored_to_its_revision_with_the_chosen_audience_and_bounded() {
         note("Trap by the door".into(), true),
         Ok(Request::Command {
             command: Command::Annotate {
-                anchor: Anchor::State { revision: 4 },
+                anchor: Anchor::State { snapshot },
                 audience: Audience::Private,
                 category: AnnotationCategory::Note,
                 source: ClientSource::User,
                 text,
             },
             ..
-        }) if text == "Trap by the door"
+        }) if text == "Trap by the door" && snapshot.0 == "opened-note-snapshot"
     ));
     assert!(matches!(
         note("shared".into(), false),

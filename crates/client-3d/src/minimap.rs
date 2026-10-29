@@ -152,7 +152,8 @@ pub(crate) fn toggle(
     if keys.just_pressed(KeyCode::KeyM)
         && game
             .screen
-            .is_none_or(|open| open == crate::screen::Screen::Places { renaming: None })
+            .as_ref()
+            .is_none_or(|open| *open == crate::screen::Screen::Places { renaming: None })
     {
         crate::screen::toggle(
             &net,
@@ -386,14 +387,14 @@ mod cosmetic_tests {
             ),
             (
                 Some(crate::screen::Screen::Note {
-                    revision: 1,
+                    snapshot: tor_protocol::SnapshotId("draft-snapshot".into()),
                     private: true,
                 }),
                 false,
                 false,
             ),
         ] {
-            app.world_mut().resource_mut::<Game>().screen = screen;
+            app.world_mut().resource_mut::<Game>().screen = screen.clone();
             {
                 let mut panel = app.world_mut().resource_mut::<crate::interact::Panel>();
                 panel.open = search;

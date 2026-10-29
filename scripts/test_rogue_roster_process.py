@@ -70,7 +70,7 @@ class RogueRosterProcesses(ProcessTestCase):
         server = self.server(scenario=unrelated_fallback(self), seed=None)
         player, _ = self.client()
         foe, restored = self.client(actor=3)
-        self.assertEqual(restored["state"], before["state"])
+        self.assertDisclosedStateEqual(restored["state"], before["state"])
         self.assertEqual(restored["history"], before["history"])
         foe.stop(); player.stop(); server.stop()
 

@@ -158,6 +158,7 @@ pub(crate) fn revocable_scenario() -> crate::Scenario {
 
 pub(crate) fn reply_context() -> p::ReplyContext {
     p::ReplyContext {
+        snapshot: tor_protocol::SnapshotId("fixture".into()),
         input: p::InputContext {
             stream: p::StreamContext {
                 stream: p::StreamId("f".repeat(36)),

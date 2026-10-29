@@ -127,7 +127,15 @@ class StreamingFixture:
                     time.sleep(0.05)
             else:
                 self.fail("blocked for good: " + str(moved.get("error")))
-        return moved
+        # Admission/start is not the final display boundary. The spectator may
+        # coalesce intermediate rat turns, so compare only the stable ready view.
+        for _ in range(200):
+            settled = self.request(client, {"type": "observe"})
+            self.assertIsNone(settled["error"])
+            if settled["state"]["observation"]["ready"] and not settled["intentions"]:
+                return settled
+            time.sleep(0.05)
+        self.fail("character did not become ready after crossing the caves")
 
 
     def rows(self):
@@ -170,7 +178,7 @@ class StreamingProcesses(StreamingFixture, ProcessTestCase):
         shutil.rmtree(package)
         server = self.server(seed=None)
         player, resumed = self.client(omit_memory=True, compact_background=True)
-        self.assertEqual(resumed["state"], far["state"])
+        self.assertDisclosedStateEqual(resumed["state"], far["state"])
         self.assertEqual(resumed["history"], far["history"])
         # Continue into previously unvisited halls without a source or bundle.
         continued = self.walk(player, "east", 20)
@@ -179,7 +187,7 @@ class StreamingProcesses(StreamingFixture, ProcessTestCase):
         server.stop()
         self.server(seed=None)
         _, restored = self.client()
-        self.assertEqual(restored["state"], continued["state"])
+        self.assertDisclosedStateEqual(restored["state"], continued["state"])
         self.assertEqual(restored["history"], continued["history"])
 
 
@@ -189,7 +197,7 @@ class StreamingProcesses(StreamingFixture, ProcessTestCase):
         self.assertIn("--scenario", refused.stderr)
         self.streaming_server(scenario=moved)
         player, resumed = self.client(omit_memory=True, compact_background=True)
-        self.assertEqual(resumed["state"], far["state"])
+        self.assertDisclosedStateEqual(resumed["state"], far["state"])
         self.walk(player, "east", 20)
         self.assertIsNone(self.request(player, {"type": "save"})["error"])
         self.assertEqual([row[0] for row in self.copied_inputs()], [1, 2, 3, 4, 5, 6])
@@ -258,7 +266,7 @@ class StreamingProcesses(StreamingFixture, ProcessTestCase):
             shown = self.frame(observer,
                 lambda f: f.get("state", {}).get("observation", {}).get("tick")
                     == moved["state"]["observation"]["tick"])
-            self.assertEqual(shown["state"], moved["state"])
+            self.assertDisclosedStateEqual(shown["state"], moved["state"])
             self.assertEqual(shown["history"], moved["history"])
         self.assertIsNone(self.request(player, {"type": "save"})["error"])
         expected = self.request(player, {"type": "snapshot"})["state"]
@@ -268,15 +276,15 @@ class StreamingProcesses(StreamingFixture, ProcessTestCase):
         server.stop()
         start()
         player, resumed = self.client()
-        self.assertEqual(resumed["state"], expected)
+        self.assertDisclosedStateEqual(resumed["state"], expected)
         observer, seen = self.client(SPECTATOR_TOKEN)
-        self.assertEqual(seen["state"], expected)
+        self.assertDisclosedStateEqual(seen["state"], expected)
         continued = self.act(player, {"type": "move", "direction": "west"})
         self.assertIsNone(continued.get("error"), continued)
         shown = self.frame(observer,
             lambda f: f.get("state", {}).get("observation", {}).get("tick")
                 == continued["state"]["observation"]["tick"])
-        self.assertEqual(shown["state"], continued["state"])
+        self.assertDisclosedStateEqual(shown["state"], continued["state"])
         self.assertEqual(shown["history"], continued["history"])
         self.assertIsNone(self.request(player, {"type": "save"})["error"])
 
@@ -384,8 +392,8 @@ class NativeStreamingProcesses(StreamingFixture, ProcessTestCase):
         self.ascii_frame(native, lambda f: f["state"] is not None)
 
         far = self.walk(player, "east", TO_HALL_4)
-        seen = self.frame(spectator, lambda f: f["state"]["revision"] == far["state"]["revision"])
-        self.assertEqual(seen["state"], far["state"])
+        seen = self.frame(spectator, lambda f: f["state"]["observation"] == far["state"]["observation"])
+        self.assertDisclosedStateEqual(seen["state"], far["state"])
         shown = self.ascii_frame(native,
             lambda f: f["state"]["observation"]["tick"] == far["state"]["observation"]["tick"])
         self.assertEqual(shown["state"]["observation"], far["state"]["observation"])
@@ -398,7 +406,7 @@ class NativeStreamingProcesses(StreamingFixture, ProcessTestCase):
         server.child.wait(timeout=10)
         server = self.restart_after_kill()
         player, resumed = self.client(omit_memory=True)
-        self.assertEqual(resumed["state"], far["state"])
+        self.assertDisclosedStateEqual(resumed["state"], far["state"])
         spectator, observing = self.client(SPECTATOR_TOKEN, omit_memory=True)
         self.assertEqual(observing["state"]["observation"], far["state"]["observation"])
 
@@ -407,15 +415,15 @@ class NativeStreamingProcesses(StreamingFixture, ProcessTestCase):
         pebble = self.pebble(back)
         self.assertEqual(len(pebble), 1)
         self.assertEqual(pebble, self.pebble(initial))
-        seen = self.frame(spectator, lambda f: f["state"]["revision"] == back["state"]["revision"])
-        self.assertEqual(seen["state"], back["state"])
+        seen = self.frame(spectator, lambda f: f["state"]["observation"] == back["state"]["observation"])
+        self.assertDisclosedStateEqual(seen["state"], back["state"])
         self.assertIsNone(self.request(player, {"type": "save"})["error"])
         player.stop()
         spectator.stop()
         server.stop()
         self.streaming_server()
         _, again = self.client()
-        self.assertEqual(again["state"], back["state"])
+        self.assertDisclosedStateEqual(again["state"], back["state"])
 
 
     def test_a_moved_compiled_bundle_is_named_to_resume_and_every_client_plays_on(self):
@@ -429,7 +437,7 @@ class NativeStreamingProcesses(StreamingFixture, ProcessTestCase):
         self.assertEqual(shown["state"]["observation"], far["state"]["observation"])
         native.stop()
         text, _ = self.text_client()
-        self.assertIn("Waited", text.command("wait"))
+        self.assertIn("Time passes.", text.command("wait"))
         text.stop()
         # Walking on builds hall 5 from the explicitly compiled moved bundle.
         player, _ = self.client(omit_memory=True)
@@ -453,14 +461,11 @@ class NativeStreamingProcesses(StreamingFixture, ProcessTestCase):
         self.assertEqual(again["state"]["observation"], inside["state"]["observation"])
         far = self.east_through(wizard, THROUGH_CAVES - INTO_CAVE)
         shown = self.ascii_frame(native,
-            lambda f: f["state"]["observation"]["tick"] == far["state"]["observation"]["tick"])
+            lambda f: f["state"]["observation"]["ready"]
+            and f["state"]["observation"]["tick"] == far["state"]["observation"]["tick"])
         self.assertEqual(shown["state"]["observation"], far["state"]["observation"])
-        # The rats act until the character is ready again; then time waits.
-        for _ in range(200):
-            settled = self.request(wizard, {"type": "snapshot"})["state"]["observation"]
-            if settled["ready"]:
-                break
-            time.sleep(0.05)
+        settled = far["state"]["observation"]
+        self.assertTrue(settled["ready"])
         self.assertIsNone(self.request(wizard, {"type": "save"})["error"])
         with closing(sqlite3.connect(self.save)) as db:
             copied = [r[0] for r in db.execute("SELECT region FROM region_sources ORDER BY region")]

@@ -136,7 +136,7 @@ fn wizard_preload_physical_entry_and_teleport_share_one_saved_retrieval_batch() 
             "preload-cast",
             &engine.branch().clone(),
             Command::AdmitIntention {
-                expected_revision: engine.revision(ActorId(2)).unwrap(),
+                expected_boundary: engine.causal_boundary(ActorId(2)).unwrap(),
                 action: Action::UseAbility {
                     id: tor_simulation::content_ids::AbilityId::new("preload_sequence").unwrap(),
                     invocation: crate::actions::AbilityInvocation {
@@ -197,7 +197,7 @@ fn wizard_preload_physical_entry_and_teleport_share_one_saved_retrieval_batch() 
             "preload-cancel",
             &engine.branch().clone(),
             Command::CancelIntention {
-                expected_revision: engine.revision(ActorId(2)).unwrap(),
+                expected_boundary: engine.causal_boundary(ActorId(2)).unwrap(),
                 admission: admitted.entry.id,
                 step: None,
             },

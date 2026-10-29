@@ -68,7 +68,7 @@ class CreatureAdvancementProcesses(ProcessTestCase):
         server.stop()
         self.server(scenario=package, wizard=True)
         observer, restored = self.client(WIZARD_TOKEN, observe=True)
-        self.assertEqual(restored["state"], repeated["state"])
+        self.assertDisclosedStateEqual(restored["state"], repeated["state"])
         wizard, _ = self.text_client(WIZARD_TOKEN, observe=True)
         self.assertNotIn("Server error", wizard.command("wizard rewind initial"))
         rewound = self.request(observer, {"type": "snapshot"})["state"]["observation"]["combat"]
@@ -114,7 +114,7 @@ class CreatureAdvancementProcesses(ProcessTestCase):
             "wizard creature train 1 5 lore",
         ):
             self.assertIn("Server error", wizard.command(command), command)
-            self.assertEqual(self.request(observer, {"type": "snapshot"})["state"], trained["state"])
+            self.assertDisclosedStateEqual(self.request(observer, {"type": "snapshot"})["state"], trained["state"])
         self.assertNotIn("Server error", wizard.command("wizard creature remove-hd 1"))
         removed = self.request(observer, {"type": "snapshot"})["state"]["observation"]["combat"]["own_stats"]
         self.assertEqual(removed["attributes"], original["attributes"])
@@ -183,7 +183,7 @@ class CreatureAdvancementProcesses(ProcessTestCase):
         server.stop()
         self.server(scenario=package, wizard=True)
         observer, restored = self.client(WIZARD_TOKEN, observe=True)
-        self.assertEqual(restored["state"], dormant["state"])
+        self.assertDisclosedStateEqual(restored["state"], dormant["state"])
         wizard, _ = self.text_client(WIZARD_TOKEN, observe=True)
         self.assertNotIn("Server error", wizard.command("wizard creature add-hd 1 mage"))
         reactivated = self.request(observer, {"type": "snapshot"})["state"]["observation"]["combat"]["own_stats"]
@@ -231,10 +231,13 @@ class CreatureAdvancementProcesses(ProcessTestCase):
             # context-bound inspection; do not retry a rejected operation.
             self.assertIsNone(self.request(observer, {"type": "snapshot"})["error"])
             offset = len(observer.transcript)
-            self.assertIsNone(self.command(observer, {"type": "wizard", "command": "creature inspect 1"})["error"])
+            inspected = self.command(observer, {"type": "wizard", "command": "creature inspect 1"})
+            self.assertIsNone(inspected["error"])
             messages = [json.loads(line).get("message") for line in observer.transcript[offset:] if line.startswith("{")]
-            return next(message["report"] for message in reversed(messages)
-                        if message and message["type"] == "creature_inspection")
+            report = next(message["report"] for message in reversed(messages)
+                          if message and message["type"] == "creature_inspection")
+            self.assertEqual(report["revision"], inspected["state"]["revision"])
+            return report
 
         original = inspect()
         self.assertEqual(original["restoration"], "authored")
@@ -242,12 +245,12 @@ class CreatureAdvancementProcesses(ProcessTestCase):
         self.assertIn("fixture_mana_bolt", content_ids(original["stats"]["abilities"]))
         self.assertNotIn("Server error", wizard.command("wizard creature remove-hd 1"))
         one_parent = inspect()
-        self.assertEqual(int(one_parent["revision"]), int(original["revision"]) + 1)
+        self.assertGreater(int(one_parent["revision"]), int(original["revision"]))
         self.assertIn("fixture_branch", content_ids(one_parent["stats"]["active_talents"]))
         self.assertEqual(one_parent["dormant_talents"], [])
         self.assertNotIn("Server error", wizard.command("wizard creature remove-hd 1"))
         dormant = inspect()
-        self.assertEqual(int(dormant["revision"]), int(one_parent["revision"]) + 1)
+        self.assertGreater(int(dormant["revision"]), int(one_parent["revision"]))
         self.assertEqual(content_ids(dormant["stats"]["dormant_talents"]), ["fixture_branch"])
         self.assertNotIn("fixture_mana_bolt", content_ids(dormant["stats"]["abilities"]))
         reasons = dormant["dormant_talents"][0]["reasons"]
@@ -266,12 +269,13 @@ class CreatureAdvancementProcesses(ProcessTestCase):
         server = self.server(scenario=package, wizard=True)
         observer, _ = self.client(WIZARD_TOKEN, observe=True)
         wizard, _ = self.text_client(WIZARD_TOKEN, observe=True)
-        self.assertEqual(inspect(), dormant)
+        self.assertDisclosedInspectionEqual(inspect(), dormant)
         self.assertIn("Server error", wizard.command("wizard creature add-hd 1 warrior"))
-        self.assertEqual(inspect(), dormant)
+        refused = inspect()
+        self.assertDisclosedInspectionEqual(refused, dormant)
         self.assertNotIn("Server error", wizard.command("wizard creature add-hd 1 mage"))
         restored = inspect()
-        self.assertEqual(int(restored["revision"]), int(dormant["revision"]) + 1)
+        self.assertGreater(int(restored["revision"]), int(refused["revision"]))
         self.assertEqual(restored["hit_dice"], original["hit_dice"][:2])
         self.assertEqual(restored["starting_skills"], original["starting_skills"])
         self.assertEqual(restored["dormant_talents"], [])
@@ -279,7 +283,7 @@ class CreatureAdvancementProcesses(ProcessTestCase):
         self.assertIn("fixture_mana_bolt", content_ids(restored["stats"]["abilities"]))
         self.assertNotIn("Server error", wizard.command("wizard creature add-hd 1 warrior"))
         fully_restored = inspect()
-        self.assertEqual(int(fully_restored["revision"]), int(restored["revision"]) + 1)
+        self.assertGreater(int(fully_restored["revision"]), int(restored["revision"]))
         self.assertEqual(fully_restored, {**original, "revision": fully_restored["revision"]})
         self.assertEqual(self.request(observer, {"type": "snapshot"})["state"]["observation"]["tick"],
                          initial["state"]["observation"]["tick"])
@@ -291,10 +295,10 @@ class CreatureAdvancementProcesses(ProcessTestCase):
                                        "creature replace 1 2 1 advancement skill athletics"})
         self.assertIsNotNone(denied["error"])
         player.stop()
-        self.assertEqual(inspect(), fully_restored)
+        self.assertDisclosedInspectionEqual(inspect(), fully_restored)
         self.assertIn("Server error", wizard.command(
             "wizard creature replace 1 2 1 unknown_pool skill athletics"))
-        self.assertEqual(inspect(), fully_restored)
+        self.assertDisclosedInspectionEqual(inspect(), fully_restored)
         self.assertNotIn("Server error", wizard.command(
             "wizard creature replace 1 2 1 advancement skill athletics"))
         alternate = inspect()
@@ -321,7 +325,7 @@ class CreatureAdvancementProcesses(ProcessTestCase):
         server.stop()
         self.server(scenario=package, wizard=True)
         observer, _ = self.client(WIZARD_TOKEN, observe=True)
-        self.assertEqual(inspect(), replaced)
+        self.assertDisclosedInspectionEqual(inspect(), replaced)
 
     def test_multi_point_authoring_enforces_total_talent_ownership_before_observation(self):
         package = creature_package(self, "ownership-boundary", abilities=("fixture_stamina_strike",))
@@ -359,4 +363,4 @@ class CreatureAdvancementProcesses(ProcessTestCase):
         wizard, _ = self.text_client(WIZARD_TOKEN, observe=True)
         before = self.request(observer, {"type": "snapshot"})["state"]
         self.assertIn("Server error", wizard.command("wizard creature talent 1 2 limit_256"))
-        self.assertEqual(self.request(observer, {"type": "snapshot"})["state"], before)
+        self.assertDisclosedStateEqual(self.request(observer, {"type": "snapshot"})["state"], before)

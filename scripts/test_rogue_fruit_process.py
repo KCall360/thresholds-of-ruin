@@ -48,7 +48,7 @@ class RogueFruitProcesses(ProcessTestCase):
         self.assertEqual((fruit["item"]["name"], fruit["item"]["quantity"], fruit["item"]["class"]),
                          ("fruit", "2", "food"))
         self.assertEqual(inventory(initial, "food ration")["quantity"], "1")
-        self.assertIn("Taken", text.command("take fruit"))
+        self.assertIn("You pick up ", text.command("take fruit"))
         carried = self.snapshot(probe)
         selected = inventory(carried, "fruit")
         ration = inventory(carried, "food ration")
@@ -62,7 +62,7 @@ class RogueFruitProcesses(ProcessTestCase):
         self.assertTrue(affordance["edible"])
         self.assertFalse(affordance["drinkable"])
         before = checkpoint(self, probe)
-        self.assertIn("ItemStarted", text.command("eat fruit"))
+        self.assertIn("You begin to eat the fruit.", text.command("eat fruit"))
         eaten = self.snapshot(probe)
         self.assertEqual(inventory(eaten, "fruit")["quantity"], "1")
         self.assertEqual(inventory(eaten, "food ration"), ration)
@@ -81,11 +81,16 @@ class RogueFruitProcesses(ProcessTestCase):
         remove_sources(self, package)
         server = self.server("--checkpoint-interval", 1, seed=None)
         probe, restored = self.client(observe=True)
-        self.assertEqual(restored["state"], eaten["state"])
+        self.assertDisclosedStateEqual(restored["state"], eaten["state"])
         self.assertEqual(checkpoint(self, probe), saved)
         text, _ = self.text_client()
         self.assertIn("fruit", text.command("inventory"))
-        self.assertIn("ItemStarted", text.command("eat fruit"))
+        final_eat = text.command("eat fruit")
+        start = "You begin to eat the item."
+        finish = "You finish eating the fruit."
+        self.assertEqual(final_eat.count(start), 1)
+        self.assertEqual(final_eat.count(finish), 1)
+        self.assertLess(final_eat.index(start), final_eat.index(finish))
         depleted = self.snapshot(probe)
         self.assertFalse(any(row["name"] == "fruit" for row in observation(depleted)["inventory"]))
         self.assertEqual(inventory(depleted, "food ration"), ration)
@@ -94,10 +99,10 @@ class RogueFruitProcesses(ProcessTestCase):
         text.stop(); probe.stop(); server.stop()
         self.server("--checkpoint-interval", 1, seed=None)
         probe, reopened = self.client(observe=True)
-        self.assertEqual(reopened["state"], depleted["state"])
+        self.assertDisclosedStateEqual(reopened["state"], depleted["state"])
         self.assertEqual(checkpoint(self, probe), completed)
         for _ in range(3):
-            self.assertEqual(self.snapshot(probe)["state"], depleted["state"])
+            self.assertDisclosedStateEqual(self.snapshot(probe)["state"], depleted["state"])
         self.assertEqual(checkpoint(self, probe), completed)
 
 

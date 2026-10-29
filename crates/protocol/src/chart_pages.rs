@@ -345,6 +345,7 @@ record!(ChartQuery {
 impl ChartQuery {
     pub fn validate(&self) -> Result<(), &'static str> {
         if !self.context.is_valid()
+            || !self.base.snapshot.is_valid()
             || !read::valid_label(&self.branch.0)
             || !read::valid_token(&self.chart)
             || self.cursor == Some(0)
@@ -383,6 +384,7 @@ record!(ChartPage {
 impl ChartPage {
     pub fn validate(&self) -> Result<(), &'static str> {
         if !self.context.is_valid()
+            || !self.base.snapshot.is_valid()
             || !read::valid_label(&self.branch.0)
             || !read::valid_token(&self.chart)
             || self.total_components == 0
@@ -479,8 +481,8 @@ fn validate_reply(
     }
     if context.input.stream != page.context
         || context.branch != page.branch
-        || context.revision != page.base.revision
-        || context.cursor.tick != page.base.cursor.tick
+        || context.revision < page.base.revision
+        || context.cursor.tick < page.base.cursor.tick
         || context.cursor.sequence < page.base.cursor.sequence
     {
         return Err("chart reply context disagrees with its observation base");

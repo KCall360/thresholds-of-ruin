@@ -11,6 +11,7 @@ use crate::{Action, ActionOutcome, ActorId, Game, GameError, OutcomeKind};
 /// Kept private so callers cannot retain an action across world changes.
 struct PreparedAction {
     intention: Option<crate::IntentionId>,
+    human_operands: Option<crate::HumanOperandBinding>,
     actor: ActorId,
     at_tick: u64,
     kind: OutcomeKind,
@@ -153,6 +154,18 @@ impl Game {
             return self.cancel_preparation_with_step(id, old, direction, movement_context, ai);
         }
         let mut prepared = self.prepare_action(id, action.clone(), plan, entry)?;
+        if let Some(queued) = self.pending_intention(id).filter(|queued| {
+            Some(queued.id) == intention
+                && queued.origin == crate::IntentionOrigin::Human
+                && matches!(queued.work, crate::IntentionWork::Action(_))
+        }) {
+            prepared.human_operands = Some(
+                queued
+                    .human_operands
+                    .clone()
+                    .ok_or(GameError::Schedule(crate::ScheduleError::InvalidIntention))?,
+            );
+        }
         prepared.validate_movement_context(&self.actors[&id], movement_context)?;
         self.bind_preparation_owner(&mut prepared, intention)?;
         let outcome = self.commit_action(prepared, ai)?;
@@ -215,6 +228,7 @@ impl Game {
         &self,
         actor: ActorId,
     ) -> Result<Option<crate::ai::AiDecision>, GameError> {
+        let _diagnostic_span = crate::diagnostics::spans::span("ai_choice");
         let Some(mut decision) = self.choose_ai(actor) else {
             return Ok(None);
         };
@@ -302,12 +316,16 @@ impl Game {
         mut prepared: PreparedAction,
         ai: Option<(crate::ai::Ai, crate::behavior::Behavior)>,
     ) -> Result<ActionOutcome, GameError> {
+        let _diagnostic_span = crate::diagnostics::spans::span("commit_action");
         let mut candidate = self.clone();
         candidate.initialize_discovery()?;
         let id = prepared.actor;
         candidate.begin_action_boundary(id)?;
         candidate.redirect_confused_movement(&mut prepared);
         candidate.on_action_committed()?;
+        if let Some(binding) = &prepared.human_operands {
+            candidate.validate_human_operands(id, prepared.plan.as_ref(), binding)?;
+        }
         candidate.apply_action_effect(&prepared)?;
         if let Some((ai, behavior)) = ai {
             candidate.combat.ai.insert(id, ai);
@@ -497,6 +515,19 @@ impl Game {
         let actor = self.validate_action_actor(id)?;
         self.prepare_available_action(id, actor, action, None, ActionEntry::Fresh)
             .map(|_| ())
+    }
+
+    pub(crate) fn prepare_human_intention(
+        &self,
+        id: ActorId,
+        action: Action,
+    ) -> Result<crate::HumanOperandBinding, GameError> {
+        let actor = self.validate_action_actor(id)?;
+        let prepared =
+            self.prepare_available_action(id, actor, action, None, ActionEntry::Fresh)?;
+        let binding = self.capture_human_operands(id, prepared.plan.as_ref())?;
+        self.validate_human_operands(id, prepared.plan.as_ref(), &binding)?;
+        Ok(binding)
     }
 
     fn validate_action_actor(&self, id: ActorId) -> Result<&crate::Actor, GameError> {
@@ -816,6 +847,7 @@ impl Game {
         };
         Ok(PreparedAction {
             intention: None,
+            human_operands: None,
             actor: id,
             at_tick,
             kind,
@@ -831,6 +863,7 @@ impl Game {
 
     /// Apply captured effects on the transaction candidate; reject stale references.
     fn apply_action_effect(&mut self, prepared: &PreparedAction) -> Result<(), GameError> {
+        let _diagnostic_span = crate::diagnostics::spans::span("action_effect");
         let id = prepared.actor;
         let kind = prepared.kind.clone();
         if let OutcomeKind::Escaped { item } = kind {
@@ -949,6 +982,7 @@ impl Game {
 
     /// Commit recovery and select the next actor with the shared stable scheduler.
     fn finish_action(&mut self, prepared: PreparedAction) -> Result<ActionOutcome, GameError> {
+        let _diagnostic_span = crate::diagnostics::spans::span("finish_action");
         let PreparedAction {
             actor: id,
             at_tick,

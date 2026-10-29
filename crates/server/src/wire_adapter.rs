@@ -515,6 +515,45 @@ pub enum CombatDiagnosticsOperation {
     Capture { enabled: bool },
 }
 
+/// Display-bound request operands, not yet validated against an issued picture.
+/// A causal journal guard does not exist until fresh resolution succeeds.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DisplayCommand {
+    RenamePlace {
+        key: String,
+        name: String,
+    },
+    Travel {
+        destination: String,
+    },
+    Wizard {
+        operation: crate::journal::WizardOperation,
+    },
+}
+impl DisplayCommand {
+    pub(crate) fn resolve(self, display_basis: u64, expected_boundary: u64) -> Command {
+        let display_basis = Some(display_basis);
+        match self {
+            Self::RenamePlace { key, name } => Command::RenamePlace {
+                display_basis,
+                expected_boundary,
+                key,
+                name,
+            },
+            Self::Travel { destination } => Command::Travel {
+                display_basis,
+                expected_boundary,
+                destination,
+            },
+            Self::Wizard { operation } => Command::Wizard {
+                display_basis,
+                expected_boundary,
+                operation,
+            },
+        }
+    }
+}
+
 /// Normalized request facts before any live target resolution.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DecodedCommand {
@@ -533,6 +572,10 @@ pub enum DecodedCommand {
         query: p::AdvancementQuery,
     },
     Backend(Command),
+    Display {
+        expected_revision: u64,
+        operation: DisplayCommand,
+    },
     StrikeInspection {
         expected_revision: u64,
         target: p::ActorId,
@@ -554,8 +597,14 @@ pub enum DecodedCommand {
         operation: CombatDiagnosticsOperation,
     },
     Gameplay {
-        expected_revision: u64,
         action: p::Action,
+    },
+    ResumeIntention {
+        admission: EntryId,
+    },
+    CancelIntention {
+        admission: EntryId,
+        step: Option<p::Direction>,
     },
 }
 
@@ -563,6 +612,8 @@ impl DecodedCommand {
     pub(crate) fn requires_control(&self) -> bool {
         match self {
             Self::Gameplay { .. }
+            | Self::ResumeIntention { .. }
+            | Self::CancelIntention { .. }
             | Self::ProjectileChoices { .. }
             | Self::Advancement { .. }
             | Self::AbilityWeaponPreview { .. } => true,
@@ -570,6 +621,10 @@ impl DecodedCommand {
             | Self::CreatureInspection { .. }
             | Self::CombatDiagnostics { .. }
             | Self::StrikeInspection { .. } => false,
+            Self::Display { operation, .. } => matches!(
+                operation,
+                DisplayCommand::RenamePlace { .. } | DisplayCommand::Travel { .. }
+            ),
             Self::Backend(command) => matches!(
                 command,
                 Command::RenamePlace { .. }
@@ -584,26 +639,81 @@ impl DecodedCommand {
     /// Compare with the original saved request without consulting live targets.
     pub fn matches(&self, command: &Command, scope: &TargetScope) -> bool {
         match (self, command) {
+            (
+                Self::Display {
+                    expected_revision: requested,
+                    operation: DisplayCommand::RenamePlace { key, name },
+                },
+                Command::RenamePlace {
+                    display_basis: Some(saved),
+                    key: old_key,
+                    name: old_name,
+                    ..
+                },
+            ) => requested == saved && key == old_key && name == old_name,
+            (
+                Self::Display {
+                    expected_revision: requested,
+                    operation: DisplayCommand::Travel { destination },
+                },
+                Command::Travel {
+                    display_basis: Some(saved),
+                    destination: old_destination,
+                    ..
+                },
+            ) => requested == saved && destination == old_destination,
+            (
+                Self::Display {
+                    expected_revision: requested,
+                    operation: DisplayCommand::Wizard { operation },
+                },
+                Command::Wizard {
+                    display_basis: Some(saved),
+                    operation: old_operation,
+                    ..
+                },
+            ) => requested == saved && operation == old_operation,
             (Self::Backend(request), original) => request == original,
             (
-                Self::Gameplay {
-                    expected_revision,
-                    action,
-                },
+                Self::Gameplay { action },
                 Command::AdmitIntention {
-                    expected_revision: original_revision,
-                    action: original,
+                    action: original, ..
+                },
+            ) => *action == encode_action(original, scope),
+            (
+                Self::ResumeIntention { admission },
+                Command::ResumeIntention {
+                    admission: original,
+                    ..
+                },
+            ) => admission == original,
+            (
+                Self::CancelIntention { admission, step },
+                Command::CancelIntention {
+                    admission: original,
+                    step: original_step,
+                    ..
                 },
             ) => {
-                expected_revision == original_revision && *action == encode_action(original, scope)
+                admission == original
+                    && step.map(crate::adapt::requested_direction) == *original_step
             }
             _ => false,
         }
     }
 
+    pub(crate) fn display_basis(&self) -> Option<u64> {
+        match self {
+            Self::Display {
+                expected_revision, ..
+            } => Some(*expected_revision),
+            _ => None,
+        }
+    }
+
     pub(crate) fn revision_requirement(&self) -> Option<(u64, &'static str)> {
         match self {
-            Self::Backend(command) => command.revision_requirement(),
+            Self::Backend(command) => command.boundary_requirement(),
             Self::AbilityWeaponPreview {
                 expected_revision, ..
             }
@@ -628,9 +738,10 @@ impl DecodedCommand {
                 *expected_revision,
                 "Refresh the observation before inspecting",
             )),
-            Self::Gameplay {
-                expected_revision, ..
-            } => Some((*expected_revision, "Refresh the observation before acting")),
+            Self::Display { .. }
+            | Self::Gameplay { .. }
+            | Self::ResumeIntention { .. }
+            | Self::CancelIntention { .. } => None,
         }
     }
 }
@@ -716,15 +827,24 @@ pub fn decode_command(command: &tor_protocol::Command) -> Result<DecodedCommand,
 
     // Keep the transport and journal schemas independent: extending either
     // enum must require an explicit decision at this boundary.
-    if let p::Command::Act {
-        expected_revision,
-        action,
-    } = command
-    {
-        return Ok(DecodedCommand::Gameplay {
-            expected_revision: *expected_revision,
-            action: action.clone(),
-        });
+    match command {
+        p::Command::Act { action } => {
+            return Ok(DecodedCommand::Gameplay {
+                action: action.clone(),
+            })
+        }
+        p::Command::ResumeIntention { intention } => {
+            return Ok(DecodedCommand::ResumeIntention {
+                admission: EntryId(intention.0.clone()),
+            })
+        }
+        p::Command::CancelIntention { intention, step } => {
+            return Ok(DecodedCommand::CancelIntention {
+                admission: EntryId(intention.0.clone()),
+                step: *step,
+            })
+        }
+        _ => {}
     }
     if let p::Command::Wizard {
         expected_revision,
@@ -814,52 +934,41 @@ pub fn decode_command(command: &tor_protocol::Command) -> Result<DecodedCommand,
             });
         }
     }
-    Ok(DecodedCommand::Backend(match command {
-        tor_protocol::Command::ResumeIntention {
-            expected_revision,
-            intention,
-        } => Command::ResumeIntention {
-            expected_revision: *expected_revision,
-            admission: EntryId(intention.0.clone()),
-        },
-        tor_protocol::Command::CancelIntention {
-            expected_revision,
-            intention,
-            step,
-        } => Command::CancelIntention {
-            expected_revision: *expected_revision,
-            admission: EntryId(intention.0.clone()),
-            step: step.map(crate::adapt::requested_direction),
-        },
-        tor_protocol::Command::RenamePlace {
+    Ok(match command {
+        p::Command::RenamePlace {
             expected_revision,
             key,
             name,
-        } => Command::RenamePlace {
+        } => DecodedCommand::Display {
             expected_revision: *expected_revision,
-            key: key.clone(),
-            name: name.clone(),
+            operation: DisplayCommand::RenamePlace {
+                key: key.clone(),
+                name: name.clone(),
+            },
         },
-        tor_protocol::Command::Travel {
+        p::Command::Travel {
             expected_revision,
             destination,
-        } => Command::Travel {
+        } => DecodedCommand::Display {
             expected_revision: *expected_revision,
-            destination: destination.clone(),
+            operation: DisplayCommand::Travel {
+                destination: destination.clone(),
+            },
         },
-        tor_protocol::Command::Wizard {
+        p::Command::Wizard {
             expected_revision,
             operation,
-        } => Command::Wizard {
+        } => DecodedCommand::Display {
             expected_revision: *expected_revision,
-            operation: crate::developer::parse_wizard(operation).map_err(|_| {
-                crate::Failure::new(
-                    tor_protocol::ErrorCode::InvalidRequest,
-                    "Invalid developer command",
-                )
-            })?,
+            operation: DisplayCommand::Wizard {
+                operation: crate::developer::parse_wizard(operation).map_err(|_| {
+                    crate::Failure::new(p::ErrorCode::InvalidRequest, "Invalid developer command")
+                })?,
+            },
         },
         p::Command::Act { .. }
+        | p::Command::ResumeIntention { .. }
+        | p::Command::CancelIntention { .. }
         | p::Command::InspectStrikeSource { .. }
         | p::Command::Advancement { .. }
         | p::Command::ProjectileChoices { .. }
@@ -872,14 +981,14 @@ pub fn decode_command(command: &tor_protocol::Command) -> Result<DecodedCommand,
             source,
             audience,
             category,
-        } => Command::Annotate {
+        } => DecodedCommand::Backend(Command::Annotate {
             anchor: anchor.clone(),
             text: text.clone(),
             source: *source,
             audience: *audience,
             category: *category,
-        },
-    }))
+        }),
+    })
 }
 
 /// Encode supported backend requests and refuse operations with no wire authority.
@@ -888,57 +997,47 @@ pub fn encode_command(
     scope: &TargetScope,
 ) -> Result<tor_protocol::Command, &'static str> {
     match command {
-        Command::ResumeIntention {
-            expected_revision,
-            admission,
-        } => Ok(tor_protocol::Command::ResumeIntention {
-            expected_revision,
+        Command::ResumeIntention { admission, .. } => Ok(tor_protocol::Command::ResumeIntention {
             intention: tor_protocol::IntentionId(admission.0),
         }),
         Command::CancelIntention {
-            expected_revision,
-            admission,
-            step,
+            admission, step, ..
         } => Ok(tor_protocol::Command::CancelIntention {
-            expected_revision,
             intention: tor_protocol::IntentionId(admission.0),
             step: step.map(crate::adapt::wire_direction),
         }),
         Command::PausePreparation => Err("Preparation suspension is backend-only"),
         Command::Wizard {
-            expected_revision,
+            expected_boundary: expected_revision,
+            display_basis,
             operation,
         } => Ok(tor_protocol::Command::Wizard {
-            expected_revision,
+            expected_revision: display_basis.unwrap_or(expected_revision),
             operation: serde_json::to_string(&operation).expect("developer command serializes"),
         }),
         Command::RenamePlace {
-            expected_revision,
+            expected_boundary: expected_revision,
+            display_basis,
             key,
             name,
         } => Ok(tor_protocol::Command::RenamePlace {
-            expected_revision,
+            expected_revision: display_basis.unwrap_or(expected_revision),
             key,
             name,
         }),
         Command::Travel {
-            expected_revision,
+            expected_boundary: expected_revision,
+            display_basis,
             destination,
         } => Ok(tor_protocol::Command::Travel {
-            expected_revision,
+            expected_revision: display_basis.unwrap_or(expected_revision),
             destination,
         }),
-        Command::AdmitIntention {
-            expected_revision,
-            action,
+        Command::AdmitIntention { action, .. } | Command::Act { action, .. } => {
+            Ok(tor_protocol::Command::Act {
+                action: encode_action(&action, scope),
+            })
         }
-        | Command::Act {
-            expected_revision,
-            action,
-        } => Ok(tor_protocol::Command::Act {
-            expected_revision,
-            action: encode_action(&action, scope),
-        }),
         Command::Annotate {
             anchor,
             text,
@@ -1084,7 +1183,7 @@ pub fn disclose_entry(
             category,
             text,
         } => Content::Annotation {
-            anchor: anchor.clone(),
+            anchor: anchor.to_public(),
             category: *category,
             text: text.clone(),
         },
@@ -1194,6 +1293,69 @@ mod strike_sequence_adapter_tests {
     use super::*;
 
     #[test]
+    fn typed_intention_retry_matching_preserves_exact_identity_and_step() {
+        let scope = TargetScope::new(uuid::Uuid::nil(), s::ActorId(1));
+        let id = EntryId("original".into());
+        let other = EntryId("other".into());
+        let resume = decode_command(&p::Command::ResumeIntention {
+            intention: p::IntentionId(id.0.clone()),
+        })
+        .unwrap();
+        let cancel = decode_command(&p::Command::CancelIntention {
+            intention: p::IntentionId(id.0.clone()),
+            step: Some(p::Direction::West),
+        })
+        .unwrap();
+        let saved_resume = Command::ResumeIntention {
+            expected_boundary: 91,
+            admission: id.clone(),
+        };
+        let saved_cancel = Command::CancelIntention {
+            expected_boundary: 92,
+            admission: id.clone(),
+            step: Some(crate::adapt::requested_direction(p::Direction::West)),
+        };
+        assert!(resume.matches(&saved_resume, &scope));
+        assert!(cancel.matches(&saved_cancel, &scope));
+        assert!(!resume.matches(
+            &Command::ResumeIntention {
+                expected_boundary: 91,
+                admission: other.clone(),
+            },
+            &scope
+        ));
+        assert!(!cancel.matches(
+            &Command::CancelIntention {
+                expected_boundary: 92,
+                admission: other,
+                step: Some(crate::adapt::requested_direction(p::Direction::West)),
+            },
+            &scope
+        ));
+        for step in [
+            None,
+            Some(crate::adapt::requested_direction(p::Direction::East)),
+        ] {
+            assert!(!cancel.matches(
+                &Command::CancelIntention {
+                    expected_boundary: 92,
+                    admission: id.clone(),
+                    step,
+                },
+                &scope
+            ));
+        }
+        assert!(!resume.matches(&saved_cancel, &scope));
+        assert!(!cancel.matches(&saved_resume, &scope));
+        let gameplay = Command::AdmitIntention {
+            expected_boundary: 91,
+            action: a::Action::Wait,
+        };
+        assert!(!resume.matches(&gameplay, &scope));
+        assert!(!cancel.matches(&gameplay, &scope));
+    }
+
+    #[test]
     fn ordered_strikes_cancel_step_roundtrips_independent_wire_and_backend_shapes() {
         let scope = TargetScope::new(uuid::Uuid::nil(), s::ActorId(1));
         for step in [
@@ -1201,15 +1363,22 @@ mod strike_sequence_adapter_tests {
             serde_json::json!("north_east"),
             serde_json::json!("down"),
         ] {
-            let wire = serde_json::json!({"type":"cancel_intention","expected_revision":"9007199254740993",
+            let wire = serde_json::json!({"type":"cancel_intention",
                 "intention":"same-admission","step":step});
             let command: p::Command = serde_json::from_value(wire.clone()).unwrap();
-            let DecodedCommand::Backend(backend) = decode_command(&command).unwrap() else {
-                panic!("ordinary command");
+            let decoded = decode_command(&command).unwrap();
+            let DecodedCommand::CancelIntention { admission, step } = &decoded else {
+                panic!("typed control command");
             };
+            let backend = Command::CancelIntention {
+                expected_boundary: 9007199254740993,
+                admission: admission.clone(),
+                step: step.map(crate::adapt::requested_direction),
+            };
+            assert!(decoded.matches(&backend, &scope));
             let stored = serde_json::to_value(&backend).unwrap();
             assert_eq!(
-                stored["expected_revision"],
+                stored["expected_boundary"],
                 serde_json::json!(9007199254740993u64)
             );
             assert_eq!(stored["admission"], "same-admission");
@@ -1226,7 +1395,7 @@ mod strike_sequence_adapter_tests {
     #[test]
     fn ordered_strikes_saved_cancel_requires_step_and_rejects_extra_authority() {
         for step in [serde_json::Value::Null, serde_json::json!("west")] {
-            let saved = serde_json::json!({"type":"cancel_intention","expected_revision":7,
+            let saved = serde_json::json!({"type":"cancel_intention","expected_boundary":7,
                 "admission":"same-admission","step":step});
             let decoded: Command = serde_json::from_value(saved.clone()).unwrap();
             assert_eq!(serde_json::to_value(decoded).unwrap(), saved);
@@ -1237,7 +1406,7 @@ mod strike_sequence_adapter_tests {
             }
         }
         assert!(serde_json::from_value::<Command>(serde_json::json!({
-            "type":"cancel_intention","expected_revision":7,"admission":"same-admission"
+            "type":"cancel_intention","expected_boundary":7,"admission":"same-admission"
         }))
         .is_err());
     }
@@ -1356,3 +1525,111 @@ mod retrieval_event_tests {
 #[cfg(test)]
 #[path = "perception_wire_tests.rs"]
 mod perception_wire_tests;
+
+#[cfg(test)]
+mod display_basis_tests {
+    use super::*;
+
+    #[test]
+    fn display_requests_have_no_causal_guard_until_validated_resolution() {
+        let scope = TargetScope::new(uuid::Uuid::nil(), tor_simulation::ActorId(1));
+        for (request, needs_control) in [
+            (
+                p::Command::RenamePlace {
+                    expected_revision: 7,
+                    key: "place".into(),
+                    name: "Camp".into(),
+                },
+                true,
+            ),
+            (
+                p::Command::Travel {
+                    expected_revision: 7,
+                    destination: "place".into(),
+                },
+                true,
+            ),
+            (
+                p::Command::Wizard {
+                    expected_revision: 7,
+                    operation: "teleport 1 1 2 3 0".into(),
+                },
+                false,
+            ),
+        ] {
+            let decoded = decode_command(&request).unwrap();
+            assert_eq!(decoded.display_basis(), Some(7));
+            assert_eq!(decoded.revision_requirement(), None);
+            assert_eq!(decoded.requires_control(), needs_control);
+            let DecodedCommand::Display {
+                expected_revision,
+                operation,
+            } = decoded.clone()
+            else {
+                panic!("display operand stage must not contain a journal guard");
+            };
+            let saved = operation.resolve(expected_revision, 903);
+            assert_eq!(saved.boundary_requirement().unwrap().0, 903);
+            assert!(decoded.matches(&saved, &scope));
+            // Wizard text is canonically encoded as JSON rather than retaining
+            // its optional shorthand spelling; decoded operands stay exact.
+            let encoded = encode_command(saved.clone(), &scope).unwrap();
+            let round_trip = decode_command(&encoded).unwrap();
+            assert_eq!(round_trip, decoded);
+            assert_eq!(round_trip.display_basis(), Some(7));
+            assert!(round_trip.matches(&saved, &scope));
+        }
+    }
+
+    #[test]
+    fn display_bound_retry_keeps_requested_generation_not_resolved_causal_guard() {
+        let scope = TargetScope::new(uuid::Uuid::nil(), tor_simulation::ActorId(1));
+        let request = p::Command::RenamePlace {
+            expected_revision: 7,
+            key: "exact-place".into(),
+            name: "Camp".into(),
+        };
+        let decoded = decode_command(&request).unwrap();
+        let DecodedCommand::Display {
+            expected_revision,
+            operation,
+        } = decoded.clone()
+        else {
+            panic!("display-bound operands, not a prematurely stamped backend command")
+        };
+        assert_eq!(expected_revision, 7);
+        let mut saved = operation.resolve(expected_revision, 903);
+        assert!(decoded.matches(&saved, &scope));
+        assert_eq!(encode_command(saved.clone(), &scope).unwrap(), request);
+        let changed = decode_command(&p::Command::RenamePlace {
+            expected_revision: 8,
+            key: "exact-place".into(),
+            name: "Camp".into(),
+        })
+        .unwrap();
+        assert!(!changed.matches(&saved, &scope));
+        let changed = decode_command(&p::Command::RenamePlace {
+            expected_revision: 7,
+            key: "exact-place".into(),
+            name: "Different".into(),
+        })
+        .unwrap();
+        assert!(!changed.matches(&saved, &scope));
+        let encoded = serde_json::to_value(&saved).unwrap();
+        assert_eq!(
+            serde_json::from_value::<Command>(encoded.clone()).unwrap(),
+            saved
+        );
+        let mut omitted = encoded;
+        omitted.as_object_mut().unwrap().remove("display_basis");
+        assert!(serde_json::from_value::<Command>(omitted).is_err());
+        let Command::RenamePlace { display_basis, .. } = &mut saved else {
+            unreachable!()
+        };
+        *display_basis = None;
+        assert!(
+            !decoded.matches(&saved, &scope),
+            "backend causal guard is not a display request"
+        );
+    }
+}

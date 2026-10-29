@@ -113,6 +113,7 @@ mod tests {
     use super::*;
     fn context() -> p::ReplyContext {
         p::ReplyContext {
+            snapshot: tor_protocol::SnapshotId("fixture".into()),
             input: p::InputContext {
                 stream: p::StreamContext {
                     stream: p::StreamId("\\\"".repeat(64)),
@@ -315,6 +316,7 @@ mod compact_expertise_tests {
     #[test]
     fn maximally_sourced_expertise_summary_fits_page_without_provenance_truncation() {
         let context = p::ReplyContext {
+            snapshot: tor_protocol::SnapshotId("fixture".into()),
             input: p::InputContext {
                 stream: p::StreamContext {
                     stream: p::StreamId("owner".into()),

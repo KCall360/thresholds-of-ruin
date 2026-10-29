@@ -34,10 +34,10 @@ pub enum Cmd {
     Advancement(String),
     /// Browse the read-only detection charts; the connection fetches pages.
     Chart(tor_client_common::charts::ChartInput),
-    /// A note anchored to the state at this revision, private or visible to
+    /// A note anchored to the snapshot opened by its editor, private or visible to
     /// the actor's other observers.
     Note {
-        revision: u64,
+        snapshot: SnapshotId,
         text: String,
         private: bool,
     },
@@ -121,7 +121,7 @@ pub fn request(state: &ClientState, command: Cmd) -> Result<Request, String> {
                 .ok_or_else(|| "There is no work you can cancel.".into())
         }
         Cmd::Note {
-            revision,
+            snapshot,
             text,
             private,
         } => {
@@ -129,7 +129,7 @@ pub fn request(state: &ClientState, command: Cmd) -> Result<Request, String> {
                 return Err(format!("A note is 1 to {MAX_NOTE_BYTES} bytes."));
             }
             return Ok(state.command_request(Command::Annotate {
-                anchor: Anchor::State { revision },
+                anchor: Anchor::State { snapshot },
                 text,
                 source: ClientSource::User,
                 audience: if private {
@@ -249,10 +249,7 @@ pub fn request(state: &ClientState, command: Cmd) -> Result<Request, String> {
             unreachable!("handled before acting")
         }
     };
-    Ok(state.command_request(Command::Act {
-        expected_revision: state.state().revision,
-        action,
-    }))
+    Ok(state.command_request(Command::Act { action }))
 }
 
 /// Aim an ability through the shared invocation rules; the server's disclosed

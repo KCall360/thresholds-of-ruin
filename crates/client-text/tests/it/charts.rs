@@ -49,6 +49,7 @@ impl ChartLink {
                 tick: 0,
             },
             state: Arc::new(StateView {
+                snapshot: tor_protocol::SnapshotId("fixture-snapshot".into()),
                 wizard_game: false,
                 revision: 0,
                 observation,
@@ -106,7 +107,7 @@ impl ChartLink {
         let page = ChartPage {
             context: query.context.clone(),
             branch: query.branch.clone(),
-            base: query.base,
+            base: query.base.clone(),
             chart: query.chart.clone(),
             kind: summary.kind,
             mode: summary.mode,
@@ -118,7 +119,7 @@ impl ChartLink {
             next: first.then_some(1),
         };
         self.queue.push_back(ServerMessage::ChartPage {
-            context: self.state.snapshot().reply_context(),
+            context: self.state.reply_context(),
             request_id: id.clone(),
             page: Box::new(page),
         });
@@ -190,7 +191,7 @@ impl Link for ChartLink {
 #[tokio::test]
 async fn ordinary_adventure_chart_command_pages_without_actions_or_new_scenery_referents() {
     let mut link = ChartLink::new();
-    let before = link.state.snapshot();
+    let before = link.state.session().clone();
     assert_eq!(
         tor_client_text::parse("chart monsters", link.state.state()),
         Ok(Input::Chart(ChartInput::Select(ChartKind::Monsters)))
@@ -206,7 +207,7 @@ async fn ordinary_adventure_chart_command_pages_without_actions_or_new_scenery_r
     );
     assert_eq!(link.sent.len(), 2);
     assert!(link.sent.iter().all(|r| matches!(r, Request::Chart { .. })));
-    assert_eq!(link.state.snapshot(), before);
+    assert_eq!(link.state.session().clone(), before);
     let scene = tor_client_text::engine::scene::Scene::new(link.state.state(), &link.palette);
     assert!(scene.referents.iter().all(|r| r.name != "painted stairs"));
     link.role = AccessRole::Player;
@@ -219,7 +220,7 @@ async fn ordinary_adventure_chart_command_pages_without_actions_or_new_scenery_r
         let _ = engine.play(&mut link, line).await.unwrap();
     }
     assert_eq!(link.sent.len(), 2);
-    assert_eq!(link.state.snapshot(), before);
+    assert_eq!(link.state.session().clone(), before);
 }
 
 #[test]
@@ -242,7 +243,7 @@ fn explicit_chart_parser_never_reinterprets_invalid_chart_input_as_actions() {
 #[tokio::test]
 async fn ordinary_mapping_command_keeps_unsupported_historical_stairs_read_only() {
     let mut link = ChartLink::new();
-    let mut snapshot = link.state.snapshot();
+    let mut snapshot = link.state.reset_snapshot().unwrap();
     let summary = &mut Arc::make_mut(&mut snapshot.state).observation.charts[0];
     summary.kind = ChartKind::Mapping;
     summary.mode = ChartMode::Historical;
@@ -260,7 +261,7 @@ async fn ordinary_mapping_command_keeps_unsupported_historical_stairs_read_only(
         .sent
         .iter()
         .all(|request| matches!(request, Request::Chart { .. })));
-    assert_eq!(link.state.snapshot(), snapshot);
+    assert_eq!(link.state.reset_snapshot().unwrap(), snapshot);
     let scene = tor_client_text::engine::scene::Scene::new(link.state.state(), &link.palette);
     assert!(scene.referents.iter().all(|r| !r.name.contains("stairs")));
     link.role = AccessRole::Player;

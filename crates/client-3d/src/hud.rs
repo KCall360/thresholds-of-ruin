@@ -372,7 +372,7 @@ pub(crate) fn buttons(
         }
         match action {
             Action::Inventory | Action::Equipment => {
-                if let Some(open) = game.screen {
+                if let Some(open) = game.screen.clone() {
                     screen::toggle(&net, &mut game, open);
                 }
                 panel.toggle_page(if matches!(action, Action::Equipment) {

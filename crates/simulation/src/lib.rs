@@ -6,9 +6,16 @@
 pub mod abilities;
 pub mod action_duration;
 mod actions;
+mod input_basis;
+pub use input_basis::InputBasis;
+mod human_operands;
+pub use human_operands::HumanOperandBinding;
 mod actor_creatures;
 mod actor_record;
 mod actor_store;
+mod mutation;
+mod mutation_frame;
+pub(crate) use mutation_frame::EntityMutationIdentity;
 pub mod appearance_catalog;
 pub mod appearance_state;
 pub mod arena;
@@ -32,7 +39,9 @@ mod lifecycle;
 pub mod linked_hold;
 mod mapping_chart;
 mod mapping_history;
+mod preparation_facts;
 pub mod projectile_profiles;
+mod region_contributions;
 pub mod scope_projection;
 mod search_clock;
 pub mod spatial_scope;
@@ -57,10 +66,12 @@ mod ai_ranged_items;
 pub mod attacks;
 pub mod attributes;
 pub mod behavior;
+mod boundary_effects;
 mod bounded;
+pub use boundary_effects::{BoundaryEffects, ObservationChange};
 pub mod combat;
 mod event_history;
-pub use event_history::{EventObservation, EventObservationWitness};
+pub use event_history::{CommitEventFacts, EventObservation, EventObservationWitness};
 pub mod conditions;
 pub mod cooldowns;
 pub mod costs;
@@ -155,7 +166,7 @@ pub use travel::TravelStep;
 
 pub use observation::{
     ActorView, CellView, CorpseAppearance, ExitView, GroundItemView, ItemView, KnownPlace,
-    Observation, SupplyView, TrapView, WornView,
+    MapObservation, Observation, SupplyView, TrapView, WornView,
 };
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -656,6 +667,8 @@ pub struct Game {
     /// client event or a serialized event queue.
     population_entry_boundary: Option<u64>,
     preparation_region_boundary: Option<theft::PreparationRegionBoundary>,
+    /// Candidate-owned derived preparation dependency facts; never serialized.
+    preparation_facts: preparation_facts::PreparationFacts,
     trap_region_boundary: Option<traps::TrapRegionBoundary>,
     light_region_boundary: Option<portable_light::LightRegionBoundary>,
     light_settled_witness: Option<portable_light::LightOpticalWitness>,
@@ -697,6 +710,7 @@ impl Clone for Game {
             unique_retrieval: self.unique_retrieval.clone(),
             population_entry_boundary: self.population_entry_boundary,
             preparation_region_boundary: self.preparation_region_boundary.clone(),
+            preparation_facts: self.preparation_facts.clone(),
             trap_region_boundary: self.trap_region_boundary.clone(),
             light_region_boundary: self.light_region_boundary.clone(),
             light_settled_witness: self.light_settled_witness.clone(),
@@ -874,6 +888,7 @@ impl Game {
             unique_retrieval: None,
             population_entry_boundary: None,
             preparation_region_boundary: None,
+            preparation_facts: preparation_facts::PreparationFacts::default(),
             trap_region_boundary: None,
             light_region_boundary: None,
             light_settled_witness: None,
@@ -1262,6 +1277,7 @@ impl Game {
     /// Read-only scheduler identity, including while an arena is paused.
     /// This grants no permission to execute work.
     pub fn next_scheduled_actor(&self) -> Option<ActorId> {
+        let _diagnostic_span = crate::diagnostics::spans::span("scheduler");
         if self.run_outcome().terminal {
             return None;
         }

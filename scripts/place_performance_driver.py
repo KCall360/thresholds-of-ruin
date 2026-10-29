@@ -4,9 +4,29 @@ import json
 import os
 from pathlib import Path
 import uuid
-from performance_driver import JsonProcess, ROOT, stop_all
+from performance_driver import JsonProcess, ROOT, stop_all, same_disclosed_state, presented_action
 from client_performance_report import validate_presentation_profile
 from place_performance_report import SPEC, validate_client
+
+
+def presented_place_command(frame, expected, action):
+    """Require exact public history; wizard-private setup is never spectator data."""
+    public_history = [entry for entry in expected["history"] if entry["audience"] == "actor"]
+    return (presented_action(frame, expected, action)
+            and frame.get("history") == public_history)
+
+
+def send_observed_command(player, request):
+    """Keep action timing separate from the explicit current-picture demand."""
+    causal, start, ack, received = player.send(request)
+    assert causal["error"] is None, causal["error"]
+    metrics = dict(ready_reader_work_ms=player.last_reader_work_ms,
+                   ready_queue_delay_ms=player.last_queue_delay_ms,
+                   headless_memory_cells=len(causal["memory"]),
+                   headless_ready_bytes=len(json.dumps(causal).encode("utf-8")))
+    state, observed = player.observe()
+    metrics["request_to_observation_ms"] = (observed-start)*1000
+    return state, start, ack, received, metrics
 
 
 def run(binary_dir, output, rooms, fresh_player=False):
@@ -35,11 +55,12 @@ def run(binary_dir, output, rooms, fresh_player=False):
 
         def command(value):
             nonlocal state
-            value["expected_revision"] = state["state"]["revision"]
-            state, start, ack, received = player.send({"type": "request", "request": {
+            if value["type"] not in ("act", "resume_intention", "cancel_intention"):
+                value["expected_revision"] = state["state"]["revision"]
+            state, start, ack, received, metrics = send_observed_command(player, {"type": "request", "request": {
                 "type": "command", "context": state["input_context"], "branch": state["branch"], "command": value}})
             assert state["error"] is None, state["error"]
-            return start, ack, received
+            return start, ack, received, metrics
 
         def wizard(operation):
             command(dict(type="wizard", operation=operation))
@@ -60,30 +81,28 @@ def run(binary_dir, output, rooms, fresh_player=False):
         places = state["state"]["observation"]["places"]
         assert len(places) == 2 + rooms * len(SPEC["hints"])
         native = launch("tor-client-ascii", ["--connect", ready["address"], "--automation"], "native", env["TOR_SPECTATOR_TOKEN"])
-        native.until(lambda f: f.get("state") == state["state"] and not f["busy"])
+        native.until(lambda f: same_disclosed_state(f.get("state"), state["state"]) and not f["busy"])
         native.child.stdin.write(json.dumps(dict(type="key", key="places")) + "\n")
         native.child.stdin.flush()
         native.until(lambda f: f.get("places_open") is True)
         for i in range(SPEC["samples"]):
             tick = int(state["state"]["observation"]["tick"])
             if i % 2 == 0:
-                start, ack, received = command(dict(type="rename_place", key=places[-1]["key"], name=f"Reverie {i}"))
+                start, ack, received, metrics = command(dict(type="rename_place", key=places[-1]["key"], name=f"Reverie {i}"))
                 assert int(state["state"]["observation"]["tick"]) == tick
             else:
-                start, ack, received = command(dict(type="act", action=dict(type="wait")))
+                start, ack, received, metrics = command(dict(type="act", action=dict(type="wait")))
                 assert int(state["state"]["observation"]["tick"]) == tick + 100
             assert ack is not None
-            frame, shown = native.until(lambda f: f.get("state") == state["state"])
+            action = {"type": "rename_place" if i % 2 == 0 else "wait"}
+            frame, shown = native.until(lambda f: presented_place_command(f, state, action))
             assert frame["places_open"] and frame["role"] == "spectator" and not frame["has_control"]
             validate_presentation_profile(frame["profile"])
             sample = dict(sample=i, label="rename" if i % 2 == 0 else "wait", places=len(places),
                           request_to_ack_ms=(ack-start)*1000, request_to_ready_ms=(received-start)*1000,
                           request_to_presentation_ms=(shown-start)*1000, profile=frame["profile"],
                           request_to_ack_line_ms=(player.ack_line_received-start)*1000,
-                          ready_reader_work_ms=player.last_reader_work_ms,
-                          ready_queue_delay_ms=player.last_queue_delay_ms,
-                          headless_memory_cells=len(state["memory"]),
-                          headless_ready_bytes=len(json.dumps(state).encode("utf-8")))
+                          **metrics)
             result["samples"].append(sample)
         saved, *_ = player.send({"type": "request", "request": {"type": "save"}})
         assert saved["error"] is None

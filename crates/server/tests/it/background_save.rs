@@ -14,7 +14,7 @@ fn act(engine: &mut Engine, request: &str) -> tor_server::CommandResult {
             request,
             &engine.branch().clone(),
             Command::Act {
-                expected_revision: engine.revision(ActorId(1)).unwrap(),
+                expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
                 action: Action::Wait,
             },
         )
@@ -69,7 +69,7 @@ fn ordinary_acknowledgements_do_not_write_and_explicit_save_is_a_barrier() {
             "one",
             &resumed.branch().clone(),
             Command::Act {
-                expected_revision: 0,
+                expected_boundary: 0,
                 action: Action::Wait,
             },
         )
@@ -96,7 +96,7 @@ fn unsaved_queue_is_bounded_without_mutating_a_rejected_action() {
             "one",
             &engine.branch().clone(),
             Command::Act {
-                expected_revision: 0,
+                expected_boundary: 0,
                 action: Action::Wait
             }
         )

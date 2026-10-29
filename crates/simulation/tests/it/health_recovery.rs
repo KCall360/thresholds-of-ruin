@@ -654,7 +654,8 @@ fn personal_recovery_disclosure_projects_lazy_progress_without_mutating_the_game
         .combat
         .unwrap()
         .own_stats
-        .unwrap();
+        .unwrap()
+        .into_owned();
     assert_eq!(stats.health_recovery.elapsed(), 400);
     assert_eq!(
         stats.health_recovery,

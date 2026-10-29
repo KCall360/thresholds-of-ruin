@@ -47,6 +47,24 @@ def evidence(*, profile="release", ids=IDS):
 
 
 class PythonShardSelectionTests(unittest.TestCase):
+    def test_linux_debug_cohort_requires_both_successful_same_attempt_owners(self):
+        group = {'result': 'success', 'outputs': {'linux_debug_shard_1': '1', 'linux_debug_shard_2': '1'}}
+        self.assertEqual(shards.linux_debug_cohort(group, '2'),
+                         {'origin_attempt': '1', 'aggregate_attempt': '2'})
+        for status in ('failure', 'cancelled', 'skipped', None):
+            with self.subTest(status=status), self.assertRaises(ValueError):
+                shards.linux_debug_cohort({**group, 'result': status}, '2')
+        for value in (None, '', '0', '01', '2', '3', True):
+            changed = deepcopy(group)
+            changed['outputs']['linux_debug_shard_2'] = value
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                shards.linux_debug_cohort(changed, '2')
+        with self.assertRaises(ValueError):
+            shards.linux_debug_cohort(group, '0')
+        with self.assertRaises(ValueError):
+            shards.linux_debug_cohort({'result': 'success', 'outputs':
+                {'linux_debug_shard_1': '3', 'linux_debug_shard_2': '3'}}, '2')
+
     def test_explicit_modules_and_future_modules_have_one_owner(self):
         left, right = shards.selection(IDS, 1), shards.selection(IDS, 2)
         self.assertEqual(left, IDS[:3])

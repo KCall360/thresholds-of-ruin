@@ -63,11 +63,13 @@ fn synthetic(service: &mut Service, id: u64, rows: usize) -> ChartTransfer {
     };
     // Explicit adapter fixture: not a counterfeit paid acquisition claim.
     Arc::make_mut(&mut observed.state).observation.charts = vec![summary.clone()];
+    let issued = client.presentations.fixture_entry_mut(&observed.base);
+    issued.charts = vec![summary.clone()];
     ChartTransfer {
         context: client.context.clone().unwrap(),
         actor: ActorId(1),
         branch: observed.branch.clone(),
-        base: observed.base,
+        base: observed.base.clone(),
         summary,
         chart: candidate.shared_chart().unwrap().clone(),
         next: 0,
@@ -78,7 +80,7 @@ fn query(t: &ChartTransfer) -> ChartQuery {
     ChartQuery {
         context: t.context.clone(),
         branch: t.branch.clone(),
-        base: t.base,
+        base: t.base.clone(),
         chart: t.summary.chart.clone().unwrap(),
         cursor: Some(t.next as u64),
     }
@@ -136,7 +138,21 @@ fn continuations_bind_attachment_branch_base_token_and_exact_admitted_cursor() {
     assert!(service
         .prepare_chart_page(client.id, query(&active))
         .is_ok());
-    for change in 0..6 {
+    service.handle(client.id, "new-picture".into(), Request::Observe);
+    assert_ne!(
+        service.clients[&client.id]
+            .last_observation
+            .as_ref()
+            .unwrap()
+            .base
+            .snapshot,
+        active.base.snapshot
+    );
+    let retained = service
+        .prepare_chart_page(client.id, query(&active))
+        .unwrap();
+    assert!(Arc::ptr_eq(&retained.chart, &active.chart));
+    for change in 0..7 {
         let mut q = query(&active);
         match change {
             0 => q.context.epoch += 1,
@@ -144,6 +160,7 @@ fn continuations_bind_attachment_branch_base_token_and_exact_admitted_cursor() {
             2 => q.base.revision += 1,
             3 => q.base.cursor.sequence += 1,
             4 => q.chart = "not-advertised".into(),
+            5 => q.base.snapshot = tor_protocol::SnapshotId("not-issued".into()),
             _ => q.cursor = Some(active.next as u64 - 1),
         }
         assert_eq!(

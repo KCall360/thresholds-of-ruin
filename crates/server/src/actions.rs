@@ -468,7 +468,7 @@ mod tests {
         };
         assert!(supplies.valid());
         let command = crate::journal::Command::AdmitIntention {
-            expected_revision: 1,
+            expected_boundary: 1,
             action: action.clone(),
         };
         let encoded_command = engine.encode_command(observer, command.clone()).unwrap();
@@ -578,7 +578,7 @@ mod tests {
             // Decoding never requires or resolves a creature in the selected ray.
             assert_eq!(engine.decode_action(actor, &encoded).unwrap(), ray.clone());
             let command = crate::journal::Command::AdmitIntention {
-                expected_revision: u64::MAX,
+                expected_boundary: u64::MAX,
                 action: ray,
             };
             let encoded = engine.encode_command(actor, command.clone()).unwrap();
@@ -734,7 +734,7 @@ mod tests {
             assert_eq!(adapt::action(&action), native);
             assert_eq!(adapt::recorded_action(native), Some(action.clone()));
             let command = crate::journal::Command::AdmitIntention {
-                expected_revision: u64::MAX,
+                expected_boundary: u64::MAX,
                 action,
             };
             let wire = engine.encode_command(observer, command.clone()).unwrap();

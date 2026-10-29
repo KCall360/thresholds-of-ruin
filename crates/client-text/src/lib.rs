@@ -8,7 +8,7 @@ pub mod narrative;
 pub mod parser;
 pub mod projectiles;
 
-pub const HELP: &str = "Commands: charts, chart monsters|food|magic|mapping, chart next|previous|cancel, advancement (overview, ledger, balances, skills, talents, expertises, intellect-expertises, intellect-expertise, purchase, remove, replace, details, next, previous, supplies, confirm, resume, cancel), attack <actor> [with <equipped weapon>], <disclosed ability name> <actor> [with <equipped weapon>] [using <supplies>], places, name <place number> <new name>, look (l), inventory (i), stats, north/east/south/west/ne/se/sw/nw/up/down (n/e/s/w/ne/se/sw/nw/u/d), go <direction>, take/drop [quantity] <name or #id>, equip/remove/drink/eat/read <name or #id>, zap <name or #id> <direction>, identify <name or #id>, identify cancel, wait (.), control, release, resume, cancel [direction], escape [hold <number|#token|name>], escape <direction>, sync, save, history [before-id], note <text>, bookmark <text>, quit (q), branch-history <branch> [before-id].\nExplicit weapon and projectile choices preview exact cost, time to next strike and recovery, then require yes/no. For projectile abilities, enter the ability name, select a numbered server source (next/previous pages, cancel), ammunition if launching, then a direction. Other default choices act immediately.\nWizard credential: wizard <server developer command>; wizard creature list discovers named spawn recipes. After creature inspection, strikes natural, strikes selected, strikes ability <id>, strikes next, strikes previous.\nNotes/bookmarks are private user notes on the current state.\nannotate <user|frontend> <private|actor> <note|bookmark|explanation> <here|state:N|entry:ID> <text>";
+pub const HELP: &str = "Commands: charts, chart monsters|food|magic|mapping, chart next|previous|cancel, advancement (overview, ledger, balances, skills, talents, expertises, intellect-expertises, intellect-expertise, purchase, remove, replace, details, next, previous, supplies, confirm, resume, cancel), attack <actor> [with <equipped weapon>], <disclosed ability name> <actor> [with <equipped weapon>] [using <supplies>], places, name <place number> <new name>, look (l), inventory (i), stats, north/east/south/west/ne/se/sw/nw/up/down (n/e/s/w/ne/se/sw/nw/u/d), go <direction>, take/drop [quantity] <name or #id>, equip/remove/drink/eat/read <name or #id>, zap <name or #id> <direction>, identify <name or #id>, identify cancel, wait (.), control, release, resume, cancel [direction], escape [hold <number|#token|name>], escape <direction>, sync, save, history [before-id], note <text>, bookmark <text>, quit (q), branch-history <branch> [before-id].\nExplicit weapon and projectile choices preview exact cost, time to next strike and recovery, then require yes/no. For projectile abilities, enter the ability name, select a numbered server source (next/previous pages, cancel), ammunition if launching, then a direction. Other default choices act immediately.\nWizard credential: wizard <server developer command>; wizard creature list discovers named spawn recipes. After creature inspection, strikes natural, strikes selected, strikes ability <id>, strikes next, strikes previous.\nNotes/bookmarks are private user notes on the current state.\nannotate <user|frontend> <private|actor> <note|bookmark|explanation> <here|state:SNAPSHOT|entry:ID> <text>";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Input {
@@ -98,7 +98,6 @@ pub fn hold_input(line: &str, state: &StateView) -> Option<Result<Input, String>
     };
     Some(selected.map(|hold| {
         Input::Command(Command::Act {
-            expected_revision: state.revision,
             action: Action::Escape { hold },
         })
     }))
@@ -149,12 +148,8 @@ pub fn magic_input(line: &str, state: &StateView) -> Option<Result<Input, String
     Some((|| {
         let view = &state.observation;
         if verb == "identify" && rest.eq_ignore_ascii_case("cancel") {
-            return tor_client_common::items::identification_action(view, None).map(|action| {
-                Input::Command(Command::Act {
-                    expected_revision: state.revision,
-                    action,
-                })
-            });
+            return tor_client_common::items::identification_action(view, None)
+                .map(|action| Input::Command(Command::Act { action }));
         }
         // Resolve a complete disclosed noun before interpreting its last word
         // as a direction: a device may itself have a directional name.
@@ -235,10 +230,7 @@ pub fn magic_input(line: &str, state: &StateView) -> Option<Result<Input, String
             )?,
             None => tor_client_common::items::identification_action(view, Some(item))?,
         };
-        Ok(Input::Command(Command::Act {
-            expected_revision: state.revision,
-            action,
-        }))
+        Ok(Input::Command(Command::Act { action }))
     })())
 }
 
@@ -263,12 +255,7 @@ pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
     }
     let (verb, rest) = word(line.trim());
     let verb = verb.to_ascii_lowercase();
-    let action = |action| {
-        Ok(Input::Command(Command::Act {
-            expected_revision: state.revision,
-            action,
-        }))
-    };
+    let action = |action| Ok(Input::Command(Command::Act { action }));
     if let Some((ability, noun)) =
         tor_client_common::abilities::match_command(&state.observation, line)?
     {
@@ -578,14 +565,14 @@ pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
             }
         }
         ("note" | "bookmark", text) => {
-            annotation("user", "private", &verb, "here", text, state.revision)
+            annotation("user", "private", &verb, "here", text, &state.snapshot)
         }
         ("annotate", rest) => {
             let (source, rest) = word(rest);
             let (audience, rest) = word(rest);
             let (category, rest) = word(rest);
             let (anchor, text) = word(rest);
-            annotation(source, audience, category, anchor, text, state.revision)
+            annotation(source, audience, category, anchor, text, &state.snapshot)
         }
         ("go", direction) => action(Action::Move {
             direction: parse_direction(direction)?,
@@ -625,7 +612,7 @@ fn annotation(
     category: &str,
     anchor: &str,
     text: &str,
-    revision: u64,
+    snapshot: &SnapshotId,
 ) -> Result<Input, String> {
     let source = match source {
         "user" => ClientSource::User,
@@ -644,17 +631,21 @@ fn annotation(
         _ => return Err("Unknown annotation category.".into()),
     };
     let anchor = if anchor == "here" {
-        Anchor::State { revision }
-    } else if let Some(n) = anchor.strip_prefix("state:") {
         Anchor::State {
-            revision: n.parse().map_err(|_| "Invalid state revision.")?,
+            snapshot: snapshot.clone(),
         }
+    } else if let Some(n) = anchor.strip_prefix("state:") {
+        let snapshot = SnapshotId(n.into());
+        if !snapshot.is_valid() {
+            return Err("Invalid snapshot identity.".into());
+        }
+        Anchor::State { snapshot }
     } else if let Some(id) = anchor.strip_prefix("entry:").filter(|id| !id.is_empty()) {
         Anchor::Entry {
             id: EntryId(id.into()),
         }
     } else {
-        return Err("Anchor must be here, state:N, or entry:ID.".into());
+        return Err("Anchor must be here, state:SNAPSHOT, or entry:ID.".into());
     };
     if text.trim().is_empty()
         || text.len() > MAX_NOTE_BYTES
@@ -688,15 +679,7 @@ pub fn safe(text: &str) -> String {
 
 pub fn describe(state: &StateView) -> String {
     let o = &state.observation;
-    let mut lines = vec![format!(
-        "Your surroundings - tick {}. {}",
-        o.tick,
-        if o.ready {
-            "Ready to act."
-        } else {
-            "Waiting for another actor."
-        }
-    )];
+    let mut lines = vec![format!("Your surroundings - snapshot tick {}.", o.tick)];
     if let Some(c) = &o.combat {
         lines.push(tor_client_common::narration::combat_status(c));
         lines.extend(
@@ -707,11 +690,6 @@ pub fn describe(state: &StateView) -> String {
         lines.extend(
             c.objective
                 .map(|o| tor_client_common::narration::objective(o).to_owned()),
-        );
-        lines.extend(
-            c.events
-                .iter()
-                .map(|e| tor_client_common::narration::combat_event(e, o, o)),
         );
     }
     for item in &o.ground_items {

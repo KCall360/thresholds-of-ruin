@@ -280,7 +280,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         engine.settle_preloading();
                     }
                     let actor = ActorId(1);
-                    let revision = engine.revision(actor)?;
+                    let revision = engine.causal_boundary(actor)?;
                     let (_, profile) = engine.command_profiled(
                         "benchmark",
                         "headless",
@@ -288,7 +288,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         &format!("{step}"),
                         &engine.branch().clone(),
                         Command::Act {
-                            expected_revision: revision,
+                            expected_boundary: revision,
                             action: Action::Move {
                                 direction: *direction,
                             },

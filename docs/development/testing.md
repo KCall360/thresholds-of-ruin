@@ -735,6 +735,15 @@ failed or incomplete shards fail the gate. Shards cannot adopt unsharded prior
 results. The workflow is the authoritative full job inventory; selected-mode
 lanes never stand in for a missing full partition.
 
+Linux debug Python likewise uses two isolated module-owned shards, each with
+its own ordinary application/compiler build and the unchanged 40-minute deadline.
+The Ubuntu full-mode aggregate requires their same-source, same-run, same-origin-
+attempt receipts and independently checks their exact inventory union. Both
+success-only shard attempt outputs and distinct tested-compiler fingerprints are
+required; a mixed or incomplete cohort cannot qualify. Linux release Python
+remains one complete owner. No assertion or per-test time limit changes with the
+split, and selected/prose-only modes do not substitute for full shard coverage.
+
 `--ci-partition` requires both `full` and an explicit `--ci-profile`. Each
 partition selects complete coverage without consulting Git merge history.
 Stages have explicit owners; an unclassified new stage rejects partition
@@ -751,13 +760,35 @@ Ordinary application artifacts deliberately exclude benchmark examples. Full
 Windows shards and selected assurance lanes use a separate, profile-specific
 locked build phase for the examples required by their independently selected
 test IDs, before Python workers start.
-Full Windows shard 1 currently needs the eight maintained examples; selected
+Full Windows shard 1 currently needs the nine maintained examples; selected
 lanes build only their actual owners' subset, and tooling-only lanes build none.
 The phase is required in the plan and receipt, runs without competing test-worker
 builds, and stays within the existing job budget. Each owner's original build
 check still runs (normally a no-op), resolves Cargo's reported executable, and
 retains all runtime limits and report assertions. Binary transport does not make
 this compilation cost disappear or qualify benchmark execution by itself.
+
+The active-mob workload adds two real-process owners in
+`scripts/test_performance_process.py`, both in `PerformanceProcesses`:
+
+- `test_active_mob_producer_proves_all_live_regions_and_replay` runs
+  `active_mob_bench --steps 8` and validates the complete 100-AI/20-region report,
+  exact movement count and replay/storage proof, without a wall-clock target gate.
+- `test_active_mob_headless_smoke_preserves_activity_and_source_free_restart`
+  runs stock server/headless applications for 16 paced moves and four burst moves,
+  requiring actual movement, private population/activity proof, explicit save,
+  source-free restart equality and cleanup. It never asserts the 60-second
+  release load target. Explicit correctness smoke may use debug artifacts; full
+  load acceptance remains release-only.
+
+Both IDs map to the same deduplicated `active_mob_bench` prerequisite. Each owner
+still resolves Cargo's reported example path independently of the ordinary
+application bundle. Pure driver/report tests cover incomplete or passive
+populations, timing and provenance validation, and causal failure/cleanup
+receipts; these are not substitutes for the real-process owners. See the
+[active-mob guide](performance.md#active-mob-workload) for timing boundaries,
+finite smoke liveness budgets and release acceptance limits. No existing
+process deadline, test selection or coverage exclusion is relaxed.
 
 Service contracts belong to the Rust partitions: their wrapper uses the exact
 host executable emitted by the successful Cargo test command. Python partitions'

@@ -68,7 +68,7 @@ class LinkedHoldServiceContracts(unittest.TestCase):
     def command(snapshot, action):
         return {"type": "command", "context": {"stream": snapshot["context"],
             "readiness_revision": snapshot["readiness"]["revision"]}, "branch": snapshot["branch"],
-            "command": {"type": "act", "expected_revision": snapshot["state"]["revision"], "action": action}}
+            "command": {"type": "act", "action": action}}
 
     def audit(self, actor=1):
         return self.host.call("audit", case=self.case, actor=actor, user=f"player-{actor}")
@@ -152,18 +152,23 @@ class LinkedHoldServiceContracts(unittest.TestCase):
         action = {"type": "move", "direction": "west"} if move else {
             "type": "escape", "hold": selected}
         canonical = self.command(current, action)
-        for field in ("revision", "readiness", "branch", "stream"):
+        # Display generations no longer guard gameplay. Exercise both stale
+        # and future authority generations without changing the requested action.
+        readiness = int(current["readiness"]["revision"])
+        self.assertGreater(readiness, 0, "fixture must have advanced input authority")
+        for field in ("stale_readiness", "future_readiness", "branch", "stream"):
             invalid = copy.deepcopy(canonical)
-            if field == "revision":
-                invalid["command"]["expected_revision"] = str(int(current["state"]["revision"]) + 1)
-            elif field == "readiness":
-                invalid["context"]["readiness_revision"] = str(int(current["readiness"]["revision"]) + 1)
+            if field == "stale_readiness":
+                invalid["context"]["readiness_revision"] = str(readiness - 1)
+            elif field == "future_readiness":
+                invalid["context"]["readiness_revision"] = str(readiness + 1)
             elif field == "stream":
                 invalid["context"]["stream"]["epoch"] = str(int(current["context"]["epoch"]) + 1)
             else:
                 invalid["branch"] = "00000000-0000-4000-8000-000000000001"
             rows = self.request(1, invalid, errors=True)
-            self.assertEqual(len([row for row in rows if row["type"] == "error"]), 1, field)
+            expected = "wrong_branch" if field == "branch" else "stale_context"
+            self.assertEqual([row["code"] for row in rows if row["type"] == "error"], [expected], field)
             self.assertEqual(self.audit(), baseline, field)
         unknown = self.command(current, {"type": "escape", "hold": "h_" + "ff" * 32})
         unavailable = self.request(1, unknown, errors=True)

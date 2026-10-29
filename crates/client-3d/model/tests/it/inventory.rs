@@ -28,7 +28,7 @@ fn fixture() -> View {
         "context":StreamContext{stream:StreamId("inventory".into()),epoch:0},
         "actor":observed.actor,"branch":"play","cursor":{"sequence":"0","tick":observed.tick.to_string()},
         "has_control":true,"intentions":[],"history":{"entries":[],"older_before":null},
-        "state":{"wizard_game":false,"revision":"0","observation":observed}
+        "state":{"snapshot":"inventory-fixture","wizard_game":false,"revision":"0","observation":observed}
     })).unwrap();
     let mut v = view(
         &ClientState::from_snapshot(snapshot).unwrap(),

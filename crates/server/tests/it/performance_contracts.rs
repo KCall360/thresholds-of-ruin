@@ -144,7 +144,7 @@ fn act(engine: &mut Engine, actor: ActorId, request: &str) -> tor_server::Comman
             request,
             &engine.branch().clone(),
             Command::Act {
-                expected_revision: engine.revision(actor).unwrap(),
+                expected_boundary: engine.causal_boundary(actor).unwrap(),
                 action: Action::Wait,
             },
         )
@@ -153,23 +153,26 @@ fn act(engine: &mut Engine, actor: ActorId, request: &str) -> tor_server::Comman
 }
 
 #[test]
-fn revision_and_rollback_operation_counts_scale_only_with_actors() {
+fn stationary_rules_commits_do_not_perform_display_work_at_either_scale() {
     let one = act(&mut Engine::memory(scenario(1)).unwrap(), ActorId(1), "one");
     let eight = act(
         &mut Engine::memory(scenario(8)).unwrap(),
         ActorId(1),
         "eight",
     );
-    assert!(
-        one.actors_observed <= 2 && one.revision_comparisons <= 1 && one.rollback_snapshots <= 1
-    );
-    assert!(
-        eight.actors_observed <= 16
-            && eight.revision_comparisons <= 8
-            && eight.rollback_snapshots <= 1
-    );
-    assert!(eight.actors_observed <= one.actors_observed * 8);
-    assert!(eight.revision_comparisons <= one.revision_comparisons * 8);
+    for profile in [one, eight] {
+        assert_eq!(profile.actors_observed, 0);
+        assert_eq!(profile.revision_comparisons, 0);
+        assert_eq!(profile.observation_changes_proven, 0);
+        assert_eq!(profile.observations_unchanged_proven, 0);
+        assert_eq!(profile.observation_projection_fallbacks, 0);
+        assert_eq!(profile.action_observer_boundaries, 0);
+        assert_eq!(profile.action_event_receipts_recorded, 0);
+        assert_eq!(profile.action_projection_validated, 0);
+        assert_eq!(profile.action_navigation_reviewed, 0);
+        assert_eq!(profile.candidate_captures, 1);
+        assert_eq!(profile.rollback_snapshots, 1);
+    }
 }
 
 #[test]
@@ -300,7 +303,58 @@ fn waits_do_not_rebuild_geometry_at_any_fixture_scale() {
             (p.perception_calls, p.scene_calls, p.navigation_refreshes),
             (0, 0, 0)
         );
-        assert_eq!(p.revision_comparisons, actors);
+        assert_eq!(p.revision_comparisons, 0);
+        assert_eq!(p.observation_changes_proven, 0);
+        assert_eq!(p.observations_unchanged_proven, 0);
+        assert_eq!(p.observation_projection_fallbacks, 0);
+        assert_eq!(p.action_observer_boundaries, 0);
+        assert_eq!(p.action_event_receipts_recorded, 0);
+        assert_eq!(p.action_projection_validated, 0);
+        assert_eq!(p.action_navigation_reviewed, 0);
         assert_eq!(engine.profile_counts().0, history + 1);
+    }
+}
+
+#[test]
+fn movement_observer_work_remains_complete_without_display_comparisons() {
+    for actors in [1, 8] {
+        let mut engine = Engine::memory(Scenario::performance(42, 8, actors).unwrap()).unwrap();
+        let actor = ActorId(1);
+        let center = |state: tor_protocol::StateView| {
+            state
+                .observation
+                .visible_cells
+                .into_iter()
+                .find(|cell| cell.position == tor_protocol::Position { x: 0, y: 0, z: 0 })
+                .expect("disclosed occupied cell")
+                .key
+        };
+        let before = center(engine.state(actor).unwrap());
+        let (_, profile) = engine
+            .command_profiled(
+                "observer-work",
+                "test",
+                actor,
+                "move",
+                &engine.branch().clone(),
+                Command::Act {
+                    expected_boundary: engine.causal_boundary(actor).unwrap(),
+                    action: Action::Move {
+                        direction: tor_server::journal::Direction::East,
+                    },
+                },
+            )
+            .unwrap();
+        assert_ne!(center(engine.state(actor).unwrap()), before);
+        assert_eq!(profile.action_observer_boundaries, actors);
+        assert_eq!(profile.action_event_receipts_recorded, actors);
+        assert_eq!(profile.action_projection_validated, actors);
+        assert_eq!(profile.action_navigation_reviewed, actors);
+        assert_eq!(profile.revision_comparisons, 0);
+        assert_eq!(profile.observation_changes_proven, 0);
+        assert_eq!(profile.observations_unchanged_proven, 0);
+        assert_eq!(profile.observation_projection_fallbacks, 0);
+        assert_eq!(profile.actors_observed, 0);
+        assert_eq!(engine.profile_counts().0, 1);
     }
 }

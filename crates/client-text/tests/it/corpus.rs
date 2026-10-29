@@ -27,7 +27,7 @@ fn state() -> StateView {
     let mut stats = tor_client_common::test_support::stats();
     stats.abilities = abilities;
     serde_json::from_value(serde_json::json!({
-        "wizard_game":false,"revision":"0","observation":{
+        "snapshot":"fixture-snapshot","wizard_game":false,"revision":"0","observation":{
         "actor":"1","self_target":super::actor_target(1),"tick":"0","position":{"x":0,"y":0,"z":0},"ready":true,
         "places":[],"visible_cells":(0..7).map(|x| serde_json::json!({
             "key":format!("cell-{x}"),"position":{"x":x,"y":0,"z":0},

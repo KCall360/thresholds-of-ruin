@@ -16,7 +16,7 @@ from process_harness import ProcessTestCase, SPECTATOR_TOKEN, settle_rogue_actio
 from process_work_budget import ProcessWorkBudget
 from rogue_earned_route import first_purchase
 from rogue_roster_package import unrelated_fallback
-from rogue_test_support import disclosed_actor_candidates
+from rogue_test_support import disclosed_actor_candidates, disclosed_frames, ordered_combat_events
 from rogue_vampire_package import DRAIN, generated_carrier_package, vampire_package
 from status_condition_package import actor_creature, checkpoint, combat, observation
 
@@ -145,7 +145,7 @@ class RogueVampireProcesses(ProcessTestCase):
                          {"earned": "1", "spent": "0", "unspent": "1"})
         preview = self.command(player, {"type": "advancement", "command": first_purchase(character, body_hd=1)})
         self.assertIsNone(preview["error"])
-        self.assertEqual(preview["state"], before["state"], "A purchase preview cannot grant progression")
+        self.assertDisclosedStateEqual(preview["state"], before["state"], "A purchase preview cannot grant progression")
         self.assertIsNone(self.command(player, {"type": "advancement", "command": "confirm"})["error"])
         current = self.finish(player, peer)
         opened = self.command(player, {"type": "advancement", "command": "overview"})
@@ -248,11 +248,9 @@ class RogueVampireProcesses(ProcessTestCase):
             saved = checkpoint(self, player)
             subject = actor_creature(saved)
             deficit = combat(drained)["own_stats"]["restorable_losses"]["maximum_health"]
-            events = [event for line in vampire.transcript[start:] if line.startswith("{")
-                      for frame in [json.loads(line)] if frame.get("state") is not None
-                      and int(frame["state"]["revision"]) > int(prior["state"]["revision"])
-                      for event in combat(frame)["events"] if event["type"] == "ability"
-                      and event["ability"]["id"] == DRAIN]
+            events = [event for event in ordered_combat_events(
+                disclosed_frames(vampire, start), after=prior)
+                if event["type"] == "ability" and event["ability"]["id"] == DRAIN]
             self.assertTrue(events, "A real resolved DR1 event must be disclosed")
             self.assertEqual({event["strike"] for event in events}, {0}, "Natural damage occurs once")
             self.assertIn(deficit, range(4))
@@ -286,7 +284,7 @@ class RogueVampireProcesses(ProcessTestCase):
         shutil.rmtree(package)
         self.server("--checkpoint-interval", 1, scenario=unrelated_fallback(self), seed=None)
         player, reopened = self.client(actor=1, omit_memory=True)
-        self.assertEqual(reopened["state"], before["state"])
+        self.assertDisclosedStateEqual(reopened["state"], before["state"])
         self.assertEqual(checkpoint(self, player), saved)
 
     def test_separate_unchanged_emu_carrier_drops_one_finite_ration_for_ordinary_take_and_eat(self):
@@ -330,6 +328,10 @@ class RogueVampireProcesses(ProcessTestCase):
             {"kind": "racial"}, {"kind": "class", "id": "mage"}])
         self.assertEqual(actor_creature(killed, 2)["build"]["hd"][:2], birth_rows,
                          "Both actual starter rows retain ownership and complete Health provenance")
+        # The carrier's death was witnessed on its attachment; demand the
+        # player's current picture before inspecting the ordinary death drop.
+        current = self.request(player, {"type": "observe"})
+        self.assertIsNone(current["error"])
         self.assertEqual(len([row for row in observation(current)["ground_items"]
                              if row["item"]["name"] == "food ration"]), 1)
         # The target's known adjacent ground cell, never its private save ID,
@@ -447,7 +449,7 @@ class RogueVampireProcesses(ProcessTestCase):
         shutil.rmtree(package)
         self.server("--checkpoint-interval", 1, scenario=unrelated_fallback(self), seed=None)
         player, restored = self.client(actor=1)
-        self.assertEqual(restored["state"], before_restart["state"])
+        self.assertDisclosedStateEqual(restored["state"], before_restart["state"])
         self.assertEqual(checkpoint(self, player), killed)
         self.assertEqual(self.private_receipts(actor=1), receipts)
 
@@ -496,7 +498,7 @@ class RogueVampireProcesses(ProcessTestCase):
                              seed=None, save_actor=character)
         player, _ = self.client(actor=character, omit_memory=True)
         vampire, reopened = self.client(actor=3, omit_memory=True)
-        self.assertEqual(reopened["state"], before["state"])
+        self.assertDisclosedStateEqual(reopened["state"], before["state"])
         self.assertEqual(checkpoint(self, player), saved)
         # Restored human queues suspend until their controller explicitly
         # resumes the same work. Only that lifecycle state may differ.

@@ -47,7 +47,7 @@ fn act(engine: &mut Engine, action: Action) -> Result<CommandResult, Failure> {
         &uuid::Uuid::new_v4().to_string(),
         &engine.branch().clone(),
         Command::Act {
-            expected_revision: engine.revision(ActorId(1)).unwrap(),
+            expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
             action,
         },
     )
@@ -395,7 +395,7 @@ fn late_storage_rejection_discards_artifact_population_stock_and_every_store_row
     let mut retry = Engine::open(&path, Scenario::two_room(999)).unwrap();
     retry.execute_next_intention().unwrap().unwrap();
     assert_eq!(retry.game, healthy.game);
-    assert_eq!(retry.revisions, healthy.revisions);
+    assert_eq!(retry.archive.records.len(), healthy.archive.records.len());
     assert_eq!(retry.receipts, healthy.receipts);
     assert_eq!(
         retry.archive.records.last().unwrap().activations,
@@ -500,21 +500,24 @@ fn expired_artifact_origins_share_the_population_and_carried_stock_identity_audi
 fn annotations_preserve_the_current_entry_snapshot_but_never_repeat_its_receipt() {
     let mut engine = Engine::memory(at_depth(26)).unwrap();
     let original = engine.game.clone();
-    let revision = engine.revision(ActorId(1)).unwrap();
+    let issued = engine.presentation_boundary();
     engine
-        .command(
+        .command_at_presentation(
             "player",
             "retrieval-test",
             ActorId(1),
             "note",
             &engine.branch().clone(),
             Command::Annotate {
-                anchor: tor_protocol::Anchor::State { revision },
+                anchor: tor_protocol::Anchor::State {
+                    snapshot: tor_protocol::SnapshotId("issued-retrieval".into()),
+                },
                 text: "An ordinary note".into(),
                 source: tor_protocol::ClientSource::User,
                 audience: tor_protocol::Audience::Actor,
                 category: tor_protocol::AnnotationCategory::Note,
             },
+            &issued,
         )
         .unwrap();
     assert_eq!(engine.game, original);
@@ -698,7 +701,8 @@ fn wizard_birth_cannot_duplicate_a_reserved_identity_but_may_share_its_display_n
             "wizard-birth",
             &engine.branch().clone(),
             Command::Wizard {
-                expected_revision: engine.revision(ActorId(1)).unwrap(),
+                display_basis: None,
+                expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
                 operation: WizardOperation::PlaceItem {
                     kind: crate::journal::WizardItem::Token,
                     position: Position {
@@ -903,7 +907,7 @@ fn one_host_action_keeps_two_physical_entries_through_late_cohort_completion() {
             "physical-cohort",
             &engine.branch().clone(),
             Command::Act {
-                expected_revision: engine.revision(driver).unwrap(),
+                expected_boundary: engine.causal_boundary(driver).unwrap(),
                 action: Action::Wait,
             },
         )
@@ -989,7 +993,7 @@ fn missing_retrieval_receipt_is_rejected_before_candidate_and_store_publication(
         actor: ActorId(1),
         branch: engine.branch().clone(),
         command: Command::Act {
-            expected_revision: engine.revision(ActorId(1)).unwrap(),
+            expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
             action: action.clone(),
         },
     };

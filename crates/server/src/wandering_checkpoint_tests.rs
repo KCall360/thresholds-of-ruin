@@ -91,7 +91,7 @@ fn large_rogue_prebirth_clocks_preserve_every_boundary_with_one_immutable_plan()
                 &format!("wait-{index}"),
                 &engine.branch().clone(),
                 Command::Act {
-                    expected_revision: engine.revision(ActorId(1)).unwrap(),
+                    expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
                     action: Action::Wait,
                 },
             )
@@ -156,7 +156,7 @@ fn large_rogue_prebirth_clocks_preserve_every_boundary_with_one_immutable_plan()
     assert_eq!(restored.boundaries.len(), engine.boundaries.len());
     for (actual, expected) in restored.boundaries.iter().zip(&engine.boundaries) {
         assert_eq!(actual.game, expected.game);
-        assert_eq!(actual.revisions, expected.revisions);
+        assert_eq!(actual.selectable, expected.selectable);
         assert_eq!(actual.id, expected.id);
     }
     assert_eq!(

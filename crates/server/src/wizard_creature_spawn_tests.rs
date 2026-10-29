@@ -180,7 +180,8 @@ fn named_spawn_bad_id_location_depth_and_capacity_leave_every_identity_and_rng_u
             "rejected-birth",
             &engine.branch().clone(),
             Command::Wizard {
-                expected_revision: engine.revision(ActorId(1)).unwrap(),
+                display_basis: None,
+                expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
                 operation,
             },
         );
@@ -217,7 +218,7 @@ fn named_spawn_resolves_known_destination_depth_without_loading_for_listing() {
         .creature_catalog_query(
             ActorId(1),
             engine.branch(),
-            engine.revision(ActorId(1)).unwrap(),
+            engine.causal_boundary(ActorId(1)).unwrap(),
             None,
             None,
         )
@@ -277,7 +278,8 @@ fn named_spawn_retry_and_rewind_preserve_receipts_and_future_identity_floors() {
     let operation = command("rat", available(&engine), Some(2));
     let branch = engine.branch().clone();
     let command = Command::Wizard {
-        expected_revision: engine.revision(ActorId(1)).unwrap(),
+        display_basis: None,
+        expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
         operation,
     };
     let first = engine
@@ -337,7 +339,7 @@ fn named_spawn_catalog_pages_are_bounded_and_reject_unknown_cursors() {
         engine.creature_catalog_query(
             ActorId(1),
             engine.branch(),
-            engine.revision(ActorId(1)).unwrap(),
+            engine.causal_boundary(ActorId(1)).unwrap(),
             Some(2),
             after,
         )
@@ -420,7 +422,8 @@ fn named_spawn_store_admission_failure_leaves_no_birth_and_exact_retry_succeeds(
     engine.enable_wizard().unwrap();
     let before = engine.diagnostic_copy();
     let command = Command::Wizard {
-        expected_revision: engine.revision(ActorId(1)).unwrap(),
+        display_basis: None,
+        expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
         operation: command("rat", available(&engine), Some(2)),
     };
     let branch = engine.branch().clone();

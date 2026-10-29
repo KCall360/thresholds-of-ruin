@@ -16,7 +16,7 @@ use tor_protocol::*;
 
 fn state() -> StateView {
     serde_json::from_value(serde_json::json!({
-        "wizard_game":false,"revision":"0","observation":{
+        "snapshot":"fixture-snapshot","wizard_game":false,"revision":"0","observation":{
         "actor":"1","self_target":super::actor_target(1),"tick":"0","position":{"x":0,"y":0,"z":0},"ready":true,
         "places":[],"visible_cells":(0..7).map(|x| serde_json::json!({
             "key":format!("cell-{x}"),"position":{"x":x,"y":0,"z":0},
@@ -946,7 +946,7 @@ fn session_commands_and_naming_are_tools() {
         meaning("note Beware the shadows", &s),
         Interpretation::Tool(Input::Command(Command::Annotate {
             anchor: Anchor::State {
-                revision: s.revision
+                snapshot: s.snapshot.clone()
             },
             text: "Beware the shadows".into(),
             source: ClientSource::User,
@@ -1042,7 +1042,7 @@ pub(crate) fn walled(map: &[&str]) -> StateView {
         }
     }
     serde_json::from_value(serde_json::json!({
-        "wizard_game": false, "revision": "0", "observation": {
+        "snapshot":"fixture-snapshot","wizard_game": false, "revision": "0", "observation": {
             "actor": "1", "self_target":super::actor_target(1),"tick": "0", "position": {"x": 0, "y": 0, "z": 0},
             "ready": true, "places": [], "visible_cells": cells,
             "ground_items": items, "inventory": [], "charts":[],"linked_holds":[],"visible_actors": actors
@@ -1954,6 +1954,7 @@ fn view_limit_referents_and_ambiguity_labels_do_not_claim_darkness() {
 #[test]
 fn disclosed_ray_sentence_builds_a_directional_goal_and_prompts_for_direction() {
     let mut state = StateView {
+        snapshot: tor_protocol::SnapshotId("fixture-snapshot".into()),
         wizard_game: false,
         revision: 0,
         observation: tor_client_common::test_support::observation(),

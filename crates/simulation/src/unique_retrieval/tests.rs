@@ -1374,3 +1374,36 @@ fn accepted_terminal_up_stops_scheduled_attack_recovery_and_hunger_work() {
     assert_eq!(game.rules_rng, before.rules_rng);
     assert!(game.combat_events().is_empty());
 }
+
+#[test]
+fn raw_world_facts_keep_terminal_exit_policy_fresh_and_ordered() {
+    let mut game = retrieval_game();
+    let actor = ActorId(1);
+    let old_exit = crate::ExitView {
+        location: at(1, 1, 1),
+        direction: Direction::Up,
+    };
+    let before = game.observe(actor).unwrap();
+    assert!(before.exits.contains(&old_exit));
+    let world = game.world.weak_identity();
+    let count = crate::diagnostics::work_counts().raw_world_fact_builds;
+    game.unique_retrieval.as_mut().unwrap().policy.exit.at = at(1, 2, 1);
+    assert!(game.unique_retrieval_policy().unwrap().valid(&game));
+    let changed = game.observe(actor).unwrap();
+    assert!(!changed.exits.contains(&old_exit));
+    let new_exit = crate::ExitView {
+        location: at(1, 2, 1),
+        direction: Direction::Up,
+    };
+    assert!(changed.exits.contains(&new_exit));
+    let mut expected = before.exits;
+    expected.retain(|exit| *exit != old_exit);
+    let index = expected.partition_point(|exit| exit.location <= new_exit.location);
+    expected.insert(index, new_exit);
+    assert_eq!(changed.exits, expected);
+    assert!(world.matches(&game.world));
+    assert_eq!(
+        crate::diagnostics::work_counts().raw_world_fact_builds,
+        count
+    );
+}

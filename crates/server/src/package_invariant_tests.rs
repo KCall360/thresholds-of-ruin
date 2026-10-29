@@ -7,7 +7,11 @@ fn assert_authority_equal(actual: &Engine, expected: &Engine, context: &str) {
         actual.game, expected.game,
         "{context}: authoritative game/queue"
     );
-    assert_eq!(actual.revisions, expected.revisions, "{context}: revisions");
+    assert_eq!(
+        actual.archive.records.len(),
+        expected.archive.records.len(),
+        "{context}: revisions"
+    );
     assert_eq!(
         actual.receipts, expected.receipts,
         "{context}: receipt index"
@@ -28,8 +32,8 @@ fn assert_authority_equal(actual: &Engine, expected: &Engine, context: &str) {
     );
     for (a, b) in actual.boundaries.iter().zip(&expected.boundaries) {
         assert_eq!(
-            (&a.id, a.selectable, &a.game, &a.revisions),
-            (&b.id, b.selectable, &b.game, &b.revisions),
+            (&a.id, a.selectable, &a.game),
+            (&b.id, b.selectable, &b.game),
             "{context}: rewind boundary"
         );
     }
@@ -67,7 +71,6 @@ fn wire_wait(engine: &Engine, actor: ActorId) -> Command {
             actor,
             engine.branch(),
             crate::wire_adapter::decode_command(&tor_protocol::Command::Act {
-                expected_revision: engine.revision(actor).unwrap(),
                 action: tor_protocol::Action::Wait,
             })
             .unwrap(),
@@ -85,7 +88,7 @@ fn every_package_rejects_atomically_and_restores_queued_wire_admission() {
         let before = engine.diagnostic_copy();
         let branch = engine.branch().clone();
         let stale = Command::AdmitIntention {
-            expected_revision: engine.revision(actor).unwrap() + 1,
+            expected_boundary: engine.causal_boundary(actor).unwrap() + 1,
             action: Action::Wait,
         };
         for _ in 0..2 {
@@ -145,7 +148,7 @@ fn every_package_rejects_atomically_and_restores_queued_wire_admission() {
         );
         let cancel = Command::CancelIntention {
             step: None,
-            expected_revision: reopened.revision(actor).unwrap(),
+            expected_boundary: reopened.causal_boundary(actor).unwrap(),
             admission: original.entry.id,
         };
         reopened
@@ -207,7 +210,7 @@ fn seeded_queue_control_retry_and_rewind_traces_restore_at_every_boundary() {
                         &format!("resume-{round}"),
                         &branch,
                         Command::ResumeIntention {
-                            expected_revision: engine.revision(actor).unwrap(),
+                            expected_boundary: engine.causal_boundary(actor).unwrap(),
                             admission: original.entry.id.clone(),
                         },
                     )
@@ -224,7 +227,7 @@ fn seeded_queue_control_retry_and_rewind_traces_restore_at_every_boundary() {
                         &branch,
                         Command::CancelIntention {
                             step: None,
-                            expected_revision: engine.revision(actor).unwrap(),
+                            expected_boundary: engine.causal_boundary(actor).unwrap(),
                             admission: original.entry.id.clone(),
                         },
                     )
@@ -265,7 +268,8 @@ fn seeded_queue_control_retry_and_rewind_traces_restore_at_every_boundary() {
                         &format!("rewind-{round}"),
                         &branch,
                         Command::Wizard {
-                            expected_revision: engine.revision(actor).unwrap(),
+                            display_basis: None,
+                            expected_boundary: engine.causal_boundary(actor).unwrap(),
                             operation: WizardOperation::Rewind { target: None },
                         },
                     )
@@ -329,7 +333,7 @@ fn replacement_with_health_work_survives_checkpoint_tail_journal_retry_and_rewin
             "drink-poison",
             &branch,
             Command::AdmitIntention {
-                expected_revision: engine.revision(actor).unwrap(),
+                expected_boundary: engine.causal_boundary(actor).unwrap(),
                 action: Action::Drink { item: 21 },
             },
         )
@@ -352,7 +356,7 @@ fn replacement_with_health_work_survives_checkpoint_tail_journal_retry_and_rewin
                 request,
                 &engine.branch().clone(),
                 Command::Act {
-                    expected_revision: engine.revision(actor).unwrap(),
+                    expected_boundary: engine.causal_boundary(actor).unwrap(),
                     action: Action::Wait,
                 },
             )
@@ -403,7 +407,8 @@ fn replacement_with_health_work_survives_checkpoint_tail_journal_retry_and_rewin
                 "bad-replacement",
                 &branch,
                 Command::Wizard {
-                    expected_revision: engine.revision(actor).unwrap(),
+                    display_basis: None,
+                    expected_boundary: engine.causal_boundary(actor).unwrap(),
                     operation: replacement("absent"),
                 },
             )
@@ -411,7 +416,8 @@ fn replacement_with_health_work_survives_checkpoint_tail_journal_retry_and_rewin
         assert_authority_equal(&engine, &unchanged, "recovering replacement rejection");
     }
     let command = Command::Wizard {
-        expected_revision: engine.revision(actor).unwrap(),
+        display_basis: None,
+        expected_boundary: engine.causal_boundary(actor).unwrap(),
         operation: replacement("advancement"),
     };
     let replaced = engine
@@ -527,7 +533,8 @@ fn replacement_with_health_work_survives_checkpoint_tail_journal_retry_and_rewin
                 "rewind-replacement",
                 &branch,
                 Command::Wizard {
-                    expected_revision: state.revision(actor).unwrap(),
+                    display_basis: None,
+                    expected_boundary: state.causal_boundary(actor).unwrap(),
                     operation: WizardOperation::Rewind {
                         target: rewind_target.clone(),
                     },

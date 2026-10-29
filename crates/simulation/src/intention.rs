@@ -175,6 +175,8 @@ pub struct QueuedIntention {
     pub movement_context: Option<MovementContext>,
     #[serde(deserialize_with = "crate::bounded::required_option")]
     pub terminal_exit_context: Option<TerminalExitContext>,
+    #[serde(deserialize_with = "crate::bounded::required_option")]
+    pub human_operands: Option<crate::HumanOperandBinding>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -283,7 +285,12 @@ impl Game {
         if origin == IntentionOrigin::Travel && !matches!(action, Action::Move(_)) {
             return Err(GameError::Schedule(crate::ScheduleError::InvalidIntention));
         }
-        self.validate_intention_action(actor, action.clone())?;
+        let human_operands = if origin == IntentionOrigin::Human {
+            Some(self.prepare_human_intention(actor, action.clone())?)
+        } else {
+            self.validate_intention_action(actor, action.clone())?;
+            None
+        };
         let movement_context = if self.terminal_exit_context(actor, &action).is_some() {
             None
         } else {
@@ -302,6 +309,7 @@ impl Game {
             origin,
             next,
             movement_context,
+            human_operands,
         ))
     }
 
@@ -319,6 +327,7 @@ impl Game {
             IntentionWork::AiDecision,
             IntentionOrigin::Autonomous,
             next,
+            None,
             None,
         ))
     }
@@ -393,6 +402,7 @@ impl Game {
         origin: IntentionOrigin,
         next: u64,
         movement_context: Option<MovementContext>,
+        human_operands: Option<crate::HumanOperandBinding>,
     ) -> IntentionId {
         let id = IntentionId(self.intentions.next_id);
         let terminal_exit_context = match &work {
@@ -409,6 +419,7 @@ impl Game {
                 state: IntentionState::Queued,
                 movement_context,
                 terminal_exit_context,
+                human_operands,
             },
         );
         self.intentions.next_id = next;
@@ -760,6 +771,7 @@ impl Game {
                         state: IntentionState::Queued,
                         movement_context: None,
                         terminal_exit_context: None,
+                        human_operands: None,
                     },
                 );
             }
@@ -832,6 +844,13 @@ impl Game {
                     && entry.id.0 != 0
                     && entry.id.0 < self.intentions.next_id
                     && ids.insert(entry.id)
+                    && match (&entry.work, entry.origin, &entry.human_operands) {
+                        (IntentionWork::Action(action), IntentionOrigin::Human, Some(binding)) =>
+                            self.human_operands_checkpoint_valid(binding, action),
+                        (IntentionWork::Action(_), IntentionOrigin::Human, None) => false,
+                        (_, _, None) => true,
+                        _ => false,
+                    }
                     && (entry.state != IntentionState::Queued
                         || !self.condition_pauses_queued_continuation(entry))
                     && (entry.origin != IntentionOrigin::Travel

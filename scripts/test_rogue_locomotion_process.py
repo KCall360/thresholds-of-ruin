@@ -38,10 +38,10 @@ class RogueLocomotionProcesses(ProcessTestCase):
         server = self.server(scenario=unrelated_fallback(self), seed=None)
         player, _ = self.client()
         foe, restored = self.client(actor=3)
-        self.assertEqual(restored["state"], before["state"])
+        self.assertDisclosedStateEqual(restored["state"], before["state"])
         rejected = self.command(foe, {"type": "act", "action": {"type": "move", "direction": "east"}})
         self.assertIsNotNone(rejected["error"])
-        self.assertEqual(rejected["state"], before["state"])
+        self.assertEqual(rejected["state"], restored["state"])
         foe.stop(); player.stop(); server.stop()
 
     def test_production_bat_kestrel_and_griffin_pay_for_unsupported_flight(self):
@@ -80,7 +80,7 @@ class RogueLocomotionProcesses(ProcessTestCase):
                     server = self.server(scenario=unrelated_fallback(self), seed=None)
                     player, _ = self.client()
                     foe, restored = self.client(actor=3)
-                    self.assertEqual(restored["state"], saved["state"])
+                    self.assertDisclosedStateEqual(restored["state"], saved["state"])
                     self.assertEqual(restored["history"], saved["history"])
                     foe.stop(); player.stop(); server.stop()
 

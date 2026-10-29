@@ -57,7 +57,8 @@ fn ordinary_observations_share_the_compiled_counts_at_two_and_256_hit_dice() {
                 .combat
                 .unwrap()
                 .own_stats
-                .unwrap();
+                .unwrap()
+                .into_owned();
             assert!(stats.hit_dice.shares_storage(&summary));
             assert_eq!(
                 stats.hit_dice.total,

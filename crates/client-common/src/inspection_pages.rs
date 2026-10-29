@@ -632,6 +632,7 @@ mod ordered_strikes_detail_state_tests {
     use super::*;
     fn context() -> ReplyContext {
         ReplyContext {
+            snapshot: tor_protocol::SnapshotId("fixture".into()),
             input: InputContext {
                 stream: StreamContext {
                     stream: StreamId("private".into()),

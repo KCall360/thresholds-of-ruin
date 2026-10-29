@@ -18,8 +18,7 @@ fn request() -> Value {
             "actor":"2","target_revision":"3","source":source(),"cursor":null}}})
 }
 fn response() -> Value {
-    json!({"type":"creature_strike_page","request_id":"detail","context":{
-        "input":{"stream":{"stream":"attachment","epoch":"1"},"readiness_revision":"1"},
+    json!({"type":"creature_strike_page","request_id":"detail","context":{"snapshot":"fixture", "input":{"stream":{"stream":"attachment","epoch":"1"},"readiness_revision":"1"},
         "actor":"1","branch":"branch","cursor":{"sequence":"1","tick":"5"},"revision":"1"},
         "page":{"inspection":"page-handle","actor":"2","target_revision":"3","source":source(),
         "resolved":{"kind":"ability","ability":{"id":"page_ability_000","name":"Technique"}},
@@ -617,6 +616,7 @@ fn ordered_strikes_snapshot_assembly_rejects_conflicting_duplicate_root_before_t
 fn ordered_strikes_legitimate_large_snapshot_keeps_its_independent_32_mib_assembly_budget() {
     use std::sync::Arc;
     let mut state = StateView {
+        snapshot: tor_protocol::SnapshotId("fixture".into()),
         wizard_game: false,
         revision: 1,
         observation: Observation {

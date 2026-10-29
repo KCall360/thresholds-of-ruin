@@ -48,6 +48,8 @@ rather than treating a historical plan as current behavior.
 - [CI cost baseline](development/ci-cost-baseline.md): measured runner cost, elapsed time and comparison limits
 - [Service contract pilot](development/service-contracts.md): opt-in catalog host, assertion ownership and qualification experiment
 - [Performance](development/performance.md): targets, workloads, comparisons and evidence
+- [Server performance review](development/server-performance-review.md): active-AI findings,
+  measured bottlenecks, refactoring constraints and acceptance boundaries
 - [Arena](development/arena.md): combat diagnostics, evaluation, matrices and search
 - [Bounded ordinary earned-route qualification](development/rogue-earned-route.md)
 - [Wizard tools](development/wizard.md): privilege, inspection, setup and rewind
@@ -64,6 +66,8 @@ rather than treating a historical plan as current behavior.
 
 - [Remaining shared requirements](plans/requirements.md), including portable export
 - [Rogue adaptation](plans/rogue.md): decisions and remaining content/survival work
+- [Rogue tuning](plans/rogue-tuning.md): proposed calibration against a locked
+  reference build, scenario mechanics profile and drought guarantee
 - [Missing Rogue consumables and devices](plans/rogue-missing-consumables.md):
   preserved design direction, deferred implementation and unresolved parameters
 - [Script extension design](plans/scripting.md): unimplemented runtime and open choices

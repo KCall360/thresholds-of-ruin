@@ -90,7 +90,7 @@ class RogueSpearProcesses(ProcessTestCase):
         self.assertIn("No choices", text.command("throw"))
         self.assertEqual(self.reply("projectile_choices", start)["page"]["choices"], [])
         text.command("cancel")
-        self.assertEqual(self.snapshot()["state"], initial["state"])
+        self.assertDisclosedStateEqual(self.snapshot()["state"], initial["state"])
         self.assertIn("Starting skills", text.command("advancement"))
         self.assertIn("Confirm", text.command("advancement purchase 2 advancement expertise rogue.spear"))
         self.assertNotIn("Server error", text.command("advancement confirm"))
@@ -101,7 +101,7 @@ class RogueSpearProcesses(ProcessTestCase):
         item = spear(learned)["id"]
         self.choose(text, item, "east")
         text.command("no")
-        self.assertEqual(self.snapshot()["state"], learned["state"])
+        self.assertDisclosedStateEqual(self.snapshot()["state"], learned["state"])
         terms = self.choose(text, item, "east")
         confirmed = text.command("yes")
         self.assertNotIn("Server error", confirmed)
@@ -150,7 +150,7 @@ class RogueSpearProcesses(ProcessTestCase):
         game = self.server("--checkpoint-interval", 1, seed=None)
         self.probe, reopened = self.client(observe=True)
         self.peer, _ = self.client(actor=3)
-        self.assertEqual(reopened["state"], paused["state"])
+        self.assertDisclosedStateEqual(reopened["state"], paused["state"])
         self.assertEqual(reopened["intentions"], paused["intentions"])
         self.assertEqual(checkpoint(self, self.probe), saved_paused)
         owner, _ = self.client()
@@ -181,7 +181,7 @@ class RogueSpearProcesses(ProcessTestCase):
         at_landing = self.settle()
         self.assertTrue(next(row for row in observation(at_landing)["ground_items"]
                              if row["item"]["id"] == item)["reachable"])
-        self.assertIn("Taken", text.command(f"take #{item}"))
+        self.assertIn("You pick up ", text.command(f"take #{item}"))
         final = self.settle()
         self.assertEqual(spear(final)["id"], item)
         self.assertEqual(spear(final)["quantity"], "1")
@@ -190,7 +190,7 @@ class RogueSpearProcesses(ProcessTestCase):
         text.stop(); self.probe.stop(); self.peer.stop(); game.stop()
         self.server("--checkpoint-interval", 1, seed=None)
         self.probe, reopened = self.client(observe=True)
-        self.assertEqual(reopened["state"], final["state"])
+        self.assertDisclosedStateEqual(reopened["state"], final["state"])
         self.assertEqual(checkpoint(self, self.probe), saved_final)
 
 

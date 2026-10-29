@@ -11,7 +11,7 @@ fn act(engine: &mut Engine, actor: ActorId, action: crate::journal::Action) {
             &uuid::Uuid::new_v4().to_string(),
             &engine.branch().clone(),
             crate::journal::Command::Act {
-                expected_revision: engine.revision(actor).unwrap(),
+                expected_boundary: engine.causal_boundary(actor).unwrap(),
                 action,
             },
         )
@@ -38,7 +38,7 @@ fn paid_engine() -> Engine {
             "paid-observation",
             &engine.branch().clone(),
             Command::AdmitIntention {
-                expected_revision: engine.revision(ActorId(1)).unwrap(),
+                expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
                 action: observe,
             },
         )
@@ -96,7 +96,7 @@ fn public_plan_same_actor_spectators_share_paid_history_but_foreign_observers_do
     let own = attach(&mut service, &mut player, ActorId(1));
     let mut spectator = connect(&mut service, AccessRole::Spectator, ActorId(1));
     let watched = attach(&mut service, &mut spectator, ActorId(1));
-    assert_eq!(own.state, watched.state);
+    crate::assert_disclosed_state_eq(&own.state, &watched.state);
     let record = own
         .state
         .observation

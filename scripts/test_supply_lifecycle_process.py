@@ -215,7 +215,7 @@ class SupplyLifecycleProcesses(ProcessTestCase):
         first.stop(); second.stop(); observer.stop(); server.stop()
         self.server(scenario=fallback, seed=None)
         _, reopened = self.client()
-        self.assertEqual(reopened["state"], saved["state"])
+        self.assertDisclosedStateEqual(reopened["state"], saved["state"])
         self.assertFalse(reopened["state"]["wizard_game"])
         self.assertEqual(relay.errors + restored_relay.errors, [])
 

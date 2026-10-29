@@ -215,7 +215,7 @@ fn exact_equal(actual: &Engine, expected: &Engine) {
         actual.game, expected.game,
         "all gameplay state, clocks, IDs, RNG and queue"
     );
-    assert_eq!(actual.revisions, expected.revisions);
+    assert_eq!(actual.archive.records.len(), expected.archive.records.len());
     assert_eq!(actual.receipts, expected.receipts);
     assert_eq!(actual.current_branch, expected.current_branch);
     assert_eq!(
@@ -225,8 +225,8 @@ fn exact_equal(actual: &Engine, expected: &Engine) {
     assert_eq!(actual.boundaries.len(), expected.boundaries.len());
     for (a, b) in actual.boundaries.iter().zip(&expected.boundaries) {
         assert_eq!(
-            (&a.id, a.selectable, &a.game, &a.revisions),
-            (&b.id, b.selectable, &b.game, &b.revisions)
+            (&a.id, a.selectable, &a.game),
+            (&b.id, b.selectable, &b.game)
         );
     }
 }
@@ -250,7 +250,7 @@ fn admit(engine: &mut Engine, request: &str, direction: Direction) -> CommandRes
             request,
             &engine.branch().clone(),
             Command::AdmitIntention {
-                expected_revision: engine.revision(ActorId(1)).unwrap(),
+                expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
                 action: Action::Move { direction },
             },
         )
@@ -563,11 +563,11 @@ fn entry_population_is_born_before_movement_recovery_advances_the_scheduler() {
     );
     assert_eq!(engine.game.next_actor(), Some(spawned[0]));
     assert!(
-        engine.revision(ActorId(spawned[0].0)).is_ok(),
+        engine.causal_boundary(ActorId(spawned[0].0)).is_ok(),
         "new actor registration cannot depend on a nonempty region transition"
     );
     assert!(engine.actors().contains(&ActorId(spawned[0].0)));
-    assert!(engine.revisions.valid_for(&engine.game));
+    // Loaded actor membership is owned solely by Game; no duplicate revision map remains.
     assert!(engine.state(ActorId(spawned[0].0)).is_ok());
     assert!(
         engine.game.known_cells(spawned[0]).next().is_some(),
@@ -738,7 +738,7 @@ fn selected_starter_persists(selected: u64) {
                 "wait",
                 &engine.branch().clone(),
                 Command::AdmitIntention {
-                    expected_revision: engine.revision(owner).unwrap(),
+                    expected_boundary: engine.causal_boundary(owner).unwrap(),
                     action: Action::Wait,
                 },
             )
@@ -812,7 +812,8 @@ fn wizard(engine: &mut Engine, operation: WizardOperation) -> CommandResult {
             &uuid::Uuid::new_v4().to_string(),
             &engine.branch().clone(),
             Command::Wizard {
-                expected_revision: engine.revision(ActorId(1)).unwrap(),
+                display_basis: None,
+                expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
                 operation,
             },
         )
@@ -968,7 +969,7 @@ fn expired_abandoned_activation(scenario: Scenario) -> (Engine, usize) {
                 &uuid::Uuid::new_v4().to_string(),
                 &engine.branch().clone(),
                 Command::Act {
-                    expected_revision: engine.revision(ActorId(1)).unwrap(),
+                    expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
                     action: Action::Wait,
                 },
             )
@@ -1340,7 +1341,7 @@ fn moved_population_items_preserve_origin_receipts_across_detach_and_recovery() 
             "take-origin-item",
             &engine.branch().clone(),
             Command::Act {
-                expected_revision: engine.revision(ActorId(1)).unwrap(),
+                expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
                 action: Action::Take {
                     item: id.0,
                     quantity: None,
@@ -1447,7 +1448,7 @@ fn cancelling_preparation_with_a_stair_step_commits_entry_as_a_gameplay_boundary
             "windup",
             &engine.branch().clone(),
             Command::AdmitIntention {
-                expected_revision: engine.revision(ActorId(1)).unwrap(),
+                expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
                 action: Action::UseAbility {
                     id: tor_simulation::content_ids::AbilityId::new("activation_windup").unwrap(),
                     invocation: crate::actions::AbilityInvocation {
@@ -1472,7 +1473,7 @@ fn cancelling_preparation_with_a_stair_step_commits_entry_as_a_gameplay_boundary
             "escape-down",
             &engine.branch().clone(),
             Command::CancelIntention {
-                expected_revision: engine.revision(ActorId(1)).unwrap(),
+                expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
                 admission: admitted.entry.id,
                 step: Some(Direction::Down),
             },
@@ -1485,7 +1486,7 @@ fn cancelling_preparation_with_a_stair_step_commits_entry_as_a_gameplay_boundary
         serde_json::to_value(&engine.archive.records.last().unwrap().activations[0]).unwrap(),
         floor(&engine, 2)
     );
-    assert!(engine.revisions.valid_for(&engine.game));
+    // Loaded actor membership is owned solely by Game; no duplicate revision map remains.
     assert!(!engine.game.population_entry_pending());
     restored_both_ways(&engine);
 }

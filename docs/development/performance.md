@@ -27,6 +27,7 @@ for specific workloads, not fresh verification of the current commit. The
 | Does checkpointing preserve a responsive native client? | [Explored-save acceptance](#explored-save-native-acceptance) |
 | Are stream application/rendering or diagnostics slow? | [Client workloads](#client-workloads), [correlation](#opt-in-timing-correlation) |
 | Does region-count growth add local command work? | [Streaming evidence and recipe](#streaming-evidence) |
+| Can 100 active AI across 20 regions coexist with 5Hz headless movement? | [Active-mob profiling and real-client acceptance](#active-mob-workload) |
 | Are content or wire projections costly? | [Places](#durable-place-workload-v1), [packages](#scenario-package-workload), [combat](#combat-workload-v1), [decoder](#wire-decoder-diagnostic), [collection edits](#individual-observation-collection-diagnostic) |
 | How does sight range affect geometry work? | [Lighting/range diagnostics](#lighting-and-range-diagnostics) |
 
@@ -477,11 +478,11 @@ Both compared revisions must contain the same versioned workload and validator;
 a missing baseline producer is not permission to compare different workloads.
 
 A case is either a `latency_bench` case name (`--cycles` sets its cycle count,
-default five) or `WORKLOAD[:GROUP]` for `combat`, `physics`, `items`, `client`,
-`places`, or `models`. The `latency_bench` region streaming cases, `stream-r16-memory`,
+default five) or `WORKLOAD[:GROUP]` for `active-mobs`, `combat`, `physics`, `items`,
+`client`, `places`, or `models`. The `latency_bench` region streaming cases, `stream-r16-memory`,
 `stream-r16-durable`, `stream-r256-memory` and `stream-r256-durable` (workload
 `streaming-v1`), run only when selected by name; see
-[region streaming performance](../architecture/streaming.md#performance). Those workloads always run their complete matrix, because their
+[region streaming performance](../architecture/streaming.md#performance). Matrix workloads always run their complete matrix, because their
 validators require it; the group only selects what's displayed. Arguments after
 `--` go to every benchmark invocation, and validator flags such as `--phase-d`
 or `--narration` are passed through to the validators.
@@ -1096,6 +1097,166 @@ with unchanged small/large `latency_bench --case` comparisons.
 See [items and character knowledge](../reference/items.md) for quantity-aware pickup/drop,
 stack identity, randomized appearances, disclosed protocol fields, scenario
 authoring, compatibility, and the versioned item profiling workload.
+
+## Active-mob workload
+
+`active-mobs-v1` is a separate all-active stress workload, not a replacement for
+ordinary latency cases. Its seed is 42: 20 portal-connected regions, five hostile
+AI per region (100 total), and one neutral controlled actor. Ordinary authored
+high but finite Health sustains combat. Each AI chamber contains a navigation
+obstacle; a full-height wall separates it from the player's unobstructed corridor.
+The player moves east through the portal ring. This avoids confusing blocked
+movement with server responsiveness; it does **not** test AI pursuit through
+portals or combat against the controlled actor. Streaming remains enabled with
+active/load radii 20, so the population is not parked in unloaded regions.
+
+### Direct Engine profiling
+
+Build before measuring, with no competing builds or tests. These POSIX examples
+use the default target directory; resolve Cargo's actual emitted paths when
+using `CARGO_TARGET_DIR`, and include `.exe` on Windows. Retain build commands,
+exit status, source/toolchain identity and executable hashes with the raw output.
+
+```sh
+: "${OUTPUT_DIR:?Set OUTPUT_DIR to an untracked evidence directory}"
+mkdir -p "$OUTPUT_DIR"
+cargo build --release --locked -p tor-server --example active_mob_bench
+target/release/examples/active_mob_bench --steps 64 > "$OUTPUT_DIR/direct.jsonl"
+python scripts/active_mob_performance_report.py "$OUTPUT_DIR/direct.jsonl" > "$OUTPUT_DIR/direct-summary.json"
+```
+
+The default is 64 player moves; `--smoke` selects 16. `--steps 8` is the smallest
+complete producer cohort. Shorter positive step counts are diagnostic probes,
+which the report validator rejects as acceptance evidence. The validator requires
+one complete report, the exact actor/region inventory, repeated AI execution over
+multiple ticks, at least one move or combat start by every AI, movement and combat
+in every region, actual pathfinding and resolved-strike work, exact completed
+player moves and portal crossings, a durable save barrier, and strict restart
+equality. Region counters must reconcile with their five physically isolated AI.
+A loaded population count or wait-only journal is not an activity proof.
+
+The direct report separates player and AI command samples, player cycles,
+projection and serialization, with p50/p95/p99/max in its summary. An AI command
+includes the real decision and engine transition. A player cycle includes the
+player move, AI work until the next player turn, and diagnostic assertions; it is
+not transport latency or a fixed simulation-tick duration. Engine phase totals
+cover capture, simulation, navigation, perception, revision comparison, journal
+serialization and publication/storage paths. Work counts identify scene,
+projection, route-search and combat costs. Pending journal bytes, explicit flush,
+save size and restart/recovery are separate storage evidence: an asynchronous
+command acknowledgement is not a durable save. StateView JSON serialization is
+not a complete transport envelope. Package construction and initial activation
+are outside timed commands; traversed regions are already active.
+
+Use the normal comparison workflow when both revisions contain the unchanged
+producer and validator:
+
+```sh
+python scripts/perf_compare.py BASE --case active-mobs --rounds 4 --order balanced
+```
+
+The default group is `r20-ai100-s64`. An explicit `-- --steps 8` selects the same
+smaller cohort on both sides; a `:GROUP` suffix only filters displayed results.
+Do not pass workload-specific step arguments to unrelated cases in the same
+invocation. Preserve the existing separate-target comparison policy and pair
+this stress diagnosis with relevant ordinary action cases; a direct-engine
+improvement alone does not prove real-client responsiveness.
+
+### Stock-server/headless acceptance
+
+Build the ordinary applications explicitly as well as the example:
+
+```sh
+cargo build --release --locked -p tor-server -p tor-client-headless --bins
+python scripts/active_mob_driver.py --bin-dir target/release \
+  --benchmark target/release/examples/active_mob_bench \
+  --build-manifest "$OUTPUT_DIR/build-manifest.json" \
+  --output "$OUTPUT_DIR/headless-01" --duration 60 --rate 5 --burst 20
+```
+
+Create the manifest from the qualified build receipt, not executable filenames
+or a later unverified checkout. It contains `source_commit` and `source_tree`
+(40-hex Git identities), boolean `dirty`, `profile: "release"`, nonempty
+`toolchain`, and `binaries`: SHA-256 values keyed by `tor-server`,
+`tor-client-headless` and `active_mob_bench`. Each binary value may instead be an
+object containing `sha256`. Keep frozen-input/build provenance alongside it;
+the driver verifies those exact executable bytes but cannot reconstruct their
+build history. The driver performs no builds and requires a new output directory.
+
+The driver bootstraps a fresh pinned save, retains the generated package under a
+different path, then launches stock `tor-server` and `tor-client-headless` without
+the original package path. It sends 300 east moves on fixed-origin 5Hz deadlines,
+never resetting the schedule after a slow response. Each sample requires a
+resolved action, the exact previously disclosed destination cell, a newer
+revision, and both authoritative actor readiness and admission for the next move.
+Command admission, execution start, terminal outcome, resulting context and next
+ready each have separate request-to-response p50/p95/p99/max. Engine action costs
+and cooldown/scheduling rules are not replaced with wall-clock speed settings.
+
+Report actual completed Hz, deadline lateness, late-minus-early lateness and
+maximum unsent driver deadline slots. The latter is **not** server mailbox depth;
+the client drives sequentially rather than accumulating unlimited admitted input.
+After the paced phase, explicit save and private closed-save inspection prove the
+100-AI/20-region activity and exact portal count before any burst can add activity.
+A source-free process restart must preserve disclosed state, branch and history.
+Twenty unpaced moves then measure catch-up capacity separately, followed by a
+second save/inspection. The headroom ratio is burst completed Hz divided by the
+commanded rate. The private inspector does not expand normal client disclosure.
+
+The provisional stress target requires a complete non-smoke release run lasting
+at least 60 seconds at at least 5Hz, all moves finished within the scheduled
+window, next-ready p95 below 100ms and p99 below 200ms, late-minus-early median
+lateness below 100ms, zero unsent whole deadline slots, and burst headroom above
+1. These are **additional stress metrics**, not a relaxation of ordinary locally
+saved action targets (p95 below 8ms, maximum below 33ms). Inspect
+`provisional_load_target_met`: a completed run can exit successfully yet miss the
+target. The full paced phase retains its duration-plus-30s failure cap and every
+individual protocol-wait deadline. Failures retain an incomplete prefix and the
+original error plus cleanup outcomes in `failure.json`; they are not a completed
+cohort. `result.json` is written only after successful owned-process cleanup.
+
+`--smoke --duration 3.2 --rate 5 --burst 4` exercises 16 paced and four burst moves
+for correctness. Only explicit smoke permits qualified debug binaries. It keeps
+the offered schedule as a diagnostic but uses a finite aggregate liveness cap of
+`duration + 30s * planned_moves`, without changing individual response deadlines.
+Smoke always reports `provisional_load_target_met: false`; neither debug smoke
+nor a short release run satisfies the sustained-load target.
+
+### Evidence boundaries
+
+Keep the same release profile, source/workload versions, seed, hardware/storage,
+duration and diagnostics for before/after comparisons. The driver retains machine
+and manifest provenance, raw samples, startup/restart intervals and per-process
+RSS samples. RSS is best-effort Linux resident memory, not allocation/live-heap
+accounting or proof of a leak; other hosts report unavailable values. Endpoint
+RSS growth over one short run is not a long-duration memory bound. The headless
+client uses `--omit-memory --compact-background` and deferred diagnostic logs;
+these reduce diagnostic output, not its retained gameplay state. Do not compare
+against a differently instrumented capture without disclosing the difference.
+
+Cold package/activation timing comes from bootstrap; headless startup/restart
+includes process and connection readiness. Warm portal traversal does not prove
+cold region activation latency. Direct phase breakdowns are matching-workload
+diagnostics, not per-request attribution within the stock-server process.
+`state_sha256` and direct replay equality cover all 101 actor disclosures under
+the strict production reader, not an independent complete private-state oracle.
+For offline comparisons, `active_mob_bench --inspect CLOSED_SAVE` also emits a
+semantic committed-execution trace hash. `--trace-executions N` selects an exact
+positive prefix while still auditing the tail; unsupported execution shapes,
+failed intentions or an unavailable prefix reject. Compare equal execution counts
+and disclose the selection; equal prefix hashes do not qualify an incomplete
+load run. Preserve replay evidence separately from latency acceptance.
+
+### Bounded sustained activity proof
+
+Offline save inspection additionally verifies player movement at ticks 0, 100, …
+and all 100 AI beginning meaningful movement/combat at tick 0. No gap between
+meaningful actions, or from the final meaningful action to the last player move,
+may exceed 200 ticks (two player turns; diagonal movement costs 142). Waits do
+not satisfy this proof. This audits existing journal records without changing AI
+pacing or timed execution. The direct report remains an aggregate activity/replay
+witness; it does not independently prove the absence of intermediate stalls.
+
 
 ## Combat workload v1
 

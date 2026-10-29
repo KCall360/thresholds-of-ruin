@@ -704,6 +704,11 @@ impl Game {
         else {
             return Ok(());
         };
+        crate::diagnostics::preparation_residency_evaluation();
+        if self.preparation_has_no_supplemental_regions(actor) {
+            crate::diagnostics::preparation_residency_proof_hit();
+            return Ok(());
+        }
         let boundary = PreparationRegionBoundary {
             actor,
             origin: preparation.origin,

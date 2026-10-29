@@ -1096,7 +1096,9 @@ fn compiled_species_fixture(hit_dice: usize) -> Game {
 #[test]
 fn compiled_species_observation_and_ai_queries_do_not_read_raw_species() {
     for count in [2, 256] {
-        let game = compiled_species_fixture(count);
+        let mut game = compiled_species_fixture(count);
+        // Exercise both the first cold decision and subsequent warm queries.
+        game.lifecycle.scenes = Default::default();
         let behavior = game.actors[&ActorId(2)].behavior.clone();
         let before = crate::diagnostics::work_counts();
         for _ in 0..4 {
@@ -1105,7 +1107,7 @@ fn compiled_species_observation_and_ai_queries_do_not_read_raw_species() {
         }
         let after = crate::diagnostics::work_counts();
         assert!(after.observations > before.observations);
-        assert!(after.decision_scenes > before.decision_scenes);
+        assert_eq!(after.decision_scenes - before.decision_scenes, 1);
         assert_eq!(game.actors[&ActorId(2)].behavior, behavior);
         assert_eq!(after.raw_species_lookups, before.raw_species_lookups);
         assert_eq!(after.raw_hit_die_visits, before.raw_hit_die_visits);

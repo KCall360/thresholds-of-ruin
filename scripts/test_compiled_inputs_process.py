@@ -42,7 +42,7 @@ class CompiledInputProcesses(ProcessTestCase):
         shutil.rmtree(package)
         server = self.server(scenario=exported, seed=None)
         player, restored = self.client()
-        self.assertEqual(restored["state"], initial["state"])
+        self.assertDisclosedStateEqual(restored["state"], initial["state"])
         for _ in range(76):
             moved = self.act(player, {"type": "move", "direction": "east"})
             self.assertIsNone(moved.get("error"), moved.get("error"))
@@ -54,7 +54,7 @@ class CompiledInputProcesses(ProcessTestCase):
         server.stop()
         self.server(scenario=exported, seed=None)
         _, resumed = self.client()
-        self.assertEqual(resumed["state"], expected)
+        self.assertDisclosedStateEqual(resumed["state"], expected)
 
     def test_live_saved_game_continues_after_authoring_sources_are_removed(self):
         package = self.package()
@@ -80,7 +80,7 @@ class CompiledInputProcesses(ProcessTestCase):
         server.stop()
         self.server(seed=None)
         _, resumed = self.client()
-        self.assertEqual(resumed["state"], expected)
+        self.assertDisclosedStateEqual(resumed["state"], expected)
 
     def test_metadata_over_save_capacity_is_rejected_before_publication(self):
         package = self.directory / "oversized"

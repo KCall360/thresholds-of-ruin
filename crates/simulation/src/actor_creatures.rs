@@ -243,6 +243,13 @@ impl CombatState {
             crate::creatures::CreatureStateError,
         >,
     ) -> Result<RebuildOutcome, crate::creatures::CreatureStateError> {
+        let required = self
+            .creature
+            .growth_retry_required_after_fold(&before.creature)?;
+        crate::diagnostics::growth_retry_decision(required, self.creature.is_shared());
+        if !required {
+            return Ok(RebuildOutcome::default());
+        }
         self.creature
             .retry_growth_after_fold(&before.creature, context)
     }
@@ -544,6 +551,74 @@ mod preparation_cost_tests {
             .unwrap();
         game.execute_next_intention().unwrap().outcome.unwrap();
         (game, actor, target, intention)
+    }
+
+    #[test]
+    fn no_op_growth_retry_retains_shared_payload_unlike_mutating_entry() {
+        let before = CombatState::from_creature(
+            CreatureIdentity {
+                name: "subject".into(),
+                faction: "neutral".into(),
+            },
+            CreatureState::new(crate::test_creatures::build(
+                crate::test_creatures::species(),
+            ))
+            .unwrap(),
+        );
+        let mut borrowed = before.clone();
+        let mut mutating = before.clone();
+        let expected = mutating
+            .creature
+            .retry_growth_after_fold(&before.creature, |_| panic!("no context required"))
+            .unwrap();
+        let counts = crate::diagnostics::work_counts();
+        let actual = borrowed
+            .retry_growth_after_fold(&before, |_| panic!("no context required"))
+            .unwrap();
+        let after = crate::diagnostics::work_counts();
+        assert_eq!(
+            after.growth_retry_decisions - counts.growth_retry_decisions,
+            1
+        );
+        assert_eq!(
+            after.growth_retry_required - counts.growth_retry_required,
+            0
+        );
+        assert_eq!(
+            after.growth_retry_shared_noops - counts.growth_retry_shared_noops,
+            1
+        );
+        assert_eq!(actual, expected);
+        assert_eq!(borrowed, mutating);
+        assert!(borrowed.creature.shares_storage(&before.creature));
+        assert!(!mutating.creature.shares_storage(&before.creature));
+
+        // The old entry has already detached this allocation. A no-op on a
+        // uniquely owned payload is not counted as an avoided payload copy.
+        assert!(!mutating.creature.is_shared());
+        let identity = mutating.creature.weak_identity();
+        let counts = crate::diagnostics::work_counts();
+        assert_eq!(
+            mutating
+                .retry_growth_after_fold(&before, |_| panic!("no context required"))
+                .unwrap(),
+            expected
+        );
+        let after = crate::diagnostics::work_counts();
+        assert_eq!(
+            after.growth_retry_decisions - counts.growth_retry_decisions,
+            1
+        );
+        assert_eq!(
+            after.growth_retry_required - counts.growth_retry_required,
+            0
+        );
+        assert_eq!(
+            after.growth_retry_shared_noops - counts.growth_retry_shared_noops,
+            0
+        );
+        assert!(identity.matches(&mutating.creature));
+        assert_eq!(mutating, before);
     }
 
     #[test]

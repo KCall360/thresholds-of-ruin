@@ -50,7 +50,7 @@ class StatusConditionHelpers:
         before = self.snapshot(client)
         result = self.request(client, {"type": "command", "context": before["input_context"],
             "branch": before["branch"], "command": {
-                "expected_revision": before["state"]["revision"], **command}})
+                **({"expected_revision": before["state"]["revision"]} if command["type"] not in ("act", "resume_intention", "cancel_intention") else {}), **command}})
         return before, result
 
     def assert_atomic_denial(self, client, command):
@@ -299,6 +299,8 @@ class StatusConditionProcesses(StatusConditionHelpers, ProcessTestCase):
         debt = int(combat(paused)["sequence"]["cancel_recovery_remaining"])
         cancelled = self.command(player, {"type": "cancel_intention"})
         self.assertIsNone(cancelled["error"])
+        cancelled = self.request(player, {"type": "observe"})
+        self.assertIsNone(cancelled["error"])
         self.assertIsNone(combat(cancelled)["preparation_remaining"])
         self.assertEqual(underfoot(cancelled["state"])["key"], location)
         self.assertEqual(int(combat(cancelled)["recovery_remaining"]), debt)
@@ -341,6 +343,7 @@ class StatusConditionProcesses(StatusConditionHelpers, ProcessTestCase):
         shown = next(row for row in protected_report["conditions"] if row["condition"]["id"] == STILLNESS)
         self.assertEqual(shown, {"condition": {"id": STILLNESS, "name": "Crystal Pause"},
                                 "phase": "protection", "source": "2", "remaining_ticks": "400"})
+        self.assertNotIn("Server error", text.command("sync"))
         description = text.command("wizard creature inspect 1")
         self.assertIn("Protection against Crystal Pause from actor 2: 400 active ticks remaining", description)
         self.assertEqual(checkpoint(self, player), protected, "privileged inspection remains read-only")
@@ -592,6 +595,8 @@ class NativeStatusConditionProcesses(StatusConditionHelpers, ProcessTestCase):
         closed = self.native_press(window, key, "Escape", "escape")
         self.assertFalse(closed["screen"]["stats"])
         _, protected = self.expire(player, peer, saved)
+        self.ascii_frame(window, lambda frame: not frame["busy"]
+                         and int(frame["state"]["observation"]["tick"]) == protected["tick"])
         description = inspect()
         self.assertIn("Protection against Crystal Pause from actor 2: 400 active ticks remaining", description)
         self.assertEqual(checkpoint(self, player), protected)

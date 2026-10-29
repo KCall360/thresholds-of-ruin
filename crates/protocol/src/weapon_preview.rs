@@ -120,8 +120,7 @@ mod tests {
         }
     }
     fn context() -> ReplyContext {
-        serde_json::from_value(json!({
-            "input":{"stream":{"stream":"attachment","epoch":"0"},"readiness_revision":"0"},
+        serde_json::from_value(json!({"snapshot":"fixture", "input":{"stream":{"stream":"attachment","epoch":"0"},"readiness_revision":"0"},
             "actor":"1","branch":"main","cursor":{"sequence":"0","tick":"0"},"revision":"0"
         }))
         .unwrap()

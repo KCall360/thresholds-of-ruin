@@ -451,8 +451,13 @@ Objects:
   cells remembered, and dark areas unexplored. The exploration mini-map remains.
   Places, History and Write note tabs share this screen; Page Up / Down and the
   mouse wheel scroll the journal. Narrow windows stack the two panes.
+  Click a known tile or use Up/Down to select a destination; Enter or the
+  Travel button submits its exact disclosed key. Selection is local, and stale
+  views or unavailable action readiness cannot submit a journey. Closed doors,
+  known traps, occupied tiles and other levels are excluded. The server chooses
+  the route and interruption policy.
 - F2 shows the latest retained history, oldest first, beside the map.
-- F4 writes a note on the current state. It starts private; Tab makes it
+- F4 opens a note anchored to the current issued snapshot. It starts private; Tab makes it
   visible to everyone who observes the actor. Enter saves it. F4 also opens
   note editing from Places or History. M stays part of a note or rename draft.
 - F5 lists the places the character knows and where each name came from. A

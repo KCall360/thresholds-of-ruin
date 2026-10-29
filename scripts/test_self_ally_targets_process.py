@@ -52,7 +52,7 @@ class SelfAllyTargetProcesses(ProcessTestCase):
                                 and entry["content"]["action"].get("id") == "mend"
                                 for entry in current["history"]))
         spectator, watched = self.client(SPECTATOR_TOKEN)
-        self.assertEqual(watched["state"], current["state"])
+        self.assertDisclosedStateEqual(watched["state"], current["state"])
         denied = self.act(spectator, {"type": "use_ability", "id": "mend", "invocation": {"aim": {"kind": "actor_target", "target": own}, "weapon": {"kind": "default"}}, "supplies": {"kind": "carried"}})
         self.assertEqual(denied["error"], "Spectator access is read-only")
         saved = self.request(player, {"type": "save"})
@@ -61,7 +61,7 @@ class SelfAllyTargetProcesses(ProcessTestCase):
         shutil.rmtree(package)
         self.server(scenario=portable, seed=None)
         _, restored = self.client()
-        self.assertEqual(restored["state"], saved["state"])
+        self.assertDisclosedStateEqual(restored["state"], saved["state"])
 
     def test_both_text_modes_select_self_and_ally_but_refuse_neutral(self):
         self.server(scenario=self_ally_package(self))
@@ -79,7 +79,7 @@ class SelfAllyTargetProcesses(ProcessTestCase):
             self.assertFalse(current["state"]["wizard_game"])
         before = self.request(observer, {"type": "snapshot"})
         self.assertIn("No matching actor", text.command("mend neutral stranger"))
-        self.assertEqual(self.request(observer, {"type": "snapshot"})["state"], before["state"])
+        self.assertDisclosedStateEqual(self.request(observer, {"type": "snapshot"})["state"], before["state"])
         text.command("release"); text.stop()
         adventure, _ = self.adventure()
         for command in ["mend me", "mend practice target"]:
@@ -94,7 +94,7 @@ class SelfAllyTargetProcesses(ProcessTestCase):
                 self.frame(observer, completed_after(tick))
         before = self.request(observer, {"type": "snapshot"})
         self.assertIn("not a valid visible target", self.say(adventure, "mend neutral stranger"))
-        self.assertEqual(self.request(observer, {"type": "snapshot"})["state"], before["state"])
+        self.assertDisclosedStateEqual(self.request(observer, {"type": "snapshot"})["state"], before["state"])
         self.assertEqual(observation(initial)["tick"], "0")
 
 
@@ -128,14 +128,14 @@ class SelfAllyTargetNativeProcesses(ProcessTestCase):
         completed = accepted if completed_after(tick)(accepted) else self.ascii_frame(window, completed_after(tick))
         self.assertTrue(completed["window_open"])
         self.assertFalse(completed["state"]["wizard_game"])
-        self.assertEqual(completed["state"], self.request(observer, {"type": "snapshot"})["state"])
+        self.assertDisclosedStateEqual(completed["state"], self.request(observer, {"type": "snapshot"})["state"])
         tick = int(observation(completed)["tick"])
         press("z", "abilities"); press("Return", "enter"); press("Up", "up")
         accepted = press("Return", "enter")
         completed = accepted if completed_after(tick)(accepted) else self.ascii_frame(window, completed_after(tick))
         self.assertFalse(completed["state"]["wizard_game"])
         authoritative = self.request(observer, {"type": "snapshot"})
-        self.assertEqual(completed["state"], authoritative["state"])
+        self.assertDisclosedStateEqual(completed["state"], authoritative["state"])
         self.assertTrue(any(entry["content"].get("action", {}).get("id") == "mend"
                             and entry["content"]["action"].get("invocation") == {"aim": {"kind": "actor_target", "target": observation(initial)["self_target"]}, "weapon": {"kind": "default"}}
                             for entry in authoritative["history"]))

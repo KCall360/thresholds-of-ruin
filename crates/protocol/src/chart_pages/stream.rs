@@ -25,7 +25,7 @@ impl Header {
         Self {
             context: page.context.clone(),
             branch: page.branch.clone(),
-            base: page.base,
+            base: page.base.clone(),
             chart: page.chart.clone(),
             kind: page.kind,
             mode: page.mode,

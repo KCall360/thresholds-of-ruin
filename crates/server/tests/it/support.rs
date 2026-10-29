@@ -51,11 +51,57 @@ pub fn decode_command(
     actor: ActorId,
     command: &tor_protocol::Command,
 ) -> Result<Command, Failure> {
-    engine.resolve_command(
-        actor,
-        engine.branch(),
-        tor_server::wire_adapter::decode_command(command)?,
-    )
+    let decoded = tor_server::wire_adapter::decode_command(command)?;
+    // This helper is an explicit trusted backend driver, not a simulated
+    // attachment. Parse developer syntax, then bind private causal freshness.
+    // Actual display-generation authority is exercised by Service tests.
+    if let tor_server::wire_adapter::DecodedCommand::Display { operation, .. } = decoded.clone() {
+        use tor_server::wire_adapter::DisplayCommand;
+        let expected_boundary = engine.causal_boundary(actor)?;
+        return Ok(match operation {
+            DisplayCommand::Wizard { operation } => Command::Wizard {
+                display_basis: None,
+                expected_boundary,
+                operation,
+            },
+            DisplayCommand::RenamePlace { key, name } => Command::RenamePlace {
+                display_basis: None,
+                expected_boundary,
+                key,
+                name,
+            },
+            DisplayCommand::Travel { destination } => Command::Travel {
+                display_basis: None,
+                expected_boundary,
+                destination,
+            },
+        });
+    }
+    if let tor_server::wire_adapter::DecodedCommand::Backend(mut command) = decoded.clone() {
+        match &mut command {
+            Command::Wizard {
+                display_basis,
+                expected_boundary,
+                ..
+            }
+            | Command::RenamePlace {
+                display_basis,
+                expected_boundary,
+                ..
+            }
+            | Command::Travel {
+                display_basis,
+                expected_boundary,
+                ..
+            } => {
+                *display_basis = None;
+                *expected_boundary = engine.causal_boundary(actor)?;
+                return Ok(command);
+            }
+            _ => {}
+        }
+    }
+    engine.resolve_command(actor, engine.branch(), decoded)
 }
 
 /// Drive the existing immediate simulation test path using a disclosed target.
@@ -74,12 +120,12 @@ pub fn act_as(
     actor: ActorId,
     action: Action,
 ) -> Result<CommandResult, Failure> {
-    let expected_revision = engine.revision(actor)?;
+    let expected_revision = engine.causal_boundary(actor)?;
     submit(
         engine,
         actor,
         Command::Act {
-            expected_revision,
+            expected_boundary: expected_revision,
             action,
         },
     )
@@ -101,7 +147,7 @@ pub fn wizard(
         engine,
         actor,
         &tor_protocol::Command::Wizard {
-            expected_revision: engine.revision(actor)?,
+            expected_revision: 0,
             operation: operation.into(),
         },
     )?;

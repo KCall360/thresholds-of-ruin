@@ -33,7 +33,7 @@ class PairedStairsProcess(ProcessTestCase):
         # Wizard acknowledgement is on another connection. Wait for the player
         # to apply the replacement body and its new command context.
         self.frame(player, lambda frame: frame["synchronized"] and frame.get("state") is not None
-                   and frame["state"]["revision"] == reshaped["state"]["revision"])
+                   and frame["state"]["observation"] == reshaped["state"]["observation"])
         arrived = self.act(player, {"type": "move", "direction": "down"})
         self.assertIsNone(arrived["error"])
         self.assertEqual(underfoot(arrived["state"]["observation"])["key"], landing)
@@ -47,7 +47,7 @@ class PairedStairsProcess(ProcessTestCase):
         server.stop()
         self.server(wizard=True)
         player, resumed = self.client()
-        self.assertEqual(resumed["state"], arrived["state"])
+        self.assertDisclosedStateEqual(resumed["state"], arrived["state"])
         blocked = self.act(player, {"type": "move", "direction": "east"})["state"]["observation"]
         self.assertEqual(underfoot(blocked)["key"], landing)
         self.assertEqual(blocked["tick"], "100")
@@ -73,14 +73,14 @@ class PairedStairsProcess(ProcessTestCase):
         self.assertTrue(any(c["stairs_up"] for c in observation["visible_cells"]))
         self.assertTrue(all("region" not in c["position"] for c in observation["visible_cells"]))
         watched = self.request(observer, {"type": "snapshot"})
-        self.assertEqual(watched["state"], arrived["state"])
+        self.assertDisclosedStateEqual(watched["state"], arrived["state"])
         self.flush_save()
         player.stop()
         observer.stop()
         server.stop()
         self.server()
         player, resumed = self.client()
-        self.assertEqual(resumed["state"], arrived["state"])
+        self.assertDisclosedStateEqual(resumed["state"], arrived["state"])
         returned = self.act(player, {"type": "move", "direction": "up"})
         self.assertIsNone(returned["error"])
         self.assertEqual(underfoot(returned["state"]["observation"])["key"], start)

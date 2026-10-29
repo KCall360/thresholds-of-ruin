@@ -1,6 +1,7 @@
 //! Authoritative items and derived region-local location/owner indexes.
 //! No mutable map reference escapes this store. Indexes are rebuilt from the
 //! authoritative entries on restore, and never form part of a save schema.
+use crate::mutation::{MutationChange, MutationCursor, MutationLedger};
 use crate::navigation_map::RegionMap;
 use crate::{ActorId, Item, ItemId, ItemLocation};
 use std::cmp::Reverse;
@@ -59,12 +60,43 @@ impl Locations {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug)]
+pub(crate) struct ItemMutation {
+    pub(crate) before: Option<ItemLocation>,
+    pub(crate) after: Option<ItemLocation>,
+}
+impl MutationChange for ItemMutation {
+    fn append(&mut self, later: &Self) {
+        self.after = later.after;
+    }
+}
+
+#[derive(Clone, Default)]
 pub(crate) struct ItemStore {
     entries: Shared<BTreeMap<ItemId, Item>>,
     locations: Locations,
     claimed: Shared<BTreeSet<ItemId>>,
+    mutations: MutationLedger<ItemId, ItemMutation>,
 }
+
+// Mutation history is derived candidate-local evidence, not authoritative state.
+impl std::fmt::Debug for ItemStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ItemStore")
+            .field("entries", &self.entries)
+            .field("locations", &self.locations)
+            .field("claimed", &self.claimed)
+            .finish()
+    }
+}
+impl PartialEq for ItemStore {
+    fn eq(&self, other: &Self) -> bool {
+        self.entries == other.entries
+            && self.locations == other.locations
+            && self.claimed == other.claimed
+    }
+}
+impl Eq for ItemStore {}
 
 impl Deref for ItemStore {
     type Target = BTreeMap<ItemId, Item>;
@@ -74,10 +106,36 @@ impl Deref for ItemStore {
 }
 
 impl ItemStore {
+    pub(crate) fn mutation_cursor(&self) -> MutationCursor<ItemId, ItemMutation> {
+        self.mutations.cursor()
+    }
+    #[cfg(test)]
+    pub(crate) fn mutation_stamp(&self, id: &ItemId) -> Option<crate::mutation::MutationStamp> {
+        self.mutations.stamp(id)
+    }
+    pub(crate) fn changes_since(
+        &self,
+        cursor: &MutationCursor<ItemId, ItemMutation>,
+    ) -> Option<BTreeMap<ItemId, ItemMutation>> {
+        self.mutations.changes_since(cursor)
+    }
+    pub(crate) fn certifies_since(&self, cursor: &MutationCursor<ItemId, ItemMutation>) -> bool {
+        self.mutations.certifies_since(cursor)
+    }
+
     pub fn from_entries(entries: BTreeMap<ItemId, Item>) -> Self {
+        let mut mutations = MutationLedger::default();
         let mut locations = Locations::default();
         let mut claimed = BTreeSet::new();
         for (&id, item) in &entries {
+            mutations.publish(
+                id,
+                ItemMutation {
+                    before: None,
+                    after: Some(item.location),
+                },
+                true,
+            );
             locations.insert(item.location, id);
             if !item.holds.is_empty() {
                 claimed.insert(id);
@@ -87,6 +145,7 @@ impl ItemStore {
             entries: Shared::new(entries),
             locations,
             claimed: Shared::new(claimed),
+            mutations,
         }
     }
 
@@ -125,7 +184,15 @@ impl ItemStore {
     ) -> impl Iterator<Item = (ItemId, &'a Item)> + 'a {
         let mut buckets: Vec<_> = visible
             .iter()
-            .filter_map(|&at| self.locations.ids(ItemLocation::Ground(at)))
+            .take(if self.locations.ground.iter().next().is_none() {
+                0
+            } else {
+                visible.len()
+            })
+            .filter_map(|&at| {
+                crate::diagnostics::item_ground_probe();
+                self.locations.ids(ItemLocation::Ground(at))
+            })
             .chain(self.locations.ids(ItemLocation::Carried(actor)))
             .map(BTreeSet::iter)
             .collect();
@@ -159,6 +226,14 @@ impl ItemStore {
             self.locations.remove(previous.location, id);
         }
         self.locations.insert(at, id);
+        self.mutations.publish(
+            id,
+            ItemMutation {
+                before: previous.as_ref().map(|item| item.location),
+                after: Some(at),
+            },
+            true,
+        );
         previous
     }
 
@@ -166,6 +241,14 @@ impl ItemStore {
         let item = self.entries.remove(id)?;
         self.claimed.remove(id);
         self.locations.remove(item.location, *id);
+        self.mutations.publish(
+            *id,
+            ItemMutation {
+                before: Some(item.location),
+                after: None,
+            },
+            false,
+        );
         Some(item)
     }
 
@@ -178,6 +261,7 @@ impl ItemStore {
     pub fn edit<R>(&mut self, id: ItemId, edit: impl FnOnce(&mut Item) -> R) -> Option<R> {
         let item = self.entries.get_mut(&id)?;
         let guard = ItemEdit {
+            mutations: &mut self.mutations,
             id,
             before: item.location,
             item,
@@ -225,6 +309,7 @@ impl<'a> Iterator for PerceivedItems<'a> {
 
 // Maintain indexes on early return and unwinding as well as ordinary edits.
 struct ItemEdit<'a> {
+    mutations: &'a mut MutationLedger<ItemId, ItemMutation>,
     id: ItemId,
     before: ItemLocation,
     item: &'a mut Item,
@@ -233,6 +318,14 @@ struct ItemEdit<'a> {
 }
 impl Drop for ItemEdit<'_> {
     fn drop(&mut self) {
+        self.mutations.publish(
+            self.id,
+            ItemMutation {
+                before: Some(self.before),
+                after: Some(self.item.location),
+            },
+            true,
+        );
         if self.item.holds.is_empty() {
             self.claimed.remove(&self.id);
         } else {
@@ -272,6 +365,125 @@ mod tests {
             motion: MotionState::default(),
             orientation: 0,
         }
+    }
+
+    #[test]
+    fn empty_ground_index_skips_scene_probes_without_losing_carried_items() {
+        let owner = ActorId(1);
+        let mut store = ItemStore::default();
+        store.insert(ItemId(10), item(ItemLocation::Carried(owner)));
+        store.insert(ItemId(20), item(ItemLocation::Carried(ActorId(2))));
+        let visible: BTreeSet<_> = (0..8)
+            .map(|x| match ground(1, x) {
+                ItemLocation::Ground(at) => at,
+                _ => unreachable!(),
+            })
+            .collect();
+        let before = crate::diagnostics::work_counts().item_ground_probes;
+        let observed: Vec<_> = store.perceived(owner, &visible).map(|(id, _)| id).collect();
+        assert_eq!(observed, vec![ItemId(10)]);
+        assert_eq!(
+            crate::diagnostics::work_counts().item_ground_probes - before,
+            0,
+            "an empty ground index needs no visible-location lookups"
+        );
+        let retained = store.clone();
+        store.insert(ItemId(5), item(ground(1, 2)));
+        assert_eq!(
+            store
+                .perceived(owner, &visible)
+                .map(|(id, _)| id)
+                .collect::<Vec<_>>(),
+            vec![ItemId(5), ItemId(10)]
+        );
+        assert_eq!(
+            retained
+                .perceived(owner, &visible)
+                .map(|(id, _)| id)
+                .collect::<Vec<_>>(),
+            vec![ItemId(10)]
+        );
+        store.edit(ItemId(5), |item| item.location = ground(2, 2));
+        assert_eq!(
+            store
+                .perceived(owner, &visible)
+                .map(|(id, _)| id)
+                .collect::<Vec<_>>(),
+            vec![ItemId(10)]
+        );
+        store.remove(&ItemId(5));
+        let before = crate::diagnostics::work_counts().item_ground_probes;
+        assert_eq!(
+            store
+                .perceived(owner, &visible)
+                .map(|(id, _)| id)
+                .collect::<Vec<_>>(),
+            vec![ItemId(10)]
+        );
+        assert_eq!(crate::diagnostics::work_counts().item_ground_probes, before);
+    }
+
+    #[test]
+    fn mutation_publication_tracks_payload_touches_aba_and_candidate_rollback() {
+        let id = ItemId(10);
+        let mut store = ItemStore::from_entries(BTreeMap::from([(id, item(ground(1, 0)))]));
+        let original = store.clone();
+        let cursor = store.mutation_cursor();
+        let stamp = store.mutation_stamp(&id).expect("initial publication");
+        store.edit(id, |item| item.quantity = 2);
+        assert_ne!(store.mutation_stamp(&id), Some(stamp));
+        assert_eq!(original.mutation_stamp(&id), Some(stamp));
+        let changes = store.changes_since(&cursor).unwrap();
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[&id].before, Some(ground(1, 0)));
+        assert_eq!(changes[&id].after, Some(ground(1, 0)));
+        let middle = store.mutation_cursor();
+        let middle_stamp = store.mutation_stamp(&id);
+        store.edit(id, |item| item.location = ground(2, 0));
+        assert_ne!(store.mutation_stamp(&id), middle_stamp);
+        assert_eq!(
+            store.changes_since(&middle).unwrap()[&id].after,
+            Some(ground(2, 0))
+        );
+        store.edit(id, |item| {
+            item.location = ground(1, 0);
+            item.quantity = 1;
+        });
+        assert_eq!(store, original, "mutation identities are not authoritative");
+        assert_eq!(
+            store.changes_since(&cursor).unwrap()[&id].after,
+            Some(ground(1, 0))
+        );
+        assert!(store.certifies_since(&cursor));
+        assert!(!original.certifies_since(&middle));
+        let removed = store.remove(&id).unwrap();
+        assert_eq!(store.mutation_stamp(&id), None);
+        assert!(store.changes_since(&cursor).unwrap()[&id].after.is_none());
+        store.insert(id, removed);
+        assert_ne!(store.mutation_stamp(&id), Some(stamp));
+        assert_eq!(store, original);
+        let restored = ItemStore::from_entries((*store).clone());
+        assert_eq!(restored, store);
+        assert!(restored.mutation_stamp(&id).is_some());
+        assert!(restored.changes_since(&cursor).is_none());
+    }
+
+    #[test]
+    fn interrupted_edits_publish_before_the_caller_recovers() {
+        let id = ItemId(10);
+        let mut store = ItemStore::default();
+        store.insert(id, item(ground(1, 0)));
+        let cursor = store.mutation_cursor();
+        let stamp = store.mutation_stamp(&id);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            store.edit(id, |item| {
+                item.quantity += 1;
+                panic!("interrupted edit");
+            });
+        }));
+        assert!(result.is_err());
+        assert_ne!(store.mutation_stamp(&id), stamp);
+        assert_eq!(store.changes_since(&cursor).unwrap().len(), 1);
     }
 
     fn check(store: &ItemStore) {

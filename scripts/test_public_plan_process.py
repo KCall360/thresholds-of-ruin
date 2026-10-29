@@ -48,7 +48,10 @@ class PublicPlanProcesses(ProcessTestCase):
             return (body.get("type") == "intention"
                     and status.get("intention") == intention and status.get("phase") == "paused")
 
-        paused = self.frame(subject, paused_intention)
+        paused_status = self.frame(subject, paused_intention)
+        paused = self.request(subject, {"type": "observe"})
+        self.assertIsNone(paused["error"])
+        self.assertEqual(paused["intentions"], paused_status["intentions"])
         self.assertFalse(combat(paused)["preparation_active"])
         self.assertEqual(combat(paused)["preparation_remaining"],
                          combat(subject_before)["preparation_remaining"])

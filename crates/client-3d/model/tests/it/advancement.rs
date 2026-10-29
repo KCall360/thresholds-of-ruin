@@ -271,7 +271,7 @@ fn snapshots_redact_unowned_invalidated_and_unsynchronized_private_actions() {
     assert!(unsynchronized.page.is_none() && unsynchronized.confirmation.is_none());
     pages.invalidate();
     assert!(AdvancementView::new(&pages, &state, true).page.is_none());
-    let mut spectator = state.snapshot().clone();
+    let mut spectator = state.reset_snapshot().unwrap();
     spectator.has_control = false;
     let observed = &mut std::sync::Arc::make_mut(&mut spectator.state).observation;
     observed.combat.as_mut().unwrap().own_stats = None;
