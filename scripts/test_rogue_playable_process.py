@@ -920,7 +920,10 @@ class RogueChecks:
         server = self.server("--checkpoint-interval", 1, seed=None)
         player, reopened = self.client(omit_memory=True)
         for field in ("state", "history", "branch"):
-            self.assertEqual(reopened[field], before[field])
+            if field == "state":
+                self.assertDisclosedStateEqual(reopened[field], before[field])
+            else:
+                self.assertEqual(reopened[field], before[field])
         # Sequence is attachment-local; simulation tick spans reconnects.
         self.assertEqual(reopened["cursor"]["tick"], before["cursor"]["tick"])
         (self.directory / f"{label}-cursors.json").write_text(

@@ -1,9 +1,11 @@
 """Actual headless client disclosure, memory, authorization and rewind acceptance."""
+import copy
 import json
 import sqlite3
 import unittest
 
 from process_harness import ProcessTestCase, SPECTATOR_TOKEN, load_fixture
+from scalar_wire import u64
 
 
 class HeadlessProcesses(ProcessTestCase):
@@ -48,16 +50,25 @@ class HeadlessProcesses(ProcessTestCase):
         self.assertGreater(len(full_frame["memory"]),
                            len(full_frame["state"]["observation"]["visible_cells"]))
         self.assertEqual(full_frame.keys() - projected_frame.keys(), {"memory"})
-        retained = {key: value for key, value in full_frame.items() if key != "memory"}
-        # Each attachment has its own opaque stream ID. Every other retained
-        # field, including epoch, readiness, observation and palette, must match.
+        retained = copy.deepcopy({key: value for key, value in full_frame.items() if key != "memory"})
+        # Independent attachments issue their own stream positions and picture
+        # capabilities. All disclosed contents and authority still match exactly.
+        self.assertDisclosedStateEqual(retained["state"], projected_frame["state"])
+        retained["state"] = projected_frame["state"]
+        retained["cursor"]["sequence"] = projected_frame["cursor"]["sequence"]
+        for frame in (full_frame, projected_frame):
+            self.assertEqual(frame["observation_base"]["snapshot"], frame["state"]["snapshot"])
+            self.assertEqual(frame["observation_base"]["revision"], frame["state"]["revision"])
+        for field in ("snapshot", "revision"):
+            retained["observation_base"][field] = projected_frame["observation_base"][field]
+        retained["observation_base"]["cursor"]["sequence"] = projected_frame["observation_base"]["cursor"]["sequence"]
         self.assertNotEqual(retained["input_context"]["stream"]["stream"],
                             projected_frame["input_context"]["stream"]["stream"])
         retained["input_context"]["stream"]["stream"] = projected_frame["input_context"]["stream"]["stream"]
         self.assertEqual(retained, projected_frame)
         denied = self.act(projected, {"type": "wait"})
         self.assertIn("read-only", denied["error"])
-        self.assertEqual(denied["state"], moved["state"])
+        self.assertEqual(denied["state"], projected_frame["state"])
         invalid = self.command(player, {"type": "not_an_input"})
         self.assertIn("Invalid input", invalid["error"])
         for client in (player, projected):
@@ -395,7 +406,13 @@ class HeadlessProcesses(ProcessTestCase):
         synced = self.hydrated(player, synced)
         synced_cells = {cell["key"]: cell for cell in synced["memory"]}
         for cell in moved["memory"]:
-            self.assertEqual(synced_cells[cell["key"]], cell)
+            refreshed = synced_cells[cell["key"]]
+            self.assertIs(type(refreshed["last_seen_revision"]), int)
+            self.assertIs(type(cell["last_seen_revision"]), int)
+            self.assertGreaterEqual(refreshed["last_seen_revision"], cell["last_seen_revision"])
+            self.assertLessEqual(refreshed["last_seen_revision"], u64(synced["state"]["revision"]))
+            self.assertEqual({key: value for key, value in refreshed.items() if key != "last_seen_revision"},
+                             {key: value for key, value in cell.items() if key != "last_seen_revision"})
         history = self.request(spectator, {"type": "history", "limit": 50, "before": None})
         self.assertIsNone(history["error"])
         player.stop()

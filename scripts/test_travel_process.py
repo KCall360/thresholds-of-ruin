@@ -12,7 +12,11 @@ from process_harness import ProcessTestCase, SPECTATOR_TOKEN, non_graphical, rea
 
 class TravelJournalProcesses(ProcessTestCase):
     def terminal(self, client):
-        return self.frame(client, lambda frame: frame.get("travel") and frame["travel"]["phase"] != "active")
+        terminal = self.frame(client, lambda frame: frame.get("travel") and frame["travel"]["phase"] != "active")
+        current = self.request(client, {"type": "observe"})
+        self.assertIsNone(current["error"])
+        self.assertEqual(current["travel"], terminal["travel"])
+        return current
 
     def test_backend_steps_have_private_admission_linked_execution_and_durable_history(self):
         server = self.server(scenario="travel")
@@ -80,7 +84,11 @@ class TravelProcesses(ProcessTestCase):
     graphical = True
 
     def terminal(self, client):
-        return self.frame(client, lambda f: f.get("travel") and f["travel"]["phase"] != "active")
+        terminal = self.frame(client, lambda frame: frame.get("travel") and frame["travel"]["phase"] != "active")
+        current = self.request(client, {"type": "observe"})
+        self.assertIsNone(current["error"])
+        self.assertEqual(current["travel"], terminal["travel"])
+        return current
 
     def test_ascii_selection_click_skip_and_resume(self):
         server = self.server(wizard=True, scenario="travel")
@@ -263,7 +271,9 @@ class TravelProcesses(ProcessTestCase):
         destination = next(c["key"] for c in initial["state"]["observation"]["visible_cells"] if c["position"] == {"x":7,"y":0,"z":0})
         self.request(player, {"type":"command", "context": initial["input_context"], "branch":initial["branch"], "command":{"type":"travel", "expected_revision":initial["state"]["revision"], "destination":destination}})
         stopped = self.terminal(player)
-        shown = self.ascii_frame(ascii_client, lambda f: f.get("travel") and f["travel"]["phase"] != "active")
+        shown = self.ascii_frame(ascii_client, lambda f: f.get("travel")
+                                and f["travel"] == stopped["travel"]
+                                and f["state"]["observation"] == stopped["state"]["observation"])
         self.assertEqual(shown["travel"], stopped["travel"])
         self.assertDisclosedStateEqual(shown["state"], stopped["state"])
         self.assertFalse(shown["has_control"])

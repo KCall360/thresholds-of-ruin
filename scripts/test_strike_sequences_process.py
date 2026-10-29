@@ -8,6 +8,7 @@ from unittest.mock import Mock, patch
 
 from process_harness import ProcessTestCase, ROOT, SPECTATOR_TOKEN, underfoot
 from strike_sequence_package import sequence_package
+from rogue_test_support import disclosed_frames, ordered_combat_events
 from stream_relay import StreamRelay, exact
 
 
@@ -75,6 +76,12 @@ def event(frame, ordinal, *, outcome=None):
     return next((value for value in combat(frame)["events"] if value["type"] == "ability"
         and value["ability"]["id"] == "triple_strike" and value["strike"] == ordinal
         and (outcome is None or value["outcome"] == outcome)), None)
+
+
+def outcome_event(frame, ordinal):
+    return next((value for value in ordered_combat_events([frame])
+                 if value["type"] == "ability" and value["ability"]["id"] == "triple_strike"
+                 and value["strike"] == ordinal), None)
 
 
 def prefix(frame):
@@ -186,7 +193,9 @@ class StrikeSequenceProcesses(ProcessTestCase):
         self.assertEqual(retry["message"]["context"]["cursor"], saved["cursor"])
         # The other ordinary controlled actor permits the remaining due strikes.
         self.sequence_peer_wait(target)
-        second = self.frame(player, lambda frame: event(frame, 1) is not None)
+        self.frame(player, lambda frame: outcome_event(frame, 1) is not None)
+        second = self.request(player, {"type": "observe"})
+        self.assertIsNone(second["error"])
         self.assertEqual(second["intentions"][0]["phase"], "started")
         self.sequence_peer_wait(target)
         finished = self.frame(player, lambda frame: combat(frame)["sequence"] is None
@@ -195,16 +204,8 @@ class StrikeSequenceProcesses(ProcessTestCase):
         target_final = self.request(target, {"type": "snapshot"})
         self.assertEqual(u64(combat(target_final)["hp"]), u64(combat(target_initial)["hp"]) - 3)
         # The resumed stream never presents strike zero a second time.
-        ordinals = []
-        for line in player.transcript:
-            if not line.startswith("{"):
-                continue
-            frame = json.loads(line)
-            message = frame.get("message") or {}
-            body = (message.get("update") or {}).get("body") or {}
-            if body.get("type") in ("observation", "observation_delta"):
-                ordinals.extend(value["strike"] for value in combat(frame)["events"]
-                    if value["type"] == "ability" and value["ability"]["id"] == "triple_strike")
+        ordinals = [value["strike"] for value in ordered_combat_events(disclosed_frames(player, 0))
+                    if value["type"] == "ability" and value["ability"]["id"] == "triple_strike"]
         self.assertEqual(ordinals, [1, 2])
 
     def test_natural_source_saved_prefix_resumes_only_unpaid_strikes(self):
@@ -247,7 +248,7 @@ class StrikeSequenceProcesses(ProcessTestCase):
         observer, watched = self.client(SPECTATOR_TOKEN)
         self.assertEqual(combat(watched)["sequence"], combat(restored)["sequence"])
         self.resume_with_peer_wait(player, target, identity)
-        self.frame(player, lambda frame: event(frame, 1) is not None)
+        self.frame(player, lambda frame: outcome_event(frame, 1) is not None)
         self.sequence_peer_wait(target)
         finished = self.frame(player, lambda frame: combat(frame)["sequence"] is None and not frame["intentions"])
         self.assertEqual(stock(finished), 1, "resumed riders and strikes do not repay the finite cost")
@@ -329,7 +330,7 @@ class NativeStrikeSequenceProcesses(ProcessTestCase):
             key("y", False)
         self.assertEqual(u64(combat(missed)["hp"]), hp)
         self.assertNotEqual(underfoot(missed["state"])["key"], underfoot(initial["state"])["key"])
-        prose = " ".join(missed["narration"] + missed["messages"]["log"])
+        prose = " ".join(missed["messages"]["log"] + [missed["messages"]["turn"]])
         self.assertIn("Triple Strike (strike 2)", prose)
         self.assertIn("missed", prose)
         heard = narrator.until(lambda line: "Triple Strike (strike 2)" in line)

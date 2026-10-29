@@ -295,12 +295,16 @@ def ascii_input_completion(key, *, wait_for_simulation=True, wait_for_ready=Fals
             return False
         if wait_for_admission and frame.get("can_admit_intention") is not True:
             return False
+        # A causal completion can precede the demanded picture. The actual
+        # native client exposes whether that presentation work is still due.
+        if wait_for_simulation and frame.get("observation_current") is False:
+            return False
         if wait_for_ready:
             observation = (frame.get("state") or {}).get("observation")
             if observation is None:
                 return False
             combat = observation["combat"]
-            return combat["dead"] or (observation["ready"]
+            return combat["dead"] or (frame.get("character_ready", observation["ready"])
                 and not combat["preparation_active"]
                 and not phases.intersection({"queued", "started"}))
         return not wait_for_simulation or "queued" not in phases
@@ -349,7 +353,7 @@ def binaries():
 
 def creature_package(test, name, *, hostile=False,
                      abilities=("fixture_stamina_strike", "fixture_mana_bolt", "fixture_focus_fear"),
-                     ability_aliases=None, extra_abilities=(), target_x=2):
+                     ability_aliases=None, extra_abilities=(), target_x=2, controlled_target=False):
     """Construct a generic transport fixture with explicit grants and geometry."""
     package = test.directory / name
     shutil.copytree(ROOT / "scenarios/two-room", package)
@@ -392,8 +396,12 @@ def creature_package(test, name, *, hostile=False,
     source = region.read_text(encoding="utf-8")
     source = "\n".join(line for line in source.splitlines() if not line.startswith("items =")) + "\n"
     faction = "foe" if hostile else "neutral"
-    source += ('\n[[actors]]\nid = 2\nat = [' + str(target_x) + ', 1, 0]\ncontroller = "ai"\nai = "practice"\n'
-               'creature = { species = "human", name = "practice target", '
+    # Dedicated payment probes can hold the preparation boundary with an
+    # ordinary peer. All other callers retain their authored autonomous target.
+    controller = ('controller = "external"\nturn_ticks = 1000\n' if controlled_target
+                  else 'controller = "ai"\nai = "practice"\n')
+    source += ('\n[[actors]]\nid = 2\nat = [' + str(target_x) + ', 1, 0]\n' + controller
+               + 'creature = { species = "human", name = "practice target", '
                'faction = "' + faction + '", binding = "intellect", '
                'starting_skills = ["athletics", "lore"], restoration = "authored", nutrition = { kind = "exempt" }, '
                'hit_dice = [{ source = "racial" }] }\n')
@@ -1067,6 +1075,14 @@ class ProcessTestCase(unittest.TestCase):
                     if key not in ("snapshot", "revision")}
         self.assertEqual(contents(actual), contents(expected), message)
 
+    def assertDisclosedInspectionEqual(self, actual, expected, message=None):
+        """A private report binds an issued display; every other field is exact."""
+        from scalar_wire import u64
+        u64(actual["revision"])
+        u64(expected["revision"])
+        self.assertEqual({key: value for key, value in actual.items() if key != "revision"},
+                         {key: value for key, value in expected.items() if key != "revision"}, message)
+
     def act(self, client, action):
         # This helper authors current valid requests. Raw command/request helpers
         # remain unchanged for missing-field and malformed-wire tests.
@@ -1120,6 +1136,12 @@ class ProcessTestCase(unittest.TestCase):
 
     def wizard_command(self, wizard, command, succeeds=True):
         """Run one developer command (the text client's form, with or without `wizard `)."""
+        if succeeds is True:
+            # Setup commands target the current disclosed boundary, not a stale
+            # spectator picture. This is a fresh read before submission, never
+            # an automatic retry of a possibly applied mutation.
+            observed = self.request(wizard, {"type": "observe"})
+            self.assertIsNone(observed["error"], "refresh before " + command)
         frame = self.command(wizard, {"type": "wizard", "command": command.removeprefix("wizard ")})
         if succeeds is not None:
             (self.assertIsNone if succeeds else self.assertIsNotNone)(frame["error"], command)
@@ -1210,13 +1232,13 @@ class ProcessTestCase(unittest.TestCase):
             return record.get("type") == "native_release" and record.get("sequence") == sequence
 
         self.frame(process, released, seconds=max(0, deadline - time.monotonic()))
-        if wait_for_admission:
-            def permitted(frame):
-                return complete(frame) and frame.get("can_admit_intention") is True
+        def permitted(frame):
+            return complete(frame) and (not wait_for_admission
+                                        or frame.get("can_admit_intention") is True)
 
-            if not permitted(completed):
-                completed = self.ascii_frame(process, permitted,
-                                             seconds=max(0, deadline - time.monotonic()))
+        if not permitted(completed):
+            completed = self.ascii_frame(process, permitted,
+                                         seconds=max(0, deadline - time.monotonic()))
         return completed
 
     def _native_window(self, client):

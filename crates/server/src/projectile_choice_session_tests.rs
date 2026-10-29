@@ -196,7 +196,8 @@ fn encoded_projectile_choices_require_current_owner_launcher_and_controller_cont
         let code = match case {
             0 => {
                 *expected_revision += 1;
-                ErrorCode::StaleRevision
+                // This generation was never issued on the current attachment.
+                ErrorCode::StaleContext
             }
             1 => {
                 *branch = BranchId("foreign-branch".into());

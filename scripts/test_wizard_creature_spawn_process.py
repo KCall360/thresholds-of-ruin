@@ -54,6 +54,8 @@ class WizardCreatureSpawnProcesses(ProcessTestCase):
         messages = [json.loads(line).get("message") for line in wizard.transcript[start:] if line.startswith("{")]
         replies = [message[field] for message in messages if message and message["type"] == kind]
         self.assertEqual(len(replies), 1)
+        if kind == "creature_inspection":
+            self.assertEqual(replies[0]["revision"], frame["state"]["revision"])
         return frame, replies[0]
 
     def born_actor(self, frame):
@@ -148,7 +150,7 @@ class WizardCreatureSpawnProcesses(ProcessTestCase):
         restored = self.request(wizard, {"type": "snapshot"})
         self.assertDisclosedStateEqual(restored["state"], snapshot["state"])
         _, recovered = self.query(wizard, f"creature inspect {actor}", "creature_inspection", "report")
-        self.assertEqual(recovered, report)
+        self.assertDisclosedInspectionEqual(recovered, report)
         self.query(wizard, "creature list depth 3", "creature_catalog", "page")
         # New birth and rewind still resolve from the pinned package, never source paths.
         second = self.wizard_command(wizard, "creature spawn rat 1 6 2 0 depth 3")

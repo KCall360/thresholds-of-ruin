@@ -121,7 +121,7 @@ class FallCreditProcesses(ProcessTestCase):
                 server = self.server("--checkpoint-interval", interval, scenario=package, seed=None)
                 owner, _ = self.client()
                 victim, continued = self.client(actor=2)
-                self.assertEqual(continued["state"], tail["state"])
+                self.assertDisclosedStateEqual(continued["state"], tail["state"])
                 self.assertEqual(self.growth(owner)["earned_xp"], "0")
                 for _ in range(200):
                     dead = self.request(victim, {"type": "snapshot"})

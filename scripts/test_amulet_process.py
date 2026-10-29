@@ -86,6 +86,10 @@ class AmuletProcesses(ProcessTestCase):
     def client(self, *args, **kwargs):
         # From the first connection: these tests never inspect map memory.
         kwargs["omit_memory"] = True
+        # Keep every causal/lifecycle/picture payload; avoid repeating the full
+        # derived state on background map/palette/waiting diagnostic envelopes.
+        # Existing transcript, action, request and wall-time ceilings stay fixed.
+        kwargs["compact_background"] = True
         kwargs.setdefault("actor", ACTOR)
         client, frame = super().client(*args, **kwargs)
         self.work_budget.track(client, frame)

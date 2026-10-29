@@ -307,8 +307,8 @@ melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, stri
         self.wizard_command(wizard, "identify 1 10")
         wizard.stop()
         text, _ = self.text_client()
-        self.assertIn("ItemStarted", text.command("remove sword"))
-        self.assertIn("ItemStarted", text.command("wear sword"))
+        self.assertIn("You begin to remove the sword.", text.command("remove sword"))
+        self.assertIn("You begin to equip the sword.", text.command("wear sword"))
         snapshot = self.request(probe, {"type": "snapshot"})
         view = snapshot["state"]["observation"]
         self.assertEqual(int(view["tick"]), 600)

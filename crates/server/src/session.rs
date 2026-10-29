@@ -749,6 +749,14 @@ impl Service {
                         "Input context changed; use the current disclosed state",
                     ));
                 }
+                // Read-only private queries return before Engine::command, so
+                // they must validate the same branch after durable retry lookup.
+                if &branch != self.engine.branch() {
+                    return Err(Failure::new(
+                        ErrorCode::WrongBranch,
+                        "The game branch changed",
+                    ));
+                }
                 if command.requires_control() && self.controllers.get(&actor) != Some(&id) {
                     return Err(Failure::new(
                         ErrorCode::NotController,
@@ -3207,7 +3215,15 @@ mod tests {
             assert_eq!(context.actor, actor);
             assert_eq!(context.branch, update.branch);
             assert_eq!(context.cursor, update.cursor);
-            assert_eq!(context.revision, before.revision);
+            assert_eq!(
+                context.revision,
+                service.clients[&client.id]
+                    .last_observation
+                    .as_ref()
+                    .unwrap()
+                    .state
+                    .revision
+            );
             assert_eq!(service.engine.state(actor).unwrap(), before);
         }
     }
@@ -3341,7 +3357,17 @@ mod tests {
         assert_eq!(model.readiness().revision, 5);
         assert!(model.readiness().admission);
         assert!(model.readiness().cancel.is_empty());
+        assert!(model.cursor().sequence > initial_base.cursor.sequence);
+        assert_eq!(model.observation_base(), initial_base);
+        assert!(!model.observation_current());
+        service.handle(client.id, "demand-picture".into(), Request::Observe);
+        while let Ok(message) = client.messages.try_recv() {
+            if let ServerMessage::Update { update } = message {
+                model.apply(*update).unwrap();
+            }
+        }
         assert!(model.observation_base().cursor.sequence > initial_base.cursor.sequence);
+        assert!(model.observation_current());
     }
 
     #[test]
@@ -4042,9 +4068,9 @@ mod tests {
             let owner = role == AccessRole::Player;
             assert_eq!(Arc::ptr_eq(&retained, &shared), owner);
             if let Some(previous) = retained_projections.insert(owner, Arc::clone(&retained)) {
-                assert!(
-                    Arc::ptr_eq(&previous, &retained),
-                    "equal role projections must share storage"
+                assert_eq!(
+                    previous, retained,
+                    "equal role projections retain exact disclosed content"
                 );
             }
             let disclosed = &retained.observation;
@@ -4457,7 +4483,7 @@ mod tests {
             ServerMessage::Update { update } if matches!(&update.body, UpdateBody::Readiness { readiness } if readiness.admission)));
         assert!(matches!(controller.messages.try_recv().unwrap(),
             ServerMessage::Ack { request_id, .. } if request_id == "control"));
-        observer.messages.try_recv().unwrap();
+        while observer.messages.try_recv().is_ok() {}
         for i in 0..QUEUE {
             service.handle(controller.id, format!("snapshot-{i}"), Request::Snapshot);
         }
@@ -4523,7 +4549,7 @@ mod tests {
             ServerMessage::Update { update } if matches!(&update.body, UpdateBody::Readiness { readiness } if readiness.admission)));
         assert!(matches!(controller.messages.try_recv().unwrap(),
             ServerMessage::Ack { request_id, .. } if request_id == "control"));
-        observer.messages.try_recv().unwrap();
+        while observer.messages.try_recv().is_ok() {}
         for i in 0..QUEUE {
             service.handle(controller.id, format!("snapshot-{i}"), Request::Snapshot);
         }
@@ -4923,11 +4949,11 @@ mod tests {
         for (index, case, operation, expected) in [
             (1, 0, "combat capture on", Some(ErrorCode::Unauthorized)),
             (1, 0, "combat inspect bad", Some(ErrorCode::Unauthorized)),
-            (0, 1, "combat capture on", Some(ErrorCode::StaleRevision)),
+            (0, 1, "combat capture on", Some(ErrorCode::StaleContext)),
             (0, 2, "combat capture on", Some(ErrorCode::WrongBranch)),
             (0, 3, "combat capture on", Some(ErrorCode::StaleContext)),
             (0, 0, "combat capture on", None),
-            (0, 1, "combat capture off", Some(ErrorCode::StaleRevision)),
+            (0, 1, "combat capture off", Some(ErrorCode::StaleContext)),
             (0, 0, "combat inspect", None),
             (0, 0, "combat inspect 1", Some(ErrorCode::InvalidAction)),
             (0, 0, "combat capture off", None),
@@ -4996,7 +5022,11 @@ mod tests {
                     })
                     .expect("private diagnostics reply");
                 assert!(report.validate().is_ok());
-                assert_eq!(report.enabled, operation != "combat capture off");
+                assert_eq!(
+                    report.enabled,
+                    operation != "combat capture off",
+                    "{operation}"
+                );
                 assert_eq!(context.actor, ActorId(1));
                 assert_eq!(context.input, service.input_context(id).unwrap());
             }
@@ -5111,7 +5141,7 @@ mod tests {
             );
         }
         for (case, code) in [
-            (0, ErrorCode::StaleRevision),
+            (0, ErrorCode::StaleContext),
             (1, ErrorCode::WrongBranch),
             (2, ErrorCode::StaleContext),
             (3, ErrorCode::InvalidAction),

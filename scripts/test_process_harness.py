@@ -555,6 +555,53 @@ class ActionCompletion(unittest.TestCase):
         frame["intentions"][0]["phase"] = "started"
         self.assertTrue(default(frame))
 
+    def test_successful_wizard_setup_refreshes_once_before_mutation_without_retry(self):
+        harness = ProcessTestCase()
+        client = object()
+        events = []
+        def refresh(owner, request):
+            events.append((owner, request))
+            return {"error": None}
+        def command(owner, request):
+            events.append((owner, request))
+            return {"error": None}
+        with patch.object(harness, "request", side_effect=refresh), \
+                patch.object(harness, "command", side_effect=command):
+            harness.wizard_command(client, "wizard rewind initial")
+        self.assertEqual(events, [(client, {"type": "observe"}),
+                                 (client, {"type": "wizard", "command": "rewind initial"})])
+        with patch.object(harness, "request") as refresh, \
+                patch.object(harness, "command", return_value={"error": "StaleContext"}) as command:
+            harness.wizard_command(client, "rewind initial", succeeds=False)
+        refresh.assert_not_called()
+        command.assert_called_once()
+
+    def test_native_simulation_waits_for_demanded_picture_after_acknowledgement(self):
+        from process_harness import ascii_input_completion
+        complete = ascii_input_completion("right")
+        frame = {"input_done": "right", "busy": False, "intentions": [],
+                 "observation_current": False}
+        self.assertFalse(complete(frame))
+        frame["input_done"] = None
+        frame["observation_current"] = True
+        self.assertTrue(complete(frame))
+        frame["input_done"] = "menu"
+        frame["observation_current"] = False
+        self.assertTrue(ascii_input_completion("menu", wait_for_simulation=False)(frame))
+
+    def test_native_readiness_uses_causal_permission_not_retained_picture(self):
+        from process_harness import ascii_input_completion
+        complete = ascii_input_completion("right", wait_for_ready=True)
+        frame = {"input_done": "right", "busy": False, "intentions": [],
+                 "observation_current": True, "character_ready": False,
+                 "state": {"observation": {"ready": True, "combat": {
+                     "preparation_active": False, "dead": False}}}}
+        self.assertFalse(complete(frame))
+        frame["input_done"] = None
+        frame["character_ready"] = True
+        frame["state"]["observation"]["ready"] = False
+        self.assertTrue(complete(frame))
+
     def test_native_readiness_wait_keeps_rejection_pause_and_death_observable(self):
         from process_harness import ascii_input_completion
         for phase, dead, ready in [(None, False, True), ("paused", False, True),
@@ -1216,6 +1263,32 @@ class NativeKeyPresses(unittest.TestCase):
                                                   wait_for_ready=True, wait_for_admission=True)
                 self.assertIs(result, permitted)
                 self.assertEqual(len(presentations), 2)
+
+    def test_native_release_rechecks_demanded_picture_without_admission_wait(self):
+        harness = ProcessTestCase()
+        acknowledged = {"type": "frame", "input_done": "right", "native_input_sequence": 16,
+                        "busy": False, "intentions": [], "observation_current": True}
+        pending = {**acknowledged, "input_done": None, "observation_current": False}
+        current = {**pending, "observation_current": True}
+        calls = []
+
+        def presentation(client, predicate, seconds):
+            calls.append(True)
+            frame = acknowledged if len(calls) == 1 else current
+            self.assertTrue(predicate(frame))
+            return frame
+
+        def release(client, predicate, seconds):
+            self.assertFalse(predicate(pending))
+            record = {"type": "native_release", "sequence": 16}
+            self.assertTrue(predicate(record))
+            return record
+
+        with patch.object(harness, "ascii_frame", side_effect=presentation), \
+                patch.object(harness, "frame", side_effect=release):
+            result = harness.native_press(object(), lambda name, down: None, "Right", "right")
+        self.assertIs(result, current)
+        self.assertEqual(len(calls), 2)
 
     def test_native_admission_failure_occurs_after_release_without_a_second_key_event(self):
         harness = ProcessTestCase()
@@ -1983,6 +2056,17 @@ class CausalPictureCompletion(unittest.TestCase):
         for payload in ({"tick": "21", "health": 5}, {"tick": "20", "health": 4}):
             with self.assertRaises(AssertionError):
                 harness.assertDisclosedStateEqual(original, {**new, "observation": payload})
+
+
+class InspectionGenerationComparison(unittest.TestCase):
+    def test_only_issued_report_generation_is_attachment_local(self):
+        harness = ProcessTestCase()
+        before = {"revision": "5", "tick": "20", "actor": "1", "hp": "7", "hidden": []}
+        after = {**before, "revision": "1"}
+        harness.assertDisclosedInspectionEqual(after, before)
+        for field, value in (("actor", "2"), ("tick", "21"), ("hp", "6"), ("hidden", ["leak"])):
+            with self.assertRaises(AssertionError):
+                harness.assertDisclosedInspectionEqual({**after, field: value}, before)
 
 
 class CompactDetectionMemory(unittest.TestCase):

@@ -150,6 +150,12 @@ impl Scripted {
 }
 
 impl Link for Scripted {
+    fn completed_observation_request(&self, id: &str, message: &ServerMessage) -> bool {
+        matches!(message, ServerMessage::Update { update }
+            if matches!(&update.body, UpdateBody::Observation { state, .. }
+                if state.snapshot == SnapshotId(format!("observe-{id}"))))
+    }
+
     fn is_synchronized(&self) -> bool {
         true
     }

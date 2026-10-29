@@ -93,6 +93,8 @@ pub enum Input {
 pub enum Effect {
     /// Stop only chart hydration; never a gameplay request.
     CancelCharts,
+    /// A fresh, basis-free overview. The worker presents Observe before querying.
+    OpenOverview(Box<tor_client_common::advancement::OpenOverview>),
     None,
     Quit,
     Request(Box<Request>),
@@ -1427,6 +1429,15 @@ impl App {
             .collect()
     }
 
+    pub fn prepare_overview(&mut self, revision: u64) -> Result<(), String> {
+        let state = self.state.as_ref().ok_or("No current attachment.")?;
+        if !self.advancement_open || !state.has_control() || state.state().revision != revision {
+            return Err("Advancement is no longer open on this picture.".into());
+        }
+        self.advancement_pending = Some((revision, AdvancementQuery::Overview {}));
+        Ok(())
+    }
+
     pub fn bind_advancement_request(&mut self, id: &str) -> Result<(), String> {
         let Some((revision, query)) = self.advancement_pending.take() else {
             return Err("Advancement request is no longer open.".into());
@@ -1471,6 +1482,21 @@ impl App {
         let Some(state) = &self.state else {
             return Effect::None;
         };
+        if matches!(input, AdvancementInput::Overview) {
+            return match tor_client_common::advancement::OpenOverview::new(state) {
+                Ok(plan) => {
+                    self.advancement_pages.clear();
+                    self.advancement_pending = None;
+                    self.busy = true;
+                    self.status = "Refreshing advancement...".into();
+                    Effect::OpenOverview(Box::new(plan))
+                }
+                Err(error) => {
+                    self.status = error;
+                    Effect::None
+                }
+            };
+        }
         let choose_ration = matches!(input, AdvancementInput::Confirm(None));
         match self.advancement_pages.request(input, state) {
             Ok(Some(request)) => {

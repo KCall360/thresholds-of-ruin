@@ -93,7 +93,7 @@ class RestorableLossProcesses(LossHelpers, ProcessTestCase):
         player.stop()
         text, _ = self.text_client()
         self.assertIn("Restorable losses: Strength 1, maximum Health 1", text.command("stats"))
-        self.assertIn("ItemStarted", text.command("drink fixture restoration"))
+        self.assertIn("You begin to drink the fixture restoration.", text.command("drink fixture restoration"))
         self.assertNotIn("Restorable losses:", text.command("stats"))
 
 
@@ -143,7 +143,7 @@ class RestorableHitDieProcesses(LossHelpers, ProcessTestCase):
         player.stop()
         text, _ = self.text_client()
         self.assertIn("Restorable losses: Hit Dice 1", text.command("stats"))
-        self.assertIn("ItemStarted", text.command("drink fixture restoration"))
+        self.assertIn("You begin to drink the fixture restoration.", text.command("drink fixture restoration"))
         self.assertNotIn("Restorable losses:", text.command("stats"))
 
 

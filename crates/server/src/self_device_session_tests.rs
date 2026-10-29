@@ -2415,11 +2415,15 @@ fn drain_normalized_updates(mut updates: Vec<StreamUpdate>) -> Value {
     let mut cell_keys = BTreeMap::new();
     for update in &mut updates {
         match &mut update.body {
-            UpdateBody::Observation { state, .. } => drain_normalize_cells(
-                &mut std::sync::Arc::make_mut(state).observation.visible_cells,
-                &mut cell_keys,
-            ),
-            UpdateBody::ObservationDelta { state, .. } => {
+            UpdateBody::Observation { state, .. } => {
+                let state = std::sync::Arc::make_mut(state);
+                identity("snapshot", &mut state.snapshot.0);
+                drain_normalize_cells(&mut state.observation.visible_cells, &mut cell_keys);
+            }
+            UpdateBody::ObservationDelta { base, state, .. } => {
+                identity("snapshot", &mut base.snapshot.0);
+                identity("snapshot", &mut state.base_snapshot.0);
+                identity("snapshot", &mut state.snapshot.0);
                 drain_normalize_cells(&mut state.cells.changed, &mut cell_keys)
             }
             _ => unreachable!("only actual observation updates captured"),
@@ -2585,6 +2589,12 @@ fn hidden_drain_observations(count: u64) -> (Value, Value, Value, Value) {
         ack(wire.send(next, &format!("privacy-clock-{}", wire.serial), wait));
     }
     assert!(resolved, "actual admitted drain completion");
+    // Both attachments demand a picture of the same committed result. Preserve
+    // the actual encoded publication comparison, including delta bases.
+    let observed = wire.send(OWNER, "drain-picture", Request::Observe);
+    drain_capture_observation_updates(&observed, &mut owner_updates);
+    wire.service
+        .handle(follower.id, "drain-picture".into(), Request::Observe);
     drain_capture_observation_updates(&wire.drain(OWNER), &mut owner_updates);
     let follower_frames: Vec<_> = std::iter::from_fn(|| follower.messages.try_recv_frame().ok())
         .map(|f| decode_response(&f.text).unwrap())

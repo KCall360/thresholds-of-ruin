@@ -93,7 +93,10 @@ class RunUntilBlockedProcesses(ProcessTestCase):
         self.assertNotEqual(excess.child.wait(timeout=15), 0)
         final = self.act(player, {"type": "wait"})
         self.assertIsNone(final["error"])
-        observed = self.frame(observer, lambda value: value["state"]["observation"] == final["state"]["observation"])
+        observed = self.request(observer, {"type": "observe"})
+        self.assertIsNone(observed["error"])
+        self.assertEqual(observed["state"]["observation"], final["state"]["observation"])
+        self.assertEqual(observed["history"], final["history"])
         self.assertEqual(observed["state"]["observation"]["tick"], "100")
         self.assertIsNone(observer.child.poll())
 

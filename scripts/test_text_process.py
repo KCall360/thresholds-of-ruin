@@ -40,9 +40,9 @@ class TextProcesses(ProcessTestCase):
         self.assertIn("Spectator access is read-only", welcome)
         self.assertIn("stone tablet", welcome)
         self.assertNotIn(SPECTATOR_TOKEN, welcome)
-        for revision, (action, event) in enumerate([("take token", "Taken"), ("wait", "Waited"), ("east", "Moved")], 1):
+        for revision, (action, event) in enumerate([("take token", "You pick up the copper token."), ("wait", "Time passes."), ("east", "You move east.")], 1):
             player.command(action)
-            seen = spectator.until(lambda line: f"tick {50 + (revision - 1) * 100}." in line)
+            seen = spectator.until(lambda line: line == event)
             self.assertIn(event, seen)  # The result is presented as well as the new state.
         player.command("note Private player plan")
         player.command("annotate user actor note here Shared progress")
@@ -130,7 +130,7 @@ class TextProcesses(ProcessTestCase):
         self.assertIn("live note", observer.until(lambda line: "live note" in line))
         # Same authenticated user sees its private notes in both frontends.
         controller.command("wait")
-        observer.until(lambda line: "tick 100." in line)
+        observer.until(lambda line: line == "Time passes.")
         controller.command("release")
         self.assertIn("Control: yours", observer.command("control"))
         self.assertIn("tick 200.", observer.command("wait"))

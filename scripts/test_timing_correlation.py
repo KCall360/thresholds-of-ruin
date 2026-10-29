@@ -257,7 +257,7 @@ class CorrelationEvidenceIdentity(unittest.TestCase):
                     del client[0]['request_kind']
                 else:
                     client[0]['request_kind'] = kind
-                with self.assertRaisesRegex(ValueError, 'Ambiguous native request revision 0'):
+                with self.assertRaisesRegex(ValueError, 'Ambiguous native action count' if kind == 'act' else 'Ambiguous native request revision 0'):
                     self.complete_capture(True, server, client, result, frames)
 
         server, client, result, frames = self.control_capture()
@@ -268,6 +268,25 @@ class CorrelationEvidenceIdentity(unittest.TestCase):
         # request was an action. Do not guess that the first UUID was setup.
         with self.assertRaisesRegex(ValueError, 'Ambiguous native request revision 0'):
             self.complete_capture(True, server, client, result, frames)
+
+    def test_classified_native_actions_do_not_depend_on_display_generation(self):
+        server, client, result, frames = self.control_capture()
+        baseline = self.complete_capture(True, server, client, result, frames)
+        for row in client:
+            if row['event'] == 'client_request':
+                row['revision'] = 97
+        frames[0]['state']['revision'] = '97'
+        self.assertEqual(self.complete_capture(True, server, client, result, frames), baseline)
+
+    def test_classified_native_capture_requires_complete_order_and_selected_frame(self):
+        for mutation, error in [('index', 'sample order'), ('frame', 'selected native frame')]:
+            server, client, result, frames = self.control_capture()
+            if mutation == 'index':
+                result['samples'][0]['index'] = 1
+            else:
+                del result['samples'][0]['presented_frame']
+            with self.assertRaisesRegex(ValueError, error):
+                self.complete_capture(True, server, client, result, frames)
 
     def test_invalid_explicit_native_request_kind_is_not_legacy_or_excluded(self):
         for kind in (None, True, 0, '', 'acquire_control', [], {}):

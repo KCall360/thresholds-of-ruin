@@ -38,6 +38,7 @@ pub enum Event {
         preview: Box<AbilityWeaponPreview>,
     },
     StrikeQuerySent(String),
+    OverviewPrepared(u64),
     AdvancementQuerySent(String),
     AdvancementPage {
         context: ReplyContext,
@@ -56,6 +57,7 @@ pub enum Event {
 /// What the window asks of the network worker.
 pub enum Command {
     CancelCharts,
+    OpenOverview(Box<tor_client_common::advancement::OpenOverview>),
     Request {
         context: StreamContext,
         request: Box<Request>,
@@ -185,6 +187,56 @@ async fn run(
                 None => {
                     connection.close().await?;
                     return Ok(());
+                }
+                Some(Command::OpenOverview(plan)) => {
+                    if !connection.is_synchronized() {
+                        publish(
+                            tx,
+                            Event::Refused("Resynchronizing; overview was not sent.".into()),
+                        )?;
+                        publish(tx, Event::Ready)?;
+                        continue;
+                    }
+                    if let Err(error) = plan.validate_attachment(&connection.state) {
+                        publish(tx, Event::Refused(error))?;
+                        publish(tx, Event::Ready)?;
+                        continue;
+                    }
+                    if !transact_observation_result(
+                        &mut connection,
+                        &mut shown_palette,
+                        plan.observation_request(),
+                        tx,
+                    )
+                    .await?
+                    {
+                        publish(
+                            tx,
+                            Event::Refused(
+                                "Observation was not confirmed. Open advancement again.".into(),
+                            ),
+                        )?;
+                        publish(tx, Event::Ready)?;
+                        continue;
+                    }
+                    let request = plan.finish(&connection.state).and_then(|()| {
+                        connection.advancement_pages.request(
+                            tor_client_common::advancement::AdvancementInput::Overview,
+                            &connection.state,
+                        )
+                    });
+                    match request {
+                        Ok(Some(request)) => {
+                            publish(
+                                tx,
+                                Event::OverviewPrepared(connection.state.state().revision),
+                            )?;
+                            transact(&mut connection, &mut shown_palette, request, tx).await?;
+                        }
+                        Ok(None) => {}
+                        Err(error) => publish(tx, Event::Refused(error))?,
+                    }
+                    publish(tx, Event::Ready)?;
                 }
                 Some(Command::Request { context, request }) => {
                     if !connection.is_synchronized() {
@@ -341,6 +393,18 @@ async fn transact(
     request: Request,
     tx: &SyncSender<Event>,
 ) -> Result<(), Error> {
+    transact_observation_result(connection, shown_palette, request, tx)
+        .await
+        .map(|_| ())
+}
+
+/// True only when the exact explicit Observe demand completed successfully.
+async fn transact_observation_result(
+    connection: &mut Connection,
+    shown_palette: &mut (Option<u64>, bool),
+    request: Request,
+    tx: &SyncSender<Event>,
+) -> Result<bool, Error> {
     let advancement_query = matches!(
         &request,
         Request::Command {
@@ -383,10 +447,12 @@ async fn transact(
         publish(tx, Event::StrikeQuerySent(id.clone()))?;
     }
     let mut refresh_preview = weapon_preview || projectile_choices;
-    let mut pending = tor_client_common::PendingRequest::new(id);
+    let mut pending = tor_client_common::PendingRequest::new(id.clone());
+    let mut observed = false;
     timeout(Duration::from_secs(10), async {
         loop {
             let message = next(connection, shown_palette, tx).await?;
+            observed |= connection.completed_observation_request(&id, &message);
             let completion = pending.observe(connection, &message);
             let complete = completion.is_some();
             let unknown = matches!(completion, Some(tor_client_common::RequestCompletion::Unknown));
@@ -409,7 +475,7 @@ async fn transact(
     })
     .await
     .map_err(|_| "Response timed out; the last request may have committed")??;
-    Ok(())
+    Ok(observed)
 }
 
 fn present(message: ServerMessage, tx: &SyncSender<Event>) -> Result<(), Error> {

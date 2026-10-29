@@ -57,7 +57,7 @@ class CreatureTemplateProcesses(ProcessTestCase):
         self.assertEqual(int(removed["state"]["observation"]["tick"]), 0)
         self.assertIn("Server error", wizard.command("wizard creature template 1 unknown on"))
         rejected = self.request(observer, {"type": "snapshot"})
-        self.assertEqual(rejected["state"], removed["state"])
+        self.assertDisclosedStateEqual(rejected["state"], removed["state"])
         player, _ = self.client(observe=True)
         denied = self.command(player, {"type": "wizard", "command": "creature template 999 arcane_trial on"})
         self.assertIn("Wizard authority", denied["error"])

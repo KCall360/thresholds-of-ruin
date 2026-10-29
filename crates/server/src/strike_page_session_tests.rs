@@ -33,8 +33,8 @@ fn connect(service: &mut Service, user: &str, role: AccessRole) -> Connection {
 }
 fn request(service: &Service, client: u64, source: Value, cursor: Value) -> Value {
     json!({"type":"command","context":service.input_context(client).unwrap(),"branch":service.engine.branch(),
-        "command":{"type":"inspect_strike_source","expected_revision":service.engine.causal_boundary(ActorId(1)).unwrap().to_string(),
-            "actor":"1","target_revision":service.engine.causal_boundary(ActorId(1)).unwrap().to_string(),"source":source,"cursor":cursor}})
+        "command":{"type":"inspect_strike_source","expected_revision":service.reply_context(client).unwrap().revision.to_string(),
+            "actor":"1","target_revision":service.reply_context(client).unwrap().revision.to_string(),"source":source,"cursor":cursor}})
 }
 fn query(service: &mut Service, client: &mut Connection, value: Value) -> Vec<Value> {
     let request: Request =
@@ -302,6 +302,13 @@ fn ordered_strikes_selected_melee_ability_page_links_to_separate_selected_source
     );
 }
 
+fn observe(service: &mut Service, client: &mut Connection) {
+    service.handle(client.id, "detail-observe".into(), Request::Observe);
+    while let Ok(reply) = client.messages.try_recv() {
+        assert!(!matches!(reply, ServerMessage::Error { .. }), "{reply:?}");
+    }
+}
+
 fn wizard(service: &mut Service, client: &mut Connection, operation: &str) {
     service.handle(
         client.id,
@@ -322,6 +329,7 @@ fn wizard(service: &mut Service, client: &mut Connection, operation: &str) {
             .any(|reply| matches!(reply, ServerMessage::Error { .. })),
         "{replies:?}"
     );
+    observe(service, client);
 }
 
 #[test]
@@ -587,6 +595,7 @@ fn ordered_strikes_detail_ordinary_unequip_changes_selected_source_and_retires_h
         .inventory
         .iter()
         .all(|item| item.equipped_slot.is_none()));
+    observe(&mut service, &mut client);
     let input = request(&service, client.id, source.clone(), cursor);
     let stale = query(&mut service, &mut client, input);
     assert!(stale.iter().any(|m| m["type"] == "error"));
@@ -607,11 +616,8 @@ fn ordered_strikes_detail_other_target_unload_and_reload_reject_old_identity() {
     let target_request = |service: &Service, client, cursor| {
         let mut value = request(service, client, source.clone(), cursor);
         value["command"]["actor"] = json!("2");
-        value["command"]["target_revision"] = json!(service
-            .engine
-            .causal_boundary(ActorId(2))
-            .unwrap()
-            .to_string());
+        value["command"]["target_revision"] =
+            json!(service.reply_context(client).unwrap().revision.to_string());
         value
     };
     let input = target_request(&service, client.id, Value::Null);

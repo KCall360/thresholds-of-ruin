@@ -198,6 +198,7 @@ fn returned_floor_rehydrates_unseen_walls_and_stairs_after_source_free_resume() 
         }),
     );
     service.run_until_blocked();
+    service.handle(client.id, "returned-picture".into(), Request::Observe);
     while let Ok(message) = client.messages.try_recv() {
         match message {
             ServerMessage::Update { update } => model.apply(*update).unwrap(),
@@ -210,7 +211,7 @@ fn returned_floor_rehydrates_unseen_walls_and_stairs_after_source_free_resume() 
     assert!(client.close.borrow().is_none());
     assert!(service.save_warning.is_none());
     assert_eq!(model.state().observation.tick, lower.observation.tick + 100);
-    assert_eq!(model.state(), &service.engine.state(actor).unwrap());
+    crate::assert_disclosed_state_eq(model.state(), &service.engine.state(actor).unwrap());
     assert!(model.readiness().admission);
     assert_eq!(model.map_cell(origin).unwrap().key, start_key);
     for position in [wall, stair] {

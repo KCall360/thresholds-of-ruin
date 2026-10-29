@@ -171,9 +171,13 @@ async fn run() -> Result<(), Error> {
                             Ok(Input::Quit) => break,
                             Ok(Input::Inspect) => None,
                             Ok(Input::Advancement { command }) => {
-                                match tor_client_common::advancement::parse(&command).and_then(|input| connection.advancement_pages.request(input, &connection.state)) {
-                                    Ok(Some(request)) => transact(&mut connection, request, output).await?,
-                                    Ok(None) => None,
+                                match tor_client_common::advancement::parse(&command) {
+                                    Ok(tor_client_common::advancement::AdvancementInput::Overview) => open_overview(&mut connection, output).await?,
+                                    Ok(input) => match connection.advancement_pages.request(input, &connection.state) {
+                                        Ok(Some(request)) => transact(&mut connection, request, output).await?,
+                                        Ok(None) => None,
+                                        Err(error) => Some(error),
+                                    },
                                     Err(error) => Some(error),
                                 }
                             }
@@ -271,6 +275,31 @@ fn wizard_still_unapplied(error: Option<&str>) -> bool {
     error.is_some_and(|error| error.starts_with("StaleRevision"))
 }
 
+async fn open_overview(
+    connection: &mut Connection,
+    output: DiagnosticOutput,
+) -> Result<Option<String>, Error> {
+    use tor_client_common::advancement::{AdvancementInput, OpenOverview};
+    let plan = match OpenOverview::new(&connection.state) {
+        Ok(plan) => plan,
+        Err(error) => return Ok(Some(error)),
+    };
+    if let Some(error) = transact(connection, plan.observation_request(), output).await? {
+        return Ok(Some(error));
+    }
+    if let Err(error) = plan.finish(&connection.state) {
+        return Ok(Some(error));
+    }
+    match connection
+        .advancement_pages
+        .request(AdvancementInput::Overview, &connection.state)
+    {
+        Ok(Some(request)) => transact(connection, request, output).await,
+        Ok(None) => Ok(None),
+        Err(error) => Ok(Some(error)),
+    }
+}
+
 async fn transact(
     connection: &mut Connection,
     request: Request,
@@ -279,8 +308,9 @@ async fn transact(
     if !connection.role().permits(&request) {
         return Ok(Some("Spectator access is read-only".into()));
     }
+    let observing = matches!(request, Request::Observe);
     let id = connection.request(request).await?;
-    let mut pending = tor_client_common::PendingRequest::new(id);
+    let mut pending = tor_client_common::PendingRequest::new(id.clone());
     timeout(Duration::from_secs(10), async {
         loop {
             let message = connection.next().await?;
@@ -288,7 +318,12 @@ async fn transact(
             match pending.observe(connection, &message) {
                 Some(tor_client_common::RequestCompletion::Reply(tor_client_common::ConfirmedReply::Rejected { code, message })) =>
                     return Ok(Some(format!("{code:?}: {message}"))),
-                Some(tor_client_common::RequestCompletion::Reply(_)) => return Ok(None),
+                Some(tor_client_common::RequestCompletion::Reply(_)) => {
+                    if observing && !connection.completed_observation_request(&id, &message) {
+                        return Ok(Some("Observation was not confirmed. Open advancement again.".into()));
+                    }
+                    return Ok(None);
+                },
                 Some(tor_client_common::RequestCompletion::Unknown) => return Ok(Some(
                     "State resynchronized; request outcome may be unknown. Inspect history before retrying.".into())),
                 None => {},

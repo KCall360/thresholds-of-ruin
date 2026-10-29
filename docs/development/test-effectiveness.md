@@ -1404,3 +1404,69 @@ Resource-guard interruptions during local linking/freezing are infrastructure
 failures, not test defects or passing checkpoints. Completed application hashes
 were verified after bounded reversible archive cleanup; successful evidence was
 preserved rather than rerunning unaffected owners. No guard threshold was lowered.
+
+### PR203 second hosted correction cohort (2026-10-29)
+
+The first correction head's exhaustive Linux server owner reported 1,222 passes
+and 50 failures. A bounded local correction run subsequently passed 57 selected
+methods and left 18 failures; those successful methods are retained rather than
+repeated wholesale. Four of the remaining failures exposed a genuine missing
+wrong-branch guard on private queries. The guard belongs after exact retry
+recognition and before query dispatch; its existing negative tests and the
+exact-once retry regression qualify that ordering. Thirteen remaining methods
+still supplied causal revisions to a display-bound inspection target, and one
+used a retained valid picture as an invalid-picture fixture. Those are two stale
+fixture roots, not fourteen production bugs.
+
+The full process partition reported 105 failures and three errors across 709
+executed methods. These are execution counts, not independent defect counts.
+Additional genuine client roots identified by those traces are: opening a new
+private advancement Overview from a retained picture rather than explicitly
+refreshing it; routine own movement being narrated as a caution and stopping
+ASCII directional running; and an unnamed newly noticed figure producing empty
+Text narration. The correction retains exact attachment/control binding during
+Overview refresh and does not refresh already pinned pages or confirmations.
+
+Stale driver roots include comparing newly issued picture capabilities across
+restart, reading combat outcomes only from pictures, expecting old debug event
+labels instead of semantic narration, and treating causal completion as a fresh
+picture. Native input completion now checks the client's disclosed picture-current
+flag and authoritative readiness, including frames arriving during key release.
+The earned-route restart check excludes only the new attachment's snapshot and
+display-generation identities; payload, tick and history remain exact, with
+negative mutation witnesses. Dedicated resource probes explicitly hold an
+external actor boundary to inspect paid preparation. The shipped autonomous arena
+is not changed: its intermediate Falter payment oracle remains in the existing
+paused, same-build preparation test, while ordinary execution retains its final
+payment and outcome checks.
+
+These corrections are pending final rebuilt process qualification; source review
+and pure helper passes do not constitute a green application run. Native physical
+key qualification also requires the xdotool dependency; an unavailable dependency
+is an infrastructure/setup failure, not a behavior pass or a new waiver.
+
+The final remaining diagnostic case was initially attributed to its old picture,
+but failed again after an explicit Observe. That correction disproved the fixture
+hypothesis: runtime capture settings/records were projected from a frozen gameplay
+boundary even though capture configuration is deliberately not journaled gameplay.
+The fix validates the issued capability but reads the current private diagnostic
+owner, matching capture controls. The existing regression retains the same picture
+across capture/inspect, checks invalid metadata and unauthorized recipients, and
+asserts unchanged gameplay state/history. This is one genuine production root,
+not another stale-test count. The affected client owner checks passed 642 tests;
+this final server correction still requires its own rebuilt witness.
+
+The runtime diagnostic regression then passed, and the ordinary applications were
+rebuilt from that corrected source. Eighteen of nineteen representative process
+methods now pass, including the paid resource/fear/Falter witnesses, owner
+advancement refresh, cancellation, ordered strikes, vampire loot, fruit, and the
+Amulet route within its unchanged output budget. Three narrow correction mistakes
+were caught and fixed without rebuilding: diagnostic memory revisions are numeric
+rather than wire decimal strings; the diagnostic observation-base repeats the
+independently issued picture capability; and consuming the last fruit retains the
+legacy generic start label followed by its exact named completion. A vampire
+purchase-preview equality also needed the same issued-picture distinction.
+These are stale fixture/driver corrections, not additional production defects.
+The remaining earned-route local run stops in candidate validation at the existing
+30-second setup limit with the development opt0 scenario tool. No route behavior
+was qualified by that timeout, and no limit was increased.

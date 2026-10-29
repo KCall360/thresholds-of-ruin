@@ -7,6 +7,7 @@ import unittest
 from rogue_test_support import (
     assert_room_gold_receipt, cardinal_melee_candidate, disclosed_body_cells, disclosed_melee_candidate,
     disclosed_sight_candidate, ground_sight_candidate, disclosed_frames, resolved_events,
+    ordered_combat_events, decision_boundary,
 )
 
 
@@ -15,26 +16,74 @@ def actor(x, y, z=0):
 
 
 class DisclosedAbilityReceipts(unittest.TestCase):
+    @staticmethod
+    def frame(sequence, events, *, kind="outcome"):
+        return {"state": {"revision": "4", "snapshot": "unchanged-picture", "observation": {
+                    "combat": {"events": [{"type": "not-an-ordered-receipt"}]}}},
+                "message": {"type": "update", "update": {
+                    "context": {"stream": "stream", "epoch": "0"},
+                    "cursor": {"sequence": str(sequence), "tick": "10"},
+                    "body": {"type": kind, "facts": {"facts": [
+                        {"kind": "combat", "event": event} for event in events]}}}}}
+
     def test_transient_receipts_exclude_stale_and_unrelated_events(self):
         event = {"type": "ability", "ability": {"id": "rust"}, "caster": "caster",
                  "target": "target", "strike": 0, "outcome": "applied"}
-        before = {"state": {"revision": "4", "observation": {"self_target": "caster"}}}
-        def frame(revision, events):
-            return {"state": {"revision": str(revision), "observation": {
-                "combat": {"events": events}}}}
+        before = {"cursor": {"sequence": "4"},
+                  "input_context": {"stream": {"stream": "stream", "epoch": "0"}},
+                  "state": {"revision": "4", "observation": {"self_target": "caster"}}}
         others = []
         for key, value in (("target", "other"), ("caster", "other"), ("strike", 1),
                            ("ability", {"id": "other"})):
             other = copy.deepcopy(event)
             other[key] = value
             others.append(other)
-        current = frame(5, others + [event])
-        player = SimpleNamespace(transcript=["ignored prefix", json.dumps(frame(4, [event])),
+        current = self.frame(5, others + [event])
+        player = SimpleNamespace(transcript=["ignored prefix", json.dumps(self.frame(4, [event])),
                                              "log", "{}", json.dumps(current),
-                                             json.dumps(frame(6, []))])
+                                             json.dumps(self.frame(6, []))])
         frames = list(disclosed_frames(player, 1))
         self.assertEqual(len(frames), 3)
         self.assertEqual(list(resolved_events(frames, before, "rust", "target")), [event])
+
+    def test_event_provenance_deduplicates_frames_not_equal_hits_or_same_tick(self):
+        event = {"type": "died", "actor": "foe"}
+        first = self.frame(1, [event, event])
+        second = self.frame(2, [event])
+        frames = [self.frame(0, [event], kind="observation"), first, first, second,
+                  {"message": {"type": "ack"}, "state": first["state"]}]
+        self.assertEqual(list(ordered_combat_events(frames)), [event, event, event])
+
+    def test_conflicting_payloads_at_one_stream_cursor_are_not_hidden(self):
+        first = self.frame(1, [{"type": "died", "actor": "foe"}])
+        conflicting = self.frame(1, [{"type": "died", "actor": "another"}])
+        with self.assertRaisesRegex(AssertionError, "Conflicting"):
+            list(ordered_combat_events([first, conflicting]))
+
+    def test_receipts_cannot_reuse_actor_handles_from_another_attachment(self):
+        baseline = {"input_context": {"stream": {"stream": "other", "epoch": "0"}},
+                    "cursor": {"sequence": "0"}}
+        with self.assertRaisesRegex(AssertionError, "attachment"):
+            list(ordered_combat_events([self.frame(1, [])], after=baseline))
+
+    def test_snapshot_issuance_is_not_a_causal_change_but_all_disclosed_state_is(self):
+        initial = {"state": {"snapshot": "first", "revision": "1",
+                             "observation": {"tick": "10", "items": [1]}},
+                   "cursor": {"sequence": "2", "tick": "10"},
+                   "readiness": {"revision": "3", "admission": True},
+                   "intentions": [], "history": [], "branch": "branch", "has_control": True}
+        refreshed = copy.deepcopy(initial)
+        refreshed["state"].update(snapshot="second", revision="2")
+        refreshed["cursor"]["sequence"] = "3"
+        self.assertEqual(decision_boundary(refreshed), decision_boundary(initial))
+        for field, value in (("state", {"observation": {"tick": "10", "items": []}}),
+                             ("readiness", {"revision": "4", "admission": True}),
+                             ("intentions", ["paid"]), ("history", ["event"]),
+                             ("branch", "rewound"), ("has_control", False),
+                             ("cursor", {"sequence": "3", "tick": "11"})):
+            changed = copy.deepcopy(refreshed)
+            changed[field] = value
+            self.assertNotEqual(decision_boundary(changed), decision_boundary(initial), field)
 
 
 class RogueRoomGoldAudit(unittest.TestCase):

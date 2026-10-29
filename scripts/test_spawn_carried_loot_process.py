@@ -153,7 +153,7 @@ class SpawnCarriedLootProcesses(ProcessTestCase):
                 self.assertEqual(receipts[0]["decisions"][0]["result"]["attempts"][0]["entity"]["carried_loot"]["kind"], expected)
                 player.stop()
                 player, after = self.client()
-                self.assertEqual(after["state"], before["state"])
+                self.assertDisclosedStateEqual(after["state"], before["state"])
                 self.assertEqual(self.private_receipts(), receipts)
                 self.flush_save(); player.stop(); server.stop()
                 shutil.rmtree(package)

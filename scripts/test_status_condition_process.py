@@ -299,6 +299,8 @@ class StatusConditionProcesses(StatusConditionHelpers, ProcessTestCase):
         debt = int(combat(paused)["sequence"]["cancel_recovery_remaining"])
         cancelled = self.command(player, {"type": "cancel_intention"})
         self.assertIsNone(cancelled["error"])
+        cancelled = self.request(player, {"type": "observe"})
+        self.assertIsNone(cancelled["error"])
         self.assertIsNone(combat(cancelled)["preparation_remaining"])
         self.assertEqual(underfoot(cancelled["state"])["key"], location)
         self.assertEqual(int(combat(cancelled)["recovery_remaining"]), debt)

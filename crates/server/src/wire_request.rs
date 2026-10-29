@@ -260,30 +260,12 @@ impl Engine {
         self.require_wizard_authority()?;
         match operation {
             crate::wire_adapter::CombatDiagnosticsOperation::Inspect { through } => {
-                let report = crate::creature_view::combat_diagnostics(
-                    self.presentation_game(boundary)?,
-                    through,
-                )
-                .map_err(|error| {
-                    use crate::creature_view::DiagnosticProjectionError as E;
-                    match error {
-                        E::InvalidPage => Failure::new(
-                            ErrorCode::InvalidAction,
-                            "Combat diagnostic page is unavailable",
-                        ),
-                        E::Inconsistent => Failure::new(
-                            ErrorCode::InvalidArchive,
-                            "Combat diagnostics are inconsistent",
-                        ),
-                    }
-                })?;
-                report.validate().map_err(|_| {
-                    Failure::new(
-                        ErrorCode::InvalidArchive,
-                        "Combat diagnostics are inconsistent",
-                    )
-                })?;
-                Ok(report)
+                // Capture is runtime tooling, not a journaled gameplay change.
+                // A frozen picture therefore cannot own its current switch or
+                // newly captured records. Validate the capability, then read
+                // the same runtime owner used by Capture.
+                self.presentation_game(boundary)?;
+                self.inspect_combat_diagnostics(through)
             }
             crate::wire_adapter::CombatDiagnosticsOperation::Capture { enabled } => {
                 self.configure_combat_diagnostics(enabled)

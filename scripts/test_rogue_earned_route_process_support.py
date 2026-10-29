@@ -13,8 +13,27 @@ from rogue_earned_route_process import (
     classify_failure, record_acquisition, compress_completed_logs, comparison_surface, validate_initial_anchor,
     validate_resume_binding, validate_saved_authority, retain_segment, verify_retained_segment,
     RouteExecution, prepare_campaign, POLICY_REVISION, main, read_authoritative_evidence,
-    ArchiveVerificationCache, RouteMeasurements, verify_earned_history,
+    ArchiveVerificationCache, RouteMeasurements, verify_earned_history, validate_restored_picture,
 )
+
+
+class RestoredPictureIdentity(unittest.TestCase):
+    def test_only_attachment_picture_capabilities_change(self):
+        old = {'state': {'snapshot': 'old', 'revision': '12', 'tick': '100',
+                         'observation': {'ready': True}, 'memory': ['exact']},
+               'history': [{'event': 'wait', 'tick': '0'}]}
+        current = copy.deepcopy(old)
+        current['state'].update(snapshot='new', revision='1')
+        validate_restored_picture(current, old)
+        for field, value in [('tick', '101'), ('observation', {'ready': False}),
+                             ('memory', [])]:
+            changed = copy.deepcopy(current)
+            changed['state'][field] = value
+            with self.subTest(field=field), self.assertRaises(EvidenceError):
+                validate_restored_picture(changed, old)
+        current['history'] = []
+        with self.assertRaises(EvidenceError):
+            validate_restored_picture(current, old)
 
 
 class CompactRouteSnapshots(unittest.TestCase):

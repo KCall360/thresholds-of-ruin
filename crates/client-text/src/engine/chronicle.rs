@@ -158,6 +158,7 @@ impl Chronicler {
             name: self
                 .names
                 .get(&id)
+                .filter(|name| !name.trim().is_empty())
                 .cloned()
                 .unwrap_or_else(|| "figure".into()),
         }
@@ -609,6 +610,32 @@ fn door_name(o: &Observation, id: DoorTarget) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unnamed_noticed_outcome_uses_generic_figure_without_a_new_picture() {
+        let before = view();
+        let actor = ActorTarget::from_digest([91; 32]);
+        let mut chronicler = Chronicler::default();
+        for name in ["guard", "", "   "] {
+            let facts = OutcomeFacts {
+                self_target: before.observation.self_target,
+                status: None,
+                actor_names: Vec::new(),
+                facts: vec![OutcomeFact::Noticed {
+                    actor,
+                    name: name.into(),
+                    position: Position { x: 1, y: 0, z: 0 },
+                }],
+            };
+            let beats = chronicler.outcome(&facts);
+            assert!(
+                matches!(beats.as_slice(), [Beat::Appeared { figure, whereabouts }]
+                if figure.id == actor
+                    && figure.name == (if name.trim().is_empty() { "figure" } else { name })
+                    && whereabouts == "to the east")
+            );
+        }
+    }
 
     #[test]
     fn ordered_outcomes_narrate_without_refreshing_the_visual_view() {

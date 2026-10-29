@@ -82,7 +82,11 @@ impl Messages {
                 _ => {}
             }
             match &line.topic {
-                Topic::Own(Event::Waited) | Topic::LostSight(_) | Topic::Pacing => {}
+                // Movement is shown by the demanded map and underfoot narration.
+                // A routine move must not itself stop a directional run.
+                Topic::Own(Event::Moved { .. } | Event::Waited)
+                | Topic::LostSight(_)
+                | Topic::Pacing => {}
                 Topic::Finished => self.finish(&line.text),
                 Topic::Noticed(actor) => {
                     let returning = self
@@ -341,6 +345,24 @@ mod outcome_tests {
     use super::*;
 
     #[test]
+    fn routine_move_outcome_does_not_stop_a_directional_run() {
+        let mut messages = Messages::default();
+        messages.absorb_outcome(
+            &[Line {
+                topic: Topic::Own(Event::Moved {
+                    direction: tor_protocol::Direction::East,
+                }),
+                text: "You move east.".into(),
+                basic_attack: None,
+            }],
+            100,
+        );
+        assert!(messages.text().is_empty());
+        messages.push("You see here a stone tablet.");
+        assert_eq!(messages.text(), "You see here a stone tablet.");
+    }
+
+    #[test]
     fn outcome_messages_use_event_time_text_without_a_visual_view() {
         let mut messages = Messages::default();
         messages.absorb_outcome(
@@ -360,7 +382,7 @@ mod outcome_tests {
             ],
             7,
         );
-        assert!(messages.text().contains("You move north."));
+        assert!(!messages.text().contains("You move north."));
         assert!(messages.text().contains("This run has ended."));
     }
 }

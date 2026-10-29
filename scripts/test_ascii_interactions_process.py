@@ -28,7 +28,7 @@ class AsciiInteractionProcesses(ProcessTestCase):
         equipped = press("Return", "enter", wait_for_ready=True, wait_for_admission=True)
         self.assertEqual(next(item for item in view(equipped)["interactions"]["inventory"] if item["item"] == mail)["equipped_slot"], 1)
         self.assertEqual(int(view(equipped)["tick"]), 300)
-        self.assertIn("You finish equipping the mail.", equipped["narration"])
+        self.assertEqual(equipped["messages"]["turn"].count("You finish equipping the mail."), 1)
         self.assertEqual(equipped["messages"]["turn"], "You finish equipping the mail.")
         selected = press("t", "unequip")
         self.assertEqual(view(selected), view(equipped), "opening a selection costs no turn")

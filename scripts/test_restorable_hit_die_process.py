@@ -70,7 +70,7 @@ class RestorableHitDieProcesses(HitDieHelpers, ProcessTestCase):
         self.assertIn("Select a growth/restoration source", overview)
         self.assertIn("Future growth: racial", text.command("advancement source racial"))
         self.assertNotIn("Server error", text.command("advancement confirm"))
-        self.assertIn("ItemStarted", text.command("drink fixture restoration"))
+        self.assertIn("You begin to drink the fixture restoration.", text.command("drink fixture restoration"))
         self.assertNotIn("Restorable losses:", text.command("stats"))
 
 

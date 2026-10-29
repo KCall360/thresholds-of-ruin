@@ -28,6 +28,16 @@ from rogue_earned_route import POLICY_REVISION, CHECKPOINT_DEPTHS, starting_body
 from ruleset_sources import resolve_with_dependencies
 from process_work_budget import ProcessBudgetExceeded, ProcessOutputBudget
 
+def validate_restored_picture(current, expected):
+    """A new attachment issues fresh picture capabilities, not new world facts."""
+    def payload(state):
+        return {key: value for key, value in state.items()
+                if key not in ('snapshot', 'revision')}
+    if (payload(current['state']) != payload(expected['state'])
+            or current['history'] != expected['history']):
+        raise EvidenceError('Source-free restore changed exact state/history')
+
+
 FORMAT = 'tor-rogue-earned-route-v1'
 MINIMUM_FREE_BYTES = 512 * 1024 * 1024
 CHUNK_SOFT_BYTES = 16 * 1024 * 1024
@@ -1047,9 +1057,7 @@ class RouteExecution:
                 seed=None, save_actor=self.actor,
                 extra_env={'TOR_SURVIVAL_DIAGNOSTICS_LOG': str(self.output / 'survival.jsonl')})
             self.connect_player()
-            if (_json_digest(self.current['state']) != _json_digest(expected['state'])
-                    or _json_digest(self.current['history']) != _json_digest(expected['history'])):
-                raise EvidenceError('Source-free restore changed exact state/history')
+            validate_restored_picture(self.current, expected)
             private = self.barrier()
             validate_saved_authority(expected, private)
             self.report['source_free_restart'] = {'status': 'passed',

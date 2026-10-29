@@ -311,7 +311,7 @@ class IntentionProcesses(ProcessTestCase):
         rewind_target = marker["history"][-1]["id"]
         self.request(second, {"type": "release_control"})
         suspended = self.frame(second, lambda frame: lifecycle(frame, identity, "suspended"))
-        self.assertEqual(suspended["state"], accepted["state"])
+        self.assertDisclosedStateEqual(suspended["state"], accepted["state"])
         reacquired = self.request(second, {"type": "acquire_control"})
         self.assertEqual(reacquired["intentions"][0]["phase"], "suspended")
         self.assertIsNone(self.request(first, {"type": "save"})["error"])
@@ -392,13 +392,19 @@ class IntentionProcesses(ProcessTestCase):
         self.assertIsInstance(receipt["intention"], str)
         self.assertEqual(accepted["state"], initial["state"])
         self.assertEqual(accepted["intentions"][0]["intention"], receipt["intention"])
-        resolved = self.frame(player, lambda frame: lifecycle(frame, receipt["intention"], "resolved"))
+        resolved_status = self.frame(player, lambda frame: lifecycle(frame, receipt["intention"], "resolved"))
+        self.assertEqual(resolved_status["intentions"], [])
+        resolved = self.request(player, {"type": "observe"})
+        self.assertIsNone(resolved["error"])
         self.assertGreater(int(resolved["state"]["revision"]), int(initial["state"]["revision"]))
         self.assertGreater(int(resolved["state"]["observation"]["tick"]), int(initial["state"]["observation"]["tick"]))
         self.assertEqual(resolved["intentions"], [])
         queued_watch = self.frame(watcher, lambda frame: lifecycle(frame, receipt["intention"], "queued"))
         self.assertDisclosedStateEqual(queued_watch["state"], initial["state"])
-        resolved_watch = self.frame(watcher, lambda frame: lifecycle(frame, receipt["intention"], "resolved"))
+        resolved_status = self.frame(watcher, lambda frame: lifecycle(frame, receipt["intention"], "resolved"))
+        self.assertEqual(resolved_status["intentions"], [])
+        resolved_watch = self.request(watcher, {"type": "observe"})
+        self.assertIsNone(resolved_watch["error"])
         self.assertDisclosedStateEqual(resolved_watch["state"], resolved["state"])
         self.assertEqual(resolved_watch["intentions"], [])
 
@@ -413,8 +419,22 @@ class IntentionNativeProcesses(ProcessTestCase):
         self.assertEqual(completed["intentions"], [])
         self.assertIsNone(completed["action_hint"])
         self.assertEqual(completed["status"], "")
-        self.assertGreater(int(completed["state"]["observation"]["tick"]),
-                           int(initial["state"]["observation"]["tick"]))
+        previous = {entry["id"] for entry in initial["history"]}
+        def committed_wait(frame):
+            return any(entry["id"] not in previous
+                       and entry["actor"] == initial["state"]["observation"]["actor"]
+                       and entry["content"].get("event") == {"type": "waited"}
+                       for entry in frame["history"])
+        if not committed_wait(completed):
+            completed = self.ascii_frame(window, committed_wait)
+        actions = [entry for entry in completed["history"]
+                   if entry["id"] not in previous and entry["content"]["type"] == "action"]
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0]["content"]["event"], {"type": "waited"})
+        self.assertEqual(actions[0]["tick"], initial["state"]["observation"]["tick"])
+        self.assertEqual(completed["intentions"], [])
+        self.assertIsNone(completed["action_hint"])
+        self.assertEqual(completed["status"], "")
 
     def test_native_resume_and_cancel_keys_preserve_original_queue_identity(self):
         self.server(wizard=True)

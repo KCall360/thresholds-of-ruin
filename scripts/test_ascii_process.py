@@ -69,10 +69,17 @@ class AsciiProcesses(ProcessTestCase):
         for revision, action in enumerate(actions, 1):
             player.command(action)
             watched = self.ascii_frame(spectator, lambda f: len([e for e in f["history"] if e["content"]["type"] == "action"]) == revision
-                and f["state"]["observation"]["tick"] == [e for e in f["history"] if e["content"]["type"] == "action"][-1]["tick"])
+                and (action == "wait" or f["state"]["observation"]["tick"] == str(50 + (revision - 1) * 100)))
             entries = [e for e in watched["history"] if e["content"]["type"] == "action"]
             self.assertEqual(len(entries), revision)
             self.assertIn("event", entries[-1]["content"])
+            self.assertEqual(int(entries[-1]["tick"]), 0 if revision == 1 else 50 + (revision - 2) * 100)
+            if action == "wait":
+                self.assertEqual(entries[-1]["content"]["event"], {"type": "waited"})
+            elif action == "east":
+                self.assertEqual(entries[-1]["content"]["event"], {"type": "moved", "direction": "east"})
+            else:
+                self.assertEqual(entries[-1]["content"]["event"]["type"], "taken")
             self.assertFalse(watched["has_control"])
         self.assertEqual(next(i["position"] for i in watched["state"]["observation"]["ground_items"] if i["item"]["name"] == "stone tablet"), {"x":2,"y":0,"z":0})
         player.command("note Secret")

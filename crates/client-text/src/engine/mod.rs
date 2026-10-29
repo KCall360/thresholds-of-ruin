@@ -1361,17 +1361,46 @@ impl Engine {
                 }
                 return Ok(Flow::Stop);
             }
-            Input::Advancement(input) => match link.advancement_request(input) {
-                Ok(Some(request)) => request,
-                Ok(None) => {
-                    record.say(link.advancement_lines().join("\n"));
-                    return Ok(Flow::Continue);
+            Input::Advancement(input) => {
+                if matches!(
+                    input,
+                    tor_client_common::advancement::AdvancementInput::Overview
+                ) {
+                    let plan =
+                        match tor_client_common::advancement::OpenOverview::new(link.client()) {
+                            Ok(plan) => plan,
+                            Err(error) => {
+                                record.say(error);
+                                return Ok(Flow::Stop);
+                            }
+                        };
+                    if !turn::run_request(
+                        link,
+                        &mut self.chronicler,
+                        record,
+                        plan.observation_request(),
+                    )
+                    .await?
+                    {
+                        return Ok(Flow::Stop);
+                    }
+                    if let Err(error) = plan.finish(link.client()) {
+                        record.say(error);
+                        return Ok(Flow::Stop);
+                    }
                 }
-                Err(error) => {
-                    record.say(error);
-                    return Ok(Flow::Stop);
+                match link.advancement_request(input) {
+                    Ok(Some(request)) => request,
+                    Ok(None) => {
+                        record.say(link.advancement_lines().join("\n"));
+                        return Ok(Flow::Continue);
+                    }
+                    Err(error) => {
+                        record.say(error);
+                        return Ok(Flow::Stop);
+                    }
                 }
-            },
+            }
             Input::Look => {
                 self.note_described(link);
                 record.entries.push(Entry::Description(self.look(link)));

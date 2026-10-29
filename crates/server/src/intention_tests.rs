@@ -620,7 +620,14 @@ mod intention_admission_tests {
             engine.game, expected,
             "only the queue and identity counter may change"
         );
-        assert_eq!(engine.archive.records.len(), causal_position);
+        assert_eq!(engine.archive.records.len(), causal_position + 1);
+        let recorded = &engine.archive.records[causal_position];
+        assert_eq!(recorded.entry, admission.entry);
+        assert!(
+            recorded.receipt.is_none(),
+            "AI admission is not an authenticated RPC"
+        );
+        assert_eq!(recorded.before_tick, recorded.after_tick);
         assert!(admission.entry.intention_ends.is_empty());
         assert!(admission.entry.intention_suspensions.is_empty());
         assert!(engine.disclose_entry(&admission.entry).is_none());
@@ -1144,7 +1151,7 @@ mod intention_admission_tests {
                 .is_err());
         }
         let command = Command::ResumeIntention {
-            expected_boundary: 0,
+            expected_boundary: engine.causal_boundary(actor).unwrap(),
             admission: admitted.entry.id.clone(),
         };
         let resumed = engine
@@ -1177,6 +1184,7 @@ mod intention_admission_tests {
                 },
             )
             .unwrap();
+        let revision = engine.causal_boundary(actor).unwrap();
         let before = engine.game.clone();
         let count = engine.archive.records.len();
         assert!(engine
@@ -1277,7 +1285,7 @@ mod intention_admission_tests {
                     &branch,
                     Command::CancelIntention {
                         step: None,
-                        expected_boundary: 0,
+                        expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
                         admission: admitted.entry.id
                     }
                 )
@@ -3090,7 +3098,7 @@ mod intention_execution_tests {
                 &engine.branch().clone(),
                 Command::Wizard {
                     display_basis: None,
-                    expected_boundary: 0,
+                    expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
                     operation: WizardOperation::SetPlaceHint {
                         position: Position {
                             region: 1,
@@ -3300,7 +3308,7 @@ mod intention_execution_tests {
                 &engine.branch().clone(),
                 Command::Wizard {
                     display_basis: None,
-                    expected_boundary: 0,
+                    expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
                     operation: WizardOperation::SetWall {
                         position: Position {
                             region: 1,
@@ -3366,7 +3374,7 @@ mod ordered_strikes_cancel_tests {
         let records = serde_json::to_value(&engine.archive.records).unwrap();
         let state = engine.state(actor).unwrap();
         let invalid: Command = serde_json::from_value(serde_json::json!({
-            "type":"cancel_intention", "expected_revision":0,
+            "type":"cancel_intention", "expected_boundary":engine.causal_boundary(actor).unwrap(),
             "admission":admitted.entry.id.0, "step":"north"
         }))
         .unwrap();
@@ -3384,7 +3392,7 @@ mod ordered_strikes_cancel_tests {
             .unwrap()
             .is_none());
         let ordinary: Command = serde_json::from_value(serde_json::json!({
-            "type":"cancel_intention", "expected_revision":0,
+            "type":"cancel_intention", "expected_boundary":engine.causal_boundary(actor).unwrap(),
             "admission":admitted.entry.id.0, "step":null
         }))
         .unwrap();
@@ -3605,7 +3613,7 @@ mod ordered_strikes_receipt_tests {
                 &branch,
                 Command::CancelIntention {
                     step: None,
-                    expected_boundary: 0,
+                    expected_boundary: engine.causal_boundary(actor).unwrap(),
                     admission: admitted.entry.id.clone(),
                 },
             )

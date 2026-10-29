@@ -319,7 +319,7 @@ fn apply_updates(state: &mut StateView, messages: Vec<ServerMessage>, shifted: &
 }
 
 #[test]
-fn peer_driven_exact_base_period_publishes_unsolicited_owner_and_followed_visual_updates() {
+fn peer_driven_exact_base_period_marks_owner_and_followed_pictures_for_refresh() {
     let directory = tempfile::tempdir().unwrap();
     let mut wire = Wire::new(Engine::memory(source(directory.path())).unwrap());
     drink(&mut wire, 30, "publish-dose");
@@ -340,12 +340,22 @@ fn peer_driven_exact_base_period_publishes_unsolicited_owner_and_followed_visual
     ack(wire.send(OWNER, "owner-clock-wait", request));
     let mut owner_updates = 0;
     let mut follower_updates = 0;
+    let mut owner_dirty = false;
+    let mut follower_dirty = false;
+    let is_dirty = |message: &ServerMessage| {
+        matches!(message,
+        ServerMessage::Update { update } if matches!(update.body,
+            UpdateBody::Outcome { visual_changed: true, .. }))
+    };
     for _ in 0..8 {
         wire.service.run_until_blocked();
-        apply_updates(&mut owner_state, wire.drain(OWNER), &mut owner_updates);
-        let frames = std::iter::from_fn(|| follower.messages.try_recv_frame().ok())
+        let owner_frames = wire.drain(OWNER);
+        owner_dirty |= owner_frames.iter().any(is_dirty);
+        apply_updates(&mut owner_state, owner_frames, &mut owner_updates);
+        let frames: Vec<_> = std::iter::from_fn(|| follower.messages.try_recv_frame().ok())
             .map(|frame| decode_response(&frame.text).unwrap())
             .collect();
+        follower_dirty |= frames.iter().any(is_dirty);
         apply_updates(&mut follower_state, frames, &mut follower_updates);
         wire.drain(OTHER);
         let saved = wire.checkpoint();
@@ -363,8 +373,27 @@ fn peer_driven_exact_base_period_publishes_unsolicited_owner_and_followed_visual
         ack(wire.send(OTHER, "peer-clock-wait", request));
     }
     assert!(
+        owner_dirty && follower_dirty,
+        "both affected observers receive a causal refresh signal"
+    );
+    assert_eq!(
+        (owner_updates, follower_updates),
+        (0, 0),
+        "no undemanded intermediate pictures"
+    );
+    // The phase is authoritative even without an eager intermediate picture.
+    // Each observer explicitly demands its current visual state.
+    let observed = wire.send(OWNER, "phase-picture", Request::Observe);
+    apply_updates(&mut owner_state, observed, &mut owner_updates);
+    wire.service
+        .handle(follower.id, "phase-picture".into(), Request::Observe);
+    let frames = std::iter::from_fn(|| follower.messages.try_recv_frame().ok())
+        .map(|frame| decode_response(&frame.text).unwrap())
+        .collect();
+    apply_updates(&mut follower_state, frames, &mut follower_updates);
+    assert!(
         owner_updates > 0,
-        "stationary owner received no phase publication"
+        "stationary owner received no requested phase picture"
     );
     assert!(
         follower_updates > 0,
@@ -387,7 +416,7 @@ fn peer_driven_exact_base_period_publishes_unsolicited_owner_and_followed_visual
         owner_state.observation.visible_cells,
         follower_state.observation.visible_cells
     );
-    assert_eq!(owner_state, wire.service.engine.state(OWNER).unwrap());
+    crate::assert_disclosed_state_eq(&owner_state, &wire.service.engine.state(OWNER).unwrap());
 }
 
 #[test]

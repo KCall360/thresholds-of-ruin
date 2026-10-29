@@ -366,7 +366,7 @@ impl Connection {
 
     /// Observe is a coalesced local demand: its ordered picture has no wire
     /// request id. Only that applied picture can complete the demand's identity.
-    pub(crate) fn completed_observation_request(&self, id: &str, message: &ServerMessage) -> bool {
+    pub fn completed_observation_request(&self, id: &str, message: &ServerMessage) -> bool {
         shown(message) && self.observation_demand.completed.as_deref() == Some(id)
     }
 

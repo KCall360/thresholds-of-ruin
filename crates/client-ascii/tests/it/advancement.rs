@@ -24,16 +24,11 @@ fn key(app: &mut App, key: Key) -> Effect {
 fn ordinary_advancement_opens_only_for_the_current_controller_and_never_uses_wizard() {
     let mut app = app(true);
     let before = app.state.as_ref().unwrap().session().clone();
-    assert!(matches!(
-        super::request(key(&mut app, Key::Advancement)),
-        Some(Request::Command {
-            command: Command::Advancement {
-                query: AdvancementQuery::Overview {},
-                expected_revision: 1
-            },
-            ..
-        })
-    ));
+    let Effect::OpenOverview(plan) = key(&mut app, Key::Advancement) else {
+        panic!("opening advancement must first demand a fresh overview picture")
+    };
+    assert_eq!(plan.observation_request(), Request::Observe);
+    assert!(app.bind_advancement_request("premature").is_err());
     assert!(app.advancement_open);
     assert_eq!(app.state.as_ref().unwrap().session().clone(), before);
     let mut observer = self::app(false);
@@ -140,10 +135,13 @@ fn a_network_validated_private_page_cannot_cross_the_ui_control_loss_queue_bound
     let mut app = app(true);
     assert!(matches!(
         key(&mut app, Key::Advancement),
-        Effect::Request(_)
+        Effect::OpenOverview(_)
     ));
     let context = app.state.as_ref().unwrap().reply_context();
     let page = page(&context);
+    // The worker has delivered its Observe picture before preparing this query.
+    app.prepare_overview(app.state.as_ref().unwrap().state().revision)
+        .unwrap();
     app.bind_advancement_request("pending-owner-page").unwrap();
     let mut network = tor_client_common::advancement::AdvancementPages::default();
     network
@@ -194,6 +192,9 @@ fn a_stale_queued_query_preserves_focus_and_requires_explicit_fresh_navigation()
     let mut app = app(true);
     key(&mut app, Key::Advancement);
     let old = app.state.as_ref().unwrap().reply_context();
+    // The worker has delivered its Observe picture before preparing this query.
+    app.prepare_overview(app.state.as_ref().unwrap().state().revision)
+        .unwrap();
     app.bind_advancement_request("overview").unwrap();
     app.show_advancement_page(&old, "overview", &page(&old))
         .unwrap();
@@ -248,18 +249,12 @@ fn a_stale_queued_query_preserves_focus_and_requires_explicit_fresh_navigation()
         app.input(Input::Text {
             text: "overview".into(),
         });
-        let Some(Request::Command {
-            command:
-                Command::Advancement {
-                    expected_revision,
-                    query: AdvancementQuery::Overview {},
-                },
-            ..
-        }) = super::request(key(&mut app, Key::Enter))
-        else {
-            panic!("explicit overview must use the latest disclosed revision")
-        };
-        assert_eq!(expected_revision, fresh_context.revision);
+        assert!(matches!(key(&mut app, Key::Enter), Effect::OpenOverview(_)));
+        assert!(
+            app.bind_advancement_request("too-early").is_err(),
+            "no page may bind before Observe completes"
+        );
+        app.prepare_overview(fresh_context.revision).unwrap();
         // Repeated Enter while that page is pending must not enqueue another request.
         assert_eq!(key(&mut app, Key::Enter), Effect::None);
         let context = fresh_context.clone();
@@ -275,7 +270,10 @@ fn a_stale_queued_query_preserves_focus_and_requires_explicit_fresh_navigation()
     app.input(Input::Text {
         text: "overview".into(),
     });
-    assert!(matches!(key(&mut app, Key::Enter), Effect::Request(_)));
+    assert!(matches!(key(&mut app, Key::Enter), Effect::OpenOverview(_)));
+    // The worker has delivered its Observe picture before preparing this query.
+    app.prepare_overview(app.state.as_ref().unwrap().state().revision)
+        .unwrap();
     app.bind_advancement_request("closing").unwrap();
     assert_eq!(key(&mut app, Key::Escape), Effect::None);
     assert!(!app.advancement_open);
@@ -290,8 +288,11 @@ fn a_stale_queued_query_preserves_focus_and_requires_explicit_fresh_navigation()
     app.ready();
     assert!(matches!(
         key(&mut app, Key::Advancement),
-        Effect::Request(_)
+        Effect::OpenOverview(_)
     ));
+    // The worker has delivered its Observe picture before preparing this query.
+    app.prepare_overview(app.state.as_ref().unwrap().state().revision)
+        .unwrap();
     app.bind_advancement_request("reopened").unwrap();
     app.show_advancement_page(&context, "reopened", &page(&context))
         .unwrap();
@@ -323,6 +324,9 @@ fn expertise_catalog_uses_shared_ordinary_query_without_local_rules() {
     let mut app = app(true);
     key(&mut app, Key::Advancement);
     let context = app.state.as_ref().unwrap().reply_context();
+    // The worker has delivered its Observe picture before preparing this query.
+    app.prepare_overview(app.state.as_ref().unwrap().state().revision)
+        .unwrap();
     app.bind_advancement_request("overview").unwrap();
     app.show_advancement_page(&context, "overview", &page(&context))
         .unwrap();
@@ -352,6 +356,9 @@ fn intellect_expertise_navigation_and_choice_use_ordinary_shared_preview() {
         let mut app = app(true);
         key(&mut app, Key::Advancement);
         let context = app.state.as_ref().unwrap().reply_context();
+        // The worker has delivered its Observe picture before preparing this query.
+        app.prepare_overview(app.state.as_ref().unwrap().state().revision)
+            .unwrap();
         app.bind_advancement_request("overview").unwrap();
         app.show_advancement_page(&context, "overview", &page(&context))
             .unwrap();

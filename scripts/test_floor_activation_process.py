@@ -233,7 +233,10 @@ def restart_omission_transport(test, controller, sweep, server, player, fallback
     player, reopened = test.client(omit_memory=True)
     test.assertIsNone(reopened["error"])
     for field in ("state", "history", "branch"):
-        test.assertEqual(reopened[field], before[field], field)
+        if field == "state":
+            test.assertDisclosedStateEqual(reopened[field], before[field])
+        else:
+            test.assertEqual(reopened[field], before[field])
     test.assertEqual(reopened["cursor"]["tick"], before["cursor"]["tick"])
     test.assertEqual(test.private_receipts(), receipts)
     test.flush_save()

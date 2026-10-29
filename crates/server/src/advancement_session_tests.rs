@@ -55,12 +55,20 @@ fn command(service: &Service, id: u64, command: Value) -> Request {
     .unwrap()
 }
 fn query(service: &mut Service, client: &mut Connection, query: Value) -> Vec<Value> {
-    let actor = service.clients[&client.id].actor.unwrap();
+    // Owner inspection is picture-bound; demand the current boundary without
+    // resetting the stream or advancing simulation before authoring the query.
+    service.handle(client.id, "owner-observe".into(), Request::Observe);
+    let observed = drain(client);
+    assert!(
+        observed.iter().all(|m| m["type"] != "error"),
+        "{observed:?}"
+    );
+    let revision = service.reply_context(client.id).unwrap().revision;
     let request = command(
         service,
         client.id,
         json!({"type":"advancement",
-        "expected_revision":service.engine.causal_boundary(actor).unwrap().to_string(),"query":query}),
+        "expected_revision":revision.to_string(),"query":query}),
     );
     service.handle(client.id, "owner-page".into(), request);
     drain(client)
@@ -860,6 +868,13 @@ fn growth_service(
         // Test-only strict saved authority, after constructor/control/ordinary
         // setup. Restart pausing must not alter the active fatal control.
         service.engine = fixture::with_maximum_xp(&service.engine);
+        // A restored Engine has no runtime input-observer registrations. This
+        // test replaces it beneath live connections rather than reconnecting;
+        // restore that attachment bookkeeping before refreshing permissions.
+        for actor in [ActorId(1), ActorId(2)] {
+            service.engine.register_input_observer(actor).unwrap();
+        }
+        service.refresh_readiness();
     }
     let mut spectator = connect(&mut service, "spectator", AccessRole::Spectator, ActorId(1));
     let mut foreign = connect(&mut service, "foreign", AccessRole::Spectator, ActorId(2));

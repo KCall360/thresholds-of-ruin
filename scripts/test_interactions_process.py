@@ -11,13 +11,13 @@ class InteractionProcesses(ProcessTestCase):
         text, welcome = self.text_client()
         self.assertNotIn("potion of healing", welcome)
         self.assertIn("Which item", text.command("drink red potion"))
-        self.assertIn("ItemStarted", text.command("wear mail"))
+        self.assertIn("You begin to equip the mail.", text.command("wear mail"))
         view = self.request(probe, {"type": "snapshot"})["state"]["observation"]
         mail = next(item["id"] for item in view["inventory"] if item["name"] == "mail")
         self.assertEqual(next(item for item in view["interactions"]["inventory"] if item["item"] == mail)["equipped_slot"], 1)
-        self.assertIn("ItemStarted", text.command("remove mail"))
+        self.assertIn("You begin to remove the mail.", text.command("remove mail"))
         potion = next(item for item in view["inventory"] if item["class"] == "potion")
-        self.assertIn("ItemStarted", text.command(f"drink #{potion['id']}"))
+        self.assertIn("You begin to drink the red potion.", text.command(f"drink #{potion['id']}"))
         after = self.request(probe, {"type": "snapshot"})["state"]["observation"]
         self.assertEqual(next(item for item in after["inventory"] if item["id"] == potion["id"])["quantity"], "1")
         self.assertIsNone(next(item for item in after["interactions"]["inventory"] if item["item"] == mail)["equipped_slot"])

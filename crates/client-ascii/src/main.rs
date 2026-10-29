@@ -342,6 +342,11 @@ fn window_loop(
                             }
                         }
                         Event::StrikeQuerySent(id) => app.bind_strike_request(&id),
+                        Event::OverviewPrepared(revision) => {
+                            if let Err(error) = app.prepare_overview(revision) {
+                                app.refused(error);
+                            }
+                        }
                         Event::AdvancementQuerySent(id) => {
                             if let Err(error) = app.bind_advancement_request(&id) {
                                 app.refused(error);
@@ -524,6 +529,16 @@ fn window_loop(
                         .commands
                         .try_send(Command::Pace(Duration::from_millis(ms)));
                 }
+                Effect::OpenOverview(plan) => {
+                    if network
+                        .commands
+                        .try_send(Command::OpenOverview(plan))
+                        .is_err()
+                    {
+                        app.disconnect("Network command queue unavailable.".into());
+                        failed = true;
+                    }
+                }
                 Effect::Request(request) => {
                     let context = app
                         .state
@@ -594,7 +609,7 @@ fn window_loop(
                 "map_tiles":state.map(|s|tor_client_ascii::render::map_tiles(s, &app.palette)),
                 "palette":{"revision":app.palette.revision(),"stale":app.palette.stale()},
                 "role":app.role,"travel":state.and_then(|s|s.travel()),"travel_cursor":app.travel_cursor,"door_direction":app.door_direction,
-                "has_control":state.is_some_and(|s|s.has_control()),"can_admit_intention":state.is_some_and(|s|s.can_admit_intention()),"connected":app.connected,"busy":app.busy,
+                "has_control":state.is_some_and(|s|s.has_control()),"can_admit_intention":state.is_some_and(|s|s.can_admit_intention()),"connected":app.connected,"busy":app.busy,"observation_current":state.map(|s|s.observation_current()),"character_ready":state.map(|s|s.character_ready()),
                 "intentions":state.map(|s|s.intentions()),"action_hint":app.intention_hint(),
                 "places_open":app.places_open,"place_selected":app.place_selected,"place_name":app.place_name,
                 "narration":state.map(|s|s.narration())});

@@ -611,7 +611,7 @@ class PlayerAdvancementProcesses(ProcessTestCase):
         self.assertEqual(sum(row["value"]["spent"] for row in remaining), 98)
         self.assertEqual(self.rows(player, "details talents"), [])
         current = self.request(player, {"type": "snapshot"})
-        self.assertEqual(current["state"], initial["state"])
+        self.assertDisclosedStateEqual(current["state"], initial["state"])
         self.assertGreater(measured["pages"], 250)
         self.assertLessEqual(measured["maximum"], 32 * 1024)
         self.assertLessEqual(measured["rows"], 32)

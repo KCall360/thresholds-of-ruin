@@ -6,12 +6,12 @@ The pulse fixture overrides only cadence probability to 1/1; production 1/3
 selection and protected sleep/Xeroc boundaries remain simulation-test owners.
 """
 import copy
-import json
 import shutil
 import subprocess
 import tomllib
 import unittest
 
+from rogue_test_support import disclosed_frames, ordered_combat_events
 from arena_matrix import toml_source
 from process_harness import ProcessTestCase, ROOT, settle_rogue_action
 from status_condition_package import checkpoint
@@ -213,28 +213,10 @@ class LivingDungeonAwarenessProcesses(ProcessTestCase):
         attacked = False
         for _ in range(12):
             caster = self.watcher(current)["id"]
-            # Settling an action consumes intermediate public strike snapshots
-            # before returning a later ready snapshot, whose events can be empty.
-            # Inspect every actual server observation consumed since unequip rather
-            # than mistaking the final frame for the entire causal action.
-            for line in player.transcript[cursor:]:
-                if not line.startswith("{"):
-                    continue
-                message = json.loads(line).get("message")
-                if not message:
-                    continue
-                combat = None
-                if message["type"] == "snapshot":
-                    combat = message["snapshot"]["state"]["observation"].get("combat")
-                elif message["type"] == "update":
-                    body = message["update"]["body"]
-                    if body["type"] == "observation":
-                        combat = body["state"]["observation"].get("combat")
-                    elif body["type"] == "observation_delta":
-                        combat = body["state"].get("combat")
-                events = combat["events"] if combat else []
-                attacked |= any(event["type"] == "ability" and event["caster"] == caster
-                                for event in events)
+            # Every licensed attack is an ordered Outcome, even when pictures
+            # coalesce preparation/resolution. Never infer it from a later sheet.
+            attacked |= any(event["type"] == "ability" and event["caster"] == caster
+                            for event in ordered_combat_events(disclosed_frames(player, cursor)))
             cursor = len(player.transcript)
             if attacked:
                 break

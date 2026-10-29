@@ -63,7 +63,15 @@ fn fixture() -> (Service, Connection) {
 fn start(service: &mut Service, client: &mut Connection, x: i32) -> Request {
     service.handle(client.id, "travel-picture".into(), Request::Observe);
     drain(client);
-    let state = service.clients[&client.id]
+    let request = travel_request(service, client.id, x);
+    service.handle(client.id, "travel".into(), request.clone());
+    assert!(!drain(client)
+        .iter()
+        .any(|m| matches!(m, ServerMessage::Error { .. })));
+    request
+}
+fn travel_request(service: &Service, id: u64, x: i32) -> Request {
+    let state = service.clients[&id]
         .last_observation
         .as_ref()
         .unwrap()
@@ -77,19 +85,14 @@ fn start(service: &mut Service, client: &mut Connection, x: i32) -> Request {
         .unwrap()
         .key
         .clone();
-    let request = Request::Command {
-        context: service.input_context(client.id).unwrap(),
+    Request::Command {
+        context: service.input_context(id).unwrap(),
         branch: service.engine.branch().clone(),
         command: Command::Travel {
             expected_revision: state.revision,
             destination,
         },
-    };
-    service.handle(client.id, "travel".into(), request.clone());
-    assert!(!drain(client)
-        .iter()
-        .any(|m| matches!(m, ServerMessage::Error { .. })));
-    request
+    }
 }
 
 #[test]
@@ -694,9 +697,11 @@ fn stale_unknown_and_wrong_branch_requests_are_atomic() {
         ),
         (
             service.engine.branch().clone(),
-            display_revision - 1,
+            // Old issued pictures remain valid capabilities; use an unissued
+            // generation to exercise stale-context rejection deliberately.
+            display_revision + 1,
             known.clone(),
-            ErrorCode::StaleRevision,
+            ErrorCode::StaleContext,
         ),
         (
             BranchId("wrong".into()),
@@ -717,9 +722,13 @@ fn stale_unknown_and_wrong_branch_requests_are_atomic() {
                 },
             },
         );
-        assert!(drain(&mut client).iter().any(
-            |m| matches!(m, ServerMessage::Error { code: received, .. } if *received == code)
-        ));
+        let messages = drain(&mut client);
+        assert!(
+            messages.iter().any(
+                |m| matches!(m, ServerMessage::Error { code: received, .. } if *received == code)
+            ),
+            "{messages:?}"
+        );
         assert_eq!(service.engine.state(ActorId(1)).unwrap(), before);
         assert!(service.travels.is_empty());
     }
@@ -810,12 +819,15 @@ fn rewind_to_retained_pending_travel_settles_restored_work_before_snapshot() {
 
 #[test]
 fn slow_controller_during_start_cannot_resurrect_travel_on_observers() {
-    let (mut service, mut controller) = fixture();
+    let (mut service, controller) = fixture();
     let mut observer = connect(&mut service, AccessRole::Spectator);
     for i in 0..QUEUE {
         service.handle(controller.id, format!("fill-{i}"), Request::Snapshot);
     }
-    start(&mut service, &mut controller, 7);
+    // Snapshot resets the attachment context. Read the final issued basis
+    // without requesting another picture or draining the deliberately full queue.
+    let request = travel_request(&service, controller.id, 7);
+    service.handle(controller.id, "travel".into(), request);
     assert!(controller.close.borrow().is_some());
     let statuses: Vec<_> = drain(&mut observer)
         .into_iter()
@@ -929,7 +941,7 @@ fn slow_spectator_pauses_the_journey_until_dropped_and_reconnects_at_committed_s
     let ServerMessage::Snapshot { snapshot, .. } = drain(&mut replacement).pop().unwrap() else {
         panic!("replacement snapshot");
     };
-    assert_eq!(*snapshot.state, service.engine.state(ActorId(1)).unwrap());
+    crate::assert_disclosed_state_eq(&snapshot.state, &service.engine.state(ActorId(1)).unwrap());
     assert_eq!(snapshot.travel.unwrap().completed_steps, 1);
     assert!(!snapshot.has_control);
     service.run_until_blocked();
@@ -938,19 +950,35 @@ fn slow_spectator_pauses_the_journey_until_dropped_and_reconnects_at_committed_s
         TravelPhase::Arrived
     );
     assert_eq!(service.travel_status[&ActorId(1)].completed_steps, 7);
-    let observations = drain(&mut replacement)
+    let outcomes: Vec<_> = drain(&mut replacement)
         .into_iter()
-        .filter(|m| {
-            matches!(m, ServerMessage::Update { update } if matches!(
-                update.body,
-                UpdateBody::Observation { .. } | UpdateBody::ObservationDelta { .. }
-            ))
+        .filter_map(|message| match message {
+            ServerMessage::Update { update } => match update.body {
+                UpdateBody::Outcome {
+                    event: Some(entry), ..
+                } if matches!(entry.content, HistoryContent::Action { .. }) => Some(entry),
+                _ => None,
+            },
+            _ => None,
         })
-        .count();
+        .collect();
     assert_eq!(
-        observations, 6,
-        "every remaining step reaches the spectator"
+        outcomes.len(),
+        6,
+        "every remaining causal action reaches the spectator"
     );
+    for (index, entry) in outcomes.iter().enumerate() {
+        assert_eq!(entry.actor, ActorId(1));
+        assert_eq!(entry.tick, 100 * (index as u64 + 1));
+        assert!(
+            matches!(&entry.content, HistoryContent::Action { event, .. }
+            if matches!(event.as_ref(), tor_protocol::Event::Moved { .. }))
+        );
+    }
+    service.handle(replacement.id, "final-picture".into(), Request::Observe);
+    assert!(drain(&mut replacement).iter().any(|m| matches!(m,
+        ServerMessage::Update { update } if matches!(update.body,
+            UpdateBody::Observation { .. } | UpdateBody::ObservationDelta { .. }))));
 }
 
 /// The runner, over its mailbox: a spectator that never reads is dropped

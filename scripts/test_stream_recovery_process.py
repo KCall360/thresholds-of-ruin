@@ -44,7 +44,13 @@ class StreamRecoveryFixture:
             caught_up = self.ascii_frame(slow, lambda f: f['state']['observation']['tick'] == '400')
             self.assertDisclosedStateEqual(caught_up['state'], final['state'])
             self.assertEqual(caught_up['history'], final['history'])
-            self.assertIn('You move west.', caught_up['narration'])
+            actions = [entry for entry in caught_up['history']
+                       if entry['content']['type'] == 'action']
+            self.assertEqual([entry['content']['event'] for entry in actions],
+                             [{'type': 'moved', 'direction': direction}
+                              for direction in ('east', 'west', 'east', 'west')])
+            self.assertEqual([int(entry['tick']) for entry in actions], [0, 100, 200, 300])
+            self.assertEqual(len({entry['id'] for entry in actions}), 4)
         else:
             # Ordered movement outcomes survive coalesced display snapshots.
             passage = slow.until(lambda line: line == '> ')

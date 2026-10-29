@@ -691,10 +691,11 @@ fn encoded_exact_weapon_preview_matches_capture_and_reservations_and_refusals_do
             "{messages:?}"
         );
         if bad == 0 {
+            // A future display generation is not an issued picture capability.
             assert!(messages.iter().any(|message| matches!(
                 message,
                 ServerMessage::Error {
-                    code: ErrorCode::StaleRevision,
+                    code: ErrorCode::StaleContext,
                     ..
                 }
             )));

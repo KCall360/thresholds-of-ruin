@@ -227,6 +227,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
         self.assertEqual(len(reports), 1, "the command must return a fresh private report")
         if kind == "creature_inspection":
             report = reports[0]
+            self.assertEqual(report["revision"], ready["state"]["revision"])
             skills = {row["skill"]["id"]: row for row in report["stats"]["skills"]}
             owned = Counter()
             grants = list(report["starting_skills"])
@@ -338,7 +339,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
         self.assertIn("Condition: at least 2 qualifying primary hits on the same target in this sequence; attempt once on a qualifying hit.", shown)
         self.assertIn("22", shown)
         after = self.request(observer, {"type": "snapshot"})
-        self.assertEqual(after["state"], initial["state"])
+        self.assertDisclosedStateEqual(after["state"], initial["state"])
         self.assertNotIn('"creature_strike_page"', "".join(observer.transcript))
 
     def test_ordered_strikes_checked_primary_discloses_both_rider_triggers_across_real_pages(self):
@@ -382,7 +383,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
         self.assertIn("primary failure", combined)
         self.assertIn("Impact: 77", combined)
         after = self.request(observer, {"type": "snapshot"})
-        self.assertEqual(after["state"], initial["state"])
+        self.assertDisclosedStateEqual(after["state"], initial["state"])
         self.assertNotIn('"creature_strike_page"', "".join(observer.transcript))
 
     def test_ordered_strikes_adventure_interface_pages_successfully_without_script_mode(self):
@@ -410,7 +411,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
             self.assertNotIn("Server error", output)
             self.assertNotIn("Reopen the creature inspection", output)
         after = self.request(observer, {"type": "snapshot"})
-        self.assertEqual(after["state"], initial["state"])
+        self.assertDisclosedStateEqual(after["state"], initial["state"])
         self.assertNotIn('"creature_strike_page"', "".join(observer.transcript))
 
     def test_ordered_strikes_pages_use_real_headless_text_queries_and_explicit_restart(self):
@@ -464,7 +465,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
         descriptors = [row for row in entries if row["kind"] == "strike_descriptor"]
         self.assertEqual(len(descriptors), 256)
         self.assertEqual([row["index"] for row in descriptors], list(range(128)) * 2)
-        self.assertEqual(current["state"], ordinary["state"])
+        self.assertDisclosedStateEqual(current["state"], ordinary["state"])
         self.assertNotIn('"creature_strike_page"', "".join(player.transcript))
         reset = self.request(wizard, {"type": "snapshot"})
         stale, pages = query(wizard, reset, source, first_cursor)
@@ -633,7 +634,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
     def test_fear_immunity_and_resistance_keep_rng_and_payment_contracts(self):
         for condition in ("fear", "mind_affecting", "resistance"):
             with self.subTest(condition=condition):
-                package = creature_package(self, "fear-" + condition, abilities=("fixture_focus_fear",))
+                package = creature_package(self, "fear-" + condition, abilities=("fixture_focus_fear",), controlled_target=True)
                 self.save = self.directory / (condition + ".db")
                 manifest = package / "scenario.toml"
                 source = manifest.read_text(encoding="utf-8")
@@ -650,6 +651,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
                 server = self.server(scenario=package, wizard=True)
                 wizard, _ = self.client(WIZARD_TOKEN, observe=True)
                 player, initial = self.client()
+                peer, _ = self.client(actor=2)
 
                 def query(operation):
                     return self._private_report(wizard, operation)
@@ -662,6 +664,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
                 self.assertEqual(resource(started, "focus")["balance"],
                                  resource(initial, "focus")["balance"] - 1)
                 self.assertEqual(resource(started, "focus")["reserved"], 1)
+                self.assertIsNone(self.act(peer, {"type": "wait"})["error"])
                 completed = self.frame(player, lambda frame: frame.get("state") is not None
                                        and frame["state"]["observation"]["ready"]
                                        and int(frame["state"]["observation"]["tick"]) > 0
@@ -692,6 +695,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
                     self.assertEqual([step["id"] for step in steps], ["effect.immune"])
                 self.assertEqual(record["outcome"], {"result": "miss" if condition == "resistance" else "unaffected", "effects": []})
                 self.assertNotIn('"type":"combat_diagnostics"', "".join(player.transcript).replace(" ", ""))
+                peer.stop()
                 player.stop()
                 wizard.stop()
                 server.stop()
@@ -759,7 +763,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
         self.server(scenario=package, wizard=True, seed=None)
         wizard, _ = self.client(WIZARD_TOKEN, observe=True)
         player, _ = self.client()
-        self.assertEqual(query("creature inspect 2", "creature_inspection"), original)
+        self.assertDisclosedInspectionEqual(query("creature inspect 2", "creature_inspection"), original)
         self.assertFalse(query("combat inspect")["enabled"])
         changed = self.command(wizard, {"type": "wizard", "command": "creature template 2 fearless on"})
         self.assertFalse(changed.get("error"), changed.get("error"))
@@ -1149,7 +1153,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
         for detail in ("blue adept", "human", "arcane", "Hit die 1", "Spark Lance (Fire)"):
             self.assertIn(detail, output)
         after = self.request(observer, {"type":"snapshot"})
-        self.assertEqual(after["state"], before["state"])
+        self.assertDisclosedStateEqual(after["state"], before["state"])
         target = wizard.command("wizard creature inspect 2")
         self.assertNotIn("Server error", target)
         self.assertIn("blue sentinel", target)
@@ -1538,7 +1542,7 @@ class CombatDiagnosticsProcesses(ProcessTestCase):
         self.assertTrue(any(record["charge"] for record in report["records"]))
         self.assertTrue(any(step["id"] == "check" for record in report["records"] for step in record["trace"]["steps"]))
         after = self.request(wizard, {"type": "snapshot"})
-        self.assertEqual(after["state"], before["state"])
+        self.assertDisclosedStateEqual(after["state"], before["state"])
         denied = self.command(player, {"type": "wizard", "command": "combat capture off"})
         self.assertIn("Wizard authority", denied["error"])
         self.assertTrue(query("combat inspect")["enabled"])

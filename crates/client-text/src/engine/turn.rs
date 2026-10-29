@@ -48,6 +48,9 @@ pub trait Link {
     fn palette(&self) -> &Palette;
     fn role(&self) -> AccessRole;
     fn is_synchronized(&self) -> bool;
+    fn completed_observation_request(&self, _id: &str, _message: &ServerMessage) -> bool {
+        false
+    }
     fn set_pace(&mut self, pace: Duration);
     fn pace(&self) -> Duration;
     fn inspection_pages(
@@ -103,6 +106,9 @@ impl Link for Connection {
     }
     fn is_synchronized(&self) -> bool {
         Connection::is_synchronized(self)
+    }
+    fn completed_observation_request(&self, id: &str, message: &ServerMessage) -> bool {
+        Connection::completed_observation_request(self, id, message)
     }
     fn set_pace(&mut self, pace: Duration) {
         Connection::set_pace(self, pace);
@@ -526,7 +532,6 @@ async fn settle(
     until: Until,
 ) -> Result<Settled, Error> {
     let observing = matches!(request, Request::Observe);
-    let visual_before = link.client().observation_base().snapshot;
     let id = link.send(request).await?;
     let mut acked = false;
     let mut admission: Option<crate::admission::AdmissionBoundary> = None;
@@ -573,7 +578,7 @@ async fn settle(
         if !link.is_synchronized() {
             continue;
         }
-        if observing && link.client().observation_base().snapshot != visual_before {
+        if observing && link.completed_observation_request(&id, &message) {
             return Ok(Settled::Done);
         }
         // A scoped execution notice is an explicit stop, not a settlement:

@@ -180,7 +180,7 @@ class GrowthFailureProcesses(ProcessTestCase):
             self.assertNotIn(private_detail, refused["message"])
             self.assertNotIn(private_detail, told)
         pending = self.request(observer, {"type": "snapshot"})
-        self.assertEqual(pending["state"], before["state"])
+        self.assertDisclosedStateEqual(pending["state"], before["state"])
         self.assertEqual(checkpoint(self, observer), saved,
                          "Text refusal must not change time, RNG, HP, growth, or carried loot")
         queued = [row for row in pending["intentions"] if row["phase"] == "queued"]
@@ -231,7 +231,7 @@ class GrowthFailureProcesses(ProcessTestCase):
         self.assertIsNone(admitted["error"])
         refused = self.execution_refusal(player, start)
         pending = self.request(player, {"type": "snapshot"})
-        self.assertEqual(pending["state"], before["state"])
+        self.assertDisclosedStateEqual(pending["state"], before["state"])
         self.assertEqual(checkpoint(self, player), saved,
                          "failed growth rolls back damage, death, XP, HD, loot, time and RNG")
         queued = [row for row in pending["intentions"] if row["phase"] == "queued"]

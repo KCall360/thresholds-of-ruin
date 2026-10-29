@@ -1635,6 +1635,7 @@ mod tests {
                 "tick": 18446744073709551615,
                 "author": {"type":"user", "user":"owner"}, "audience":"actor",
                 "content": {"type":"intention_admitted", "intention":1,
+                    "human_operands":{"weapon":{"kind":"natural"},"items":[],"preparation":null},
                     "action":{"type":"use_ability", "id":"basic_melee", "invocation":{"aim":{"kind":"actor_target","target":18446744073709551615},"weapon":{"kind":"default"}},"supplies":{"kind":"carried"}}}
             },
             "receipt": {"user":"owner", "frontend":"test", "request_id":"request",
@@ -1681,7 +1682,7 @@ mod tests {
         }
         for target in ["null", r#""entry\\escaped\"identity""#] {
             check_stored::<crate::journal::Command>(&format!(
-                r#"{{"type":"wizard","expected_boundary":1,"operation":{{"type":"rewind","target":{target}}}}}"#
+                r#"{{"type":"wizard","expected_boundary":1,"display_basis":null,"operation":{{"type":"rewind","target":{target}}}}}"#
             ));
         }
         for source in ["user", "frontend"] {

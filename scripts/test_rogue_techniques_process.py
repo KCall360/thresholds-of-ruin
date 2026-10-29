@@ -17,7 +17,7 @@ from rogue_magic_receipts import (
 from rogue_test_support import (
     assert_room_gold_receipt, care_combat_action, disclosed_actor_candidates,
     disclosed_melee_candidate, disclosed_sight_candidate, disclosed_step_action,
-    first_floor_foes, disclosed_frames, resolved_events,
+    first_floor_foes, disclosed_frames, resolved_events, ordered_combat_events,
 )
 
 
@@ -250,7 +250,7 @@ class RogueTechniquesProcesses(ProcessTestCase):
         self.assertTrue(any(event["type"] == "ability" and event["caster"] in seen
             and event["ability"]["id"] == "basic_melee"
             and event["target"] == target and event["outcome"] == "applied"
-            for frame in disclosed_frames(player, start) for event in combat(frame)["events"]),
+            for event in ordered_combat_events(disclosed_frames(player, start))),
             "The injury must come from disclosed ordinary hostile combat")
 
         before, start = current, len(player.transcript)
