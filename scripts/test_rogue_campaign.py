@@ -132,9 +132,30 @@ class RunSummaries(unittest.TestCase):
         self.assertEqual(run["meals_eaten"], 1)
         self.assertEqual(run["phases_per_floor"], {"1": {"explore": 1, "eat": 1}, "2": {"combat": 1}})
         self.assertEqual(run["before_death"], {"foes": {"orc": 1, "bat": 1},
-                                               "phases": {"explore": 1, "eat": 1, "combat": 1}})
+                                               "phases": {"explore": 1, "eat": 1, "combat": 1},
+                                               "hunger": {"nourished": 2, "hungry": 1}})
+        self.assertEqual(run["hunger_at_death"], "nourished")
         self.assertEqual(run["final_level"], 2)
         self.assertIn("wanderer_arrivals", run["unavailable"])
+
+    def test_a_failed_closing_save_keeps_the_finished_run(self):
+        run = campaign.summarize(fake_controller(), [sample(0), sample(6000)],
+                                 "death", seed=2, wall_seconds=1.0)
+
+        def failed_save():
+            raise AssertionError("Explicit save failed: " + "x" * 5000 + " behind schedule")
+        campaign.keep_item_generation(run, failed_save)
+        self.assertEqual(run["outcome"], "death")
+        self.assertIsNone(run["item_generation"])
+        self.assertIn("item_generation", run["unavailable"])
+        self.assertTrue(run["item_generation_error"].endswith("behind schedule"))
+
+    def test_harness_errors_keep_the_final_exception(self):
+        text = "Traceback\n" + "y" * 5000 + "\nAssertionError: the cause"
+        clipped = campaign.clipped(text)
+        self.assertTrue(clipped.startswith("Traceback"))
+        self.assertTrue(clipped.endswith("AssertionError: the cause"))
+        self.assertLess(len(clipped), 3100)
 
     def test_censored_runs_have_no_death_depth(self):
         run = campaign.summarize(fake_controller(), [sample(0), sample(6000)],
@@ -142,6 +163,7 @@ class RunSummaries(unittest.TestCase):
         self.assertFalse(run["died"])
         self.assertIsNone(run["death_depth"])
         self.assertIsNone(run["before_death"])
+        self.assertIsNone(run["hunger_at_death"])
 
     def test_aggregate_excludes_harness_errors_from_shape(self):
         runs = [campaign.summarize(fake_controller(), [sample(0), sample(6000)], outcome,

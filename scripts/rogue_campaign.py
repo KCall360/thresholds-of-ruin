@@ -132,8 +132,11 @@ def summarize(controller, samples, outcome, *, seed, wall_seconds):
         "before_death": ({"foes": dict(Counter(name for sample in samples[-DEATH_WINDOW:]
                                                 for name in sample.get("foes", []))),
                           "phases": dict(Counter(sample["phase"]
+                                                 for sample in samples[-DEATH_WINDOW:])),
+                          "hunger": dict(Counter(sample["hunger"]
                                                  for sample in samples[-DEATH_WINDOW:]))}
                          if outcome == "death" else None),
+        "hunger_at_death": final["hunger"] if outcome == "death" else None,
         # Where each floor's commands went, to tell a stalled bot from a slow floor.
         "phases_per_floor": {str(depth): dict(Counter(sample["phase"] for sample in samples
                                                       if sample.get("depth") == depth))
@@ -392,7 +395,17 @@ class CampaignRun(ProcessTestCase):
         CampaignRun.result["refusal"] = refusal
         CampaignRun.result["searches"] = searches
         CampaignRun.result["settlement_deadlines"] = deadlines
-        CampaignRun.result["item_generation"] = item_generation(self.private_receipts())
+        keep_item_generation(CampaignRun.result, self.private_receipts)
+
+
+def keep_item_generation(result, read_receipts):
+    """Add first-entry item receipts; a finished run survives a failed save barrier."""
+    try:
+        result["item_generation"] = item_generation(read_receipts())
+    except AssertionError as error:
+        result["item_generation"] = None
+        result["unavailable"] = [*result["unavailable"], "item_generation"]
+        result["item_generation_error"] = str(error)[-1000:]
 
 
 def expected_armor(depth):
@@ -435,8 +448,13 @@ def run_seed(seed, floor_limit, run_limit, start_depth=1, work_root=None):
     if not outcome.wasSuccessful():
         problems = [text for _, text in outcome.errors + outcome.failures]
         return {"summary": SUMMARY, "seed": seed, "outcome": "harness_error",
-                "error": problems[-1][:3000] if problems else "unknown"}
+                "error": clipped(problems[-1]) if problems else "unknown"}
     return CampaignRun.result
+
+
+def clipped(text, keep=1500):
+    """A traceback's start and its final exception, which a long reply would bury."""
+    return text if len(text) <= 2 * keep else text[:keep] + "\n...\n" + text[-keep:]
 
 
 def aggregate(runs):

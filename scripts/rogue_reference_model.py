@@ -59,7 +59,9 @@ ITEM_CHANCE = Fraction(36, 100)
 CATEGORY_WEIGHTS = {"potion": 26, "scroll": 36, "food": 16, "weapon": 7, "armor": 7,
                     "ring": 4, "wand": 4}
 MEAL_MEAN = Fraction(1100 + 1499, 2)
-DROUGHT_THRESHOLD = 3
+# Rogue increments no_food before placing a level's items and forces food when
+# it exceeds 3, so three earlier foodless levels force the next level's food.
+DROUGHT_EARLIER_FLOORS = 3
 WANDER_STARTUP_TURNS = 70  # nominal spread(70): 67..73, mean 70
 WANDER_ROLL_INTERVAL = 4
 WANDER_CHANCE = Fraction(1, 6)
@@ -175,12 +177,13 @@ def food_per_floor():
     for first in range(attempts):
         reach = (1 - chance) ** first * chance
         forced_mean += reach * (1 + (attempts - first - 1) * chance * share)
-    # Counter states 0..threshold are ordinary floors; one more state is forced.
+    # States are the count of earlier foodless floors; below three they are
+    # ordinary, at three the floor is forced.
     # A floor without food advances the counter, food resets it. The renewal
     # chain's stationary weights are products of the preceding failure chances,
     # and the forced state repeats only when no item is created at all.
     weights = [Fraction(1)]
-    for _ in range(DROUGHT_THRESHOLD + 1):
+    for _ in range(DROUGHT_EARLIER_FLOORS):
         weights.append(weights[-1] * ordinary_none)
     # The forced state loops on itself when nothing is created.
     weights[-1] = weights[-1] / (1 - nothing)

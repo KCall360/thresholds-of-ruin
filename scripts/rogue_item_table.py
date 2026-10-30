@@ -110,10 +110,11 @@ def render(text):
                   'bands = [{ depth = { kind = "open", minimum = 1 }, choices = [\n']
         lines += [f"  {row},\n" for row in choice_rows(categories)]
         lines += ["] }]\n", "\n"]
-    lines += ["# Rogue forces food once more than three new floors in a row produced none.\n",
+    lines += ["# Rogue forces food on the fourth new floor in a row without any: its\n",
+              "# counter includes the new floor, while this threshold counts earlier floors.\n",
               '[[floor_activation.profiles."rogue.low_depth".stages]]\n',
               'id = "rogue.food_drought"\n', "version = 1\n", 'kind = "food_drought"\n',
-              "threshold = 3\n",
+              "threshold = 2\n",
               "food = [" + ", ".join(f'"{name}"' for name in FOOD) + "]\n",
               "quantity = 1\n",
               'bands = [{ depth = { kind = "open", minimum = 1 }, choices = '

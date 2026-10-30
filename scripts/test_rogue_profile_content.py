@@ -83,7 +83,9 @@ class RogueProfileContent(unittest.TestCase):
         self.assertAlmostEqual(expected["rogue.ration"] / food, 0.9)
         self.assertAlmostEqual(expected["rogue.healing"], 9 * 0.36 * 0.26 * 0.13)
         drought = stages["rogue.food_drought"]
-        self.assertEqual((drought["kind"], drought["threshold"]), ("food_drought", 3))
+        # TOR's threshold counts earlier floors and places food when more than
+        # it were foodless; Rogue's fourth foodless level is forced, so 2.
+        self.assertEqual((drought["kind"], drought["threshold"]), ("food_drought", 2))
         self.assertEqual(set(drought["food"]), {"rogue.ration", "rogue.fruit"})
         self.assertEqual(stages["rogue.treasure_room"]["chance"], {"numerator": 1, "denominator": 20})
         # The committed stages are exactly the generator's current output.

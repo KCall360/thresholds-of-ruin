@@ -75,9 +75,11 @@ def check_food(runs):
 
 def check_starvation(runs):
     deaths = [run for run in runs if run.get("died")]
-    # A death while the reserve is empty is starvation (or its fainting).
+    # A death while the reserve is empty is starvation (or its fainting). Runs
+    # recorded before the hunger at death was kept fall back to any empty spell.
     starved = [run for run in deaths if run.get("cause") == "starvation"
-               or run.get("samples_by_hunger", {}).get("empty")]
+               or (run["hunger_at_death"] == "empty" if "hunger_at_death" in run
+                   else run.get("samples_by_hunger", {}).get("empty"))]
     share = len(starved) / len(deaths) if deaths else 0.0
     return {"pass": share <= 0.10, "deaths": len(deaths), "starved": len(starved)}
 

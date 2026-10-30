@@ -66,6 +66,17 @@ class ReferenceModel(unittest.TestCase):
         self.assertGreater(drought, 0)
         self.assertLess(drought, Fraction(1, 5))
 
+    def test_drought_forces_food_on_the_fourth_foodless_level(self):
+        # Rogue increments no_food before placing a new level's items and forces
+        # food when it exceeds 3: three earlier foodless levels suffice.
+        attempts, chance = model.ITEM_ATTEMPTS, model.ITEM_CHANCE
+        miss = (1 - chance * model.food_share()) ** attempts
+        nothing = (1 - chance) ** attempts
+        weights = [Fraction(1), miss, miss ** 2, miss ** 3 / (1 - nothing)]
+        _, drought = model.food_per_floor()
+        self.assertEqual(drought, weights[-1] / sum(weights))
+        self.assertEqual(model.DROUGHT_EARLIER_FLOORS, 3)
+
     def test_traps_start_at_depth_four(self):
         self.assertEqual(model.traps_per_floor(3), 0)
         # Depth 4: 40% chance, rnd(1) + 1 = one trap.

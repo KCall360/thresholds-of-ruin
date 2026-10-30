@@ -281,12 +281,13 @@ bands = [{ depth = { kind = "open", minimum = 1 }, choices = [
   { archetype = "rogue.wand_cancellation", weight = 20 },
 ] }]
 
-# Rogue forces food once more than three new floors in a row produced none.
+# Rogue forces food on the fourth new floor in a row without any: its
+# counter includes the new floor, while this threshold counts earlier floors.
 [[floor_activation.profiles."rogue.low_depth".stages]]
 id = "rogue.food_drought"
 version = 1
 kind = "food_drought"
-threshold = 3
+threshold = 2
 food = ["rogue.fruit", "rogue.ration"]
 quantity = 1
 bands = [{ depth = { kind = "open", minimum = 1 }, choices = [{ archetype = "rogue.ration", weight = 9 }, { archetype = "rogue.fruit", weight = 1 }] }]
