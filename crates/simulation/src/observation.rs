@@ -705,6 +705,8 @@ pub(crate) struct ActorReferenceObservation {
 /// Tactile awareness and projected stair landings never become sight targeting.
 pub(crate) struct DecisionSnapshot {
     pub view: Observation,
+    /// Existing body-relative disclosure chart, including nonvisual awareness.
+    pub scene: Arc<Vec<tor_world::SightCell>>,
     pub sight: Arc<Vec<tor_world::SightCell>>,
 }
 
@@ -722,6 +724,7 @@ impl Game {
         let view = self.observe_in_snapshot(id, &snapshot)?;
         Ok(DecisionSnapshot {
             view,
+            scene: snapshot.cells.clone(),
             sight: snapshot.sight.clone(),
         })
     }

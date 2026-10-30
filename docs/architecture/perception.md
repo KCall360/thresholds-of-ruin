@@ -586,7 +586,8 @@ flight-gated vertical edges matter. For a diagonal, the component routes must
 produce a legal agreeing endpoint/frame when both exist; one valid side route
 can suffice under the movement rule. A stationary actor expands no movement.
 
-One search is shared across destinations within a decision. It incrementally
+Target ranking and pursuit share one search across destinations within a decision.
+It incrementally
 expands until a requested destination is settled, then reconstructs a complete
 `Vec<TravelStep>` through predecessors. Thus it is not a separate full search per
 target, but repeated long destinations still reconstruct route vectors. The
@@ -594,10 +595,16 @@ algorithm finds a minimum cost in **remembered** topology; it is not an omniscie
 shortest path through currently hidden changes, and route step count used by
 some policy ranking is not the same quantity as accumulated movement time.
 
-The current flee heuristic does not use one uniform distance metric. Its
-[qualified limitation](../reference/ai.md#current-retreat-limitation) is separate
-from the minimum-tick route-search guarantee; no optimal or topology-neutral
-retreat behavior is implied here.
+Retreat compares the same route-step quantity from the current and prospective
+positions, using a separate remembered frontier for each legal disclosed candidate
+and its full post-step orientation. Its [distance and limits](../reference/ai.md#retreat-distance-and-limits)
+include directed escapes and unavailable current routes. A no-route local fallback
+uses one consistent coordinate metric only in the already-cached unwrapped
+physical disclosure chart within the actor/threat region; it neither learns
+topology nor generates another scene.
+This does not change the
+minimum-tick search policy or establish an optimal escape planner; the extra
+candidate-search cost has not been performance-qualified.
 
 Source: [remembered routing](../../crates/simulation/src/travel.rs), `RouteSearch`,
 `refresh_navigation_scene`; [retreat scoring](../../crates/simulation/src/ai.rs),

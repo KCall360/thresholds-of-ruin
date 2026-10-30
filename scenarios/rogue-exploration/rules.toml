@@ -1,4 +1,4 @@
-import = "interactions-v56"
+import = "interactions-v57"
 
 # Equipment expertise is an ordinary HD-point or earned Intellect choice.
 # No preset, species, NPC or default talent receives a free expertise grant.

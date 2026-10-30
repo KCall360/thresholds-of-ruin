@@ -115,41 +115,82 @@ review, not reports that those behavioral witnesses were run here.
 
 ## Recommended engineering work
 
-These are **not implemented by this documentation change**. Priority means review
-order, not permission to start code changes or proof of a live defect.
+The documentation review did not implement these proposals. Subsequent
+correctness/hardening status is recorded below; remaining performance hypotheses
+still require measurement rather than a blanket rewrite.
 
-### 1. Retreat metric across regions — medium correctness
+### 1. Retreat metric across regions — confirmed correctness fix
 
-**Source-supported candidate, not runtime-reproduced.** [AI retreat](../../crates/simulation/src/ai.rs)
-compares current remembered route length with same-region Manhattan distance and
-scores off-threat-region candidates as `current + 1`. This mixes metrics.
+The pinned review identified a **source-supported candidate, not a runtime
+reproduction**: current remembered route length was compared with same-region
+Manhattan distance or `current + 1` outside the threat's region. Subsequent
+[regressions](../../crates/simulation/src/ai_flee_tests.rs) confirmed the defect
+before the implementation changed.
 
-Proposed bounded witness: a six-cell corridor split into regions A and B, three
-cells each, no gravity, no competing care/erratic/self-step action and no retained
-preparation or committed work. The engaged actor is A0, opponent B2, flee threshold
-100, all relevant cells/edges remembered, and East to A1 is its only legal move.
-Current route length is five; A1 scores six although its remaining route is four.
-An equivalent unsplit corridor scores that candidate four and can Wait instead.
-First reproduce both arrangements through ordinary decision/execution, then choose
-an intended topology-stable metric and test blocked/memory/portal cases. Do not
-change behavior merely because Manhattan is convenient.
+The exact witness is a six-cell corridor split into regions A and B, three cells
+each, no gravity, no competing care/erratic/self-step action and no retained
+preparation. The engaged actor is A0, visible opponent B2, flee threshold 100,
+relevant cells/edges remembered, and East to A1 its only legal move. The old code
+selected East despite reducing the five-step route to four; the unsplit control
+waited. The positive rotated-portal escape control also passed before the fix.
 
-### 2. Save-owned note-anchor leaves — medium hardening
+Current [retreat scoring](../reference/ai.md#retreat-distance-and-limits) compares
+hop counts of the same minimum-duration remembered-route policy from the actual
+current/candidate frames. Full CI caught a follow-on regression: this initially
+made a retained navigation map mandatory even for currently visible local retreat.
+The corrected policy retains a single-metric local fallback only in an unwrapped
+disclosed chart within the actor/threat region, without teaching topology. Regressions also retain one-way
+escapes, blocked/unknown-route behavior, same-region folded-chart rejection,
+preview purity and checkpointed AI execution. Additional
+candidate searches are an explicit correctness cost, not a measured speedup.
+The approved deterministic correction uses rules identity `interactions-v57`.
+All saves pinned to the previous identity are rejected, not only saves containing
+the affected AI state; scenario certificates must be regenerated. Wire and stored
+schema versions are unchanged. Serializer shape compatibility alone does not
+establish old-tail replay, and this change provides no migration.
+
+### 2. Save-owned note-anchor leaves — implemented hardening
 
 [Journal](../../crates/server/src/journal.rs) `RecordedAnchor::State` and
-[save schema](../../crates/server/src/save_schema.rs) still directly use protocol
-snapshot/entry leaves in parts of their serialization. Typed save/wire separation
-is the design rule, not yet universal leaf independence. Add save-owned adapters
-with strict roundtrip/rejection witnesses. This is coupling risk, **not established
-current corruption** or grounds to invent migration support.
+[save schema](../../crates/server/src/save_schema.rs) now use save-owned snapshot
+and optional-entry adapters instead of protocol leaf serializers. Independent
+fixtures preserve existing string/null shapes, required fields, byte-length and
+control-character validation, escaped/Unicode strings and private causal anchors.
+The stored format is unchanged. This resolves the identified coupling risk;
+it is **not a repair of established data corruption**, an importer, or evidence
+that a separate deterministic gameplay change preserves historical replay.
 
-### 3. Adaptation and route work — medium performance hypothesis
+### 3. Adaptation and route work — measured counts, timing still open
 
-[Compact outcome adaptation](../../crates/server/src/adapt/outcomes.rs) matches
-cells against disclosed entity collections, yielding cell×entity work in its
-current shape. Known routes can also materialize paths when a scalar rank suffices.
-Profile representative densities first. Any indexing must preserve ordering,
-repeated geometric occurrences and disclosure; no speedup was measured here.
+[Compact outcome adaptation](../../crates/server/src/adapt/outcomes.rs) now lazily
+groups already-projected entity rows by location within one call. The existing
+location-and-frame disclosure gate and scene iteration remain authoritative;
+groups retain list order, repeated identities and portal occurrences. No global
+cache or additional disclosure is introduced.
+
+The [count witnesses](../../crates/server/src/adapt/outcomes_work_tests.rs) use
+actual four-location corridor/portal scenes with synthetic disclosed entity
+rows. With 64 items, 64 apparent objects and 64 actors, four ordinary occurrences
+previously inspected 768 rows; 33 portal occurrences inspected 6,336. Both now
+inspect 192 input rows once, plus 12 or 99 location lookups respectively. Matched
+source-row emissions remain 192 and 1,584; these counts exclude observer aliases
+and extra underfoot representations. When no scene occurrence is disclosed,
+row work remains zero. Typed projections and eventful serialized facts match the independent
+full adapter, including frame privacy, cosmetic names and multi-cell identities.
+
+These are work counts, **not a measured latency improvement**. Grouping adds
+`O(N log L)` construction and `O(N + L)` transient references/maps; one/few-cell,
+many-location and mostly unmatched workloads can trade scans for extra work.
+Release timing and allocation measurements remain open.
+
+Known routes still materialize paths for ranking. A scalar alternative must
+preserve the hop count of the selected minimum-duration route, not substitute
+the route's duration cost. Body-transition count witnesses likewise find four
+permanent compiles on successful away-form changes, with 50/316/1,228 raw HD
+visits in the direct 2/16/64-HD fixture family. This is measurement only: no body
+optimization is implemented. Identical replacement compilation may be reusable,
+but original-body reward/Intellect projection and actual gear/condition folds
+must remain distinct; paid and direct fixtures are not interchangeable timings.
 
 ### 4. Presentation/history retention — medium capacity risk
 

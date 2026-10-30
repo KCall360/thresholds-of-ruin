@@ -26,7 +26,7 @@ def manifest_lines(scenario_id: str) -> list[str]:
 
 def write_rules(root: Path) -> None:
     root.mkdir(parents=True, exist_ok=True)
-    (root / "rules.toml").write_text('import = "interactions-v56"\n', encoding="utf-8", newline="\n")
+    (root / "rules.toml").write_text('import = "interactions-v57"\n', encoding="utf-8", newline="\n")
 
 
 def build_explicit(root: Path, scenario_id: str, floors: int) -> None:

@@ -164,16 +164,45 @@ paid work retains its committed-prefix and recovery obligations; failed candidat
 execution does not leak new engagement or RNG. Human and autonomous controllers
 share the same capability, source and target gates.
 
-## Current retreat limitation
+<a id="current-retreat-limitation"></a>
+## Retreat distance and limits
 
-The current flee heuristic compares the current route's step count against a
-same-region candidate's Manhattan distance, while an off-threat-region candidate
-scores `current + 1`. These are not one uniform distance metric. A source-supported
-split-corridor construction suggests region partitioning can change retreat choice.
-It has **not been runtime-reproduced in this documentation review**. See the
-[qualified finding](../development/documentation-review.md#recommended-engineering-work)
-for the exact proposed fixture and scope; do not infer optimal or topology-neutral
-retreat from the general routing contract.
+When a current route is known, flee compares **hop counts of stable
+minimum-duration remembered routes** from the current position and each legal,
+currently disclosed candidate. It does not mix accumulated movement time, local
+coordinates or an invented `current + 1` into those scores. Candidate searches
+start in the actual post-step location and body orientation. A remembered
+**directed** graph with no return path from a known candidate to the otherwise
+reachable threat gives that candidate unbounded distance. A candidate not yet
+present in the remembered graph is unknown, not proof of an escape.
+
+Current visibility does not require a retained navigation map. Without a current
+route, a conservative local fallback compares Manhattan distances on both sides
+of the comparison, but only when actor and threat share a region and the existing
+physical disclosure chart within that region is unwrapped: every such occurrence
+has its ordinary body-relative coordinates and unchanged frame. Candidate steps must likewise be
+ordinary same-region displacements. Local mode rejects folded or rotated
+occurrences within the actor’s region and does not use portal-crossing candidates
+or cross-region coordinate comparisons. It neither inspects hidden links nor
+teaches navigation during a decision. Disclosed occurrences in other
+regions do not forbid ordinary local steps; a disclosed fold back into the
+actor’s region does. It is a local heuristic, not a proof about undisclosed paths. A partial map never causes per-candidate metric
+switching.
+
+Only a strictly greater score qualifies; existing direction order resolves ties.
+If neither metric is available, retained commitment, visible self-defense/basic
+attack and eventual Wait retain their ordinary priority. First-step collision
+and disclosure checks still apply; no reverse link or hidden topology is invented.
+
+A separate frontier per candidate adds search work (at most ten candidate
+origins); this is a correctness change, not a measured optimization or an optimal
+escape planner.
+The [regressions](../../crates/simulation/src/ai_flee_tests.rs) cover split/unsplit
+corridors, rotated and one-way portals, blocked retreat, missing remembered
+connections, no-map local retreat beside visible other-region portals, folded-chart
+rejection, pure previews and checkpointed autonomous execution. The
+[review record](../development/documentation-review.md#recommended-engineering-work)
+retains the original source-only finding and its subsequent confirmation.
 
 ## Worked control-flow examples
 
