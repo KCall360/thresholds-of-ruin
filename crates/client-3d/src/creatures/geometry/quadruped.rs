@@ -192,15 +192,8 @@ pub(super) fn quadruped(kit: &mut Kit, lift: Entity, look: &Look, centaur: bool)
                     ),
                     0.04,
                 );
-                for side in [-1.0f32, 1.0] {
-                    body.add(
-                        Ellipsoid(
-                            Vec3::new(side * 0.235 * w, 0.47, 0.0),
-                            Vec3::new(0.072, 0.068, 0.075),
-                        ),
-                        0.06,
-                    );
-                }
+                // Deltoids belong to the animated arms; the rib/clavicle
+                // support stays on the torso without retaining lateral caps.
                 if let Some(bust) = bust {
                     bust_supports(&mut body, &bust, 0.0);
                 } else {
@@ -307,33 +300,42 @@ pub(super) fn quadruped(kit: &mut Kit, lift: Entity, look: &Look, centaur: bool)
                 beard(p, hair_color(&rider));
             }
         });
+        let arms = super::anatomy::RiderArms::resolve(&l);
         for (side, arm, fore, hand) in [
             (1.0f32, J::ArmL, J::ForeL, J::HandL),
             (-1.0, J::ArmR, J::ForeR, J::HandR),
         ] {
             let tag = if side > 0.0 { "l" } else { "r" };
-            let reach = if l.v.woman { 0.215 } else { 0.24 };
+            let reach = arms.reach;
             let upper = kit.joint(
                 arm,
                 torso,
                 Vec3::new(side * reach, 0.48, 0.0),
                 &format!("arm{tag}"),
                 |p| {
-                    limb(&mut p.matte, 0.3, 0.064, 0.05, 0.068, 0.008, l.cloth);
+                    organic_upper_arm(
+                        &mut p.matte,
+                        side,
+                        arms.width,
+                        1.0,
+                        arms.muscle,
+                        true,
+                        l.cloth,
+                    );
                 },
             );
             let lower = kit.joint(fore, upper, Vec3::Y * -0.3, &format!("fore{tag}"), |p| {
-                limb(&mut p.matte, 0.26, 0.05, 0.038, 0.056, 0.004, l.cloth);
+                organic_forearm(&mut p.matte, arms.width, 1.0, arms.muscle, true, l.cloth);
                 p.satin.prism(
                     Vec3::Y * -0.13,
                     Vec3::Y * -0.25,
-                    0.058,
-                    0.052,
+                    0.058 * arms.width,
+                    0.052 * arms.width,
                     10,
                     LEATHER,
                     0.0,
                 );
-                fist(p, Vec3::Y * -0.3, side, 1.0, l.cloth);
+                fist(p, Vec3::Y * -0.3, side, arms.width, l.cloth);
             });
             let grip = kit
                 .commands

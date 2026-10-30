@@ -11,9 +11,11 @@ pub(super) fn input(
     net: Res<Net>,
     mut game: ResMut<Game>,
     mut rig: ResMut<CameraRig>,
+    ui: crate::inventory::InputCapture,
 ) {
     // Typed advancement commands neither turn the camera nor move.
-    if game.screen.is_some() {
+    if game.screen.is_some() || ui.keyboard(&game, &keys) {
+        wheel.clear();
         return;
     }
     if keys.just_pressed(KeyCode::KeyQ) {
@@ -22,8 +24,12 @@ pub(super) fn input(
     if keys.just_pressed(KeyCode::KeyE) {
         rig.facing += 1;
     }
-    for event in wheel.read() {
-        rig.distance = (rig.distance - event.y * 0.8).clamp(4.0, 32.0);
+    if ui.pointer() {
+        wheel.clear();
+    } else {
+        for event in wheel.read() {
+            rig.distance = (rig.distance - event.y * 0.8).clamp(4.0, 32.0);
+        }
     }
     game.since_send += time.delta_secs();
     if game.busy || game.fatal {
@@ -131,8 +137,9 @@ pub(super) fn rig_camera(
     time: Res<Time>,
     mut game: ResMut<Game>,
     mut rig: ResMut<CameraRig>,
-    mut camera: Query<&mut Transform, (With<Camera3d>, Without<Torch>)>,
+    mut camera: Query<(&mut Transform, &Projection), WorldCameraFilter>,
     mut torch: Query<&mut Transform, (With<Torch>, Without<Camera3d>)>,
+    framing: crate::inventory::Framing,
 ) {
     let dt = time.delta_secs();
     let player = stand(game.feet_world) + Vec3::Y * 0.65;
@@ -147,15 +154,45 @@ pub(super) fn rig_camera(
     rig.yaw += (goal_yaw - rig.yaw) * (1.0 - (-dt * 9.0).exp());
     // Facing north at yaw 0: the camera sits south of the player (+z).
     let forward = Vec3::new(rig.yaw.sin(), 0.0, -rig.yaw.cos());
-    let pitch = 0.95f32;
-    let eye =
-        rig.focus - forward * rig.distance * pitch.cos() + Vec3::Y * rig.distance * pitch.sin();
-    if let Ok(mut transform) = camera.single_mut() {
-        *transform = Transform::from_translation(eye).looking_at(rig.focus, Vec3::Y);
+    let coverage = framing.coverage(&game);
+    rig.panel_coverage += (coverage - rig.panel_coverage) * (1.0 - (-dt * 10.0).exp());
+    if let Ok((mut transform, projection)) = camera.single_mut() {
+        *transform = framed_camera(
+            rig.focus,
+            forward,
+            rig.distance,
+            projection,
+            rig.panel_coverage,
+        );
     }
     if let Ok(mut transform) = torch.single_mut() {
         transform.translation = rig.focus + Vec3::Y * 1.4;
     }
+}
+
+type WorldCameraFilter = (
+    With<Camera3d>,
+    Without<Torch>,
+    Without<crate::portrait::PortraitCamera>,
+);
+
+/// Shift the view, keeping actor positions, heading, focus and torch authoritative.
+fn framed_camera(
+    focus: Vec3,
+    forward: Vec3,
+    distance: f32,
+    projection: &Projection,
+    coverage: f32,
+) -> Transform {
+    let pitch = 0.95f32;
+    let eye = focus - forward * distance * pitch.cos() + Vec3::Y * distance * pitch.sin();
+    let half_width = match projection {
+        Projection::Perspective(p) => distance * (p.fov * 0.5).tan() * p.aspect_ratio,
+        Projection::Orthographic(p) => p.area.width() * 0.5,
+        _ => 0.0,
+    };
+    let shift = forward.cross(Vec3::Y) * half_width * coverage;
+    Transform::from_translation(eye + shift).looking_at(focus + shift, Vec3::Y)
 }
 
 /// Tell the cave shader where the player and camera are, for the cutaway.
@@ -163,7 +200,7 @@ pub(super) fn update_cave_params(
     rig: Res<CameraRig>,
     palette: Res<Palette>,
     mut materials: ResMut<Assets<CaveMaterial>>,
-    camera: Query<&Transform, With<Camera3d>>,
+    camera: Query<&Transform, crate::portrait::ExplorationCamera>,
 ) {
     let Ok(eye) = camera.single() else {
         return;
@@ -189,7 +226,7 @@ pub(super) fn follow_actors(
     time: Res<Time>,
     mut bodies: Query<(&ActorBody, &mut Transform)>,
     mut labels: Query<(&mut Node, &mut Visibility), With<Label>>,
-    camera: Query<(&Camera, &GlobalTransform)>,
+    camera: Query<(&Camera, &GlobalTransform), crate::portrait::ExplorationCamera>,
 ) {
     let smooth = 1.0 - (-time.delta_secs() * 12.0).exp();
     let Ok((camera, eye)) = camera.single() else {

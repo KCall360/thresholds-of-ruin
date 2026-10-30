@@ -29,12 +29,10 @@ impl Face {
     }
 }
 
-fn faces(world: &World, meshes: &Assets<Mesh>, joint: Entity) -> Vec<Face> {
+fn faces(world: &World, rig: &Rig, meshes: &Assets<Mesh>, joint: Entity) -> Vec<Face> {
     let mut out = Vec::new();
-    for child in world.get::<Children>(joint).unwrap().iter() {
-        let Some(mesh) = world.get::<Mesh3d>(child).and_then(|m| meshes.get(&m.0)) else {
-            continue;
-        };
+    for surface in super::test_support::joint_meshes(world, rig, meshes, joint) {
+        let mesh = surface.mesh;
         let Some(VertexAttributeValues::Float32x3(points)) =
             mesh.attribute(Mesh::ATTRIBUTE_POSITION)
         else {
@@ -44,7 +42,7 @@ fn faces(world: &World, meshes: &Assets<Mesh>, joint: Entity) -> Vec<Face> {
         else {
             panic!("colors")
         };
-        let transform = world.get::<Transform>(child).unwrap().compute_affine();
+        let transform = surface.transform;
         let indices: Vec<_> = mesh.indices().unwrap().iter().collect();
         for tri in indices.as_chunks::<3>().0 {
             out.push(Face {
@@ -154,7 +152,7 @@ fn articulated_joint_flesh_covers_terminal_disks_through_bent_poses() {
         for build in 0..3 {
             let look = Look::with_choice(model, 42, Some(Variant { build, ..default() }));
             let (world, rig, _, meshes) = spawn_one(&look);
-            let body = faces(&world, &meshes, rig.joint(J::Body).unwrap());
+            let body = faces(&world, &rig, &meshes, rig.joint(J::Body).unwrap());
             for (upper, lower, foot) in [
                 (J::FL, J::FLs, J::HoofFL),
                 (J::FR, J::FRs, J::HoofFR),
@@ -163,8 +161,8 @@ fn articulated_joint_flesh_covers_terminal_disks_through_bent_poses() {
             ] {
                 let a = rig.rest[lower as usize];
                 let b = rig.rest[foot as usize];
-                let first = faces(&world, &meshes, rig.joint(upper).unwrap());
-                let second = faces(&world, &meshes, rig.joint(lower).unwrap());
+                let first = faces(&world, &rig, &meshes, rig.joint(upper).unwrap());
+                let second = faces(&world, &rig, &meshes, rig.joint(lower).unwrap());
                 // Cap plane normals require the inverse transpose under the
                 // actual nonuniform Storybook scale, unlike bone positions.
                 let upper_axis = (a / storybook_part(rig.plan, upper)).normalize();
@@ -251,8 +249,8 @@ fn articulated_joint_xeroc_shanks_and_pads_keep_skin_with_pale_nails() {
             (J::BLs, J::HoofBL),
             (J::BRs, J::HoofBR),
         ] {
-            let shank = faces(&world, &meshes, rig.joint(shin).unwrap());
-            let pad = faces(&world, &meshes, rig.joint(foot).unwrap());
+            let shank = faces(&world, &rig, &meshes, rig.joint(shin).unwrap());
+            let pad = faces(&world, &rig, &meshes, rig.joint(foot).unwrap());
             for (name, surface) in [("shank", &shank), ("pad", &pad)] {
                 let skin = pigment_area(surface, look.skin);
                 let cloth = pigment_area(surface, look.cloth * 0.9);
@@ -293,6 +291,74 @@ fn reparented_mesh_preserves_placement_across_proportions_and_parent_pose() {
                 original.distance(moved) < 1e-6,
                 "{parent:?} -> {child:?}: {original:?} != {moved:?}"
             );
+        }
+    }
+}
+
+#[test]
+fn centaur_rider_shoulders_and_elbows_keep_flesh_through_supported_bends() {
+    assert_joint_pair_flesh(
+        CreatureModel::Centaur,
+        &[[J::Torso, J::ArmL, J::ForeL], [J::Torso, J::ArmR, J::ForeR]],
+    );
+}
+
+#[test]
+fn fur_backing_covers_yeti_joint_pivots_without_duplicate_skin() {
+    assert_joint_pair_flesh(
+        CreatureModel::Yeti,
+        &[
+            [J::Torso, J::ArmL, J::ForeL],
+            [J::Torso, J::ArmR, J::ForeR],
+            [J::Hips, J::LegL, J::ShinL],
+            [J::Hips, J::LegR, J::ShinR],
+        ],
+    );
+}
+
+fn assert_joint_pair_flesh(model: CreatureModel, pairs: &[[J; 3]]) {
+    for woman in [false, true] {
+        for build in 0..3 {
+            let look = Look::with_choice(
+                model,
+                17,
+                Some(Variant {
+                    woman,
+                    build,
+                    ..default()
+                }),
+            );
+            let (world, rig, _, meshes) = spawn_one(&look);
+            for &[parent, upper, lower] in pairs {
+                let torso = faces(&world, &rig, &meshes, rig.joint(parent).unwrap());
+                let arm = faces(&world, &rig, &meshes, rig.joint(upper).unwrap());
+                let forearm = faces(&world, &rig, &meshes, rig.joint(lower).unwrap());
+                for proximal in [true, false] {
+                    for angle in [-0.3, 0.0, 0.6, 1.1] {
+                        let rotation = Quat::from_rotation_x(angle);
+                        let fixed = if proximal { &torso } else { &arm };
+                        let moving = if proximal { &arm } else { &forearm };
+                        let offset = rig.rest[if proximal { upper } else { lower } as usize];
+                        let mut surface: Vec<_> = fixed
+                            .iter()
+                            .map(|face| face.moved(Quat::IDENTITY, -offset))
+                            .collect();
+                        surface.extend(moving.iter().map(|face| face.moved(rotation, Vec3::ZERO)));
+                        for direction in [
+                            Vec3::X,
+                            Vec3::NEG_X,
+                            Vec3::Y,
+                            Vec3::NEG_Y,
+                            Vec3::Z,
+                            Vec3::NEG_Z,
+                        ] {
+                            let hit = first_hit(&surface, direction * 1.5, -direction);
+                            assert!(hit.is_some_and(|distance| (0.05..1.485).contains(&distance)),
+                                "{model:?}, woman={woman}, build={build}, {upper:?}, proximal={proximal}, bend={angle}, direction={direction:?}: uncovered pivot {hit:?}");
+                        }
+                    }
+                }
+            }
         }
     }
 }

@@ -3,6 +3,29 @@ use tor_client_common::{test_support::observation, ClientState, Palette};
 use tor_protocol::{ItemClass, ItemTarget, ItemView, Snapshot, StreamContext, StreamId};
 
 #[test]
+fn character_attributes_follow_disclosure_and_do_not_survive_redaction() {
+    let mut observed = observation();
+    let mut stats = tor_client_common::test_support::stats();
+    stats.attributes.strength = 7;
+    stats.attributes.speed = 4;
+    observed.combat.as_mut().unwrap().own_stats = Some(stats);
+    let projected = view(&from_observation(observed.clone()), &Palette::default());
+    let attributes = projected.attributes.unwrap();
+    assert_eq!(attributes.strength, 7);
+    assert_eq!(attributes.speed, 4);
+    observed.combat.as_mut().unwrap().own_stats = None;
+    assert!(
+        view(&from_observation(observed.clone()), &Palette::default())
+            .attributes
+            .is_none()
+    );
+    observed.combat = None;
+    assert!(view(&from_observation(observed), &Palette::default())
+        .attributes
+        .is_none());
+}
+
+#[test]
 fn upper_body_and_portal_images_do_not_replace_the_players_known_foot_position() {
     use tor_protocol::{AppearanceSeed, CreatureAppearance, Position, WornView};
     let mut observed = observation();

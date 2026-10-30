@@ -118,6 +118,165 @@ fn action(state: &ClientState, command: Cmd) -> Result<Action, String> {
 }
 
 #[test]
+fn equipment_projection_preserves_duplicate_sockets_and_only_carried_owner_facts() {
+    let mut o = observation(false);
+    let slot = EquipmentSlot {
+        id: "socket.unusual".into(),
+        name: "Grasp".into(),
+        equipped_phrase: "in a grasp".into(),
+        requires_attack: false,
+    };
+    let interactions = o.interactions.as_mut().unwrap();
+    interactions.slots = vec![slot.clone(), slot.clone()];
+    interactions.inventory[1].slot = Some(slot);
+    interactions.inventory[1].equipped_slot = Some(1);
+    interactions.inventory[1].known_cursed = Some(false);
+    let mut absent = affordance([99; 32]);
+    absent.slot = interactions.inventory[1].slot.clone();
+    interactions.inventory.push(absent);
+    let equipment = tor_client_3d_model::Equipment::from_observation(&o);
+    assert_eq!(equipment.slots.len(), 2);
+    assert_eq!(equipment.slots[1].name, "Grasp");
+    assert_eq!(
+        equipment.items.len(),
+        4,
+        "absent carried identities are not display targets"
+    );
+    let wand = equipment
+        .items
+        .iter()
+        .find(|item| item.item == ItemTarget::from_digest(WAND))
+        .unwrap();
+    assert_eq!(wand.equipped_slot, Some(1));
+    assert_eq!(wand.known_cursed, Some(false));
+    assert!(
+        wand.known_equipment.is_none(),
+        "unknown equipment must stay unknown"
+    );
+    o.interactions = None;
+    let hidden = tor_client_3d_model::Equipment::from_observation(&o);
+    assert!(hidden.slots.is_empty() && hidden.items.is_empty());
+}
+
+#[test]
+fn equipment_compares_socket_identity_and_tracks_free_positions_without_a_swap() {
+    let slot = EquipmentSlot {
+        id: "grasp".into(),
+        name: "Grip".into(),
+        equipped_phrase: "in use".into(),
+        requires_attack: false,
+    };
+    let mut candidate = affordance(WAND);
+    candidate.slot = Some(slot.clone());
+    let mut equipped = affordance(STAFF);
+    equipped.slot = Some(slot.clone());
+    equipped.equipped_slot = Some(0);
+    let mut equipment = tor_client_3d_model::Equipment {
+        slots: vec![slot.clone(), slot.clone()],
+        items: vec![candidate, equipped],
+    };
+    let wand = ItemTarget::from_digest(WAND);
+    assert_eq!(equipment.comparison_slot(wand, None), Some(0));
+    assert_eq!(equipment.comparison_slot(wand, Some(1)), Some(1));
+    assert!(equipment.has_free_slot(wand));
+    equipment.items[0].slot.as_mut().unwrap().id = "different socket with same label".into();
+    assert_eq!(equipment.comparison_slot(wand, Some(0)), None);
+    assert!(!equipment.has_free_slot(wand));
+    equipment.items[0].slot = Some(slot);
+    equipment.items[0].equipped_slot = Some(1);
+    assert_eq!(equipment.comparison_slot(wand, Some(0)), Some(1));
+    assert!(!equipment.has_free_slot(wand));
+    equipment.items[0].known_cursed = Some(false);
+    assert_eq!(
+        equipment.facts(wand),
+        ["Combat properties not known.", "Not cursed"]
+    );
+    equipment.items[0].known_equipment = Some(EquipmentView {
+        attack: None,
+        modifiers: vec![],
+    });
+    equipment.items[0].known_cursed = None;
+    assert_eq!(equipment.facts(wand), ["No remembered modifiers."]);
+    assert_eq!(
+        equipment.facts(ItemTarget::from_digest([99; 32])),
+        ["Properties not known."]
+    );
+}
+
+#[test]
+fn equipment_facts_keep_remembered_damage_components_timing_and_unknowns_distinct() {
+    let mut offer = affordance(WAND);
+    let key = DamageKeyView {
+        category: DamageType::Keen,
+        descriptor: None,
+        sides: None,
+    };
+    offer.known_equipment = Some(EquipmentView {
+        attack: Some(AttackView {
+            skill: ContentRef {
+                id: "unusual_skill".into(),
+                name: "Blade craft".into(),
+            },
+            bonus: -3,
+            damage_enchantment: 2,
+            wind_up: 3,
+            recovery: 5,
+            damage: DamageView {
+                primary: key,
+                components: vec![
+                    DamageComponentView {
+                        category: DamageType::Keen,
+                        descriptor: None,
+                        amount: DamageAmountView::Fixed { value: 7 },
+                    },
+                    DamageComponentView {
+                        category: DamageType::Energy,
+                        descriptor: Some(ContentRef {
+                            id: "searing".into(),
+                            name: "Searing".into(),
+                        }),
+                        amount: DamageAmountView::Rolled {
+                            count: 2,
+                            sides: 6,
+                            bonus: -1,
+                        },
+                    },
+                ],
+            },
+        }),
+        modifiers: vec![CombatTraceStep {
+            id: "ward".into(),
+            name: "Disclosed ward".into(),
+            fields: vec![DiagnosticField {
+                id: "armor".into(),
+                name: "Armor".into(),
+                value: DiagnosticValue::Signed { value: 2 },
+            }],
+        }],
+    });
+    offer.known_projectile_bonus = Some(ProjectileBonusView { hit: 0, damage: -1 });
+    offer.known_protected = Some(false);
+    let equipment = tor_client_3d_model::Equipment {
+        slots: vec![],
+        items: vec![offer],
+    };
+    assert_eq!(
+        equipment.facts(ItemTarget::from_digest(WAND)),
+        [
+            "Blade craft attack bonus: -3",
+            "Damage enchantment: +2",
+            "Wind-up: 3 ticks  |  Recovery: 5 ticks",
+            "Keen damage: 7",
+            "Searing damage: 2d6-1",
+            "Disclosed ward",
+            "  Armor: 2",
+            "Projectile hit bonus: +0  |  Damage bonus: -1",
+            "Not protected",
+        ]
+    );
+}
+
+#[test]
 fn carried_items_show_reading_and_how_each_device_is_aimed() {
     let projected = view(&state(false), &Palette::default());
     let item = |id| {

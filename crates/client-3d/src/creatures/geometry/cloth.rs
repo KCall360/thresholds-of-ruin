@@ -1,21 +1,5 @@
 use super::*;
 
-/// A sculpted limb segment hanging down from its joint: a tapering core
-/// from `r0` to `r1` over `len`, a muscle belly of `belly` a third of the way
-/// down (pushed forward by `forward`), rounded at both ends so neighbouring
-/// segments overlap without a seam.
-pub(super) fn limb(
-    b: &mut Builder,
-    len: f32,
-    r0: f32,
-    r1: f32,
-    belly: f32,
-    forward: f32,
-    color: Vec3,
-) {
-    sculpted_limb(b, LimbShape::new(len, r0, r1, belly, forward), color);
-}
-
 pub(in crate::creatures) fn limb_form(shape: LimbShape) -> crate::sdf::Sculpt {
     use crate::sdf::{Sculpt, Shape::*};
     if let Some(contour) = shape.contour {
@@ -36,16 +20,26 @@ pub(in crate::creatures) fn limb_form(shape: LimbShape) -> crate::sdf::Sculpt {
     let mut s = Sculpt::default();
     s.add(Capsule(Vec3::ZERO, Vec3::Y * -len, r0, r1), 0.0);
     if belly.x > 0.0 {
-        s.add(Ellipsoid(belly_center, belly), 0.03);
+        s.add(Ellipsoid(belly_center, belly), LimbShape::BELLY_BLEND);
     }
     s
 }
 
 pub(super) fn sculpted_limb(b: &mut Builder, shape: LimbShape, color: Vec3) {
     let (low, high) = shape.mesh_bounds(0.02);
-    limb_form(shape).mesh(b, low, high, 0.007, &|at, _| {
+    limb_form(shape).mesh_projected(b, low, high, limb_step(shape), &|at, _| {
         color * crate::sdf::Sculpt::weave(at)
     });
+}
+
+fn limb_step(shape: LimbShape) -> f32 {
+    let mut radius = shape.radius_top.min(shape.radius_bottom);
+    if let Some(contour) = shape.contour {
+        for mass in contour.masses {
+            radius = radius.min(mass.radii.min_element());
+        }
+    }
+    closed_surface_step(radius)
 }
 
 /// How far cloth stands off the body beneath it, by build.
@@ -60,13 +54,14 @@ pub(in crate::creatures) fn cloth_over(
     ease: f32,
     rolls: &[(f32, f32)],
 ) -> crate::sdf::Sculpt {
-    use crate::sdf::Shape::Ellipsoid;
+    use crate::sdf::Shape::Torus;
     form.inflate(ease);
     for &(y, radius) in rolls {
         form.add(
-            Ellipsoid(
+            Torus(
                 Vec3::new(0.0, y, 0.004),
-                Vec3::new(radius, 0.013, radius * 1.04),
+                Vec2::new(radius - 0.013, 0.013),
+                1.04,
             ),
             0.012,
         );
@@ -83,9 +78,13 @@ pub(super) fn trouser_leg(b: &mut Builder, shape: LimbShape, build: f32, knee: b
         &[(-shape.length + 0.03, shape.radius_bottom + ease + 0.005)]
     };
     let (low, high) = shape.mesh_bounds(0.03);
-    cloth_over(limb_form(shape), ease, rolls).mesh(b, low, high, 0.007, &|at, _| {
-        color * crate::sdf::Sculpt::weave(at)
-    });
+    cloth_over(limb_form(shape), ease, rolls).mesh_projected(
+        b,
+        low,
+        high,
+        limb_step(shape),
+        &|at, _| color * crate::sdf::Sculpt::weave(at),
+    );
 }
 
 /// How hanging cloth is cut: fitted at the waist, rounding out over the

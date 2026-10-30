@@ -76,9 +76,13 @@ def steps(profile):
     ]
 
 
-# Native process tests render on CI's software rasterizers; the job's own
-# 120-minute limit still bounds the whole run.
+# Native process tests render on CI's software rasterizers. The expanded suite
+# needs more time on Windows; individual frame/quit deadlines remain unchanged.
 PROCESS_TIMEOUT = 3000
+
+
+def process_timeout(platform):
+    return 90 * 60 if platform == "win32" else PROCESS_TIMEOUT
 
 
 def process_summary(path):
@@ -168,7 +172,7 @@ def main(argv=None):
             try:
                 with log.open("w", encoding="utf-8") as output:
                     result = subprocess.run(command, cwd=ROOT, env=environment, stdout=output, stderr=subprocess.STDOUT,
-                                            timeout=2400 if name != "process-tests" else PROCESS_TIMEOUT, check=False)
+                                            timeout=2400 if name != "process-tests" else process_timeout(sys.platform), check=False)
                 code = result.returncode
             except subprocess.TimeoutExpired:
                 code = 124

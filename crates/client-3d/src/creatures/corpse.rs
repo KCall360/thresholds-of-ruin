@@ -1,5 +1,26 @@
 use super::*;
 
+/// Live discoveries use a stand-in while their articulated corpse is prepared.
+pub(crate) fn request_corpse(
+    commands: &mut Commands,
+    library: &mut PropLibrary,
+    meshes: &mut Assets<Mesh>,
+    model: CreatureModel,
+    at: Vec3,
+    yaw: f32,
+    individual: u64,
+) -> Entity {
+    let look = Look::of(model, individual);
+    let mut anim = Anim::corpse(individual);
+    anim.yaw = yaw;
+    let entity = commands
+        .spawn((anim, Transform::from_translation(at), Visibility::default()))
+        .id();
+    let rig = loading::request(commands, library, meshes, entity, &look);
+    commands.entity(entity).insert(rig);
+    entity
+}
+
 /// A corpse on the floor, using only the disclosed creature recipe.
 pub fn spawn_corpse(
     commands: &mut Commands,

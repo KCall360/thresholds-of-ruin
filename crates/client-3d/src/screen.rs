@@ -41,31 +41,32 @@ pub(crate) fn setup(mut commands: Commands) {
     commands
         .spawn((
             ScreenRoot,
+            crate::chrome::BlockWorld,
             Interaction::default(),
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Percent(12.0),
                 right: Val::Percent(12.0),
                 top: Val::Percent(8.0),
-                bottom: Val::Percent(8.0),
+                bottom: Val::Px(184.0),
                 padding: UiRect::all(Val::Px(16.0)),
                 border: UiRect::all(Val::Px(1.0)),
                 overflow: Overflow::clip(),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.03, 0.035, 0.05, 0.94)),
-            BorderColor(Color::srgba(0.3, 0.75, 0.68, 0.55)),
-            BorderRadius::all(Val::Px(6.0)),
+            crate::chrome::frame(),
+            GlobalZIndex(5),
             Visibility::Hidden,
         ))
         .with_child((
             ScreenText,
             Text::new(""),
             TextFont {
+                font: crate::chrome::FONT,
                 font_size: 15.0,
                 ..default()
             },
-            TextColor(Color::srgb(0.9, 0.88, 0.8)),
+            TextColor(crate::chrome::INK),
         ));
 }
 
@@ -98,8 +99,15 @@ pub(crate) fn toggle(net: &Net, game: &mut Game, screen: Screen) {
 
 /// Typed characters edit the line; Enter sends it. On the places list a
 /// number key picks the place to rename.
-pub(crate) fn typing(mut input: EventReader<KeyboardInput>, net: Res<Net>, mut game: ResMut<Game>) {
+pub(crate) fn typing(
+    mut input: EventReader<KeyboardInput>,
+    net: Res<Net>,
+    mut game: ResMut<Game>,
+    mut section: Local<usize>,
+) {
     let Some(screen) = game.screen.clone() else {
+        *section = 0;
+
         input.clear();
         return;
     };
@@ -169,6 +177,23 @@ pub(crate) fn typing(mut input: EventReader<KeyboardInput>, net: Res<Net>, mut g
             continue;
         }
         match &event.logical_key {
+            Key::Tab if screen == Screen::Advancement && game.typed.is_empty() => {
+                *section = (*section + 1) % crate::character::SECTIONS.len();
+                game.send(
+                    &net,
+                    Cmd::Advancement(crate::character::SECTIONS[*section].1.into()),
+                );
+            }
+            Key::PageDown | Key::PageUp
+                if screen == Screen::Advancement && game.typed.is_empty() =>
+            {
+                let command = if event.logical_key == Key::PageDown {
+                    "next"
+                } else {
+                    "previous"
+                };
+                game.send(&net, Cmd::Advancement(command.into()));
+            }
             Key::Enter => {
                 let line = std::mem::take(&mut game.typed);
                 if line.trim().is_empty() {
@@ -215,7 +240,7 @@ pub(crate) fn typing(mut input: EventReader<KeyboardInput>, net: Res<Net>, mut g
     }
 }
 
-fn origin(origin: tor_protocol::PlaceNameOrigin) -> &'static str {
+pub(crate) fn origin(origin: tor_protocol::PlaceNameOrigin) -> &'static str {
     match origin {
         tor_protocol::PlaceNameOrigin::Invented => "made up when first seen",
         tor_protocol::PlaceNameOrigin::Authored => "its own name",
@@ -314,7 +339,7 @@ pub(crate) fn show(
         return;
     }
     if let Ok(mut visibility) = root.single_mut() {
-        let wanted = if game.screen.is_some() {
+        let wanted = if game.screen == Some(Screen::Charts) {
             Visibility::Visible
         } else {
             Visibility::Hidden
@@ -366,6 +391,51 @@ mod tests {
     fn press(app: &mut App, key: Key) {
         app.world_mut().send_event(self::key(key));
         app.update();
+    }
+
+    #[test]
+    fn advancement_navigation_preserves_drafts_and_never_confirms_a_purchase() {
+        let mut view = crate::test_support::view(0);
+        view.has_control = true;
+        let (mut app, mut commands) = app(view);
+        press(&mut app, Key::PageDown);
+        assert!(commands.try_recv().is_err(), "closed screens cannot browse");
+        app.world_mut().resource_mut::<Game>().screen = Some(Screen::Advancement);
+        press(&mut app, Key::PageDown);
+        assert!(
+            matches!(commands.try_recv().unwrap().command, Cmd::Advancement(text) if text == "next")
+        );
+        app.world_mut().resource_mut::<Game>().busy = false;
+        let (net, mut commands) = crate::net::test_channel();
+        app.insert_resource(net);
+        press(&mut app, Key::PageUp);
+        assert!(
+            matches!(commands.try_recv().unwrap().command, Cmd::Advancement(text) if text == "previous")
+        );
+        app.world_mut().resource_mut::<Game>().busy = false;
+        let (net, mut commands) = crate::net::test_channel();
+        app.insert_resource(net);
+        press(&mut app, Key::Tab);
+        assert!(
+            matches!(commands.try_recv().unwrap().command, Cmd::Advancement(text) if text == "balances")
+        );
+        app.world_mut().resource_mut::<Game>().busy = false;
+        app.world_mut().resource_mut::<Game>().typed = "purchase 1 pool talent example".into();
+        press(&mut app, Key::PageDown);
+        assert!(
+            commands.try_recv().is_err(),
+            "navigation cannot discard a draft"
+        );
+        assert_eq!(
+            app.world().resource::<Game>().typed,
+            "purchase 1 pool talent example"
+        );
+        app.world_mut().resource_mut::<Game>().typed.clear();
+        press(&mut app, Key::Enter);
+        assert!(
+            commands.try_recv().is_err(),
+            "empty Enter never commits a preview"
+        );
     }
 
     #[test]

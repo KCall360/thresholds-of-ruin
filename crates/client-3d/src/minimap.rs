@@ -1,6 +1,6 @@
 //! A north-up mini-map of the character's level: what is seen and
 //! remembered, doors and stairs, items, creatures, and the way the camera
-//! faces. `M` shows or hides it.
+//! faces. `M` opens the larger map and journal.
 
 use crate::{CameraRig, Game};
 use bevy::{
@@ -28,7 +28,7 @@ pub(crate) struct MiniMap {
 pub(crate) struct MiniMapFrame;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum Ground {
+pub(crate) enum Ground {
     Wall,
     Floor,
     Object,
@@ -38,7 +38,22 @@ enum Ground {
     Trap,
 }
 
-fn terrain_kind(cell: &tor_client_3d_model::Terrain<'_>, dz: i32) -> Option<Ground> {
+impl Ground {
+    pub(crate) fn color(self) -> [f32; 3] {
+        match self {
+            Self::Floor => [0.62, 0.52, 0.38],
+            Self::Object => [0.95, 0.78, 0.3],
+            Self::Wall => [0.3, 0.32, 0.4],
+            Self::Door => [0.86, 0.6, 0.24],
+            Self::Up => [0.36, 0.84, 0.86],
+            Self::Down => [0.4, 0.55, 0.95],
+            // Orange, as the ASCII map marks a discovered trap.
+            Self::Trap => [0.98, 0.5, 0.16],
+        }
+    }
+}
+
+pub(crate) fn terrain_kind(cell: &tor_client_3d_model::Terrain<'_>, dz: i32) -> Option<Ground> {
     Some(if cell.stairs_up || cell.stairs_down {
         match cell.object_model {
             Some(tor_client_3d_model::ItemModel::Stairs) => Ground::Down,
@@ -84,19 +99,19 @@ pub(crate) fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     commands
         .spawn((
             MiniMapFrame,
+            crate::chrome::BlockWorld,
+            Interaction::default(),
             Node {
                 position_type: PositionType::Absolute,
                 right: Val::Px(16.0),
-                bottom: Val::Px(40.0),
+                top: Val::Px(16.0),
                 width: Val::Px(SIZE as f32 + 8.0),
                 height: Val::Px(SIZE as f32 + 8.0),
                 padding: UiRect::all(Val::Px(3.0)),
                 border: UiRect::all(Val::Px(1.0)),
                 ..default()
             },
-            BorderColor(Color::srgba(0.85, 0.72, 0.48, 0.55)),
-            BorderRadius::all(Val::Percent(50.0)),
-            BackgroundColor(Color::srgba(0.03, 0.035, 0.05, 0.55)),
+            crate::chrome::frame(),
         ))
         .with_children(|frame| {
             frame.spawn((
@@ -127,15 +142,24 @@ pub(crate) fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
 
 pub(crate) fn toggle(
     keys: Res<ButtonInput<KeyCode>>,
-    mut frame: Query<&mut Visibility, With<MiniMapFrame>>,
+    net: Res<crate::Net>,
+    mut game: ResMut<Game>,
+    panel: Res<crate::interact::Panel>,
 ) {
-    if keys.just_pressed(KeyCode::KeyM) {
-        for mut visibility in &mut frame {
-            *visibility = match *visibility {
-                Visibility::Hidden => Visibility::Inherited,
-                _ => Visibility::Hidden,
-            };
-        }
+    if panel.keyboard_captured || (panel.open && panel.search_focused) {
+        return;
+    }
+    if keys.just_pressed(KeyCode::KeyM)
+        && game
+            .screen
+            .as_ref()
+            .is_none_or(|open| *open == crate::screen::Screen::Places { renaming: None })
+    {
+        crate::screen::toggle(
+            &net,
+            &mut game,
+            crate::screen::Screen::Places { renaming: None },
+        );
     }
 }
 
@@ -191,16 +215,7 @@ pub(crate) fn draw(
     canvas.clear();
     for (&(dx, dy), &(kind, seen)) in &ground {
         let lit = if seen { 1.0 } else { 0.5 };
-        let color = match kind {
-            Ground::Floor => [0.62, 0.52, 0.38],
-            Ground::Object => [0.95, 0.78, 0.3],
-            Ground::Wall => [0.3, 0.32, 0.4],
-            Ground::Door => [0.86, 0.6, 0.24],
-            Ground::Up => [0.36, 0.84, 0.86],
-            Ground::Down => [0.4, 0.55, 0.95],
-            // Orange, as the ASCII map marks a discovered trap.
-            Ground::Trap => [0.98, 0.5, 0.16],
-        };
+        let color = kind.color();
         canvas.cell(dx, dy, color.map(|c| c * lit), 0.92);
     }
 
@@ -330,6 +345,85 @@ mod cosmetic_tests {
     use super::*;
     use tor_client_3d_model::{ItemModel, Terrain};
     use tor_protocol::{ItemClass, ObjectPresentation, ObjectPresentationKind, Position};
+
+    #[test]
+    fn map_shortcut_opens_the_combined_places_screen_without_a_world_action() {
+        let (net, mut receiver) = crate::net::test_channel();
+        let mut app = App::new();
+        app.insert_resource(net)
+            .init_resource::<Game>()
+            .init_resource::<crate::interact::Panel>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .add_systems(Update, toggle);
+        app.world_mut().spawn((MiniMapFrame, Visibility::Inherited));
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyM);
+        app.update();
+        assert_eq!(
+            app.world().resource::<Game>().screen,
+            Some(crate::screen::Screen::Places { renaming: None })
+        );
+        assert!(receiver.try_recv().is_err());
+    }
+
+    #[test]
+    fn typing_fields_do_not_toggle_the_map_and_the_shortcut_returns_afterwards() {
+        let (net, mut receiver) = crate::net::test_channel();
+        let mut app = App::new();
+        app.insert_resource(net)
+            .init_resource::<Game>()
+            .init_resource::<crate::interact::Panel>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .add_systems(Update, toggle);
+        for (screen, search, captured) in [
+            (None, true, false),
+            (None, false, true),
+            (Some(crate::screen::Screen::History), false, false),
+            (
+                Some(crate::screen::Screen::Places { renaming: Some(0) }),
+                false,
+                false,
+            ),
+            (
+                Some(crate::screen::Screen::Note {
+                    snapshot: tor_protocol::SnapshotId("draft-snapshot".into()),
+                    private: true,
+                }),
+                false,
+                false,
+            ),
+        ] {
+            app.world_mut().resource_mut::<Game>().screen = screen.clone();
+            {
+                let mut panel = app.world_mut().resource_mut::<crate::interact::Panel>();
+                panel.open = search;
+                panel.search_focused = search;
+                panel.keyboard_captured = captured;
+            }
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .reset_all();
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .press(KeyCode::KeyM);
+            app.update();
+            assert_eq!(
+                app.world().resource::<Game>().screen,
+                screen,
+                "typing fields retain M"
+            );
+        }
+        app.world_mut().resource_mut::<Game>().screen = None;
+        app.update();
+        assert_eq!(
+            app.world().resource::<Game>().screen,
+            Some(crate::screen::Screen::Places { renaming: None })
+        );
+        app.update();
+        assert_eq!(app.world().resource::<Game>().screen, None);
+        assert!(receiver.try_recv().is_err());
+    }
 
     #[test]
     fn a_discovered_trap_is_marked_on_its_level_only() {

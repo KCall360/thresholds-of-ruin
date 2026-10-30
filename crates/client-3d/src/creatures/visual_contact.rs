@@ -1,6 +1,5 @@
 //! Visual contact profiles derived from composed geometry, in joint-local space.
 use super::*;
-use bevy::asset::RenderAssetUsages;
 use bevy::render::mesh::VertexAttributeValues;
 
 /// The nearer of two signed distances, keeping `best` on a tie. Unlike
@@ -84,9 +83,7 @@ impl Part {
     pub fn from_model(path: Vec<J>, model: &Model, meshes: &mut Assets<Mesh>, scale: Vec3) -> Self {
         let mut triangles = Vec::new();
         for (handle, _) in &model.0 {
-            let mesh = meshes.get_mut(handle).expect("composed contact mesh");
-            // Redressing may reuse this cached mesh after renderer extraction.
-            mesh.asset_usage |= RenderAssetUsages::MAIN_WORLD;
+            let mesh = retained_mesh(meshes, handle);
             let Some(VertexAttributeValues::Float32x3(points)) =
                 mesh.attribute(Mesh::ATTRIBUTE_POSITION)
             else {

@@ -1,6 +1,7 @@
 """Real server + Bevy window + OS input, maintained outside the core gate."""
 import hashlib
 import json
+import math
 import os
 import re
 from pathlib import Path
@@ -12,15 +13,17 @@ import sys
 import threading
 import time
 import tomllib
+from types import SimpleNamespace
 import unittest
 
 CLIENT = Path(__file__).resolve().parents[1]
 ROOT = CLIENT.parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-from process_harness import ProcessTestCase, SPECTATOR_TOKEN, creature_package, door, non_graphical
-from arena_matrix import toml_source
-from stream_relay import StreamRelay
-import model_generation
+# Shared harness imports require the repository path established above.
+from process_harness import ProcessTestCase, SPECTATOR_TOKEN, creature_package, door, non_graphical  # noqa: E402
+from arena_matrix import toml_source  # noqa: E402
+from stream_relay import StreamRelay  # noqa: E402
+import model_generation  # noqa: E402
 
 
 class AbilityTrace:
@@ -54,6 +57,232 @@ class AbilityTrace:
 
 class Native3DProcesses(ProcessTestCase):
     graphical = True
+
+    def assert_live_portrait(self, portrait, initial):
+        own_actor = next(actor for actor in portrait["actors"] if actor["is_self"])
+        self.assertEqual(portrait["portrait"]["target"], own_actor["target"])
+        self.assertEqual(len(portrait["actors"]), len(initial["actors"]), "the portrait reuses the live rig rather than adding an actor")
+        self.assertLessEqual(portrait["portrait"]["texture_size"][0], 768)
+        self.assertLessEqual(portrait["portrait"]["texture_size"][1], 1024)
+        from render_pixels import decode_png
+        width, height, channels, rows = decode_png(Path(portrait["png"]).read_bytes())
+        left, top, right, bottom = portrait["portrait"]["bounds"]
+        self.assertGreater(right - left, 0.1)
+        self.assertGreater(bottom - top, 0.2)
+        colored = 0
+        colored_top, colored_bottom = height, 0
+        for y in range(int((top + 0.02) * height), int((bottom - 0.02) * height), 2):
+            for x in range(int((left + 0.02) * width), int((right - 0.02) * width), 2):
+                rgb = rows[y][x * channels:x * channels + 3]
+                if max(rgb) > 55 and max(rgb) - min(rgb) > 10:
+                    colored += 1
+                    colored_top = min(colored_top, y)
+                    colored_bottom = max(colored_bottom, y)
+        self.assertGreater(colored, 1000, "the actual offscreen portrait must contain the rendered character, not an empty target")
+        with self.subTest(portrait="character_scale"):
+            self.assertGreater((colored_bottom - colored_top) / ((bottom - top) * height), 0.52,
+                               "the full character must use a substantial part of the portrait's height")
+        with self.subTest(portrait="heading_space"):
+            self.assertGreater(top * height - left * width, 20,
+                               "the equally inset portrait pane must reserve a visible heading line above its image")
+
+    def test_equipment_screen_browses_locally_and_removes_then_equips_the_disclosed_item(self):
+        self.server(scenario=self.fallback_package())
+        executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
+        window = self.launch("tor-client-3d", [
+            "--connect", self.address, "--capture", self.directory / "equipment", "--capture-every", "0.4",
+        ], executable=executable)
+        initial = self.captured(window, lambda frame: frame["has_control"] and not frame["busy"])
+        native = self.native_keys(window)
+        opened = self.tap(window, native, "F6", lambda frame: (frame.get("inventory_browser") or {}).get("page") == "Equipment")
+        self.assertTrue(opened["equipment_slots"], "the fixture must disclose actual equipment slots")
+        portrait = self.captured(window, lambda frame: (frame.get("portrait") or {}).get("active") and not frame["portrait"]["pending"] and frame["portrait"]["mesh_parts"] > 0)
+        self.assert_live_portrait(portrait, initial)
+        turn = portrait["portrait"]["turn"]
+        rotated = self.tap(window, native, "bracketright", lambda frame: frame["portrait"]["turn"] > turn + 0.5)
+        self.assertEqual(rotated["revision"], initial["revision"], "turning the portrait is local")
+        self.assertEqual(rotated["world_feet"], initial["world_feet"])
+        self.tap(window, native, "bracketleft", lambda frame: abs(frame["portrait"]["turn"] - turn) < 0.01)
+        selected = self.tap(window, native, "Right", lambda frame: frame["inventory_browser"]["selected"] is not None)
+        target = selected["inventory_browser"]["selected"]
+        item = next(item for item in selected["inventory"] if item["id"] == target)
+        self.assertIsNotNone(item["equipped"], "positive fixture: first gear item starts equipped")
+        slot = next(slot for slot in selected["equipment_slots"] if slot["occupant"] == target)
+        self.assertEqual(selected["inventory_browser"]["comparison_slot"], slot["index"])
+        slot_controls = [control for control in selected["inventory_browser"]["controls"] if control["control"].startswith("Socket(")]
+        self.assertEqual(len(slot_controls), len(selected["equipment_slots"]), "all declared socket controls must be laid out")
+        _, height = struct.unpack(">II", Path(selected["png"]).read_bytes()[16:24])
+        slot_bottom = max(control["screen"][1] + control["size"][1] / (2 * height) for control in slot_controls)
+        self.assertLess(slot_bottom, 0.57, "the slot grid must leave the opening viewport's lower area for item comparisons")
+        viewport = selected["panel_viewport"]
+        remove_buttons = [button for button in selected["panel_buttons"] if button["target"] == target and button["operation"] == "Unequip"]
+        self.assertEqual(len(remove_buttons), 1, "the selected equipped item must have one real Remove button")
+        left, top, right, bottom = remove_buttons[0]["bounds"]
+        self.assertLess(left, right)
+        self.assertLess(top, bottom)
+        self.assertGreaterEqual(left, viewport[0] - 0.002)
+        self.assertGreaterEqual(top, viewport[1] - 0.002)
+        self.assertLessEqual(right, viewport[2] + 0.002)
+        self.assertLessEqual(bottom, viewport[3] + 0.002, "Remove must be wholly visible without first scrolling the comparison")
+        self.assertEqual(selected["revision"], initial["revision"], "browsing cannot spend a turn")
+        self.assertEqual(selected["world_feet"], initial["world_feet"])
+
+        def action_key(frame, label):
+            index = next(index for index, (action, identity) in enumerate(zip(frame["panel_actions"], frame["panel_item_targets"]))
+                         if identity == target and action.endswith(": " + label))
+            self.assertLess(index, 10, "the fixture must keep this action within the numbered hotkeys")
+            return str((index + 1) % 10)
+
+        removed = self.tap(window, native, action_key(selected, "Remove"),
+                           lambda frame: not frame["busy"] and frame["can_act"] and any(item["id"] == target and item["equipped"] is None for item in frame["inventory"]))
+        self.assertGreater(removed["revision"], selected["revision"])
+        self.assertIsNone(removed["equipment_slots"][slot["index"]]["occupant"])
+        restored = self.tap(window, native, action_key(removed, "Equip"),
+                            lambda frame: not frame["busy"] and frame["can_act"] and any(item["id"] == target and item["equipped"] is not None for item in frame["inventory"]))
+        self.assertGreater(restored["revision"], removed["revision"])
+        self.assertEqual(restored["equipment_slots"][slot["index"]]["occupant"], target)
+        inventory = self.tap(window, native, "Tab", lambda frame: frame["inventory_browser"]["page"] == "Inventory")
+        self.captured(window, lambda frame: not frame["portrait"]["active"])
+        self.assertEqual(inventory["revision"], restored["revision"])
+        self.assertTrue(inventory["has_control"], "Tab inside the panel must not transfer actor control")
+        self.tap(window, native, "Escape", lambda frame: not frame["panel_open"])
+        native("Escape", True)
+        self.assertEqual(window.child.wait(timeout=30), 0)
+
+    def test_inventory_reframes_the_player_without_moving_the_actor(self):
+        self.server(scenario=self.fallback_package())
+        executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
+        window = self.launch("tor-client-3d", [
+            "--connect", self.address, "--capture", self.directory / "inventory-framing", "--capture-every", "0.4",
+        ], executable=executable)
+        initial = self.captured(window, lambda frame: frame["has_control"] and not frame["busy"])
+        original = next(actor for actor in initial["actors"] if actor["is_self"])
+        self.assertAlmostEqual(original["screen"][0], 0.5, delta=0.05)
+        native = self.native_keys(window)
+        opened = self.tap(window, native, "i", lambda frame: frame.get("inventory_browser") is not None)
+        actor = next(actor for actor in opened["actors"] if actor["is_self"])
+        self.assertLess(actor["screen"][0], 0.4, "the player must remain visible in the uncovered world beside inventory")
+        self.assertEqual(actor["world"], original["world"])
+        self.assertEqual(opened["revision"], initial["revision"])
+        self.tap(window, native, "Escape", lambda frame: not frame["panel_open"])
+        restored = self.captured(window, lambda frame: any(actor["is_self"] and 0.45 < actor["screen"][0] < 0.55 for actor in frame["actors"]))
+        self.assertEqual(restored["world_feet"], initial["world_feet"])
+        native("Escape", True)
+        self.assertEqual(window.child.wait(timeout=30), 0)
+
+    def test_inventory_grid_search_and_arrow_selection_do_not_send_world_actions(self):
+        self.server(scenario=self.fallback_package())
+        executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
+        window = self.launch("tor-client-3d", [
+            "--connect", self.address, "--capture", self.directory / "inventory-grid", "--capture-every", "0.4",
+        ], executable=executable)
+        initial = self.captured(window, lambda frame: frame["has_control"] and not frame["busy"])
+        native = self.native_keys(window)
+        opened = self.tap(window, native, "i", lambda frame: frame.get("inventory_browser") is not None)
+        self.assertTrue(opened["inventory_browser"]["shown"])
+        selected = self.tap(window, native, "Right", lambda frame: frame["inventory_browser"]["selected"] is not None)
+        self.assertEqual(selected["inventory_browser"]["selected"], opened["inventory_browser"]["shown"][0])
+        native("Control_L", True)
+        try:
+            self.tap(window, native, "f", lambda frame: frame["inventory_browser"]["search_focused"])
+        finally:
+            native("Control_L", False)
+        self.captured(window, lambda frame: "ControlLeft" not in frame["keys"])
+        query = ""
+        for letter in "wqm1":
+            query += letter
+            searched = self.tap(window, native, letter, lambda frame, query=query: frame["inventory_browser"]["query"] == query)
+        self.assertEqual(searched["inventory_browser"]["shown"], [])
+        self.assertEqual(searched["minimap_open"], initial["minimap_open"], "typing M must not toggle the map")
+        self.assertEqual(searched["world_feet"], initial["world_feet"])
+        self.assertEqual(searched["revision"], initial["revision"], "search and selection must not submit an item or movement action")
+        self.tap(window, native, "Escape", lambda frame: frame["panel_open"] and not frame["inventory_browser"]["search_focused"])
+        self.tap(window, native, "Escape", lambda frame: not frame["panel_open"])
+        native("Escape", True)
+        self.assertEqual(window.child.wait(timeout=30), 0)
+
+    def test_inventory_grid_mouse_filter_selection_and_drop_use_the_disclosed_item(self):
+        self.server(scenario=self.fallback_package())
+        executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
+        window = self.launch("tor-client-3d", [
+            "--connect", self.address, "--capture", self.directory / "inventory-mouse", "--capture-every", "0.4",
+        ], executable=executable)
+        self.captured(window, lambda frame: frame["has_control"] and not frame["busy"])
+        native = self.native_keys(window)
+        self.tap(window, native, "g", lambda frame: any(item["name"] == "unfamiliar relic" for item in frame["inventory"]))
+        opened = self.tap(window, native, "i", lambda frame: frame.get("inventory_browser") is not None)
+        mouse = self.native_mouse(window)
+
+        def click_control(frame, predicate, done):
+            control = next(control for control in frame["inventory_browser"]["controls"] if predicate(control))
+            try:
+                mouse(control["screen"], True)
+                self.captured(window, done)
+            finally:
+                mouse(control["screen"], False)
+            return self.captured(window, lambda frame: "Left" not in frame["mouse"] and done(frame))
+
+        gear = click_control(opened, lambda control: control["control"] == "Filter(Gear)",
+                             lambda frame: frame["inventory_browser"]["filter"] == "Gear")
+        all_items = click_control(gear, lambda control: control["control"] == "Filter(All)",
+                                  lambda frame: frame["inventory_browser"]["filter"] == "All")
+        index = next(index for index, label in enumerate(all_items["panel_actions"][:10]) if label.endswith(": Drop"))
+        item = next(item for item in all_items["inventory"] if item["id"] == all_items["panel_item_targets"][index])
+        selected = click_control(all_items, lambda control: control["target"] == item["id"],
+                                 lambda frame: frame["inventory_browser"]["selected"] == item["id"])
+        self.assertEqual(selected["revision"], opened["revision"])
+        self.assertEqual(selected["world_feet"], opened["world_feet"])
+        self.tap(window, native, str((index + 1) % 10), lambda frame: all(
+            current["id"] != item["id"] or int(current["quantity"]) < int(item["quantity"]) for current in frame["inventory"]))
+        self.tap(window, native, "Escape", lambda frame: not frame["panel_open"])
+        native("Escape", True)
+        self.assertEqual(window.child.wait(timeout=30), 0)
+
+    def test_framed_hud_dock_opens_inventory_without_a_world_action(self):
+        self.server(scenario=self.fallback_package())
+        executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
+        window = self.launch("tor-client-3d", [
+            "--connect", self.address, "--capture", self.directory / "hud", "--capture-every", "0.4",
+        ], executable=executable)
+        initial = self.captured(window, lambda frame: frame["has_control"] and not frame["busy"])
+        self.assertTrue("hud" in initial, "the live frame must present the framed action dock")
+        self.assertEqual(initial["hud"]["readiness"], "READY")
+        self.assertEqual({button["action"] for button in initial["hud"]["buttons"]},
+                         {"Inventory", "Equipment", "Character", "Map", "Places", "Journal", "Wait"})
+        for button in initial["hud"]["buttons"]:
+            self.assertTrue(all(0 < value < 1 for value in button["screen"]), button)
+            self.assertTrue(all(value > 20 for value in button["size"]), button)
+        pack = next(button for button in initial["hud"]["buttons"] if button["action"] == "Inventory")
+        mouse = self.native_mouse(window)
+        try:
+            mouse(pack["screen"], True)
+            opened = self.captured(window, lambda frame: frame["panel_open"])
+        finally:
+            mouse(pack["screen"], False)
+        self.assertEqual(opened["revision"], initial["revision"], "the dock must not click through into the world")
+        self.assertEqual(opened["world_feet"], initial["world_feet"])
+        self.assertTrue(opened["panel_actions"])
+        native = self.native_keys(window)
+        closed = self.tap(window, native, "Escape", lambda frame: not frame["panel_open"])
+        # Bottom center is reachable even when Xvfb is narrower than the client.
+        try:
+            mouse([0.5, 0.98], True)
+            blank = self.captured(window, lambda frame: "Left" in frame["mouse"])
+        finally:
+            mouse([0.5, 0.98], False)
+        self.assertEqual(blank["revision"], closed["revision"], "empty dock areas must also block world clicks")
+        self.captured(window, lambda frame: "Left" not in frame["mouse"])
+        journal = next(button for button in initial["hud"]["buttons"] if button["action"] == "Journal")
+        try:
+            mouse(journal["screen"], True)
+            history = self.captured(window, lambda frame: frame["screen"] == "History")
+        finally:
+            mouse(journal["screen"], False)
+        self.assertEqual(history["revision"], closed["revision"])
+        self.tap(window, native, "Escape", lambda frame: frame["screen"] is None)
+        self.assertIsNone(window.child.poll())
+        native("Escape", True)
+        self.assertEqual(window.child.wait(timeout=30), 0)
 
     @model_generation.local
     def test_art_lineup_presents_generated_bodies_and_accepts_native_close(self):
@@ -220,6 +449,182 @@ class Native3DProcesses(ProcessTestCase):
             self.assertNotEqual(restored["joints"], initial["joints"], "the equipped model must actually animate")
 
     @model_generation.local
+    def test_redressed_head_matches_a_cold_render_in_both_outfit_orders(self):
+        from render_pixels import decode_png
+        executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
+        images = {}
+        states = {}
+        for initial, final in [("commoner", "commoner"), ("princess", "princess"),
+                               ("commoner", "princess"), ("princess", "commoner")]:
+            name = f"{initial}-to-{final}"
+            script = {
+                "version": 1, "hz": 50, "viewport": [320, 320],
+                "actors": [{"id": "wearer", "model": "Human", "seed": 17,
+                            "body": {"woman": True, "hair": 2}, "outfit": initial,
+                            "equipment": [], "position": [0, 0, 0], "yaw": 0}],
+                "cameras": [{"id": "neck", "position": [0, 1.078, 1.5],
+                             "target": [0, 1.078, 0], "fov_degrees": 10}],
+                "events": [{"tick": 0, "actor": "wearer",
+                            "operation": {"type": "teleport", "position": [0, 0, 0], "yaw": 0}},
+                           {"tick": 0, "actor": "wearer",
+                            "operation": {"type": "dress", "outfit": final}}],
+                "captures": [{"tick": 0, "name": "head", "camera": "neck"}],
+            }
+            source = self.directory / f"{name}.json"
+            source.write_text(json.dumps(script), encoding="utf-8")
+            output = self.directory / name
+            window = self.launch("tor-client-3d", ["--scene-script", source, "--capture", output],
+                                 executable=executable)
+            self.assertEqual(window.child.wait(timeout=240), 0,
+                             window.stdout_path.read_text(encoding="utf-8")[-3000:])
+            manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["status"], "complete")
+            actor = manifest["captures"][0]["actors"][0]
+            states[initial, final] = actor
+            self.assertEqual(actor["composition"]["outfit"], final)
+            self.assertEqual(manifest["captures"][0]["clock_ns"], "0")
+            width, height, channels, rows = decode_png((output / "head.png").read_bytes())
+            self.assertEqual((width, height), (320, 320))
+            # The close-up isolates the neck. Quantized darkness tolerates small
+            # shading differences while preserving the actual choker silhouette.
+            images[initial, final] = [max(rows[y][x * channels:x * channels + 3]) < 80
+                                      for y in range(int(height * 0.46), int(height * 0.54))
+                                      for x in range(int(width * 0.25), int(width * 0.75))]
+        plain, choker = images["commoner", "commoner"], images["princess", "princess"]
+        self.assertGreater(sum(a != b for a, b in zip(plain, choker)), 200,
+                           "positive witness: the camera must see the neck ornament")
+        for initial, final in [("commoner", "princess"), ("princess", "commoner")]:
+            self.assertEqual(states[initial, final]["joints"], states[final, final]["joints"],
+                             "compare the same explicit pose, not construction versus refreshed idle")
+            expected = images[final, final]
+            changed = sum(a != b for a, b in zip(images[initial, final], expected))
+            self.assertLess(changed, 50, f"{initial} -> {final}: cached head must match cold render")
+
+    @model_generation.local
+    def test_yeti_surface_coat_presents_around_the_body_during_motion(self):
+        from render_pixels import decode_png
+        executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
+        source = CLIENT / "review-scripts/yeti-coat.json"
+        output = self.directory / "yeti-coat"
+        window = self.launch("tor-client-3d", ["--scene-script", source, "--capture", output],
+                             executable=executable)
+        self.assertEqual(window.child.wait(timeout=240), 0,
+                         window.stdout_path.read_text(encoding="utf-8")[-3000:])
+        report = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(report["status"], "complete")
+        expected = {f"{view}-{pose}" for view in ("front", "side", "back")
+                    for pose in ("rest", "walk", "heavy")}
+        self.assertEqual({shot["name"] for shot in report["captures"]}, expected)
+        snapshots, images = {}, {}
+        for shot in report["captures"]:
+            tick = shot["tick"]
+            self.assertIn(tick, (0, 25, 50))
+            self.assertEqual(shot["clock_ns"], str(tick * 20_000_000))
+            self.assertEqual(len(shot["actors"]), 1)
+            actor = shot["actors"][0]
+            self.assertEqual(actor["id"], "yeti")
+            self.assertEqual(actor["composition"]["model"], "Yeti")
+            self.assertGreater(actor["root_children"], 0)
+            self.assertTrue(all(math.isfinite(v) for frame in actor["joints"].values() for v in frame))
+            if tick in snapshots:
+                self.assertEqual(actor, snapshots[tick], "camera changes hold the same pose")
+            snapshots[tick] = actor
+            data = (output / (shot["name"] + ".png")).read_bytes()
+            width, height, channels, rows = decode_png(data)
+            self.assertEqual((width, height), (640, 640))
+            # White fur need not be saturated. Compare with both background
+            # edges on this row; either edge can cross the finite floor horizon.
+            # Keep the control strip above the cast shadow at the screen bottom.
+            def foreground(x, y):
+                pixel = rows[y][x * channels:x * channels + 3]
+                return min(max(abs(a - b) for a, b in
+                               zip(pixel, rows[y][edge * channels:edge * channels + 3]))
+                           for edge in (8, 632)) > 20
+
+            presented = sum(foreground(x, y) for y in range(80, 520) for x in range(80, 560))
+            self.assertGreater(presented, 10_000, "each view must present a substantial body")
+            self.assertFalse(any(foreground(x, y) for y in range(80, 520) for x in range(608, 640)),
+                             "the same oracle must reject the empty backdrop and floor")
+            images[shot["name"]] = hashlib.sha256(data).digest()
+        self.assertNotEqual(snapshots[0]["joints"]["HandR"][:12], snapshots[25]["joints"]["HandR"][:12])
+        self.assertNotEqual(snapshots[25]["joints"]["Torso"][:12], snapshots[50]["joints"]["Torso"][:12])
+        for view in ("front", "side", "back"):
+            self.assertNotEqual(images[view + "-rest"], images[view + "-walk"])
+            self.assertNotEqual(images[view + "-walk"], images[view + "-heavy"])
+
+    @model_generation.local
+    def test_centaur_rider_builds_present_and_keep_the_grip_during_motion(self):
+        from render_pixels import decode_png
+        executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
+        source = CLIENT / "review-scripts/centaur-builds.json"
+        script = json.loads(source.read_text(encoding="utf-8"))
+        output = self.directory / "centaur-builds"
+        window = self.launch("tor-client-3d", ["--scene-script", source, "--capture", output],
+                             executable=executable)
+        self.assertEqual(window.child.wait(timeout=240), 0,
+                         window.stdout_path.read_text(encoding="utf-8")[-3000:])
+        report = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(report["status"], "complete")
+        self.assertEqual(len(report["captures"]), 12)
+        expected_ids = {actor["id"] for actor in script["actors"]}
+        self.assertEqual(len(expected_ids), 6)
+        snapshots = {}
+        images = {}
+        for shot in report["captures"]:
+            tick = shot["tick"]
+            self.assertIn(tick, (0, 25))
+            self.assertEqual(shot["clock_ns"], str(tick * 20_000_000))
+            actors = {actor["id"]: actor for actor in shot["actors"]}
+            self.assertEqual(set(actors), expected_ids)
+            if tick in snapshots:
+                self.assertEqual(actors, snapshots[tick], "camera changes must hold the same pose")
+            snapshots[tick] = actors
+            data = (output / (shot["name"] + ".png")).read_bytes()
+            width, height, channels, rows = decode_png(data)
+            self.assertEqual((width, height), (640, 640))
+            colored = sum(max(rows[y][x * channels:x * channels + 3])
+                          - min(rows[y][x * channels:x * channels + 3]) > 25
+                          for y in range(160, 560) for x in range(160, 480))
+            self.assertGreater(colored, 500, "the GPU capture must contain the colored body, not just floor")
+            images[shot["name"]] = hashlib.sha256(data).digest()
+
+        def hand_in_torso(actor):
+            torso, hand = actor["joints"]["Torso"], actor["joints"]["HandR"]
+            self.assertTrue(all(math.isfinite(v) for v in torso + hand))
+            delta = [hand[index] - torso[index] for index in range(12, 15)]
+            # Bone frames carry uniform creature scale. Project onto their
+            # orthogonal axes to compare anatomy independently of world scale.
+            return [sum(d * v for d, v in zip(delta, torso[start:start + 3]))
+                    / sum(v * v for v in torso[start:start + 3]) for start in (0, 4, 8)]
+
+        for requested in script["actors"]:
+            identity = requested["id"]
+            rest, walking = snapshots[0][identity], snapshots[25][identity]
+            self.assertEqual(rest["composition"]["model"], "Centaur")
+            self.assertEqual(rest["composition"]["body"], walking["composition"]["body"])
+            self.assertGreater(rest["root_children"], 0)
+            self.assertEqual(rest["root_children"], walking["root_children"])
+            self.assertAlmostEqual(walking["position"][2], 24 * 0.65 / 50, places=5)
+            self.assertNotEqual(rest["joints"]["HandR"][:12], walking["joints"]["HandR"][:12])
+            self.assertNotEqual(images[identity + "-rest"], images[identity + "-walk"])
+            for actor in (rest, walking):
+                local = hand_in_torso(actor)
+                self.assertTrue(0.30 < math.hypot(local[1], local[2]) < 0.65,
+                                "the spear grip must stay beyond the elbow during the held pose")
+        for sex in ("man", "woman"):
+            for tick in (0, 25):
+                hands = [hand_in_torso(snapshots[tick][f"{build}-{sex}"])
+                         for build in ("slender", "average", "sturdy")]
+                widths = [abs(hand[0]) for hand in hands]
+                self.assertTrue(widths[1] > widths[0] * 1.04 and widths[2] > widths[1] * 1.04,
+                                f"{sex}/{tick}: rendered shoulder spacing must follow build: {widths}")
+                for hand in hands:
+                    self.assertAlmostEqual(hand[1], hands[1][1], places=4,
+                                           msg="fullness must not stretch the arm's reach")
+                    self.assertAlmostEqual(hand[2], hands[1][2], places=4,
+                                           msg="fullness must not move the weapon out of its grip")
+
+    @model_generation.local
     def test_scripted_review_replays_composition_motion_and_capture_ticks(self):
         executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
         script = {
@@ -339,22 +744,180 @@ class Native3DProcesses(ProcessTestCase):
         self.assertTrue((output / "barbarian.png").is_file())
 
     @model_generation.local
+    def test_startup_splash_presents_before_world_start_and_enters_with_eggs(self):
+        executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
+        window = self.launch("tor-client-3d", [
+            "--server-bin", self.bin / ("tor-server" + self.suffix),
+            "--scenario", CLIENT / "scenarios/crowd-hundred", "--seed", "7", "--distance", "34",
+            "--save-root", self.directory / "startup-saves", "--capture", self.directory / "startup-captures",
+            "--capture-every", "0.4", "--quit-after", "120",
+        ], executable=executable)
+        shown = self.frame(window, lambda frame: frame.get("type") == "startup_splash" and frame.get("event") == "presented", seconds=45)
+        self.own_private_backend_cleanup(shown["pid"])
+        self.assertNotEqual(shown["pid"], window.child.pid)
+        self.assertEqual(shown["completed"], 0)
+        self.assertTrue(shown["software_presented"], "the first frame must not depend on the game's GPU initialization")
+        initial_png = Path(shown["png"]).read_bytes()
+        self.assertEqual(initial_png[:8], b"\x89PNG\r\n\x1a\n")
+        self.assertGreater(len(initial_png), 4096)
+        started = self.frame(window, lambda frame: frame.get("type") == "local_server", seconds=90)
+        self.own_private_backend_cleanup(started["pid"])
+        steps = [shown]
+
+        def entering(frame):
+            if frame.get("type") == "startup_splash" and frame.get("event") == "presented":
+                steps.append(frame)
+                return frame["completed"] == frame["total"] == 4
+            return False
+
+        ready = self.frame(window, entering, seconds=120)
+        self.assertEqual([step["completed"] for step in steps], sorted(step["completed"] for step in steps))
+        self.assertTrue(any(0 < step["completed"] < 4 for step in steps), "present an intermediate progress milestone")
+        self.assertNotEqual(initial_png, Path(ready["png"]).read_bytes(), "the progress display must actually change its pixels")
+        frame = self.captured(window, lambda frame: frame["has_control"] and not frame["busy"])
+        self.assertGreater(frame["pending_models"], 0, "entering the dungeon must not wait for all hundred models")
+        self.assertEqual(frame["failed_models"], 0)
+        native = self.native_keys(window)
+        self.tap(window, native, "i", lambda frame: frame["panel_open"])
+        self.tap(window, native, "Escape", lambda frame: not frame["panel_open"])
+        native("Escape", True)
+        try:
+            self.assertEqual(window.child.wait(timeout=40), 0)
+        finally:
+            if window.child.poll() is None:
+                native("Escape", False)
+        reports = [json.loads(line) for line in window.stdout_path.read_text(encoding="utf-8").splitlines() if line.startswith("{")]
+        self.assertTrue(any(report.get("type") == "startup_splash" and report.get("event") == "closed"
+                            and report["pid"] == shown["pid"] for report in reports))
+
+    def test_closing_the_startup_splash_cancels_the_client_and_owned_world(self):
+        executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
+        window = self.launch("tor-client-3d", [
+            "--server-bin", self.bin / ("tor-server" + self.suffix), "--scenario", ROOT / "scenarios/two-room",
+            "--save-root", self.directory / "cancelled-startup", "--quit-after", "120",
+        ], executable=executable)
+        shown = self.frame(window, lambda frame: frame.get("type") == "startup_splash" and frame.get("event") == "presented", seconds=45)
+        self.own_private_backend_cleanup(shown["pid"])
+        helper = SimpleNamespace(child=SimpleNamespace(pid=shown["pid"]))
+        native = self.native_keys(helper, expected_title="Thresholds of Ruin — Starting")
+        native("Escape", True)
+        self.assertEqual(window.child.wait(timeout=90), 0)
+        reports = [json.loads(line) for line in window.stdout_path.read_text(encoding="utf-8").splitlines() if line.startswith("{")]
+        self.assertTrue(any(report.get("event") == "cancelled" and report.get("pid") == shown["pid"] for report in reports))
+        for report in reports:
+            if report.get("type") != "local_server":
+                continue
+            host, port = report["address"].rsplit(":", 1)
+            try:
+                with socket.create_connection((host, int(port)), timeout=2):
+                    self.own_private_backend_cleanup(report["pid"])
+                    self.fail("cancelling startup left its private server running")
+            except OSError:
+                pass
+
+    @model_generation.local
+    def test_live_models_show_eggs_accept_input_and_replace_them_without_a_new_view(self):
+        executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
+        window = self.launch("tor-client-3d", [
+            "--server-bin", self.bin / ("tor-server" + self.suffix),
+            "--scenario", CLIENT / "scenarios/crowd", "--seed", "7", "--distance", "16",
+            "--save-root", self.directory / "async-model-saves", "--capture", self.directory / "async-models",
+            "--capture-every", "0.4", "--quit-after", "180",
+        ], executable=executable)
+        started = self.frame(window, lambda frame: frame.get("type") == "local_server", seconds=90)
+        self.own_private_backend_cleanup(started["pid"])
+        loading = self.captured(window, lambda frame: frame["has_control"] and frame["pending_models"] > 0)
+        eggs = {actor["target"] for actor in loading["actors"]
+                if not actor["model_ready"] and actor["presented_plan"] == "Marker"}
+        self.assertTrue(eggs, "actual GPU capture must contain disclosed actors presented as eggs")
+        self.assertEqual(loading["failed_models"], 0)
+        native = self.native_keys(window)
+        before = next(actor["world"] for actor in loading["actors"] if actor["is_self"])
+        moved = self.tap(window, native, "a", lambda frame: frame["world_feet"] != loading["world_feet"] and any(
+            actor["is_self"] and actor["world"] != before for actor in frame["actors"]))
+        self.assertGreater(moved["pending_models"], 0, "both server movement and the presented player must advance while models load")
+        opened = self.tap(window, native, "i", lambda frame: frame["panel_open"])
+        self.assertGreater(opened["pending_models"], 0, "inventory input must be processed while models are still loading")
+        closed = self.tap(window, native, "Escape", lambda frame: not frame["panel_open"])
+        ready = self.captured(window, lambda frame: frame["pending_models"] == 0)
+        self.assertEqual(ready["failed_models"], 0)
+        self.assertEqual(ready["revision"], closed["revision"], "completion must not need another server view after movement")
+        replaced = [actor for actor in ready["actors"] if actor["target"] in eggs]
+        self.assertEqual(len(replaced), len(eggs))
+        self.assertTrue(all(actor["model_ready"] and actor["presented_plan"] != "Marker" for actor in replaced))
+        self.assertNotEqual(Path(ready["png"]).read_bytes(), Path(loading["png"]).read_bytes())
+        native("Escape", True)
+        try:
+            self.assertEqual(window.child.wait(timeout=40), 0)
+        finally:
+            if window.child.poll() is None:
+                native("Escape", False)
+
+    @model_generation.local
+    def test_closing_while_models_load_stops_only_the_owned_private_backend(self):
+        executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
+        window = self.launch("tor-client-3d", [
+            "--server-bin", self.bin / ("tor-server" + self.suffix),
+            "--scenario", CLIENT / "scenarios/crowd-hundred", "--seed", "7", "--distance", "34",
+            "--save-root", self.directory / "unfinished-model-saves", "--capture", self.directory / "unfinished-models",
+            "--capture-every", "0.4", "--quit-after", "120",
+        ], executable=executable)
+        started = self.frame(window, lambda frame: frame.get("type") == "local_server", seconds=90)
+        self.own_private_backend_cleanup(started["pid"])
+        self.captured(window, lambda frame: frame["has_control"] and frame["pending_models"] > 0)
+        native = self.native_keys(window)
+        native("Escape", True)
+        try:
+            self.assertEqual(window.child.wait(timeout=40), 0)
+        finally:
+            if window.child.poll() is None:
+                native("Escape", False)
+        host, port = started["address"].rsplit(":", 1)
+        with self.assertRaises(OSError, msg="quitting with pending models must stop its private server"):
+            with socket.create_connection((host, int(port)), timeout=2):
+                pass
+        self.assertTrue(Path(started["save"]).is_file())
+
+    @model_generation.local
     def test_frame_stats_report_the_crowd_benchmark_and_exit(self):
         executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
         window = self.launch("tor-client-3d", [
             "--server-bin", self.bin / ("tor-server" + self.suffix), "--scenario", CLIENT / "scenarios/crowd",
-            "--save-root", self.directory / "crowd-saves", "--seed", "7", "--frame-stats", "2",
+            "--save-root", self.directory / "crowd-saves", "--seed", "7", "--distance", "16", "--frame-stats", "2",
         ], executable=executable)
         report = self.frame(window, lambda frame: frame.get("type") == "3d_frame_stats", seconds=240)
         self.assertEqual(window.child.wait(timeout=40), 0)
         self.assertEqual(report["creatures"], 25, "the character and the crowd's 24 creatures")
         self.assertEqual(report["posed_rigs"], 25)
+        self.assertEqual(report["frustum_creatures"], {
+            "min": 25, "max": 25, "sampled_frames": report["frames"], "unavailable_frames": 0,
+        })
         self.assertGreater(report["frames"], 0)
         self.assertLessEqual(report["p50_ms"], report["p95_ms"])
         self.assertLessEqual(report["p95_ms"], report["p99_ms"])
         self.assertLessEqual(report["p99_ms"], report["max_ms"])
         self.assertAlmostEqual(report["fps"], 1000.0 / report["mean_ms"], places=3)
         self.assertEqual(set(report["motion_ms_per_frame"]), {"pose", "robes", "drapes", "hair"})
+
+    @model_generation.local
+    def test_frame_stats_measure_one_hundred_visible_creatures(self):
+        executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
+        window = self.launch("tor-client-3d", [
+            "--server-bin", self.bin / ("tor-server" + self.suffix),
+            "--scenario", CLIENT / "scenarios/crowd-hundred",
+            "--save-root", self.directory / "hundred-crowd-saves", "--seed", "7",
+            "--distance", "34", "--frame-stats", "2",
+        ], executable=executable)
+        started = self.frame(window, lambda frame: frame.get("type") == "local_server", seconds=90)
+        self.own_private_backend_cleanup(started["pid"])
+        report = self.frame(window, lambda frame: frame.get("type") == "3d_frame_stats", seconds=480)
+        self.assertEqual(window.child.wait(timeout=40), 0)
+        self.assertEqual(report["creatures"], 101)
+        self.assertEqual(report["posed_rigs"], 101)
+        self.assertGreater(report["frames"], 0)
+        self.assertEqual(report["frustum_creatures"], {
+            "min": 101, "max": 101, "sampled_frames": report["frames"], "unavailable_frames": 0,
+        })
 
     @model_generation.local
     def test_scripted_action_boundaries_do_not_consume_a_step(self):
@@ -874,7 +1437,9 @@ class Native3DProcesses(ProcessTestCase):
             native.stroke(name)
             return self.captured(window, lambda frame: not frame["busy"] and done(frame))
         code = ("Key" + name.upper() if name.isalpha() and len(name) == 1 else
-                "Digit" + name if name.isdigit() else {"Return": "Enter", "space": "Space"}.get(name, name))
+                "Digit" + name if name.isdigit() else {"Return": "Enter", "space": "Space", "Up": "ArrowUp",
+                                                       "Down": "ArrowDown", "Left": "ArrowLeft", "Right": "ArrowRight",
+                                                       "bracketleft": "BracketLeft", "bracketright": "BracketRight"}.get(name, name))
         native(name, True)
         try:
             self.captured(window, lambda frame: code in frame["keys"])
@@ -882,8 +1447,8 @@ class Native3DProcesses(ProcessTestCase):
             native(name, False)
         return self.captured(window, lambda frame: code not in frame["keys"] and not frame["busy"] and done(frame))
 
-    def native_keys(self, client):
-        handle = self._native_window(client)
+    def native_keys(self, client, *, expected_title="Thresholds of Ruin — 3D prototype"):
+        handle = self._native_window(client, expected_title=expected_title)
         if os.name == "nt":
             import ctypes
             from ctypes import wintypes
@@ -892,12 +1457,13 @@ class Native3DProcesses(ProcessTestCase):
             user32.MapVirtualKeyW.argtypes = [wintypes.UINT, wintypes.UINT]
             def key(name, down):
                 vk = ord(name.upper()) if len(name) == 1 and name.isascii() and name.isalnum() else {
-                    "Escape": 0x1B, "space": 0x20, "Return": 0x0D, "Tab": 0x09,
+                    "Escape": 0x1B, "space": 0x20, "Return": 0x0D, "Tab": 0x09, "Control_L": 0x11,
                     "Up": 0x26, "Down": 0x28, "Left": 0x25, "Right": 0x27,
-                    "PageUp": 0x21, "PageDown": 0x22, "F2": 0x71, "F4": 0x73, "F5": 0x74, "F10": 0x79,
+                    "PageUp": 0x21, "PageDown": 0x22, "Home": 0x24, "End": 0x23, "F2": 0x71, "F4": 0x73, "F5": 0x74, "F6": 0x75, "F7": 0x76, "F10": 0x79,
+                    "bracketleft": 0xDB, "bracketright": 0xDD,
                 }[name]
                 scan = user32.MapVirtualKeyW(vk, 0)
-                extended = name in ("Up", "Down", "Left", "Right", "PageUp", "PageDown")
+                extended = name in ("Up", "Down", "Left", "Right", "PageUp", "PageDown", "Home", "End")
                 self.assertTrue(user32.PostMessageW(handle, 0x100 if down else 0x101, vk,
                     1 | (scan << 16) | (0x01000000 if extended else 0) | (0 if down else 0xC0000000)))
             return key
@@ -944,6 +1510,20 @@ class Native3DProcesses(ProcessTestCase):
                 self.assertNotEqual(save, path)
                 self.assertEqual(path.read_bytes(), contents, "a later launch changed a prior save")
             prior = (save, save.read_bytes())
+
+    @non_graphical
+    def test_missing_connection_credential_is_rejected_before_opening_the_splash(self):
+        executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
+        environment = dict(os.environ)
+        environment.pop("TOR_SERVER_TOKEN", None)
+        captures = self.directory / "invalid-connection-captures"
+        log = self.directory / "invalid-connection.log"
+        with log.open("w", encoding="utf-8") as output:
+            result = subprocess.run([executable, "--connect", "127.0.0.1:1", "--capture", captures],
+                                    env=environment, stdout=output, stderr=subprocess.STDOUT, timeout=30)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(captures.exists(), "invalid credentials must be rejected before splash presentation or capture side effects")
+        self.assertIn("TOR_SERVER_TOKEN", log.read_text(encoding="utf-8"))
 
     @non_graphical
     def test_live_appearance_override_is_rejected_before_connecting(self):
@@ -1163,6 +1743,123 @@ class Native3DProcesses(ProcessTestCase):
             if window.child.poll() is None:
                 native("Escape", False)
 
+    def test_map_destination_selection_is_local_and_enter_travels_to_the_exact_cell(self):
+        self.server()
+        executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
+        window = self.launch("tor-client-3d", ["--connect", self.address, "--capture", self.directory / "map-route", "--capture-every", "0.4", "--quit-after", "600"], executable=executable)
+        initial = self.captured(window, lambda frame: frame["has_control"] and frame["can_act"] and not frame["busy"])
+        native = self.native_keys(window)
+        def route(frame):
+            return (frame.get("map_journal") or {}).get("route") or {}
+        opened = self.tap(window, native, "m", lambda frame: str(frame["screen"]).startswith("Places") and route(frame).get("options"))
+        self.assertIsNone(route(opened)["selected"])
+        feet = route(opened)["feet"]
+        options = route(opened)["options"]
+        adjacent = {row["key"] for row in options if row["label"] == "Known floor" and max(abs(row["position"][axis] - feet[axis]) for axis in (0, 1)) == 1}
+        self.assertTrue(adjacent, "positive fixture must contain an adjacent disclosed floor")
+        frame = opened
+        for _ in range(len(options)):
+            previous = route(frame)["selected"]
+            frame = self.tap(window, native, "Down", lambda current, previous=previous: route(current)["selected"] != previous)
+            if route(frame)["selected"] in adjacent:
+                break
+        target = route(frame)["selected"]
+        self.assertIn(target, adjacent)
+        self.assertTrue(route(frame)["can_travel"])
+        self.assertEqual(frame["revision"], initial["revision"], "selection must not advance the world")
+        self.assertEqual(frame["world_feet"], initial["world_feet"])
+        row = next(row for row in options if row["key"] == target)
+        from render_pixels import decode_png
+        width, height, channels, rows = decode_png(Path(frame["png"]).read_bytes())
+        left, top, right, bottom = frame["map_journal"]["picture_bounds"]
+        x = round((left + row["point"][0] * (right - left)) * width)
+        y = round((top + row["point"][1] * (bottom - top)) * height)
+        gold = 0
+        for py in range(max(0, y - 12), min(height, y + 13)):
+            for px in range(max(0, x - 12), min(width, x + 13)):
+                red, green, blue = rows[py][px * channels:px * channels + 3]
+                gold += red > 235 and green > 180 and 80 < blue < 160
+        self.assertGreater(gold, 10, "the selected destination must have a real visible marker")
+        arrived = self.tap(window, native, "Return", lambda current: current["screen"] is None and current["foot_cell"] == target and current["can_act"])
+        self.assertGreater(arrived["revision"], initial["revision"])
+        self.assertFalse(arrived["map_journal"]["visible"])
+        self.assertNotEqual(arrived["world_feet"], initial["world_feet"])
+        native("Escape", True)
+        try:
+            self.assertEqual(window.child.wait(timeout=30), 0)
+        finally:
+            if window.child.poll() is None:
+                native("Escape", False)
+
+    def test_map_journal_shares_the_disclosed_map_and_preserves_note_typing(self):
+        self.server()
+        executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
+        window = self.launch("tor-client-3d", ["--connect", self.address, "--capture", self.directory / "map-journal", "--capture-every", "0.4", "--quit-after", "600"], executable=executable)
+        initial = self.captured(window, lambda frame: frame["has_control"] and not frame["busy"])
+        native = self.native_keys(window)
+        opened = self.tap(window, native, "m", lambda frame: (frame["screen"] or "").startswith("Places") and (frame.get("map_journal") or {}).get("visible"))
+        left, top, right, bottom = opened["map_journal"]["picture_bounds"]
+        self.assertGreater(right - left, 0.25)
+        self.assertGreater(bottom - top, 0.3)
+        from render_pixels import decode_png
+        width, height, channels, rows = decode_png(Path(opened["png"]).read_bytes())
+        colored = 0
+        for y in range(int(top * height), int(bottom * height), 2):
+            for x in range(int(left * width), int(right * width), 2):
+                rgb = rows[y][x * channels:x * channels + 3]
+                if max(rgb) > 50 and max(rgb) - min(rgb) > 15:
+                    colored += 1
+        self.assertGreater(colored, 100, "the enlarged map must contain actual disclosed terrain")
+        history = self.tap(window, native, "F2", lambda frame: frame["screen"] == "History")
+        self.assertTrue(history["map_journal"]["visible"])
+        note = self.tap(window, native, "F4", lambda frame: (frame["screen"] or "").startswith("Note"))
+        self.assertTrue(note["map_journal"]["visible"])
+        typed = self.tap(window, native, "m", lambda frame: frame["typed"] == "m")
+        self.assertTrue(typed["screen"].startswith("Note"), "M belongs to the note draft")
+        self.assertEqual(typed["revision"], initial["revision"])
+        self.assertEqual(typed["world_feet"], initial["world_feet"])
+        self.tap(window, native, "Escape", lambda frame: frame["screen"] is None and not frame["map_journal"]["visible"])
+        self.tap(window, native, "m", lambda frame: (frame["screen"] or "").startswith("Places"))
+        self.tap(window, native, "m", lambda frame: frame["screen"] is None)
+        native("Escape", True)
+        try:
+            self.assertEqual(window.child.wait(timeout=30), 0)
+        finally:
+            if window.child.poll() is None:
+                native("Escape", False)
+
+    def test_character_screen_shares_the_live_portrait_and_keeps_command_keys(self):
+        self.server(scenario=self.fallback_package())
+        executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
+        window = self.launch("tor-client-3d", ["--connect", self.address, "--capture", self.directory / "character", "--capture-every", "0.4", "--quit-after", "600"], executable=executable)
+        initial = self.captured(window, lambda frame: frame["has_control"] and not frame["busy"])
+        native = self.native_keys(window)
+        self.tap(window, native, "F10", lambda frame: frame["screen"] == "Advancement" and not frame["busy"])
+        portrait = self.captured(window, lambda frame: (frame.get("portrait") or {}).get("active") and not frame["portrait"]["pending"] and frame["portrait"]["mesh_parts"] > 0)
+        self.assert_live_portrait(portrait, initial)
+        pane = portrait["advancement"]["pane_bounds"]
+        self.assertAlmostEqual(pane[2] - pane[0], 0.54, delta=0.01)
+        self.assertLessEqual(portrait["portrait"]["bounds"][2], pane[0], "the live portrait and character controls must not overlap")
+        turn = portrait["portrait"]["turn"]
+        rotated = self.tap(window, native, "Home", lambda frame: frame["portrait"]["turn"] < turn - 0.1)
+        self.assertEqual(rotated["revision"], portrait["revision"])
+        self.assertEqual(rotated["world_feet"], portrait["world_feet"])
+        self.tap(window, native, "End", lambda frame: abs(frame["portrait"]["turn"] - turn) < 0.01)
+        typed = self.tap(window, native, "bracketleft", lambda frame: frame["typed"] == "[")
+        self.assertAlmostEqual(typed["portrait"]["turn"], turn)
+        held = self.tap(window, native, "Home", lambda frame: frame["typed"] == "[")
+        self.assertEqual(held["typed"], "[")
+        self.assertAlmostEqual(held["portrait"]["turn"], turn, msg="a command draft keeps navigation keys")
+        self.assertEqual(held["revision"], initial["revision"])
+        self.assertEqual(held["world_feet"], initial["world_feet"])
+        self.tap(window, native, "Escape", lambda frame: frame["screen"] is None and not frame["portrait"]["active"])
+        native("Escape", True)
+        try:
+            self.assertEqual(window.child.wait(timeout=30), 0)
+        finally:
+            if window.child.poll() is None:
+                native("Escape", False)
+
     def test_native_advancement_screen_reads_the_owners_pages(self):
         """F10 opens the owner's advancement pages from the real server, and a
         typed command fetches another; Esc closes it without quitting."""
@@ -1184,6 +1881,10 @@ class Native3DProcesses(ProcessTestCase):
         feet = self.captured(window)["world_feet"]
         frame = tap("F10", lambda frame: "Overview" in lines(frame))
         self.assertNotIn("Open overview to fetch", lines(frame))
+        frame = tap("Tab", lambda frame: "Point balances" in lines(frame))
+        self.assertEqual(frame["world_feet"], feet, "character navigation is free browsing")
+        frame = tap("Tab", lambda frame: "SkillRank catalog" in lines(frame))
+        self.assertEqual(frame["world_feet"], feet)
         for letter in "ledger":
             frame = tap(letter, lambda frame, letter=letter: frame["advancement"]["typed"].endswith(letter))
         self.assertEqual(frame["advancement"]["typed"], "ledger")
@@ -1191,6 +1892,88 @@ class Native3DProcesses(ProcessTestCase):
         self.assertEqual(frame["world_feet"], feet, "typing a, d, e and the like never moves the character")
         frame = tap("Escape", lambda frame: frame["advancement"] is None)
         self.assertIsNone(window.child.poll(), "Esc closes the screen, not the game")
+        native("Escape", True)
+        try:
+            self.assertEqual(window.child.wait(timeout=30), 0)
+        finally:
+            if window.child.poll() is None:
+                native("Escape", False)
+
+    def test_graphical_advancement_selects_a_pool_previews_and_explicitly_confirms(self):
+        """Ordinary keyboard selection previews a disclosed purchase; F7 alone commits it."""
+        self.server(scenario="advancement-owner")
+        executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
+        window = self.launch("tor-client-3d", [
+            "--connect", self.address, "--capture", self.directory / "captures", "--capture-every", "0.4",
+        ], executable=executable)
+        self.captured(window, lambda frame: frame["has_control"] and not frame["busy"])
+        native = self.native_keys(window)
+
+        def tap(name, done):
+            return self.tap(window, native, name, done)
+
+        def lines(frame):
+            return chr(10).join((frame.get("advancement") or {}).get("lines", []))
+
+        def choices(frame):
+            return (frame.get("advancement") or {}).get("choices") or {}
+
+        def type_line(line, done):
+            prefix = ""
+            for letter in line:
+                prefix += letter
+                tap(letter, lambda frame, prefix=prefix: frame["typed"] == prefix)
+            return tap("Return", done)
+
+        def select(frame, predicate):
+            rows = choices(frame).get("rows", [])
+            index = next((index for index, row in enumerate(rows) if predicate(row)), None)
+            self.assertIsNotNone(index, f"expected disclosed choice among {rows}")
+            for _ in range(len(rows) + 1):
+                previous = choices(frame).get("selected")
+                if previous == index:
+                    return frame
+                frame = tap("Down", lambda current, previous=previous: choices(current).get("selected") != previous)
+            self.fail("keyboard selection must reach the disclosed row")
+
+        frame = tap("F10", lambda frame: "Overview" in lines(frame))
+        feet, revision = frame["world_feet"], int(frame["revision"])
+        frame = tap("Tab", lambda frame: "Point balances" in lines(frame))
+        self.assertTrue(choices(frame).get("rows"), "Point balances must present graphical funding choices")
+        frame = select(frame, lambda row: row.get("pool") == "practice" and row.get("owner") == 0 and row.get("kind") == "SkillRank")
+        frame = tap("Return", lambda frame: choices(frame).get("funding") == {"pool": "practice", "owner": 0} and "SkillRank catalog" in lines(frame))
+        frame = type_line("supplies", lambda frame: "Ration:" in lines(frame) and frame["typed"] == "")
+        self.assertTrue(choices(frame).get("supplies"), "typed supply chooser must replace the retained catalog display")
+        self.assertFalse(choices(frame).get("rows"), "supply pages must not contain hidden catalog shortcuts")
+        self.assertFalse(frame["panel_open"], "typing supplies stays in the character screen")
+        frame = type_line("skills", lambda frame: "SkillRank catalog" in lines(frame) and frame["typed"] == "" and choices(frame).get("rows"))
+        self.assertEqual(choices(frame).get("funding"), {"pool": "practice", "owner": 0})
+        frame = select(frame, lambda row: row.get("selection") == {"kind": "skill_rank", "skill": "perception"})
+        frame = tap("Return", lambda frame: choices(frame).get("can_confirm") and (choices(frame).get("proposal") or {}).get("kind") == "purchase")
+        self.assertTrue(choices(frame).get("structured_preview"), "the default preview must show result cards")
+        confirmation = choices(frame).get("confirm_button")
+        self.assertIsNotNone(confirmation, "the preview must present a confirmation control")
+        self.assertIn("Purchase HD 1 / pool practice / skill perception", confirmation["label"])
+        bounds, clip = confirmation["bounds"], confirmation["clip"]
+        self.assertGreater(bounds[2] - bounds[0], 100)
+        self.assertGreater(bounds[3] - bounds[1], 20)
+        for axis in (0, 1):
+            self.assertGreaterEqual(bounds[axis] + 1, clip[axis], "confirmation starts inside the presented clip")
+            self.assertLessEqual(bounds[axis + 2], clip[axis + 2] + 1, "confirmation stays fully visible outside the scrolling body")
+        self.assertEqual(int(frame["revision"]), revision, "preview is free and leaves the build unchanged")
+        self.assertEqual(frame["world_feet"], feet)
+        frame = type_line("ledger", lambda frame: "Purchase ledger" in lines(frame) and frame["typed"] == "")
+        self.assertNotIn("skill perception", lines(frame), "preview must not appear in the committed ledger")
+        self.assertTrue(choices(frame).get("can_confirm"), "browsing keeps the exact retained preview")
+        self.assertFalse(choices(frame).get("structured_preview"), "browsing must keep the requested ledger visible")
+        self.assertIn("Purchase HD 1 / pool practice / skill perception", choices(frame)["confirm_button"]["label"], "confirmation must keep naming its exact proposal while browsing")
+        frame = tap("F7", lambda frame: not frame["busy"] and int(frame["revision"]) > revision)
+        self.assertEqual(frame["world_feet"], feet)
+        self.assertFalse(choices(frame).get("can_confirm"), "changed state invalidates the confirmation")
+        type_line("overview", lambda frame: "Overview" in lines(frame) and frame["typed"] == "")
+        frame = type_line("ledger", lambda frame: "Purchase ledger" in lines(frame) and frame["typed"] == "")
+        self.assertEqual(lines(frame).count("skill perception"), 1, "the exact purchase commits once")
+        tap("Escape", lambda frame: frame["advancement"] is None)
         native("Escape", True)
         try:
             self.assertEqual(window.child.wait(timeout=30), 0)

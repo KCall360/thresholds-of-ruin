@@ -1054,10 +1054,18 @@ class CiWorkflowContract(unittest.TestCase):
     def test_partition_budgets_bound_whole_jobs_without_changing_individual_deadlines(self):
         profiles = self.job("profiles")
         self.assertIn("timeout-minutes: ${{ matrix.partition == 'python' && 40 || 60 }}", profiles)
-        self.assertIn("timeout-minutes: 40", self.job("windows_python"))
+        self.assertIn("timeout-minutes: 50", self.job("windows_python"))
         self.assertIn("timeout-minutes: 40", self.job("windows_binaries"))
         self.assertNotIn("TOR_TEST_TIMEOUT", profiles)
         self.assertNotIn("--timeout", profiles)
+
+    def test_windows_python_budget_reserves_time_for_post_verification_cleanup(self):
+        job = self.job("windows_python")
+        minutes = int(re.search(r"timeout-minutes: (\d+)", job)[1])
+        self.assertGreaterEqual(minutes, 45, "the observed 40-minute run needs post-test cleanup headroom")
+        self.assertLessEqual(minutes, 60, "retain a bounded whole-job budget")
+        self.assertNotIn("TOR_TEST_TIMEOUT", job)
+        self.assertNotIn("--timeout", job)
 
     def test_only_python_partitions_require_a_native_desktop_and_virtual_display(self):
         profiles = self.job("profiles")

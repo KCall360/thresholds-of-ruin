@@ -9,21 +9,28 @@
 mod autoplay;
 mod bestiary;
 mod cave;
+mod chrome;
 mod creatures;
 mod cursor;
 mod diagnostics;
+mod equipment;
 mod frame_stats;
 mod gallery;
 mod graphics;
+mod hud;
 mod interact;
+mod inventory;
 mod launch;
 mod lighting;
+mod map_journal;
 mod minimap;
 #[doc(hidden)]
 pub mod model_benchmark;
 mod net;
 mod pack;
 mod picking;
+mod portrait;
+mod progression;
 mod props;
 #[cfg(test)]
 mod render_contracts;
@@ -31,10 +38,12 @@ mod review_clock;
 mod review_script;
 mod sdf;
 mod showcase;
+mod startup;
 #[cfg(test)]
 mod test_support;
 use diagnostics::capture;
 mod camera;
+mod character;
 mod scene;
 mod screen;
 use camera::{follow_actors, input, rig_camera, torch_flicker, update_cave_params};
@@ -71,6 +80,12 @@ X: door   I: pack   Space: wait   R/F: up/down   M: map   Tab: control   Esc: cl
 
 pub fn run() -> Result<(), Error> {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
+    if arguments
+        .first()
+        .is_some_and(|arg| arg == "--startup-window")
+    {
+        return startup::window_cli(&arguments[1..]);
+    }
     if arguments.iter().any(|arg| arg == "--live-playlist") {
         return review_script::live::cli(&arguments);
     }
@@ -304,9 +319,17 @@ pub fn run() -> Result<(), Error> {
         bestiary::run(diagnostics);
         return Ok(());
     }
+    let connection = connect
+        .map(|address| std::env::var("TOR_SERVER_TOKEN").map(|token| (address, token)))
+        .transpose()
+        .map_err(|_| "--connect requires TOR_SERVER_TOKEN")?;
+    let mut splash = startup::Splash::start(diagnostics.capture.as_deref())?;
+    if splash.cancelled() {
+        return Ok(());
+    }
     let mut server: Option<launch::OwnedChild> = None;
-    let (address, token) = match connect {
-        Some(address) => (address, std::env::var("TOR_SERVER_TOKEN")?),
+    let (address, token) = match connection {
+        Some(connection) => connection,
         None => {
             let credentials = launch::Credentials::new();
             let started =
@@ -320,13 +343,19 @@ pub fn run() -> Result<(), Error> {
             (started.address, credentials.owner)
         }
     };
+    if splash.cancelled() {
+        return Ok(());
+    }
     let network = Arc::new(Mutex::new(Network::start(address, token, actor, observe)));
+    splash.preparing_renderer();
 
     let mut app = App::new();
     app.add_plugins(graphics::plugins().set(WindowPlugin {
         primary_window: Some(Window {
             title: "Thresholds of Ruin — 3D prototype".into(),
             resolution: WindowResolution::new(1440., 900.),
+            visible: false,
+            focused: false,
             // Timing frames measures headroom, so it lifts the display cap.
             present_mode: if diagnostics.frame_stats.is_some() {
                 bevy::window::PresentMode::AutoNoVsync
@@ -337,6 +366,7 @@ pub fn run() -> Result<(), Error> {
         }),
         ..default()
     }))
+    .add_plugins(startup::PresentationPlugin)
     .add_plugins(MaterialPlugin::<CaveMaterial>::default())
     .insert_resource(ClearColor(FOG))
     .insert_resource(AmbientLight {
@@ -345,6 +375,7 @@ pub fn run() -> Result<(), Error> {
         ..default()
     })
     .insert_resource(Net(network.clone()))
+    .insert_resource(splash)
     .insert_resource(CameraRig {
         distance: diagnostics.distance.unwrap_or(8.5),
         ..default()
@@ -371,10 +402,16 @@ pub fn run() -> Result<(), Error> {
     .add_systems(
         Startup,
         (
+            startup::renderer_ready,
+            chrome::setup,
             setup,
+            portrait::setup,
+            hud::setup,
             interact::setup,
             screen::setup,
+            character::setup,
             minimap::setup,
+            map_journal::setup,
             cursor::setup,
         )
             .chain(),
@@ -382,11 +419,40 @@ pub fn run() -> Result<(), Error> {
     .add_systems(
         Update,
         (
-            receive,
+            (receive, creatures::loading::poll, startup::tick).chain(),
             react,
-            interact::keys,
-            (screen::typing, screen::show),
-            interact::panel,
+            (interact::keys, hud::buttons).chain(),
+            (
+                (progression::sync, progression::controls).chain(),
+                (
+                    map_journal::route::sync,
+                    map_journal::route::keyboard,
+                    map_journal::route::pointer,
+                    map_journal::route::buttons,
+                    map_journal::keyboard,
+                )
+                    .chain(),
+                (screen::typing, character::buttons, map_journal::buttons).chain(),
+                (
+                    screen::show,
+                    map_journal::show,
+                    map_journal::route::draw,
+                    character::show,
+                    progression::draw,
+                    progression::focus,
+                )
+                    .chain(),
+            )
+                .chain(),
+            (
+                inventory::controls,
+                inventory::typing,
+                portrait::controls,
+                interact::panel,
+                chrome::skin,
+                chrome::scroll,
+            )
+                .chain(),
             interact::panel_buttons,
             input,
             interact::hover,
@@ -407,7 +473,7 @@ pub fn run() -> Result<(), Error> {
                 lighting::effects,
                 lighting::shade,
                 lighting::lamps,
-                hud,
+                hud::update,
             )
                 .chain(),
         )
@@ -418,16 +484,20 @@ pub fn run() -> Result<(), Error> {
         (
             demo,
             capture.after(lighting::lamps),
-            frame_stats::frame_stats
-                .after(creatures::animate)
-                .run_if(|diagnostics: Res<Diagnostics>| diagnostics.frame_stats.is_some()),
+            portrait::update.after(lighting::lamps).before(capture),
             autoplay::run,
             autoplay::hunt,
-            minimap::toggle,
+            minimap::toggle.after(inventory::typing),
             minimap::draw,
             boredom,
             cursor::update,
         ),
+    )
+    .add_systems(
+        PostUpdate,
+        frame_stats::frame_stats
+            .after(bevy::render::view::VisibilitySystems::CheckVisibility)
+            .run_if(|diagnostics: Res<Diagnostics>| diagnostics.frame_stats.is_some()),
     )
     .add_systems(Last, (props::maintain_cache, shutdown_on_exit));
     // Timing frames also attributes the animation work in them.
@@ -589,6 +659,8 @@ struct Game {
     /// The detection charts as the session last presented them.
     charts: Vec<String>,
     advancement: Vec<String>,
+    advancement_view: tor_client_3d_model::AdvancementView,
+    advancement_serial: u64,
     typed: String,
     busy: bool,
     fatal: bool,
@@ -679,6 +751,7 @@ struct CameraRig {
     yaw: f32,
     distance: f32,
     focus: Vec3,
+    panel_coverage: f32,
 }
 
 impl Default for CameraRig {
@@ -688,6 +761,7 @@ impl Default for CameraRig {
             yaw: 0.0,
             distance: 14.0,
             focus: Vec3::ZERO,
+            panel_coverage: 0.0,
         }
     }
 }
@@ -765,12 +839,6 @@ struct DoorLeaf {
 struct Torch;
 
 #[derive(Component)]
-struct LogText;
-
-#[derive(Component)]
-struct StatusText;
-
-#[derive(Component)]
 struct Label;
 
 fn setup(
@@ -822,6 +890,7 @@ fn setup(
 
     commands.spawn((
         Camera3d::default(),
+        IsDefaultUiCamera,
         crate::graphics::camera_antialiasing(),
         Camera {
             hdr: true,
@@ -851,49 +920,6 @@ fn setup(
         Transform::from_xyz(0.0, 1.5, 0.0),
     ));
     studio_lights(&mut commands);
-
-    let text = |size: f32, color: Color| {
-        (
-            TextFont {
-                font_size: size,
-                ..default()
-            },
-            TextColor(color),
-        )
-    };
-    commands.spawn((
-        LogText,
-        Text::new("Connecting..."),
-        text(17.0, Color::srgb(0.9, 0.88, 0.8)),
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(16.0),
-            top: Val::Px(12.0),
-            max_width: Val::Px(900.0),
-            ..default()
-        },
-    ));
-    commands.spawn((
-        StatusText,
-        Text::new(""),
-        text(16.0, Color::srgb(0.7, 0.85, 0.8)),
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(16.0),
-            bottom: Val::Px(34.0),
-            ..default()
-        },
-    ));
-    commands.spawn((
-        Text::new(HELP),
-        text(13.0, Color::srgb(0.45, 0.5, 0.55)),
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(16.0),
-            bottom: Val::Px(12.0),
-            ..default()
-        },
-    ));
 }
 
 /// Observer-frame (x south-positive y, z up) to Bevy (y up, z south).
@@ -958,65 +984,6 @@ const COMPASS: [Direction; 8] = [
     Direction::West,
     Direction::NorthWest,
 ];
-
-fn hud(
-    game: Res<Game>,
-    mut log: Query<&mut Text, (With<LogText>, Without<StatusText>)>,
-    mut status: Query<&mut Text, (With<StatusText>, Without<LogText>)>,
-) {
-    if !game.is_changed() {
-        return;
-    }
-    if let Ok(mut text) = log.single_mut() {
-        let lines: Vec<&str> = game.log.iter().rev().take(7).map(String::as_str).collect();
-        text.0 = lines.into_iter().rev().collect::<Vec<_>>().join("\n");
-    }
-    if let Ok(mut text) = status.single_mut() {
-        let mut rows = Vec::new();
-        let mut parts = Vec::new();
-        if let Some(view) = &game.view {
-            // The shared status rows, as the ASCII client shows them.
-            rows.extend(view.status.iter().filter(|row| !row.is_empty()).cloned());
-            if view.hp.is_some_and(|(hp, _)| hp == 0) {
-                parts.push("You have fallen.".into());
-            }
-            if view.can_resume {
-                parts.push("F8 resumes your work".into());
-            }
-            if view.can_cancel {
-                parts.push("F9 cancels it".into());
-            }
-            parts.push(
-                if view.has_control {
-                    "in control"
-                } else {
-                    "observing"
-                }
-                .to_string(),
-            );
-            let here: Vec<&str> = view
-                .items
-                .iter()
-                .filter(|i| i.position == view.feet)
-                .map(|i| i.name.as_str())
-                .collect();
-            if !here.is_empty() {
-                parts.push(format!("here: {}", here.join(", ")));
-            }
-        }
-        if game.busy {
-            parts.push("...".into());
-        }
-        if !game.status.is_empty() {
-            parts.push(game.status.clone());
-        }
-        rows.push(parts.join("   |   "));
-        text.0 = rows.join(
-            "
-",
-        );
-    }
-}
 
 fn shutdown_on_exit(mut exits: EventReader<AppExit>, net: Res<Net>) {
     if exits.read().next().is_none() {

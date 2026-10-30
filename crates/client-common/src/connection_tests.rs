@@ -1400,6 +1400,7 @@ async fn advancement_transport_installs_only_correlated_owned_bounded_pages_and_
 ) {
     for case in [
         "owner",
+        "owner_cursor",
         "external",
         "observer",
         "spectator",
@@ -1415,7 +1416,7 @@ async fn advancement_transport_installs_only_correlated_owned_bounded_pages_and_
         } else {
             AccessRole::Player
         };
-        let context = initial.reply_context();
+        let mut context = initial.reply_context();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let server = tokio::spawn(async move {
@@ -1465,6 +1466,31 @@ async fn advancement_transport_installs_only_correlated_owned_bounded_pages_and_
                 };
                 request_id
             };
+            if case == "owner_cursor" {
+                context.cursor.sequence += 1;
+                let facts = OutcomeFacts::capture(
+                    &initial.state.observation,
+                    &initial.state.observation,
+                    None,
+                );
+                send(
+                    &mut socket,
+                    ServerMessage::Update {
+                        update: Box::new(StreamUpdate {
+                            context: initial.context.clone(),
+                            actor: initial.actor,
+                            branch: initial.branch.clone(),
+                            cursor: context.cursor,
+                            body: UpdateBody::Outcome {
+                                visual_changed: false,
+                                facts,
+                                event: None,
+                            },
+                        }),
+                    },
+                )
+                .await;
+            }
             let message =
                 owner_advancement_message(context, if case == "wrong_id" { "wrong" } else { &id });
             if case == "oversized" {
@@ -1474,7 +1500,7 @@ async fn advancement_transport_installs_only_correlated_owned_bounded_pages_and_
             } else {
                 send(&mut socket, message).await;
             }
-            if matches!(case, "owner" | "external") {
+            if matches!(case, "owner" | "owner_cursor" | "external") {
                 send(
                     &mut socket,
                     ServerMessage::Update {
@@ -1483,7 +1509,8 @@ async fn advancement_transport_installs_only_correlated_owned_bounded_pages_and_
                             actor: initial.actor,
                             branch: initial.branch,
                             cursor: StreamCursor {
-                                sequence: initial.cursor.sequence + 1,
+                                sequence: initial.cursor.sequence
+                                    + if case == "owner_cursor" { 2 } else { 1 },
                                 tick: initial.cursor.tick,
                             },
                             body: UpdateBody::Control { has_control: false },
@@ -1513,12 +1540,19 @@ async fn advancement_transport_installs_only_correlated_owned_bounded_pages_and_
         } else {
             None
         };
+        if case == "owner_cursor" {
+            assert!(matches!(
+                client.next().await.unwrap(),
+                ServerMessage::Update { .. }
+            ));
+            assert_eq!(client.state.state(), &before);
+        }
         let result = client.next().await;
-        if matches!(case, "owner" | "external") {
+        if matches!(case, "owner" | "owner_cursor" | "external") {
             let message = result.unwrap();
             assert_eq!(
                 client.advancement_pages.overview().is_some(),
-                case == "owner"
+                matches!(case, "owner" | "owner_cursor")
             );
             let mut pending = crate::PendingRequest::new(id.unwrap());
             assert!(matches!(

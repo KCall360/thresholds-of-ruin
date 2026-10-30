@@ -716,7 +716,9 @@ checks do not replace the current
   The prototype adds shared body/fitting dimensions, correlated build silhouettes,
   fitted garment surfaces, an offline swappable wardrobe with garment-owned
   feminine necklines and lower-panel construction, outfit-owned torso ornaments
-  and pouches, independent offline helm/boots/cloak/breastplate equipment overrides that
+  and pouches, resolved head components whose cache identity includes neck
+  adornments as well as headwear and earrings, independent offline
+  helm/boots/cloak/breastplate equipment overrides that
   survive wardrobe changes, fitted torso armor and cloak back clearance during
   swing, peplums fitted over tunics,
   reusable closed baldrics
@@ -724,7 +726,62 @@ checks do not replace the current
   sewn bindings and straps with coherent surface fitting and
   support retained across garment openings,
   hollow faceted shoulder plates fitted to the resolved arms,
-  and family-specific support motion. Feathered fliers and beasts share tapered,
+  shared organic arm surfaces for bipeds and centaur riders,
+  and family-specific support motion. Shared organic tube paths use bounded
+  geometry-driven sampling and radius-aware ring density while preserving knots
+  and paint spacing. Closed arm and leg surfaces now use
+  projected, locally refined sampling; fixed-cast native comparisons reduced
+  source vertices while preserving reviewed silhouettes. The 100+ visible
+  creature target remains 60 FPS and is not yet qualified. Live startup now shows
+  the embedded splash before world and graphics initialization, with progress
+  through actual milestones and a handoff to the first prepared scene frames.
+  It remains responsive during initialization and does not wait for all creature
+  models before opening play. The framed live HUD has a disclosed-health globe,
+  readiness badge, recent
+  messages and mouse-accessible Inventory, Equipment, Character, Map, Places, Journal and
+  Wait controls. Shared status rows retain authoritative resource and condition
+  information. The inventory has an icon grid, filters, bounded name search,
+  selected-item details/actions, equipped markers and a separate Within reach
+  section. Equipment shares its selection and action path, with server-declared
+  sockets (including repeated kinds), equipped/selected cards, remembered attack,
+  modifier and knowledge facts, and explicit remove-before-equip guidance for full
+  matching slots. A large rotatable live portrait shares the displayed actor's
+  rig and meshes, follows asynchronous stand-in replacement, and keeps exploration
+  camera and actor state independent. Its bounded offscreen target is inactive
+  when closed. Browsing stays local; priority prompts and numbered item actions keep
+  their shared command semantics. The camera frames the player beside inventory
+  without moving the actor. Shared serif typography and procedural
+  stone/brass frames replace the plain shell. The responsive character sheet shares the live
+  portrait and shows disclosed attributes above scrollable advancement pages,
+  with catalog/balance/ledger navigation and a fixed command line. Home/End
+  turns its portrait only with an empty command draft; narrow windows expand
+  the sheet and hide the portrait when necessary. Structured preview cards
+  show health, resources and disclosed consequences, including a death warning. Tab cycles sections; Page Up/Down
+  browse server pages. Graphical pool and purchase cards preserve disclosed talent
+  forms and the exact owner/context; Enter previews and a separate fixed-footer
+  button (F7) confirms. Stale pages and missing readiness disable paid controls.
+  Drafts and the typed replacement/growth/Intellect/supply workflows retain their
+  shared semantics. The map/journal combines a bounded, cached north-up map of
+  disclosed terrain
+  with known places, retained history and note editing. Places retain their
+  opaque identity for rename controls; no undisclosed place coordinates or
+  objectives are invented. Journal scrolling supports keyboard and mouse, and
+  narrow windows stack the panes. Known-tile selection stays local until Enter
+  or Travel submits the exact key; stale snapshots and unavailable readiness
+  disable dispatch, while the server owns pathfinding and interruptions.
+  The supplied interface concepts remain the
+  direction for progression polish, richer resource HUD and accessibility work;
+  the full redesign remains unfinished. Live play uses
+  asynchronous creature preparation with egg-shaped stand-ins, so unfinished
+  figures do not hold up movement or input; completed rigs replace their eggs
+  without waiting for another server view. Frame timing waits for finished models.
+  Diagnostics retain full-window camera body-count extrema alongside instantiated actors;
+  a separate 101-actor crowd fixture
+  passes local visibility acceptance at its documented camera distance. Release
+  crowd timing remains separate from the screenshot-bearing functional checks.
+  Yeti torso, hip and limb masses share
+  continuous underfur and closed, surface-combed clumps with bounded density
+  and cached geometry; its head and extremities still need refinement. Feathered fliers and beasts share tapered,
   closed vanes with a central ridge and proportionate thickness. Reared beasts
   distinguish supporting legs from grasping limbs; Jabberwock uses bent hind
   support and free clawed hands. Xeroc combines a larger articulated maw with
