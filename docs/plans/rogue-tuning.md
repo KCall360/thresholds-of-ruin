@@ -200,6 +200,30 @@ armor. With those, all 116 judged ratios are within the ratified ±35%. The
 final study over seeds 0–15 judged 117 ratios, all within ±35%, with at least
 20 measured attacks for every species.
 
+Signature effects (30 October 2026). Arena reports now count applied effects,
+and the study judges each species' signature per foe action. Rogue 5.4.4 has no
+monster flight, so every Rogue species has `flee_percent = 0`. Over seeds 0–15:
+
+| Species | Signature | Target | Measured | Within ±35% |
+| --- | --- | --- | --- | --- |
+| A aquator | rust armor | 0.80 | 0.85 | Yes |
+| R rattlesnake | Strength poison | 0.20 | 0.15 | Yes |
+| F venus flytrap | hold | 0.70 | 0.47 | No |
+| M medusa | gaze confusion | 0.49 | 0.27 | No |
+| V vampire | maximum-Health drain | 0.21 | 0.55 | No |
+| W wraith | level drain | 0.08 | 0.37 | No |
+| L leprechaun | steal gold | 0.27 | 0 | No |
+| N nymph | steal magic item | 0.45 | 0 | No |
+| I ice monster | freeze | 0.35 | no attacks | Not measured |
+
+The dragon's breath is a ranged action in Rogue, not a hit rider, so the per-hit
+target does not judge it. The ice monster and bat die to one hit; after a missed
+swing the provoked monster's attack, scaled by its Speed, has not resolved before
+the adventurer's next swing kills it, where Rogue's alternating turns would give
+it one. That is a turn-order difference to decide, not a value to tune. The
+thieves carry out basic attacks instead of their filch abilities even with gold
+or a magic item to take, which needs diagnosis before tuning.
+
 Open engine defect: a held adventurer's AI basic-melee plan against an adjacent
 flytrap fails execution with `InvalidPlan` when the flytrap's Clutch resolves
 first, and the rollback makes the same choice repeat. The arena behavior above
