@@ -107,7 +107,8 @@ def summarize(controller, samples, outcome, *, seed, wall_seconds):
     for witness in controller.growth_history:
         level = u64(witness["hit_dice"]["total"]) - 1  # body racial HD is not a Rogue level
         for depth, entry in entries.items():
-            if entry["tick"] >= witness["tick"]:
+            # Ticks are decimal strings; compare them as numbers.
+            if u64(entry["tick"]) >= u64(witness["tick"]):
                 levels[depth] = max(levels.get(depth, 0), level)
     deepest = max(entries)
     floor_ticks = {}
@@ -123,6 +124,10 @@ def summarize(controller, samples, outcome, *, seed, wall_seconds):
         "death_depth": deepest if outcome == "death" else None,
         "final_tick": final["tick"], "commands": controller.commands,
         "level_on_arrival": {str(depth): level for depth, level in sorted(levels.items())},
+        # The evidence behind level_on_arrival, so it can be recomputed.
+        "first_entry_ticks": {str(depth): entries[depth]["tick"] for depth in ordered},
+        "growth": [[witness["tick"], u64(witness["hit_dice"]["total"])]
+                   for witness in controller.growth_history],
         "ticks_per_floor": {str(depth): ticks for depth, ticks in sorted(floor_ticks.items())},
         "commands_per_floor": {str(depth): count for depth, count in sorted(controller.floor_commands.items())},
         "samples_by_hunger": dict(hunger),

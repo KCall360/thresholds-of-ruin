@@ -138,6 +138,19 @@ class RunSummaries(unittest.TestCase):
         self.assertEqual(run["final_level"], 2)
         self.assertIn("wanderer_arrivals", run["unavailable"])
 
+    def test_levels_on_arrival_compare_ticks_as_numbers(self):
+        # "88300" sorts after "500000" as text; a later level must not count.
+        controller = fake_controller()
+        controller.first_entries = {1: {"tick": "0", "commands": 0},
+                                    2: {"tick": "88300", "commands": 40}}
+        controller.growth_history = [witness(2, 0), witness(3, 50000), witness(9, 500000)]
+        run = campaign.summarize(controller, [sample(0), sample(600000, depth=2)],
+                                 "censored_action_budget", seed=1, wall_seconds=1.0)
+        self.assertEqual(run["level_on_arrival"], {"1": 1, "2": 2})
+        # The raw evidence is kept so levels can be recomputed.
+        self.assertEqual(run["first_entry_ticks"], {"1": "0", "2": "88300"})
+        self.assertEqual(run["growth"], [["0", 2], ["50000", 3], ["500000", 9]])
+
     def test_a_failed_closing_save_keeps_the_finished_run(self):
         run = campaign.summarize(fake_controller(), [sample(0), sample(6000)],
                                  "death", seed=2, wall_seconds=1.0)
