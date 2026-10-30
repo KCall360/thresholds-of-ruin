@@ -79,10 +79,24 @@ Other players can continue acting during a save; those later actions need not be
 covered by its acknowledgement. There is at most one pending save per connection.
 
 A full queue rejects the new command before publication and prompts the worker to
-save the existing prefix. A background I/O failure preserves accepted state and
-pending bytes, reports the problem, and rejects further mutations. An explicit
-save retries the pending batch. Reads and already accepted duplicate requests
-remain available. No error is reported as a successful save.
+save the existing prefix. A background failure preserves accepted state and
+pending bytes, reports the problem, and rejects further mutations. I/O and
+unclassified encoding failures retain explicit Save retry. A typed checkpoint
+capacity failure is different: repeating the same immutable snapshot cannot fix
+its raw or compressed size. Save therefore leaves the retained error in place
+without encoding that unchanged snapshot again. If admission already captured a
+newer checkpoint while the failed one was encoding, the newer retained snapshot
+remains eligible for explicit retry; it is not assumed to fit until encoding
+succeeds. Reads and already accepted duplicate requests remain available. No
+error is reported as a successful save.
+
+Capacity failure does not discard accepted records, fall back to journal-only
+saving, enlarge a format limit or evict history. Pending work remains in memory;
+closing/restarting can lose that unsaved play and is not a repair. The error asks
+the operator to keep the session open and report it, without promising unsupported
+recovery. The last committed database prefix remains unchanged. Capacity fault
+tests use scoped reduced encoder limits; they do not establish a gameplay route
+to the production checkpoint ceiling.
 
 Enabling wizard authority remains a synchronous barrier: its permanent marker
 must be saved before privileged commands can execute. Once queued, the lineage
@@ -330,7 +344,9 @@ Until commit, SQLite rollback recovery preserves the previous selection and rows
 After commit, the new snapshot and its history are selected together. There is no
 separate manifest rename, generation file deletion, or interval where the only
 recoverable copy of a receipt has been removed. Errors preserve the pending batch
-and snapshot for explicit retry and block further mutation under the save contract.
+and snapshot and block further mutation. Retry eligibility follows the failure
+classification above: an unchanged checkpoint with a proven encoder capacity
+failure is not needlessly encoded again.
 
 Compaction is logical: only one selected checkpoint and the active replay tail
 remain, with obsolete database pages available for reuse. All chronological history,

@@ -691,6 +691,7 @@ fn write_region_rows(conn: &Connection, rows: &[(u64, Vec<u8>)]) -> Result<(), F
 }
 use rusqlite::OptionalExtension;
 
+#[cfg(test)]
 fn encode_checkpoint(checkpoint: &DiskCheckpoint) -> Result<Vec<u8>, Failure> {
     checkpoint_codec::write_json(checkpoint, Vec::new()).map_err(|_| storage_failure())
 }
@@ -953,6 +954,49 @@ struct Pending {
     sources: Vec<(u64, Arc<str>)>,
     queued: Instant,
 }
+/// Only an explicit encoder capacity bound is terminal for the same snapshot.
+/// Other serialization, region and commit failures retain the existing retry path.
+#[derive(Clone, Copy, Debug)]
+enum SaveFailure {
+    CheckpointCapacity { sequence: u64 },
+    Retryable,
+}
+impl SaveFailure {
+    fn blocks_retry(self, retained_checkpoint: Option<u64>) -> bool {
+        matches!(self, Self::CheckpointCapacity { sequence } if Some(sequence) == retained_checkpoint)
+    }
+    fn message(self, retained_checkpoint: Option<u64>) -> &'static str {
+        if self.blocks_retry(retained_checkpoint) {
+            "Save checkpoint exceeds capacity; recent play is not saved. Retrying this unchanged checkpoint cannot help. Keep this session open and report the error."
+        } else if matches!(self, Self::CheckpointCapacity { .. }) {
+            "Save checkpoint exceeded capacity; a newer checkpoint is retained. Recent play is not saved. Use save to retry."
+        } else {
+            "Background save failed; recent play is not saved. Use save to retry."
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "storage_checkpoint_failure_tests.rs"]
+mod checkpoint_failure_tests;
+
+fn encode_background_checkpoint(
+    _shared: &Shared,
+    sequence: u64,
+    checkpoint: &DiskCheckpoint,
+) -> Result<Vec<u8>, SaveFailure> {
+    #[cfg(test)]
+    let encoded = checkpoint_failure_tests::encode(_shared, checkpoint)?;
+    #[cfg(not(test))]
+    let encoded = checkpoint_codec::write_json_classified(checkpoint, Vec::new());
+    encoded.map_err(|error| match error {
+        checkpoint_codec::EncodeError::CapacityExceeded => {
+            SaveFailure::CheckpointCapacity { sequence }
+        }
+        checkpoint_codec::EncodeError::Other(_) => SaveFailure::Retryable,
+    })
+}
+
 #[derive(Debug)]
 struct State {
     appended: BTreeSet<tor_simulation::RecordId>,
@@ -960,6 +1004,7 @@ struct State {
     checkpoint: Option<(u64, Checkpoint)>,
     last_checkpoint_requested: u64,
     status: SaveStatus,
+    failure: Option<SaveFailure>,
     oldest: Option<Instant>,
     last_activity: Instant,
     force: u64,
@@ -971,6 +1016,8 @@ struct State {
 #[derive(Debug)]
 struct Shared {
     state: Mutex<State>,
+    #[cfg(test)]
+    checkpoint_test: checkpoint_failure_tests::CheckpointTest,
     inputs: Arc<Mutex<InputOwnership>>,
     wake: Condvar,
     policy: SavePolicy,
@@ -1087,6 +1134,8 @@ impl Store {
             .collect::<Result<_, Failure>>()?;
         let content = archive.scenario.content()?;
         let shared = Arc::new(Shared {
+            #[cfg(test)]
+            checkpoint_test: checkpoint_failure_tests::CheckpointTest::default(),
             inputs: Arc::new(Mutex::new(InputOwnership {
                 known: saved.clone(),
                 pending: BTreeMap::new(),
@@ -1105,6 +1154,7 @@ impl Store {
                     durable_sequence: sequence,
                     ..SaveStatus::default()
                 },
+                failure: None,
                 oldest: None,
                 last_activity: Instant::now(),
                 force: sequence,
@@ -1346,8 +1396,15 @@ impl Store {
     pub(crate) fn request_flush(&self) -> u64 {
         let mut s = self.0.shared.state.lock().unwrap();
         s.force = s.status.accepted_sequence;
-        s.status.error = None;
-        self.0.shared.wake.notify_one();
+        let retained_checkpoint = s.checkpoint.as_ref().map(|(seq, _)| *seq);
+        if !s
+            .failure
+            .is_some_and(|failure| failure.blocks_retry(retained_checkpoint))
+        {
+            s.status.error = None;
+            s.failure = None;
+            self.0.shared.wake.notify_one();
+        }
         s.force
     }
     pub(crate) fn flush(&self) -> Result<(), Failure> {
@@ -1422,8 +1479,12 @@ fn run_worker(shared: Arc<Shared>, conn: Connection, path: PathBuf) {
             .as_ref()
             .map(|(seq, state)| {
                 Ok((
-                    encode_checkpoint(&state.encode(&shared.save_id, *seq))?,
-                    RegionWrite::encode(state)?,
+                    encode_background_checkpoint(
+                        &shared,
+                        *seq,
+                        &state.encode(&shared.save_id, *seq),
+                    )?,
+                    RegionWrite::encode(state).map_err(|_| SaveFailure::Retryable)?,
                 ))
             })
             .transpose();
@@ -1446,9 +1507,9 @@ fn run_worker(shared: Arc<Shared>, conn: Connection, path: PathBuf) {
                 test_barrier.as_deref(),
                 Duration::from_secs(30),
             )
-            .map_err(|_| storage_failure())?;
+            .map_err(|_| SaveFailure::Retryable)?;
             if conn.is_none() {
-                conn = Some(connection(&path)?);
+                conn = Some(connection(&path).map_err(|_| SaveFailure::Retryable)?);
             }
             commit_batch(
                 conn.as_mut().unwrap(),
@@ -1471,6 +1532,7 @@ fn run_worker(shared: Arc<Shared>, conn: Connection, path: PathBuf) {
                     Ok(())
                 },
             )
+            .map_err(|_| SaveFailure::Retryable)
         });
         let mut s = shared.state.lock().unwrap();
         s.status.saving = false;
@@ -1519,16 +1581,19 @@ fn run_worker(shared: Arc<Shared>, conn: Connection, path: PathBuf) {
                 s.status.last_commit_ms = commit_ms;
                 s.oldest = s.pending.front().map(|p| p.queued);
             }
-            Err(_) => {
+            Err(failure) => {
                 if s.checkpoint.is_none() {
                     s.checkpoint = checkpoint;
                 }
                 for entry in batch.into_iter().rev() {
                     s.pending.push_front(entry);
                 }
-                s.status.error = Some(
-                    "Background save failed; recent play is not saved. Use save to retry.".into(),
-                );
+                s.failure = Some(failure);
+                s.status.error = s.failure.map(|failure| {
+                    failure
+                        .message(s.checkpoint.as_ref().map(|(seq, _)| *seq))
+                        .into()
+                });
                 // Discard uncertain connection state before an explicit retry.
                 drop(s);
                 conn = None;
