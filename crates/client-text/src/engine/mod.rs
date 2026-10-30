@@ -254,21 +254,16 @@ fn yes_or_no(line: &str) -> Option<bool> {
 }
 
 /// The run is over: the character died, or it ended in victory.
-fn ended(state: &StateView) -> bool {
+fn ended(state: &tor_client_common::ClientState) -> bool {
     state
-        .observation
-        .combat
-        .as_ref()
-        .is_some_and(|c| c.terminal || c.dead)
+        .outcome_status()
+        .is_some_and(|status| status.terminal || status.dead)
 }
 
 fn hp(link: &impl Link) -> (u64, u64) {
     link.client()
-        .state()
-        .observation
-        .combat
-        .as_ref()
-        .map_or((0, 0), |c| (c.hp, c.max_hp))
+        .outcome_status()
+        .map_or((0, 0), |status| (status.hp, status.max_hp))
 }
 
 /// The most rounds one `fight` goes before stopping to let the player look.
@@ -488,6 +483,10 @@ impl Engine {
 
     /// Play one line of input to the end of its turn.
     pub async fn play(&mut self, link: &mut impl Link, line: &str) -> Result<Outcome, Error> {
+        // Embedders may start with play rather than welcome. Establish the
+        // initial HP baseline before consuming the first causal outcome;
+        // learn never overwrites an already tracked outcome status.
+        self.learn(link);
         let mut line = line.trim().to_owned();
         let mut record = Record::default();
         if line.is_empty() {
@@ -1093,7 +1092,9 @@ impl Engine {
         }
         if flow.is_none() {
             why = Some("Updates are still arriving; you pause to take stock.");
-        } else if matches!(flow, Some(Flow::Continue)) && !link.client().can_admit_intention() {
+        } else if matches!(flow, Some(Flow::Continue))
+            && (!link.client().character_ready() || !link.client().can_admit_intention())
+        {
             why = Some("Input permissions are still updating; you pause to take stock.");
             flow = Some(Flow::Stop);
         }
@@ -1191,7 +1192,7 @@ impl Engine {
             .await?;
             self.tally.goals += 1;
             self.after_beats(link, record);
-            if ended(link.client().state()) {
+            if ended(link.client()) {
                 return Ok(Flow::Stop);
             }
             if !done {
@@ -1360,17 +1361,46 @@ impl Engine {
                 }
                 return Ok(Flow::Stop);
             }
-            Input::Advancement(input) => match link.advancement_request(input) {
-                Ok(Some(request)) => request,
-                Ok(None) => {
-                    record.say(link.advancement_lines().join("\n"));
-                    return Ok(Flow::Continue);
+            Input::Advancement(input) => {
+                if matches!(
+                    input,
+                    tor_client_common::advancement::AdvancementInput::Overview
+                ) {
+                    let plan =
+                        match tor_client_common::advancement::OpenOverview::new(link.client()) {
+                            Ok(plan) => plan,
+                            Err(error) => {
+                                record.say(error);
+                                return Ok(Flow::Stop);
+                            }
+                        };
+                    if !turn::run_request(
+                        link,
+                        &mut self.chronicler,
+                        record,
+                        plan.observation_request(),
+                    )
+                    .await?
+                    {
+                        return Ok(Flow::Stop);
+                    }
+                    if let Err(error) = plan.finish(link.client()) {
+                        record.say(error);
+                        return Ok(Flow::Stop);
+                    }
                 }
-                Err(error) => {
-                    record.say(error);
-                    return Ok(Flow::Stop);
+                match link.advancement_request(input) {
+                    Ok(Some(request)) => request,
+                    Ok(None) => {
+                        record.say(link.advancement_lines().join("\n"));
+                        return Ok(Flow::Continue);
+                    }
+                    Err(error) => {
+                        record.say(error);
+                        return Ok(Flow::Stop);
+                    }
                 }
-            },
+            }
             Input::Look => {
                 self.note_described(link);
                 record.entries.push(Entry::Description(self.look(link)));
@@ -1424,7 +1454,7 @@ impl Engine {
                     record.say("Wizard authority is required.");
                     return Ok(Flow::Stop);
                 }
-                let context = link.client().snapshot().reply_context();
+                let context = link.client().reply_context();
                 let command = link
                     .inspection_pages()
                     .ok_or_else(|| "Open a creature inspection first.".to_owned())
@@ -1569,7 +1599,7 @@ impl Engine {
             let arrival = self.arrival(link);
             record.entries.push(Entry::Description(arrival));
         }
-        if ended(link.client().state()) && !self.tally.told {
+        if ended(link.client()) && !self.tally.told {
             self.tally.told = true;
             record.entries.push(Entry::Description(self.ending(link)));
         }
@@ -1598,8 +1628,10 @@ impl Engine {
     /// The observed session account, never an authoritative whole-run history.
     fn ending(&self, link: &impl Link) -> String {
         let state = link.client().state();
-        let combat = state.observation.combat.as_ref();
-        let died = combat.is_some_and(|c| c.dead);
+        let died = link
+            .client()
+            .outcome_status()
+            .is_some_and(|status| status.dead);
         let banner = if died {
             "*** You have died ***"
         } else {

@@ -44,12 +44,11 @@ impl Service {
             .map_err(|_| Failure::new(ErrorCode::InvalidRequest, "Invalid explored map query"))?;
         let client = self.clients.get(&id).ok_or_else(stale)?;
         let actor = client.actor.ok_or_else(stale)?;
-        let observed = client.last_observation.as_ref().ok_or_else(stale)?;
+        let observed = self.issued_presentation(id, &query.base)?;
         if client.context.as_ref() != Some(&query.context)
             || observed.branch != query.branch
             || observed.base != query.base
             || self.engine.branch() != &query.branch
-            || self.engine.revision(actor).ok() != Some(query.base.revision)
         {
             return Err(stale());
         }
@@ -63,15 +62,14 @@ impl Service {
                 || transfer.id != cursor.transfer
                 || transfer.next != cursor.next as usize
                 || transfer.page != cursor.page
-                || !self
-                    .engine
-                    .map_projection_is_current(actor, &transfer.projection)
             {
                 return Err(stale());
             }
             return Ok(transfer.clone());
         }
-        let projection = self.engine.explored_map(actor, query.window)?;
+        let projection = self
+            .engine
+            .explored_map_at(&observed.boundary, actor, query.window)?;
         if projection.cells.len() > MAX_MAP_TRANSFER_CELLS {
             return Err(resource());
         }
@@ -98,16 +96,12 @@ impl Service {
         // Readiness publication can advance the general stream cursor without
         // changing its observation base. Re-read the exact observation identity.
         let client = self.clients.get(&id).ok_or_else(stale)?;
-        let observed = client.last_observation.as_ref().ok_or_else(stale)?;
+        let observed = self.issued_presentation(id, &transfer.base)?;
         if client.context.as_ref() != Some(&transfer.context)
             || client.actor != Some(transfer.actor)
             || observed.branch != transfer.branch
             || observed.base != transfer.base
             || self.engine.branch() != &transfer.branch
-            || self.engine.revision(transfer.actor).ok() != Some(transfer.base.revision)
-            || !self
-                .engine
-                .map_projection_is_current(transfer.actor, &transfer.projection)
         {
             return Err(stale());
         }
@@ -171,7 +165,7 @@ fn fit_page(
         transfer: transfer.id.clone(),
         actor: transfer.actor,
         branch: transfer.branch.clone(),
-        base: transfer.base,
+        base: transfer.base.clone(),
         window: transfer.window,
         start: u32::try_from(transfer.next).map_err(|_| invalid())?,
         page: transfer.page,

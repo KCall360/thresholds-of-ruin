@@ -43,7 +43,7 @@ fn query(service: &Service, client: u64) -> MapQuery {
     MapQuery {
         context: client.context.clone().unwrap(),
         branch: observed.branch.clone(),
-        base: observed.base,
+        base: observed.base.clone(),
         window: MapWindow::normal()
             .checked_translate(observed.state.observation.position)
             .unwrap(),
@@ -185,7 +185,7 @@ fn stale_initial_context_and_cross_attachment_or_reordered_cursors_are_rejected(
         .as_ref()
         .unwrap()
         .clone();
-    for change in 0..5 {
+    for change in 0..6 {
         let mut request = original.clone();
         request.cursor = Some(cursor.clone());
         match change {
@@ -194,6 +194,7 @@ fn stale_initial_context_and_cross_attachment_or_reordered_cursors_are_rejected(
             2 => request.base.revision += 1,
             // Keep the cursor structurally valid while giving the wrong offset.
             3 => request.cursor.as_mut().unwrap().next -= 1,
+            4 => request.base.snapshot = tor_protocol::SnapshotId("not-issued".into()),
             _ => request.cursor.as_mut().unwrap().page += 1,
         }
         assert_eq!(
@@ -348,11 +349,11 @@ fn empty_and_work_limited_projections_have_one_explicit_terminal_page() {
 }
 
 #[test]
-fn publication_rechecks_observation_but_accepts_a_later_non_observation_cursor() {
+fn immutable_map_transfer_survives_later_visual_and_non_visual_publications() {
     let (mut service, mut client) = service(MAX_MAP_PAGE_BYTES);
     let transfer = synthetic_transfer(&service, client.id, 1025);
     let before = service.engine.state(ActorId(1)).unwrap();
-    let base = transfer.base;
+    let base = transfer.base.clone();
     service.update(client.id, UpdateBody::Control { has_control: false });
     service
         .publish_map_page(client.id, "later-cursor", transfer)
@@ -370,29 +371,20 @@ fn publication_rechecks_observation_but_accepts_a_later_non_observation_cursor()
     let mut query = query(&service, client.id);
     query.cursor = page.next;
     let staged = service.prepare_map_page(client.id, query.clone()).unwrap();
-    service.update(
-        client.id,
-        UpdateBody::Observation {
-            state: before.clone().into(),
-            event: None,
-        },
-    );
-    assert!(service.clients[&client.id].map_transfer.is_none());
-    assert_eq!(
-        service
-            .publish_map_page(client.id, "obsolete", staged)
-            .unwrap_err()
-            .code,
-        ErrorCode::StaleContext
-    );
-    assert_eq!(
-        service
-            .prepare_map_page(client.id, query)
-            .err()
-            .unwrap()
-            .code,
-        ErrorCode::StaleContext
-    );
+    service.handle(client.id, "fresh-visual".into(), Request::Observe);
+    let latest = service.clients[&client.id]
+        .last_observation
+        .as_ref()
+        .unwrap();
+    assert_ne!(latest.base.snapshot, base.snapshot);
+    assert!(latest.base.revision > base.revision);
+    assert!(service.clients[&client.id].map_transfer.is_some());
+    let retained = service.prepare_map_page(client.id, query).unwrap();
+    assert_eq!(retained.base, base);
+    assert_eq!(retained.projection.cells, staged.projection.cells);
+    service
+        .publish_map_page(client.id, "retained", staged)
+        .unwrap();
     assert_eq!(service.engine.state(ActorId(1)).unwrap(), before);
 }
 
@@ -452,4 +444,35 @@ fn exact_aggregate_transfer_ceiling_admits_the_terminal_page() {
         if page.next.is_none() && page.cells.len() == 1)
     );
     assert!(service.clients[&client.id].map_transfer.is_none());
+}
+
+#[test]
+fn initial_map_request_uses_issued_boundary_after_rules_advance() {
+    let (mut service, client) = service(MAX_MAP_PAGE_BYTES);
+    let old_query = query(&service, client.id);
+    let original = service
+        .prepare_map_page(client.id, old_query.clone())
+        .unwrap();
+    let actor = ActorId(1);
+    let boundary = service.engine.causal_boundary(actor).unwrap();
+    service
+        .engine
+        .command(
+            "test",
+            "test",
+            actor,
+            "advance-rules-without-picture",
+            &service.engine.branch().clone(),
+            crate::journal::Command::Act {
+                expected_boundary: boundary,
+                action: crate::actions::Action::Wait,
+            },
+        )
+        .unwrap();
+    assert!(service.engine.causal_boundary(actor).unwrap() > boundary);
+    let retained = service.prepare_map_page(client.id, old_query).unwrap();
+    assert_eq!(retained.base, original.base);
+    assert_eq!(retained.projection.cells, original.projection.cells);
+    assert_eq!(retained.projection.complete, original.projection.complete);
+    assert_eq!(retained.projection.ambiguous, original.projection.ambiguous);
 }

@@ -349,7 +349,7 @@ class RogueRestorationProcesses(ProcessTestCase):
         server = self.server("--checkpoint-interval", 1, scenario=ROOT / "scenarios/two-room", seed=None)
         self.sample["phase"] = "replay"
         player, reopened = self.client(actor=1)
-        self.assertEqual(reopened["state"], restored["state"])
+        self.assertDisclosedStateEqual(reopened["state"], restored["state"])
         self.assertEqual(checkpoint(self, player), saved_after)
         # Only already disclosed neighboring cells choose this local round trip;
         # generated floor revisit/activation behavior has independent owners.

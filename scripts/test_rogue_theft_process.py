@@ -472,7 +472,7 @@ class RogueTheftProcesses(ProcessTestCase):
                 shutil.rmtree(package)
                 server = self.server("--checkpoint-interval", 1, scenario=fallback, seed=None)
                 player, current = self.client()
-                self.assertEqual(current["state"], before_restart["state"])
+                self.assertDisclosedStateEqual(current["state"], before_restart["state"])
                 self.assertEqual(current["history"], before_restart["history"])
                 self.assertEqual(checkpoint(self, player), transferred)
                 self.assertEqual(self.private_receipts(), receipts, "Restore must not regenerate finite stock")

@@ -1,10 +1,12 @@
 """Door actions through the actual text, headless and native ASCII clients."""
 import json
 import os
+import threading
 from pathlib import Path
 import unittest
 
 from process_harness import ProcessTestCase, SPECTATOR_TOKEN, door, non_graphical
+from stream_relay import StreamRelay
 
 
 class DoorProcesses(ProcessTestCase):
@@ -46,26 +48,28 @@ class DoorProcesses(ProcessTestCase):
         self.ascii_frame(window, lambda f: f.get("door_direction") is True)
         key("o", False)
         key("Right", True)
-        opened = self.ascii_frame(window, lambda f: int(f["state"]["revision"]) == int(closed["state"]["revision"]) + 1 and not f["busy"])
+        opened = self.ascii_frame(window, lambda f: door(f)["open"] and not f["busy"])
         key("Right", False)
         self.assertTrue(door(opened)["open"])
         key("c", True)
         self.ascii_frame(window, lambda f: f.get("door_direction") is False)
         key("c", False)
         key("Right", True)
-        closed_again = self.ascii_frame(window, lambda f: int(f["state"]["revision"]) == int(opened["state"]["revision"]) + 1 and not f["busy"])
+        closed_again = self.ascii_frame(window, lambda f: not door(f)["open"] and not f["busy"])
         key("Right", False)
         self.assertFalse(door(closed_again)["open"])
         watched = self.request(observer, {"type":"snapshot"})
-        self.assertEqual(watched["state"], closed_again["state"])
+        self.assertDisclosedStateEqual(watched["state"], closed_again["state"])
         self.assertEqual(watched["history"][-1]["content"]["event"]["type"], "door_changed")
-        key("Escape", True)
+        # Native S saves and closes; successful exit destroys the key target.
+        key("Shift_L", True)
+        key("s", True)
         self.assertEqual(window.child.wait(timeout=15), 0)
         self.assertTrue(capture.read_bytes().startswith(b"P6\n1200 800\n255\n"))
         player.stop(); observer.stop(); server.stop()
         self.server()
         _, resumed = self.client(SPECTATOR_TOKEN)
-        self.assertEqual(resumed["state"], closed_again["state"])
+        self.assertDisclosedStateEqual(resumed["state"], closed_again["state"])
         self.assertFalse(resumed["state"]["wizard_game"])
 
     @non_graphical
@@ -98,7 +102,7 @@ class DoorProcesses(ProcessTestCase):
         self.server(wizard=True)
         wizard = self.wizard()
         observer, resumed = self.client(SPECTATOR_TOKEN)
-        self.assertEqual(resumed["state"], hidden["state"])
+        self.assertDisclosedStateEqual(resumed["state"], hidden["state"])
         self.wizard_command(wizard, "rewind initial")
         rewound = self.request(observer, {"type":"snapshot"})
         self.assertNotEqual(rewound["branch"], resumed["branch"])
@@ -109,31 +113,71 @@ class DoorProcesses(ProcessTestCase):
     def test_stop_and_rewind_discard_pending_door_action(self):
         self.server(wizard=True, scenario="doors")
         wizard = self.wizard()
-        player, _ = self.adventure()
+        hold_arrival = threading.Event()
+        arrival_held = threading.Event()
+
+        def hold_pending_door(message):
+            body = message.get("update", {}).get("body", {})
+            if (hold_arrival.is_set() and body.get("type") == "travel"
+                    and body["status"]["phase"] == "arrived"):
+                hold_arrival.clear()
+                relay.gate.clear()
+                arrival_held.set()
+                # Hold this exact arrival before delivery, not merely the next
+                # frame. The real server remains free to finish and rewind.
+                relay.gate.wait()
+
+        relay = StreamRelay(self.address, on_server_message=hold_pending_door)
+        self.addCleanup(relay.close)
+        upstream = self.address
+        try:
+            self.address = relay.address
+            player, _ = self.adventure()
+        finally:
+            self.address = upstream
         observer, initial = self.client(SPECTATOR_TOKEN)
         # A turn runs to its end before the next command is read.
         self.send(player, "open door")
         self.send(player, "stop")
         output = player.until(lambda line: line == "There's nothing to stop.")
         self.assertIn("You walk over to the wooden door and open it.", output)
+        player.until(lambda line: line == "> ")
         opened = self.request(observer, {"type":"snapshot"})
         self.assertTrue(door(opened)["open"])
-        # A slow display leaves the door action waiting while the wizard
-        # rewinds; the rewind ends the turn without it.
         self.wizard_command(wizard, "rewind initial")
         self.say(player, "look")
-        self.say(player, "pace 1000")
-        self.send(player, "open door")
-        self.frame(observer, lambda f: (f.get("travel") or {}).get("phase") == "active")
-        # Sync the wizard before a revision-checked rewind while travel progresses.
-        self.wizard_command(wizard, "rewind initial")
-        restored = self.request(observer, {"type":"snapshot"})
-        self.assertNotEqual(restored["branch"], initial["branch"])
-        self.assertEqual(restored["state"]["observation"]["tick"], '0')
-        # A barrier query waits until the text client has handled its fresh snapshot.
+        # Pace controls presentation, not authority. Hold the real arrival so
+        # Text still owns its pending door goal while the approach completes.
+        hold_arrival.set()
+        try:
+            self.send(player, "open door")
+            self.assertTrue(arrival_held.wait(15), "Text's approach arrival was not held")
+            arrived = self.request(observer, {"type":"snapshot"})
+            self.assertEqual(arrived["travel"]["phase"], "arrived")
+            self.assertFalse(door(arrived)["open"])
+            self.assertGreater(int(arrived["travel"]["completed_steps"]), 0)
+            self.assertFalse(any(h["content"].get("action", {}).get("type") == "set_door"
+                                 for h in arrived["history"]))
+            # No authority is moving now: refresh and rewind cannot race a
+            # travel step. The ordered reset must discard Text's pending goal.
+            self.wizard_command(wizard, "rewind initial")
+            restored = self.request(observer, {"type":"snapshot"})
+            self.assertNotEqual(restored["branch"], arrived["branch"])
+            self.assertNotEqual(restored["branch"], initial["branch"])
+            self.assertEqual(restored["state"]["observation"]["tick"], '0')
+            self.assertFalse(door(restored)["open"])
+        finally:
+            relay.gate.set()
+        # Consume the pending turn's prompt before issuing a real barrier query.
+        self.assertNotIn("and open it", player.until(lambda line: line == "> "))
+        # A barrier query waits until Text has handled the ordered reset.
         self.assertNotIn("and open it", self.say(player, "look"))
         final = self.request(observer, {"type":"snapshot"})
         self.assertEqual(final["state"]["observation"]["tick"], '0')
+        self.assertFalse(door(final)["open"])
+        self.assertFalse(any(h["content"].get("action", {}).get("type") == "set_door"
+                             for h in final["history"]))
+        self.assertEqual(relay.errors, [])
 
     @non_graphical
     def test_rotated_aperture_door_remains_an_ordinary_visible_object(self):

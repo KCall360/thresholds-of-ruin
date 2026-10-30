@@ -18,7 +18,7 @@ fn search(engine: &mut Engine) {
         engine,
         OWNER,
         Command::AdmitIntention {
-            expected_revision: engine.revision(ActorId(OWNER)).unwrap(),
+            expected_boundary: engine.causal_boundary(ActorId(OWNER)).unwrap(),
             action: Action::UseAbility {
                 id: AbilityId::new("rogue.search").unwrap(),
                 invocation: crate::actions::AbilityInvocation {

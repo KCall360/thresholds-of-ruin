@@ -574,7 +574,7 @@ fn fall_index_tracks_mutation_and_clone_without_entering_authoritative_equality(
         vec![TARGET]
     );
     let mut rebuilt =
-        crate::actor_store::ActorStore::from_entries(game.actors.raw_entries().clone());
+        crate::actor_store::ActorStore::from_entries(game.actors.owned_actor_entries());
     assert_eq!(rebuilt, game.actors);
     assert_eq!(
         rebuilt.active_fall_owners().collect::<Vec<_>>(),

@@ -70,6 +70,7 @@ impl Line {
         }
     }
 
+    #[cfg(test)]
     fn with_basic_attack(mut self, before: &Observation, after: &Observation) -> Self {
         // Prefer a current disclosed capability over an older one. The prior
         // view still covers a strike that removes a grant or ends the run.
@@ -193,6 +194,147 @@ pub fn observation_lines(
     after: &Observation,
     event: Option<&Event>,
 ) -> Vec<Line> {
+    let lines = outcome_lines(&OutcomeFacts::capture(before, after, event));
+    #[cfg(test)]
+    assert_eq!(lines, observation_lines_legacy(before, after, event));
+    lines
+}
+
+/// Render ordered disclosed outcomes independently of visual refresh cadence.
+pub fn outcome_lines(outcomes: &OutcomeFacts) -> Vec<Line> {
+    outcomes
+        .facts
+        .iter()
+        .filter_map(|fact| outcome_line(outcomes, fact))
+        .collect()
+}
+
+/// Render one disclosed fact without coupling callers to a parallel line list.
+pub fn outcome_line(outcomes: &OutcomeFacts, fact: &OutcomeFact) -> Option<Line> {
+    let actor_name = |id| {
+        outcomes
+            .actor_names
+            .iter()
+            .find(|entry| entry.actor == id)
+            .map_or_else(|| "figure".into(), |entry| label(&entry.name, "figure"))
+    };
+    let mut line = match fact {
+        OutcomeFact::Injured { .. } | OutcomeFact::Objective { .. } => return None,
+        OutcomeFact::OwnAction { event, name, .. } => Line::new(
+            Topic::Own(event.clone()),
+            action_with_name(event, name.as_ref()),
+        ),
+        OutcomeFact::TrapDiscovered { family } => Line::new(
+            Topic::Discovery,
+            family.map_or_else(
+                || "You notice a trap.".into(),
+                |family| format!("You recognize a {}.", family.name()),
+            ),
+        ),
+        OutcomeFact::DoorDiscovered => Line::new(Topic::Discovery, "You notice a door."),
+        OutcomeFact::Displaced => Line::new(Topic::Motion, "You move involuntarily."),
+        OutcomeFact::Impacted => Line::new(Topic::Motion, "You collide with an obstruction."),
+        OutcomeFact::Noticed { actor, name, .. } => {
+            let name = label(name, "figure");
+            let article = if name.to_lowercase().starts_with(['a', 'e', 'i', 'o', 'u']) {
+                "an"
+            } else {
+                "a"
+            };
+            Line::new(
+                Topic::Noticed(*actor),
+                format!("You notice {article} {name}."),
+            )
+        }
+        OutcomeFact::LostSight { actor, name, .. } => Line::new(
+            Topic::LostSight(*actor),
+            format!("You can no longer see the {}.", label(name, "figure")),
+        ),
+        OutcomeFact::DoorChanged { name, open, .. } => Line::new(
+            Topic::Door,
+            format!(
+                "The {} is now {}.",
+                label(name, "door"),
+                if *open { "open" } else { "closed" }
+            ),
+        ),
+        OutcomeFact::Pacing { ready } => Line::new(
+            Topic::Pacing,
+            if *ready {
+                "You can act again."
+            } else {
+                "You must wait."
+            },
+        ),
+        OutcomeFact::ItemCompleted { work, name } => {
+            let verb = match work {
+                ItemWorkKind::Equip => "equipping",
+                ItemWorkKind::Unequip => "removing",
+                ItemWorkKind::Drink => "drinking",
+                ItemWorkKind::Eat => "eating",
+                ItemWorkKind::Read => "reading",
+                ItemWorkKind::Ignite => "igniting",
+                ItemWorkKind::Extinguish => "extinguishing",
+                ItemWorkKind::Zap => "zapping",
+            };
+            Line::new(
+                Topic::Finished,
+                format!(
+                    "You finish {verb} the {}.",
+                    label(name.as_deref().unwrap_or(""), "item")
+                ),
+            )
+        }
+        OutcomeFact::ItemRefused {
+            reason: ItemRefusalReason::TooWeak,
+        } => Line::new(Topic::Finished, "You are too weak to use it."),
+        OutcomeFact::CurseBlocked { name } => Line::new(
+            Topic::Finished,
+            format!(
+                "You cannot remove the {}; it is cursed.",
+                label(name.as_deref().unwrap_or(""), "item")
+            ),
+        ),
+        OutcomeFact::PublicPlan { record } => {
+            Line::new(Topic::PublicPlan, crate::public_plan::line(record))
+        }
+        OutcomeFact::Combat { event, .. } => Line::new(
+            Topic::Combat(event.clone()),
+            combat_event_with_names(event, outcomes.self_target, &actor_name),
+        ),
+        OutcomeFact::Status { status } => Line::new(Topic::Status, combat_status_facts(status)),
+    };
+    match fact {
+        OutcomeFact::OwnAction {
+            basic_attack: true, ..
+        } => line.basic_attack = Some(BasicAttack::Preparing),
+        OutcomeFact::Combat {
+            event: CombatEventView::Ability {
+                target, outcome, ..
+            },
+            basic_attack: true,
+        } => {
+            let target = match target {
+                Some(actor) if *actor == outcomes.self_target => "yourself".into(),
+                Some(actor) => format!("the {}", actor_name(*actor)),
+                None => "something".into(),
+            };
+            line.basic_attack = Some(BasicAttack::Resolved {
+                target,
+                outcome: *outcome,
+            });
+        }
+        _ => {}
+    }
+    Some(line)
+}
+
+#[cfg(test)]
+fn observation_lines_legacy(
+    before: &Observation,
+    after: &Observation,
+    event: Option<&Event>,
+) -> Vec<Line> {
     let door = match event {
         Some(Event::DoorChanged { door, .. }) => Some(*door),
         _ => None,
@@ -201,7 +343,7 @@ pub fn observation_lines(
     if let Some(event) = event {
         lines.insert(
             0,
-            Line::new(Topic::Own(event.clone()), action(event, after))
+            Line::new(Topic::Own(event.clone()), action_legacy(event, after))
                 .with_basic_attack(before, after),
         );
     }
@@ -256,15 +398,24 @@ fn actor_name(actor: ActorTarget, before: &Observation, after: &Observation) -> 
 
 /// One line for a combat event, written from the observer's point of view.
 pub fn combat_event(event: &CombatEventView, before: &Observation, after: &Observation) -> String {
-    let observer = after.self_target;
+    combat_event_with_names(event, after.self_target, &|actor| {
+        actor_name(actor, before, after)
+    })
+}
+
+fn combat_event_with_names(
+    event: &CombatEventView,
+    observer: ActorTarget,
+    actor_name: &impl Fn(ActorTarget) -> String,
+) -> String {
     let subject = |actor: Option<ActorTarget>| match actor {
         Some(id) if id == observer => "You".to_owned(),
-        Some(id) => format!("The {}", actor_name(id, before, after)),
+        Some(id) => format!("The {}", actor_name(id)),
         None => "Something".into(),
     };
     let object = |actor: Option<ActorTarget>| match actor {
         Some(id) if id == observer => "you".to_owned(),
-        Some(id) => format!("the {}", actor_name(id, before, after)),
+        Some(id) => format!("the {}", actor_name(id)),
         None => "something".into(),
     };
     match event {
@@ -387,6 +538,10 @@ pub fn injury(injury: Injury) -> &'static str {
 }
 
 pub fn combat_status(c: &CombatView) -> String {
+    combat_status_facts(&OutcomeStatusFacts::from(c))
+}
+
+fn combat_status_facts(c: &OutcomeStatusFacts) -> String {
     let mut text = format!("HP {}/{}", c.hp, c.max_hp);
     if c.dead {
         text.push_str(" — You died. This run has ended.");
@@ -397,12 +552,12 @@ pub fn combat_status(c: &CombatView) -> String {
             " — Victory! You may continue exploring."
         });
         if !c.terminal {
-            if let Some(sequence) = sequence_status(c) {
+            if let Some(sequence) = sequence_status_facts(c) {
                 text.push_str(" — ");
                 text.push_str(&sequence);
             }
         }
-    } else if let Some(sequence) = sequence_status(c) {
+    } else if let Some(sequence) = sequence_status_facts(c) {
         text.push_str(" — ");
         text.push_str(&sequence);
     } else if let Some(remaining) = c.preparation_remaining {
@@ -423,6 +578,10 @@ pub fn combat_status(c: &CombatView) -> String {
 /// Exact active-time progress and cancellation commitment for the observed actor.
 /// This contains no action permissions; frontends offer controls from readiness.
 pub fn sequence_status(c: &CombatView) -> Option<String> {
+    sequence_status_facts(&OutcomeStatusFacts::from(c))
+}
+
+pub fn sequence_status_facts(c: &OutcomeStatusFacts) -> Option<String> {
     let sequence = c.sequence.as_ref()?;
     let phase = if sequence.completed == 0 {
         format!(
@@ -574,6 +733,100 @@ fn describe_changes(
 
 /// Ordinary action narration resolves names only from the resulting disclosed view.
 pub fn action(event: &Event, view: &Observation) -> String {
+    action_with_name(event, outcome_action_name(event, view).as_ref())
+}
+
+fn action_with_name(event: &Event, name: Option<&OutcomeName>) -> String {
+    let named = || {
+        name.map(|name| {
+            label(
+                &name.text,
+                match name.fallback {
+                    OutcomeNameFallback::Item => "item",
+                    OutcomeNameFallback::Object => "object",
+                    OutcomeNameFallback::Stairs => "stairs",
+                    OutcomeNameFallback::ObjectiveItem => "objective item",
+                    OutcomeNameFallback::Door => "door",
+                },
+            )
+        })
+    };
+    match event {
+        Event::EscapeStarted { .. } => "You begin trying to escape a hold.".into(),
+        Event::Escaped { .. } => format!(
+            "You leave the dungeon with the {}.",
+            named().unwrap_or_else(|| "objective item".into())
+        ),
+        Event::ItemStarted { action } => {
+            let Some((work, _)) = ItemWorkKind::from_action(action) else {
+                return "You begin preparing.".into();
+            };
+            let verb = match work {
+                ItemWorkKind::Equip => "equip",
+                ItemWorkKind::Unequip => "remove",
+                ItemWorkKind::Drink => "drink",
+                ItemWorkKind::Eat => "eat",
+                ItemWorkKind::Read => "read",
+                ItemWorkKind::Ignite => "ignite",
+                ItemWorkKind::Extinguish => "extinguish",
+                ItemWorkKind::Zap => "zap",
+            };
+            format!(
+                "You begin to {verb} the {}.",
+                named().unwrap_or_else(|| "item".into())
+            )
+        }
+        Event::Moved { direction } => format!(
+            "You move {}.",
+            match direction {
+                Direction::North => "north",
+                Direction::East => "east",
+                Direction::South => "south",
+                Direction::West => "west",
+                Direction::NorthEast => "northeast",
+                Direction::SouthEast => "southeast",
+                Direction::SouthWest => "southwest",
+                Direction::NorthWest => "northwest",
+                Direction::Up => "up",
+                Direction::Down => "down",
+            }
+        ),
+        Event::Crumbled { quantity, .. } => {
+            if *quantity == 1 {
+                "The item crumbles as you try to pick it up.".into()
+            } else {
+                format!("{quantity} items crumble as you try to pick them up.")
+            }
+        }
+        Event::Taken { quantity, .. } => named().map_or_else(
+            || "You pick up the item.".into(),
+            |name| {
+                if *quantity == 1 {
+                    format!("You pick up the {name}.")
+                } else {
+                    format!("You pick up {quantity} x {name}.")
+                }
+            },
+        ),
+        Event::Dropped { quantity, .. } => named().map_or_else(
+            || "You drop the item.".into(),
+            |name| format!("You drop {quantity} x {name}."),
+        ),
+        Event::DoorChanged { open, .. } => format!(
+            "You {} the {}.",
+            if *open { "open" } else { "close" },
+            named().unwrap_or_else(|| "door".into())
+        ),
+        Event::Waited => "Time passes.".into(),
+        Event::PreparationPaused => "Your preparation is paused until you act again.".into(),
+        Event::AbilityStarted { ability, .. } => {
+            format!("You prepare to use {}.", label(&ability.name, "ability"))
+        }
+    }
+}
+
+#[cfg(test)]
+fn action_legacy(event: &Event, view: &Observation) -> String {
     match event {
         Event::EscapeStarted { .. } => "You begin trying to escape a hold.".into(),
         Event::Escaped { item } => {
@@ -677,6 +930,421 @@ pub fn action(event: &Event, view: &Observation) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn receipt_fixture() -> Observation {
+        let mut view = crate::test_support::portable_light_observation(false);
+        let item = view.inventory[0].id;
+        let interactions = view.interactions.as_mut().unwrap();
+        interactions.completed = vec![Action::Ignite { item }];
+        interactions.refused = vec![ItemRefusalView {
+            action: Action::Zap {
+                item,
+                aim: DeviceAim::SelfTarget {},
+            },
+            reason: ItemRefusalReason::TooWeak,
+        }];
+        interactions.curse_blocked = vec![item];
+        view.combat.as_mut().unwrap().events = vec![CombatEventView::Ability {
+            caster: Some(view.self_target),
+            target: Some(view.visible_actors[0].id),
+            ability: crate::test_support::content("basic_melee"),
+            outcome: AbilityOutcome::Miss,
+            strike: None,
+        }];
+        view
+    }
+
+    fn receipt_count(facts: &OutcomeFacts) -> usize {
+        facts
+            .facts
+            .iter()
+            .filter(|fact| {
+                matches!(
+                    fact,
+                    OutcomeFact::Combat { .. }
+                        | OutcomeFact::ItemCompleted { .. }
+                        | OutcomeFact::ItemRefused { .. }
+                        | OutcomeFact::CurseBlocked { .. }
+                )
+            })
+            .count()
+    }
+
+    #[test]
+    fn causal_receipts_distinguish_old_batch_from_identical_same_tick_new_batch() {
+        let before = receipt_fixture();
+        let mut later = before.clone();
+        later.tick += 1;
+        assert_eq!(
+            receipt_count(&OutcomeFacts::capture(&before, &later, None)),
+            4,
+            "legacy tick-only rendering repeats stale receipts"
+        );
+        let unchanged = OutcomeFacts::capture_causal(
+            &before,
+            &later,
+            None,
+            tor_protocol::EventProvenance {
+                batch: 5,
+                through: 4,
+            },
+            tor_protocol::EventProvenance {
+                batch: 5,
+                through: 4,
+            },
+        )
+        .unwrap();
+        assert_eq!(receipt_count(&unchanged), 0);
+        assert!(!OutcomeFacts::picture_changed(&before, &later));
+        assert_eq!(
+            receipt_count(&OutcomeFacts::capture(&before, &before, None)),
+            0,
+            "legacy equality suppresses a distinct identical same-tick batch"
+        );
+        let fresh = OutcomeFacts::capture_causal(
+            &before,
+            &before,
+            None,
+            tor_protocol::EventProvenance {
+                batch: 5,
+                through: 4,
+            },
+            tor_protocol::EventProvenance {
+                batch: 6,
+                through: 4,
+            },
+        )
+        .unwrap();
+        assert_eq!(receipt_count(&fresh), 4);
+        fresh.validate_at(before.tick).unwrap();
+    }
+
+    #[test]
+    fn causal_receipts_emit_exact_same_batch_suffix_and_reject_rewritten_prefix() {
+        let before = receipt_fixture();
+        let mut after = before.clone();
+        after
+            .combat
+            .as_mut()
+            .unwrap()
+            .events
+            .extend(before.combat.as_ref().unwrap().events.clone());
+        let old = before.interactions.as_ref().unwrap();
+        let current = after.interactions.as_mut().unwrap();
+        current.completed.extend(old.completed.clone());
+        current.refused.extend(old.refused.clone());
+        current.curse_blocked.extend(old.curse_blocked.clone());
+        assert_eq!(
+            receipt_count(&OutcomeFacts::capture(&before, &after, None)),
+            8
+        );
+        let suffix = OutcomeFacts::capture_causal(
+            &before,
+            &after,
+            None,
+            tor_protocol::EventProvenance {
+                batch: 5,
+                through: 4,
+            },
+            tor_protocol::EventProvenance {
+                batch: 5,
+                through: 8,
+            },
+        )
+        .unwrap();
+        assert_eq!(receipt_count(&suffix), 4);
+        suffix.validate_at(after.tick).unwrap();
+        assert!(OutcomeFacts::capture_causal(
+            &before,
+            &after,
+            None,
+            tor_protocol::EventProvenance {
+                batch: 5,
+                through: 4
+            },
+            tor_protocol::EventProvenance {
+                batch: 5,
+                through: 4
+            }
+        )
+        .is_err());
+        assert!(OutcomeFacts::capture_causal(
+            &before,
+            &after,
+            None,
+            tor_protocol::EventProvenance {
+                batch: 5,
+                through: 4
+            },
+            tor_protocol::EventProvenance {
+                batch: 5,
+                through: 3
+            }
+        )
+        .is_err());
+        after.combat.as_mut().unwrap().events[0] = CombatEventView::Interrupted {
+            actor: after.self_target,
+        };
+        assert!(OutcomeFacts::capture_causal(
+            &before,
+            &after,
+            None,
+            tor_protocol::EventProvenance {
+                batch: 5,
+                through: 4
+            },
+            tor_protocol::EventProvenance {
+                batch: 5,
+                through: 8
+            }
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn persistent_picture_ignores_receipt_clear_and_motion_pulses_but_keeps_velocity() {
+        let mut before = receipt_fixture();
+        before.motion = Some(MotionView {
+            velocity: [0; 3],
+            units_per_cell: 100,
+            displaced: true,
+            impacted: true,
+        });
+        let mut after = before.clone();
+        after.tick += 1;
+        after.combat.as_mut().unwrap().events.clear();
+        let interactions = after.interactions.as_mut().unwrap();
+        interactions.completed.clear();
+        interactions.refused.clear();
+        interactions.curse_blocked.clear();
+        after.motion = None;
+        let cleared = OutcomeFacts::capture_causal(
+            &before,
+            &after,
+            None,
+            tor_protocol::EventProvenance {
+                batch: 5,
+                through: 4,
+            },
+            tor_protocol::EventProvenance {
+                batch: 6,
+                through: 0,
+            },
+        )
+        .unwrap();
+        assert_eq!(receipt_count(&cleared), 0);
+        assert!(!OutcomeFacts::picture_changed(&before, &after));
+        after.motion = Some(MotionView {
+            velocity: [1, 0, 0],
+            units_per_cell: 100,
+            displaced: false,
+            impacted: false,
+        });
+        assert!(OutcomeFacts::picture_changed(&before, &after));
+        after.motion = None;
+        after.combat.as_mut().unwrap().hp -= 1;
+        assert!(OutcomeFacts::picture_changed(&before, &after));
+    }
+
+    #[test]
+    fn outcome_facts_preserve_text_only_injury_and_objective_without_extra_common_lines() {
+        let mut before = crate::test_support::observation();
+        let actor = before.visible_actors[0].id;
+        before.combat.as_mut().unwrap().actors = vec![CombatActorView {
+            actor,
+            hostile: true,
+            allied: false,
+            injury: Injury::Healthy,
+        }];
+        let mut after = before.clone();
+        after.combat.as_mut().unwrap().actors[0].injury = Injury::Wounded;
+        after.combat.as_mut().unwrap().objective = Some(ObjectiveKind::ReachExit);
+        let facts = OutcomeFacts::capture(&before, &after, None);
+        facts.validate_at(after.tick).unwrap();
+        assert!(facts.facts.contains(&OutcomeFact::Injured {
+            actor,
+            injury: Injury::Wounded
+        }));
+        assert!(facts.facts.contains(&OutcomeFact::Objective {
+            objective: ObjectiveKind::ReachExit
+        }));
+        assert_eq!(
+            outcome_lines(&facts),
+            observation_lines_legacy(&before, &after, None)
+        );
+        after
+            .combat
+            .as_mut()
+            .unwrap()
+            .events
+            .push(CombatEventView::Died {
+                actor,
+                cause: DeathCause::Injury,
+            });
+        let facts = OutcomeFacts::capture(&before, &after, None);
+        assert!(!facts
+            .facts
+            .iter()
+            .any(|fact| matches!(fact, OutcomeFact::Injured { .. })));
+        let repeat = OutcomeFacts::capture(&after, &after, None);
+        assert!(!repeat
+            .facts
+            .iter()
+            .any(|fact| matches!(fact, OutcomeFact::Objective { .. })));
+    }
+
+    #[test]
+    fn outcome_status_updates_even_when_old_narration_is_silent() {
+        let before = crate::test_support::observation();
+        let mut after = before.clone();
+        let combat = after.combat.as_mut().unwrap();
+        combat.recovery_remaining = 19;
+        combat.max_hp += 1;
+        combat.terminal = true;
+        let facts = OutcomeFacts::capture(&before, &after, None);
+        facts.validate_at(after.tick).unwrap();
+        assert_eq!(
+            facts.status,
+            after.combat.as_ref().map(OutcomeStatusFacts::from)
+        );
+        assert_ne!(
+            facts.status,
+            before.combat.as_ref().map(OutcomeStatusFacts::from)
+        );
+        assert_eq!(
+            outcome_lines(&facts),
+            observation_lines_legacy(&before, &after, None)
+        );
+        assert!(outcome_lines(&facts).is_empty());
+    }
+
+    #[test]
+    fn outcome_facts_round_trip_without_visual_views_and_retain_order() {
+        let before = crate::test_support::portable_light_observation(false);
+        let mut after = before.clone();
+        after.tick += 1;
+        after.ready = false;
+        after.visible_actors.clear();
+        after.motion = Some(MotionView {
+            velocity: [0, 0, 0],
+            units_per_cell: 100,
+            displaced: true,
+            impacted: true,
+        });
+        let item = before.inventory[0].id;
+        let interactions = after.interactions.as_mut().unwrap();
+        interactions.completed = vec![Action::Ignite { item }];
+        interactions.curse_blocked = vec![item];
+        let combat = after.combat.as_mut().unwrap();
+        combat.hp -= 1;
+        combat.events = vec![CombatEventView::Ability {
+            caster: Some(before.self_target),
+            target: Some(before.visible_actors[0].id),
+            ability: crate::test_support::content("basic_melee"),
+            outcome: AbilityOutcome::Applied,
+            strike: None,
+        }];
+        let event = Event::ItemStarted {
+            action: Action::Ignite { item },
+        };
+        let expected = observation_lines_legacy(&before, &after, Some(&event));
+        let facts = OutcomeFacts::capture(&before, &after, Some(&event));
+        facts.validate_at(after.tick).unwrap();
+        let wire = serde_json::to_string(&facts).unwrap();
+        assert!(!wire.contains("visible_cells"));
+        assert!(!wire.contains("own_stats"));
+        assert!(!wire.contains("inventory"));
+        drop(before);
+        drop(after);
+        let decoded: OutcomeFacts = serde_json::from_str(&wire).unwrap();
+        decoded.validate().unwrap();
+        assert_eq!(outcome_lines(&decoded), expected);
+        assert!(outcome_lines(&decoded)
+            .iter()
+            .any(|line| line.basic_attack.is_some()));
+    }
+
+    #[test]
+    fn outcome_facts_preserve_own_action_absence_empty_names_and_ground_presentations() {
+        let before = crate::test_support::portable_light_observation(false);
+        let item = before.inventory[0].id;
+        for raw in ["", " ", "\u{1b}", "amulet\nname"] {
+            for present in [false, true] {
+                let mut after = before.clone();
+                after.inventory[0].name = raw.into();
+                after.ground_items = vec![GroundItemView {
+                    item: after.inventory[0].clone(),
+                    position: after.position,
+                    presentation: None,
+                    reachable: true,
+                    supply_reachable: false,
+                }];
+                if !present {
+                    after.inventory.clear();
+                    after.ground_items.clear();
+                }
+                for event in [
+                    Event::Taken {
+                        item,
+                        result: item,
+                        quantity: 2,
+                    },
+                    Event::Dropped {
+                        item,
+                        result: item,
+                        quantity: 2,
+                    },
+                    Event::Escaped { item },
+                    Event::ItemStarted {
+                        action: Action::Ignite { item },
+                    },
+                ] {
+                    assert_eq!(action(&event, &after), action_legacy(&event, &after));
+                    assert_eq!(
+                        outcome_lines(&OutcomeFacts::capture(&before, &after, Some(&event))),
+                        observation_lines_legacy(&before, &after, Some(&event))
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn outcome_facts_keep_cosmetic_ground_name_fallbacks_client_rendered() {
+        let before = crate::test_support::portable_light_observation(false);
+        let item = before.inventory[0].id;
+        let event = Event::Dropped {
+            item,
+            result: item,
+            quantity: 2,
+        };
+        for kind in [
+            ObjectPresentationKind::Item {
+                class: ItemClass::Tool,
+            },
+            ObjectPresentationKind::Stairs,
+        ] {
+            for raw in ["", " ", "\u{1b}", "sampled stairs"] {
+                let mut after = before.clone();
+                after.ground_items = vec![GroundItemView {
+                    item: before.inventory[0].clone(),
+                    position: after.position,
+                    reachable: true,
+                    supply_reachable: false,
+                    presentation: Some(ObjectPresentation {
+                        name: raw.into(),
+                        asset: None,
+                        kind,
+                    }),
+                }];
+                assert_eq!(action(&event, &after), action_legacy(&event, &after));
+                assert_eq!(
+                    outcome_lines(&OutcomeFacts::capture(&before, &after, Some(&event))),
+                    observation_lines_legacy(&before, &after, Some(&event))
+                );
+            }
+        }
+    }
 
     #[test]
     fn attire_names_visible_armour_and_weapons_without_control_text() {

@@ -1,12 +1,13 @@
 # Progression and creature construction design
 
-This is the accepted design direction for classes, talents and constructed
-creatures. Checks, conditions, permanent requirements, the owned point ledger
-and actor-active Health recovery are implemented. Ordinary player advancement,
-the class and creature content, and the remaining action mechanics are unfinished.
-The [implementation plan](progression.md) orders the work;
-[creature rules](../reference/creature-rules.md) remain the
-authority for what exists today; [status](../status.md) owns scope.
+This is the accepted design rationale and proposed extended catalog, not the
+current executable rules reference or a claim that every proposed talent exists.
+Checks, conditions, owned advancement, ordinary purchase/respec, actor-active
+recovery, the starter class techniques and constructed Rogue roster are implemented.
+Current ownership and effects live in [progression](../reference/progression.md),
+[combat](../reference/combat.md) and [creature rules](../reference/creature-rules.md).
+The [implementation record](progression.md) preserves sequence and acceptance;
+[status](../status.md) owns unfinished scope.
 
 The catalog here starts from the maintainer's *Thresholds of Ruin Simulation
 Talent Design* proposal (Revision 2, 12 October 2026). That proposal is kept
@@ -42,7 +43,7 @@ The proposal was reviewed against the current rules. These decisions change it:
    monster has no power a PC could not, in principle, construct.
 2. **Edge first.** Positioning, setups, conditions and talents grant advantage or
    disadvantage. Skill ranks, weapons and enchantment provide flat accuracy.
-3. **Scarce points, meaningful choices.** A point buys a talent or a skill rank.
+3. **Scarce points, meaningful choices.** A pool point buys an eligible talent, skill rank or expertise.
    Because ranks are the only permanent flat accuracy, ranks and talents compete.
 4. **Useful from HD 1.** Every root grants a working action. Solo play never
    requires a companion, a negotiating enemy or a rare item.
@@ -101,33 +102,17 @@ each branch.
 
 ### Drain, restoration and respec
 
-- Level drain removes the latest HD and the choice it owns. Requirements are then
-  rechecked; nodes whose HD, class or skill gates fail become dormant even if an
-  earlier HD bought them. Type, subtype and species traits are never drained.
-  Removing the last HD is ordinary death.
-- A creature's authored build lists its intended choice per HD. Restoring or
-  regrowing an HD refills that choice from the build. A PC chooses again, with a
-  preview, for an empty restored slot.
-- Restoration is limited by the highest applied growth tier, not the highest
-  earned tier: funded but blocked HD are not lost HD. An empty ChooseAgain slot
-  uses the explicitly selected future source; an authored ordinal uses its recipe.
-  Without an eligible source or original Health root, restoration is explicitly
-  unavailable, with no guessed class or extra lost-HD history. Selection and
-  eligibility belong in owner inspection. Restored capacity does not heal or
-  refill resources, reset the damage quiet timer or revive the dead.
-- Drain preserves fractional progress and the highest-earned threat watermark.
-  At HD 6 with 60% progress toward 7, drain to 5 leaves that fraction; the remaining
-  40% earned afterward regrows 6. Restoration first restores 6 and leaves 60% toward 7.
-  Genuinely earned unspent credit already banked while growth was blocked may
-  retry when drain/restoration removes its blocker. XP previously spent on the
-  removed HD is never refunded or reused; no drain-timestamp eligibility clock
-  is added. Current, highest-applied and highest-earned tiers survive save/replay.
-- Purchase order is authored data. A signature bought on HD 1 is lost last; a
-  late or high-gated purchase is lost first.
-- Respec happens at a disclosed safe place: no sensed hostile, no active hostile
-  plan and no recent Health loss. It replaces one purchase and its dependent
-  subtree in one transaction, takes time and consumes a ration, and preserves
-  injury, cooldowns, charges, item identities and failed-knowledge locks.
+Current behavior is owned by [progression](../reference/progression.md) and
+[HD drain/restoration](../reference/creature-rules.md#latest-hit-die-drain-and-restoration).
+The original watermark-only description predates explicit body-package ownership
+and saved drained-row receipts; do not treat it as a second current algorithm.
+
+The durable decisions are exact owned choices/Health provenance, dormant rather
+than deleted unsupported purchases, no refund of previously spent XP, ordinary
+candidate atomicity and ration-paid safe respec. Restoration distinguishes authored
+package rows and personal ChooseAgain/Authored policies. Injury and resource
+deficits are retained; restoration does not revive the dead or launder purchases.
+
 
 ## Edge model
 
@@ -625,8 +610,9 @@ Eligibility: `gaze_capable` flag.
 #### Mimic tree
 
 Eligibility: shapechanger subtype. The authored M/P/X slice uses one initial
-mundane mace guise; touch, adjacent Search, attack or movement reveals it
-globally with no re-hide. MI2 is a source-granted first-attack capability; the
+mundane mace guise. Actual touch can trigger readied ambush; attack or movement
+releases the shared guise. Checked Search recognizes it privately rather than
+globally revealing it. See [perception](../architecture/perception.md#object-guise-and-private-recognition). MI2 is a source-granted first-attack capability; the
 subtype alone grants neither guise nor general shapechanging.
 
 | ID | Node | HD | Parents | Effect | Needs |

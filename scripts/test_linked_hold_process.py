@@ -77,7 +77,7 @@ class LinkedHoldProcesses(ProcessTestCase):
         self.assertIn("Choose a hold", choices)
         for number, offer in enumerate(holds(initial), 1):
             self.assertIn(f"{number}. {NAMES[number]} (#{offer['target']})", choices)
-        self.assertEqual(self.snapshot(subject)["state"], initial["state"],
+        self.assertDisclosedStateEqual(self.snapshot(subject)["state"], initial["state"],
                          "an ambiguous Text command must not select either hold")
 
         # One process covers both canonical selector forms without extra fixtures.
@@ -147,7 +147,7 @@ class LinkedHoldProcesses(ProcessTestCase):
         choices = self.native_press(window, native, "F11", "escape_hold")
         self.assertEqual(choices["hold_choices"], [first, second])
         self.assertEqual(len(choices["hold_rows"]), 2)
-        self.assertEqual(self.snapshot(subject)["state"], initial["state"],
+        self.assertDisclosedStateEqual(self.snapshot(subject)["state"], initial["state"],
                          "opening F11 must not submit an implicit first choice")
         self.native_press(window, native, "Down", "down")
         selected = self.native_press(window, native, "Return", "enter")
@@ -199,7 +199,7 @@ class LinkedHoldProcesses(ProcessTestCase):
         peers = {actor: self.client(actor=actor)[0] for actor in (1, 2, 3)}
         subject = peers.pop(1)
         restored = self.snapshot(subject)
-        self.assertEqual(restored["state"], paused["state"])
+        self.assertDisclosedStateEqual(restored["state"], paused["state"])
         self.assertEqual(restored["intentions"], paused["intentions"])
         self.assertEqual(checkpoint(self, subject), saved,
                          "source-free reopen must preserve the complete saved plan, clocks, links and RNG")

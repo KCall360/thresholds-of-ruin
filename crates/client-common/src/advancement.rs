@@ -3,6 +3,9 @@
 use std::collections::VecDeque;
 use tor_protocol::*;
 
+mod overview;
+pub use overview::OpenOverview;
+
 const STALE: &str = "Advancement preview is stale. Open advancement and explicitly preview again.";
 pub const HELP: &str = "overview | ledger | balances | skills | talents | expertises | intellect-expertises | next | previous\nsource racial | source class <class ID>\nintellect-expertise <threshold> <expertise ID>\npurchase <HD> <pool ID> <skill|talent|expertise> <ID> [form <form ID>]\nremove <HD> <purchase number> | replace <HD> <purchase number> <pool ID> <skill|talent|expertise> <ID> [form <form ID>]\ndetails <summary|removed|refunds|balances|skills|talents|expertises|conditions>\nsupplies | confirm [using carried|<name or #item>] | resume | cancel\nHD and purchase numbers start at 1. Choices preview first; only confirm commits.";
 
@@ -216,6 +219,15 @@ impl AdvancementPages {
     pub fn retained_pages(&self) -> usize {
         self.pages.len()
     }
+    /// Whether retained private pages still belong to this exact disclosed state.
+    /// This does not imply that a paid intention is currently admissible.
+    pub fn is_current(&self, context: &ReplyContext) -> bool {
+        !self.stale && self.context.as_ref() == Some(context)
+    }
+    /// The exact-supply chooser overlays, rather than replaces, a retained page.
+    pub fn shows_supplies(&self) -> bool {
+        self.showing_supplies
+    }
     pub fn confirmation(&self) -> Option<&Confirmation> {
         self.confirmation.as_ref()
     }
@@ -243,6 +255,12 @@ impl AdvancementPages {
             self.clear();
         } else if self.context.as_ref().is_some_and(|old| old != context) {
             self.stale = true;
+        }
+        if self
+            .pending
+            .as_ref()
+            .is_some_and(|pending| !pending_context_matches(&pending.context, context))
+        {
             self.pending = None;
         }
     }
@@ -251,7 +269,7 @@ impl AdvancementPages {
         self.pending = None;
     }
     fn fresh(&self, context: &ReplyContext) -> Result<(), String> {
-        if self.stale || self.context.as_ref() != Some(context) {
+        if !self.is_current(context) {
             return Err(STALE.into());
         }
         Ok(())
@@ -310,7 +328,7 @@ impl AdvancementPages {
             .as_ref()
             .ok_or("Unrequested advancement page.")?;
         if pending.request_id != id
-            || &pending.context != context
+            || !pending_context_matches(&pending.context, context)
             || pending.query != page.query
             || pending.revision != page.revision
             || page.revision != context.revision
@@ -467,7 +485,7 @@ impl AdvancementPages {
             self.clear();
             return Err("Advancement requires control of your character.".into());
         }
-        let context = state.snapshot().reply_context();
+        let context = state.reply_context();
         self.observe(&context, true);
         let command = match input {
             AdvancementInput::Overview => {
@@ -515,12 +533,10 @@ impl AdvancementPages {
                 }
                 if resume {
                     Command::ResumeIntention {
-                        expected_revision: context.revision,
                         intention: progress.intention.clone(),
                     }
                 } else {
                     Command::CancelIntention {
-                        expected_revision: context.revision,
                         intention: progress.intention.clone(),
                         step: None,
                     }
@@ -626,10 +642,7 @@ impl AdvancementPages {
                 }
             }
         };
-        Ok(Command::Act {
-            expected_revision: confirmation.revision,
-            action,
-        })
+        Ok(Command::Act { action })
     }
     pub fn supply_costs(&self) -> Result<Vec<AbilitySupplyCost>, String> {
         let ration = &self.overview().ok_or("Open advancement first.")?.ration;
@@ -723,6 +736,20 @@ impl AdvancementPages {
         }
         rows
     }
+}
+/// Commands pin the issued picture and input authority, not the event cursor.
+/// An ordered outcome can precede the reply without replacing that picture.
+/// Connection still requires the reply to match its complete current context;
+/// displayed-page freshness continues to require exact context equality.
+fn pending_context_matches(request: &ReplyContext, reply: &ReplyContext) -> bool {
+    request.input == reply.input
+        && request.actor == reply.actor
+        && request.branch == reply.branch
+        && request.snapshot == reply.snapshot
+        && request.revision == reply.revision
+        && (request.cursor == reply.cursor
+            || (reply.cursor.sequence > request.cursor.sequence
+                && reply.cursor.tick >= request.cursor.tick))
 }
 fn basis_matches(basis: &AdvancementBasis, context: &ReplyContext) -> bool {
     basis.actor == context.actor

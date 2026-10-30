@@ -272,6 +272,7 @@ fn identified_self_device_uses_disclosed_mode_without_direction_prompt() {
     device.zappable = true;
     device.device_activation = Some(DeviceActivation::SelfTarget);
     let valid = StateView {
+        snapshot: tor_protocol::SnapshotId("fixture".into()),
         revision: 0,
         wizard_game: false,
         observation: view.clone(),
@@ -313,6 +314,7 @@ fn portable_light_actions_use_authoritative_affordances_without_auto_equipping()
         extinguishable: false,
     });
     assert!(StateView {
+        snapshot: tor_protocol::SnapshotId("fixture".into()),
         revision: 0,
         wizard_game: false,
         observation: view.clone()
@@ -333,6 +335,7 @@ fn portable_light_actions_use_authoritative_affordances_without_auto_equipping()
             }
         }
         assert!(StateView {
+            snapshot: tor_protocol::SnapshotId("fixture".into()),
             revision: 0,
             wizard_game: false,
             observation: forged.clone()
@@ -377,6 +380,7 @@ fn portable_light_actions_use_authoritative_affordances_without_auto_equipping()
         extinguishable: false,
     });
     assert!(StateView {
+        snapshot: tor_protocol::SnapshotId("fixture".into()),
         revision: 0,
         wizard_game: false,
         observation: view.clone()
@@ -398,6 +402,7 @@ fn portable_light_actions_use_authoritative_affordances_without_auto_equipping()
         .ignitable = true;
     assert!(
         StateView {
+            snapshot: tor_protocol::SnapshotId("fixture".into()),
             revision: 0,
             wizard_game: false,
             observation: view.clone()
@@ -433,6 +438,7 @@ fn portable_light_completion_narration_is_explicit_and_not_repeated_on_fuel_upda
         extinguishable: false,
     });
     assert!(StateView {
+        snapshot: tor_protocol::SnapshotId("fixture".into()),
         revision: 0,
         wizard_game: false,
         observation: elapsed.clone()
@@ -462,6 +468,7 @@ fn dual_device_discloses_both_aims_only_when_identified() {
     row.zappable = true;
     row.device_activation = Some(DeviceActivation::DirectionOrSelf);
     let valid = StateView {
+        snapshot: tor_protocol::SnapshotId("fixture".into()),
         revision: 0,
         wizard_game: false,
         observation: view.clone(),

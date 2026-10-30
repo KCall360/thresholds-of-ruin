@@ -175,7 +175,8 @@ fn joint_capacity_case(retrieval: bool) {
         .unwrap()
         .own_stats
         .as_ref()
-        .unwrap();
+        .unwrap()
+        .materialize();
     assert_eq!(own_stats.hit_dice.total, tor_simulation::HdCount(251));
     assert_eq!(own_stats.hit_dice.racial, tor_simulation::HdCount(251));
     let inventory = observed.inventory;

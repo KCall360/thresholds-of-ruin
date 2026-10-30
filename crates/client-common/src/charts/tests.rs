@@ -51,6 +51,7 @@ fn client(kind: ChartKind, mode: ChartMode, status: ChartStatus) -> ClientState 
             tick: 10,
         },
         state: Arc::new(StateView {
+            snapshot: SnapshotId("chart-client-fixture".into()),
             wizard_game: false,
             revision: 2,
             observation,
@@ -92,7 +93,7 @@ fn page(
     ChartPage {
         context: query.context.clone(),
         branch: query.branch.clone(),
-        base: query.base,
+        base: query.base.clone(),
         chart: query.chart.clone(),
         kind: summary.kind,
         mode: summary.mode,
@@ -115,7 +116,7 @@ fn accept(
     let query = pages.next_query().unwrap();
     pages.bind(&query, id, state).unwrap();
     let page = page(state, &query, records, components, total);
-    let context = state.snapshot().reply_context();
+    let context = state.reply_context();
     let wire = ServerMessage::ChartPage {
         context: context.clone(),
         request_id: id.into(),
@@ -131,7 +132,7 @@ fn accept(
 #[test]
 fn whole_chart_hydration_is_atomic_preserves_repeated_occurrences_and_never_changes_world_view() {
     let state = client(ChartKind::Monsters, ChartMode::Live, ChartStatus::Available);
-    let before = state.snapshot();
+    let before = state.session().clone();
     let memory: Vec<_> = state.map_memory().map(|cell| cell.appearance()).collect();
     let mut pages = ChartPages::default();
     assert!(matches!(
@@ -168,7 +169,7 @@ fn whole_chart_hydration_is_atomic_preserves_repeated_occurrences_and_never_chan
         .lines(&state)
         .iter()
         .any(|l| l.contains("Panel 700 at (12, -3, 9): stairs")));
-    assert_eq!(state.snapshot(), before);
+    assert_eq!(state.session().clone(), before);
     assert_eq!(
         state
             .map_memory()
@@ -242,7 +243,7 @@ fn revision_history_context_and_owner_changes_withhold_old_live_rows_and_partial
     .unwrap();
     let presentation = pages.presentation().unwrap();
     for change in 0..4 {
-        let mut next = state.snapshot();
+        let mut next = state.reset_snapshot().unwrap();
         match change {
             0 => {
                 Arc::make_mut(&mut next.state).revision += 1;
@@ -263,7 +264,7 @@ fn revision_history_context_and_owner_changes_withhold_old_live_rows_and_partial
         assert!(!changed.lines(&next).join("\n").contains("bat"));
         assert!(changed.install(presentation.clone(), &next).is_err());
     }
-    let mut next = state.snapshot();
+    let mut next = state.reset_snapshot().unwrap();
     next.cursor.sequence += 1;
     Arc::make_mut(&mut next.state).revision += 1;
     let summary = &mut Arc::make_mut(&mut next.state).observation.charts[0];
@@ -383,7 +384,7 @@ fn unsupported_mapping_keeps_historical_sparse_facts_and_never_merges_them_into_
         ChartMode::Historical,
         ChartStatus::Available,
     );
-    let mut snapshot = state.snapshot();
+    let mut snapshot = state.reset_snapshot().unwrap();
     Arc::make_mut(&mut snapshot.state).observation.charts[0].supported = false;
     let state = ClientState::from_snapshot(snapshot.clone()).unwrap();
     let mut pages = ChartPages::default();
@@ -438,7 +439,7 @@ fn unsupported_mapping_keeps_historical_sparse_facts_and_never_merges_them_into_
     }
     assert!(text.contains("Panel 2 — position unavailable"));
     assert_eq!(pages.display().unwrap().rows.len(), 7);
-    assert_eq!(state.snapshot(), snapshot);
+    assert_eq!(state.reset_snapshot().unwrap(), snapshot);
     assert!(state.map_memory().next().is_none());
     assert!(state.state().observation.visible_cells.is_empty());
     assert!(state.state().observation.visible_actors.is_empty());

@@ -140,11 +140,12 @@ fn rewinding_before_a_generated_build_builds_the_same_cave_again() {
     engine.enable_wizard().unwrap();
     walk_east(&mut engine, INTO_CAVE + ACROSS_CAVE);
     let first = seen(&engine);
-    let expected_revision = engine.revision(ActorId(1)).unwrap();
+    let expected_revision = engine.causal_boundary(ActorId(1)).unwrap();
     command(
         &mut engine,
         Command::Wizard {
-            expected_revision,
+            display_basis: None,
+            expected_boundary: expected_revision,
             operation: WizardOperation::Rewind { target: None },
         },
     )

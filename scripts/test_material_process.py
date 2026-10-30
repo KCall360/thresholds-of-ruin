@@ -32,14 +32,14 @@ class MaterialProcesses(ProcessTestCase):
         self.assertEqual((self.column(initial, 2)["wall"], self.column(initial, 2)["material"]), (True, "stone"))
         for direction in ("up", "down"):
             self.say(player, "step " + direction)
-            self.assertEqual(self.request(observer, {"type": "snapshot"})["state"], initial["state"])
+            self.assertDisclosedStateEqual(self.request(observer, {"type": "snapshot"})["state"], initial["state"])
         self.assertIn("walk east", self.say(player, "east"))
         expected = self.request(observer, {"type": "snapshot"})["state"]
         player.stop(); observer.stop(); server.stop()
         self.assertEqual(inspect_save(self.save)["ruleset"], "interactions-v56")
         self.server()
         _, resumed = self.client(SPECTATOR_TOKEN)
-        self.assertEqual(resumed["state"], expected)
+        self.assertDisclosedStateEqual(resumed["state"], expected)
 
     def test_doorway_corners_from_west_on_door_and_east_in_native_ascii(self):
         server = self.server()
@@ -61,7 +61,7 @@ class MaterialProcesses(ProcessTestCase):
                 self.assertIn((wall_x, y), cells, name)
                 self.assertTrue(cells[(wall_x, y)]["wall"], name)
             watched = self.request(observer, {"type": "snapshot"})
-            self.assertEqual(watched["state"], native["state"])
+            self.assertDisclosedStateEqual(watched["state"], native["state"])
             if os.environ.get("TOR_RIM_CAPTURE_DIR"):
                 (Path(os.environ["TOR_RIM_CAPTURE_DIR"]) / ("rim-" + name + ".ppm")).write_bytes(read_capture(capture))
             if name != "east":
@@ -72,12 +72,12 @@ class MaterialProcesses(ProcessTestCase):
         self.key(window, "open_door", wait_for_admission=True)
         opened = self.key(window, "left", wait_for_admission=True)
         self.assertIn("copper token", json.dumps(opened["state"]["observation"]["ground_items"]))
-        self.key(window, "escape")
+        self.key(window, "save_quit")
         self.assertEqual(window.child.wait(timeout=10), 0)
         observer.stop(); server.stop()
         self.server()
         _, resumed = self.client(SPECTATOR_TOKEN)
-        self.assertEqual(resumed["state"], opened["state"])
+        self.assertDisclosedStateEqual(resumed["state"], opened["state"])
 
     def test_wizard_chamber_surface_refresh_native_view_and_rewind(self):
         server = self.server(wizard=True, scenario="material-volumes")
@@ -90,7 +90,7 @@ class MaterialProcesses(ProcessTestCase):
         capture = Path(os.environ.get("TOR_MATERIAL_CAPTURE", str(self.save.parent / "material.ppm")))
         window = self.launch("tor-client-ascii", ["--connect", self.address, "--automation", "--capture", capture], token=SPECTATOR_TOKEN)
         native = self.ascii_frame(window, lambda f: f["state"] is not None and not f["busy"])
-        self.assertEqual(native["state"], initial["state"])
+        self.assertDisclosedStateEqual(native["state"], initial["state"])
         self.wizard_command(wizard, "teleport 1 1 1 1 0")
         away = self.request(observer, {"type": "snapshot"})
         key = self.here(initial)["key"]
@@ -107,21 +107,21 @@ class MaterialProcesses(ProcessTestCase):
         self.assertFalse(self.column(refreshed, 2)["wall"])
         self.assertIsNone(self.column(refreshed, 3))
         self.assertFalse(remembered(refreshed)["wall"])
-        native = self.ascii_frame(window, lambda f: f["state"] == refreshed["state"])
-        self.assertEqual(native["state"], refreshed["state"])
+        native = self.ascii_frame(window, lambda f: f["state"]["observation"] == refreshed["state"]["observation"])
+        self.assertDisclosedStateEqual(native["state"], refreshed["state"])
         self.assertIn("stone", self.say(text, "examine ceiling")) # Other ceiling cells remain visible.
         self.wizard_command(wizard, "rewind initial")
         rewound = self.request(observer, {"type": "snapshot"})
         self.assertTrue(self.column(rewound, 2)["wall"])
         self.assertIn(key, [c["key"] for c in rewound["memory"]])
-        self.ascii_frame(window, lambda f: f["state"] == rewound["state"])
-        self.key(window, "escape")
+        self.ascii_frame(window, lambda f: f["state"]["observation"] == rewound["state"]["observation"])
+        self.key(window, "save_quit")
         self.assertEqual(window.child.wait(timeout=10), 0)
         self.assertTrue(capture.read_bytes().startswith(b"P6"))
         wizard.stop(); observer.stop(); text.stop(); server.stop()
         self.server(wizard=True)
         _, resumed = self.client(SPECTATOR_TOKEN)
-        self.assertEqual(resumed["state"], rewound["state"])
+        self.assertDisclosedStateEqual(resumed["state"], rewound["state"])
 
 
 if __name__ == "__main__":

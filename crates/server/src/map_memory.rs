@@ -18,8 +18,22 @@ pub(crate) fn inputs(
     view: &s::Observation,
     terrain: crate::adapt::Terrain<'_>,
 ) -> Vec<s::MapCellInput> {
+    appearance_inputs(
+        &view.visible_cells,
+        &view.exits,
+        &view.ground_items,
+        terrain,
+    )
+}
+
+pub(crate) fn appearance_inputs(
+    visible_cells: &[s::CellView],
+    exits: &[s::ExitView],
+    ground_items: &[s::GroundItemView],
+    terrain: crate::adapt::Terrain<'_>,
+) -> Vec<s::MapCellInput> {
     let mut items: BTreeMap<_, Vec<_>> = BTreeMap::new();
-    for item in &view.ground_items {
+    for item in ground_items {
         items
             .entry(item.location)
             .or_default()
@@ -34,19 +48,17 @@ pub(crate) fn inputs(
                 asset: item.asset.clone(),
             });
     }
-    let up: BTreeSet<_> = view
-        .exits
+    let up: BTreeSet<_> = exits
         .iter()
         .filter(|e| e.direction == tor_world::Direction::Up)
         .map(|e| e.location)
         .collect();
-    let down: BTreeSet<_> = view
-        .exits
+    let down: BTreeSet<_> = exits
         .iter()
         .filter(|e| e.direction == tor_world::Direction::Down)
         .map(|e| e.location)
         .collect();
-    let visible: BTreeMap<_, _> = view.visible_cells.iter().map(|c| (c.location, c)).collect();
+    let visible: BTreeMap<_, _> = visible_cells.iter().map(|c| (c.location, c)).collect();
     visible
         .into_iter()
         .map(|(location, cell)| {

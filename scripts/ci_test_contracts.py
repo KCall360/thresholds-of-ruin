@@ -19,6 +19,8 @@ SMOKE_RELEASE = (
     'test_checkpoint_process.CheckpointProcesses.test_checkpoint_tail_crash_and_restart_through_real_headless_client',
 )
 REVIEWED_OWNERS = {
+    'test_active_mob_driver': ('ActivityEvidence', 'PacingAndTimings'),
+    'test_active_mob_performance_report': ('ActiveMobReportTests',),
     'physics_smoke_process': ('PhysicsCorrectnessSmoke',),
     'test_adventure_process': ('AdventureProcesses',),
     'test_ai_interactions_process': ('AiInteractionProcesses', 'IdleItemWaitContracts'),

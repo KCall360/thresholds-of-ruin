@@ -24,7 +24,7 @@ fn snapshot(revision: u64, shift: i32) -> Snapshot {
         "context":super::stream_context(0), "actor":"1", "branch":"map-budget",
         "cursor":{"sequence":revision.to_string(),"tick":revision.to_string()},
         "has_control":true,"intentions":[],"history":{"entries":[],"older_before":null},
-        "state":{"wizard_game":false,"revision":revision.to_string(),"observation":{
+        "state":{"snapshot":format!("fixture-{revision}"), "wizard_game":false,"revision":revision.to_string(),"observation":{
             "actor":"1","self_target":ActorTarget::from_digest([1;32]),"tick":revision.to_string(),
             "position":{"x":0,"y":0,"z":0},"places":[],
             "visible_cells":visible_cells,
@@ -95,6 +95,7 @@ async fn map_reply(
     let end = start + cells.len() as u32;
     let mut message = ServerMessage::MapPage {
         context: ReplyContext {
+            snapshot: query.base.snapshot.clone(),
             input: InputContext {
                 stream: query.context.clone(),
                 readiness_revision: 0,
@@ -109,7 +110,7 @@ async fn map_reply(
             transfer: transfer.into(),
             actor: ActorId(1),
             branch: query.branch.clone(),
-            base: query.base,
+            base: query.base.clone(),
             window: query.window,
             start,
             page,

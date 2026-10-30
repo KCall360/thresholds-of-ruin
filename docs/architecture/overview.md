@@ -8,7 +8,10 @@ Gameplay is single-player; multiplayer input policy remains future work.
 The 3D frontend is maintained in a separate workspace with its own verification.
 Windows is the primary platform and Linux is continuously
 tested. [Project status](../status.md) owns supported formats and implementation
-scope; this page explains boundaries and why they exist.
+scope; this page explains boundaries and why they exist. The
+[simulation cycle](simulation-cycle.md) gives the detailed execution order, and
+[protocol lifecycle](../reference/protocol-lifecycle.md) joins wire state, retries
+and recovery.
 
 ## Workspace boundaries
 
@@ -41,13 +44,16 @@ There is no historical format importer or alternate rules implementation. See
 
 The [scenario compilation boundary](scenario-compilation.md) separates authoring,
 canonical content inputs, lazy world descriptions and mutable save state.
+The [retained spatial registry](spatial-registry.md) keeps canonical room/passage
+classification separate from physical topology, population and residency.
 
 ## Authority, intentions and publication
 
 The server's wire adapter preserves unresolved typed request facts. Decoding does
 not authorize an operation, resolve a live target or mutate a game. Session
-permission checks and durable receipt lookup precede fresh actor context, branch
-and revision validation. Observer-scoped opaque entity references derive from a
+role and attached-actor permission checks precede accepted-receipt lookup. An
+authorized exact retry is resolved before fresh actor context, branch, controller
+and display-guard validation. Observer-scoped opaque entity references derive from a
 saved privacy salt, observer and entity kind. Retry comparison can reconstruct
 them without consulting whether the target still exists.
 
@@ -135,26 +141,34 @@ and [client architecture](clients.md).
 
 ## Observation and client boundary
 
-The server builds an actor-specific observation at a committed boundary and reuses
-it for revision comparison, navigation refresh and publication. Immutable shared
-views may be reused only for the same actor and branch. Each reader retains its
-own cursor, control state, reset context and history audience. Private annotations
-remain independently filtered by actor/user. Region transitions invalidate stale
-candidate views; caches are absent from saves and rewind boundaries.
+Authoritative boundaries capture actor-specific semantic/event facts, update
+knowledge and navigation, and publish ordered observer-filtered outcomes. They do
+not issue a rich display picture or advance a display revision on every action.
+`Observe` separately requests a picture of committed state. The service owns its
+connection-specific picture identity, revision and exact delta base; the engine
+does not persist a display revision map. Immutable shared projections may be
+reused only under their actor/branch and dependency witnesses. Each reader retains
+its own cursor, control state, reset context and history audience. Private
+annotations remain independently filtered by actor/user. Region transitions
+invalidate stale candidate views; derived caches are not saved authority.
 
 Snapshots and ordered deltas never serialize the world. Entity names, affordances,
 errors, assets and semantic events must not disclose hidden facts. Current health
 and preparation detail are personal; visible enemies disclose qualitative injury.
 The client validates a complete candidate before replacing its current view.
-Intermediate observations still refresh memory even when presentation skips ahead.
+Ordered outcomes carry status and narration independently of pictures; a
+hidden-only boundary can produce no outcome. Intermediate received observations
+still refresh memory even when presentation skips ahead.
 
 Both frontends can observe an actor; one connection controls it at a time. Control
 transfer is explicit and atomic. Server-granted spectator credentials restrict
 mutation; a player's `--observe` startup preference is not that security boundary.
 Wizard authority also has its own credential and does not widen normal disclosure.
 
-Clients may animate, summarize or fast-forward already committed progress. Window
-size, redraw rate and network delay never advance game time. Slow output is bounded
+Clients may animate, summarize or fast-forward already committed progress and
+coalesce redundant visual demand before requesting a picture. They must not drop
+or reorder issued causal outcomes. Window size, redraw rate and network delay
+never advance game time. Slow output is bounded
 and requires resynchronization rather than silently dropping state. Host output
 limits, retained-state limits, deadlines and exact recovery envelopes belong in the
 [protocol reference](../reference/protocol.md); they are not simulation tuning constants.

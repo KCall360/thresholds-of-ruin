@@ -13,7 +13,7 @@ fn wizard(
     id: &str,
     operation: WizardOperation,
 ) -> Result<tor_server::CommandResult, tor_server::Failure> {
-    let revision = engine.revision(ActorId(1)).unwrap();
+    let revision = engine.causal_boundary(ActorId(1)).unwrap();
     let branch = engine.branch().clone();
     engine.command(
         "developer",
@@ -22,7 +22,8 @@ fn wizard(
         id,
         &branch,
         Command::Wizard {
-            expected_revision: revision,
+            display_basis: None,
+            expected_boundary: revision,
             operation,
         },
     )
@@ -175,7 +176,7 @@ fn public_scenes_and_history_do_not_expose_backend_geometry() {
                 &format!("move-{index}"),
                 &branch,
                 Command::Act {
-                    expected_revision: index,
+                    expected_boundary: index,
                     action: Action::Move {
                         direction: Direction::East,
                     },

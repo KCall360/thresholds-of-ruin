@@ -1,884 +1,137 @@
 # Current capabilities and next work
 
 This page owns current scope, sequencing and supported format identities.
-References describe exact behavior; [future requirements](plans/requirements.md)
-record accepted work that is not yet complete. “Implemented” describes code in
-this tree, not a promise that every related product or performance goal is closed.
-Every change still requires the [testing policy](development/testing.md).
+References own exact mechanics; [plans](plans/README.md) distinguish unfinished
+work from implemented design records. “Implemented” does not mean balanced,
+fully optimized or qualified for every workload. Follow the
+[testing policy](development/testing.md).
 
-**Current formats:** protocol **65**, save format **64**, scenario format **36**, ruleset
-**`interactions-v56`**, scenario validator **`tor-scenario-48`**. Unsupported
-protocol/save/rules identities are rejected rather than migrated. Current private
-creature records also require explicit Health roll policy, stable HD/purchase
-ownership, body snapshots and pending-return state; authored packages may
-explicitly register body forms and eligibility. Other current guides refer here
-instead of copying these identities.
+**Current formats:** protocol **67**, save format **65**, scenario format **36**,
+ruleset **`interactions-v56`**, scenario validator **`tor-scenario-48`**.
+Unsupported identities are rejected rather than migrated. Current private
+creature records include explicit Health-roll policy, stable HD/purchase ownership,
+body snapshots and pending-return state; authored content can register body forms.
 
-The independent compiled inputs use RulesInput **26**, ContentPackage **33** and
-RegionInput **9**. Physical TORB/TORJ/TORR framing stays at **6** and TORC at **1**;
-rooms **2**, grid-rooms **1** and world-family **1** are unchanged. The independent
-arena run report is **`tor-arena-run-v6`**; its enclosing batch/matrix/search
-formats remain unchanged. Current payloads require explicit nullable rider
-conditions, bounded sequence-hit/attempt progress, actor nutrition, condition
-semantics, exact periodic-regeneration nutrition rates/fractions and personal
-status alongside invocation and reply-context shapes, source-owned form choices,
-fall provenance, effective locomotion operands, learned flight requirements,
-linked-hold identities, frozen Escape plans, exact private Move-to-Escape
-admission bindings, durable floor-activation records,
-explicit cell illumination and shared creature/corpse appearance. Current payloads
-also retain explicit item magical/currency capability, checked quantity ranges and
-frozen theft/relocation plans, item-owned armor corrosion, frozen directional-ray
-plans and bounded future birth-advancement schedules, nullable readable/device
-capabilities, exact instance charges and observed-charge facts, one paid owner-only
-identification continuation, bounded per-instance equipment birth/condition state,
-actor-owned equipment facts (redacted from spectator snapshots and live updates),
-frozen equipped-item alterations, signed weapon
-damage enchantment and explicit Psychic damage, and owned-HD Health improvements with immutable
-acquisition witnesses and bounded dormant drain records. Prior payload identities
-remain rejection-only. Physical framing remains unchanged.
-
-Rogue spears now support ordinary expertise-gated Throw with explicit 1d6 Keen
-payload and recoverable hits. Each of the fourteen charged-effect identities
-selects one stable wand/staff form per run, with shuffled metal/wood appearances.
-One-grip melee deals fixed 1 Impact for wands or 2d3 Impact for staves without
-spending charges; existing Zap effects and live effect weights are unchanged.
-The current retained authoring/content format stores bounded physical forms;
-protocol item class `wand` remains the shared wands-and-staves category. See the
-[item contracts](reference/items.md#magical-wand-and-staff-forms).
-
-The opt-in Rogue content catalog now includes ordinary fruit and standalone
-stackable darts/shuriken with distinct melee/throw payloads and consumed-hit
-recovery. A bounded shared-room population stage supports treasure rooms with
-explicit effective actor birth depth and strict nested entry receipts. The
-inert [authoring example](../scenarios/rogue-exploration/examples/treasure-stage.toml)
-must be selected explicitly; existing live stage IDs/order, weights, starter
-kits, dagger/arrow behavior and food rules are unchanged. See the
-[item contracts](reference/items.md#ordinary-fruit) and
-[population schema](reference/scenario-packages.md#first-entry-population).
-Focused local and real-process evidence is distinct from required final-head
-hosted qualification; native carried-stack input is a hosted owner, not a claimed
-local graphical pass. This does not establish balance or complete Rogue parity.
-
-The approved [missing-consumables batch](plans/rogue-missing-consumables.md) is
-being reconstructed from published source after its previous local implementation
-became unavailable. Strict device aim, captured self-device planning and
-knowledge-gated common/Text/ASCII prompts now have fresh focused coverage. Paid
-self-device execution passes Nothing and nonempty-effect Service contrasts,
-including charge/retry and paused identification with source-deleted reopen. The
-room/passage foundation and appearance selector pass their fresh tests; the
-appearance selector now supports integrated opt-in Hallucination gameplay, with
-the focused runtime and consumer checkpoint described below.
-Fresh Service checks cover OnUse observer isolation and storage rollback;
-actual Text/process checks and genuine current save/wire fixtures pass.
-Remaining consumables and broader qualification are unfinished. The opt-in
-Nothing catalog definition now has pure content coverage, a freshly validated
-package certificate, and imported-catalog Text/Service acceptance including
-source-deleted reopen. The complete-pool test fixture is corrected and the
-fresh full server library passes. Live pools are unchanged. Historical local
-results do not qualify this tree.
-A bounded row-run registry, pooled Game/history retention and canonical authored/
-generated source verification now support the opt-in Room Light device. Focused
-Service coverage includes paid room illumination, passage/maze no-ops, connected
-cross-region loading, frozen foreign surfaces and source-deleted reopening.
-Live distributions remain unchanged. Core result-projection, package certificate
-and actual Text room/passage use now pass, including exact payment, identification,
-repeat use and source-deleted reopening from real compressed checkpoints. Strict
-checkpoint decoding binds the actual current/history spatial roots before its
-canonical comparison, and restoration independently revalidates those roots.
-Focused spatial/effect tests and the full server library pass; remaining
-consumables and broader verification gates are still unfinished.
-The [spatial integration plan](plans/rogue-spatial-registry-reconstruction.md) owns
-exact acceptance scope and remaining qualification.
-The opt-in Drain Life wand now has paid weak-refusal, empty-target and exact
-wide/odd-Health behavior, canonical asymmetric room/passage targeting, frozen
-contact, privacy and source-free persistence coverage. Three actual imported
-processes and genuine refusal recording pass. The final ten-case focused rerun
-closes the privacy fixture failure from the preceding 1,074-pass server run;
-this is not a new full-suite or gate result. Remaining consumables and final
-verification remain unfinished.
-The opt-in Cancellation and Magic Missile wands now use physical first-body
-contact with load-only frontier preparation and strict saved plans. Cancellation
-suppresses marked specials without a global future-invisibility veto; Missile
-uses one opposed save and ordinary damage adjustments. Fresh simulation/server
-libraries pass 1,850/1,084 tests, protocol integration 282 and client-common 145;
-the selected World ray owner passes 18. Three imported-device processes cover
-paid use and source-deleted interval-one reopening; a separate production-catalog
-process passes three Ice Monster, Phantom and Xeroc contrasts. Genuine recording
-contains 50 generated client examples/53 captured server samples, and all 44 live
-scenario certificates were
-regenerated. These are internal reconstruction results, not final quick/push/full,
-native, release or hosted verification. Live weighted stock and kits are unchanged.
-The opt-in portable torch now supports explicit paid ignition/extinguishing,
-one-grip equipment, lit dropping, extinguishing on stow, active-location fuel and
-exact expiry. Dynamic illumination and dependency-only load preparation preserve
-ordinary visible-region activation policy. Fresh core/server libraries pass
-1,868/1,094 tests, including seven torch Service cases; affected protocol, common,
-Text, ASCII and World owners also pass. Current-state map-work controls prove
-steady-fuel updates avoid reacquisition while preserving exact state; they are not
-whole-pipeline performance measurements. A final hash-verified application build
-passes actual Text Adventure use and source-deleted reopening, and its compiler
-checks all 44 live certificates. Genuine wire recording contains 52 generated
-client examples and 55 captured server frames, including torch lit/off states.
-Native ASCII, independent 3D, final verification/release/hosted gates and broader
-performance qualification remain pending. No live weighted stock or kit changes.
-ASCII retained-map rendering now borrows original appearance payloads through
-compact occurrence-position references instead of cloning remembered payloads.
-A causal storage-pointer regression and independent materialized-output oracle
-pass, alongside all 150 ASCII integration tests. This establishes the exercised
-storage/rendering contract, not timing or broader performance parity; native and
-final verification obligations remain separate.
-The opt-in Haste potion now uses finite actor-active haste and named-condition
-overdose with forced rest, interoperating with the persistent wand through explicit
-mixed-lifetime Keep semantics. Slow-masked applications still count; unrelated
-innate/equipment speed sources are not stripped. Fresh core 1,879 and seven focused
-Service/save controls pass. The full server collection's 1,099 passes plus two
-stale-certificate failures is closed by both exact-binary reruns after genuine
-certificate refresh, not reported as a new full run. Actual ordinary Adventure
-use/source-deleted reopening and a separate granted-ability diagnostic process
-pass. Genuine recording now has 52 generated client examples and 57 captured
-server frames. The updated protocol library/integration and common library pass 36/283/146
-tests. Final/native/release gates remain pending; live weighted pools and kits
-remain unchanged.
-The opt-in growth potions now have paid/source-free acceptance: Strength preserves the
-ordinary-five cap and limits ordinary plus acquired permanent magic to seven,
-with innate modifiers afterward; each Raise dose funds one additional level
-beyond all levels already funded by XP, even while actual growth is blocked,
-without bypassing ordinary advancement admission.
-Their provenance, refund/history and actual-caller checks pass, including the
-corrected full core/server regressions and current protocol/common/ASCII consumers.
-Existing live item distributions remain unchanged. The separate
-[baleful Polymorph implementation](plans/baleful-polymorph.md) now has source-staged
-body/personal ownership, atomic transitions and opt-in wand content. All 26 NPC
-body types are now enrolled: the approved class-only trio adds one racial body HD
-while retaining personal classes; Dragon retains ten racial HD with separately
-funded personal attribute/Breath receipts. Only emu/snake/troll are opt-in form
-destinations; live weighted stock and kits remain unchanged. Personal restoration
-must distinguish empty-choice `ChooseAgain` from original-choice `Authored`, with
-stable purchase high-water marks and authored package restoration.
-
-Current application writers validate every package and produce current-protocol
-and save fixtures without altering historical formats. Ordinary paid
-`ChooseAgain` purchase/drain/XP restoration now has corresponding first-red and
-green process evidence; retained Authored attribute receipts have a separate
-explicitly privileged-builder witness. Aggregate qualification remains a release
-requirement, not something inferred from these selected checks. The approved
-100-method local native deferral remains **deferred, not passed**; final-head
-hosted graphical gates are mandatory. Consumables PR #195 merged at `feae51f`,
-and the separate Polymorph branch is based on it. No additional live tuning or
-next Rogue implementation milestone is implied.
-
-The opt-in Hallucination potion now uses one pure timed condition and saved
-base-turn presentation cadence. Extend preserves its generation/deadline; Extra
-Healing removes exactly that condition. Genuine visual actors, ground/guise objects
-and unknown stair artwork receive observer-specific canonical cosmetics without
-changing real targets, actions or navigation. Nonvisual Awareness stays factual;
-map and public-plan samples retain their acquisition-time presentation.
-Fresh core/server libraries pass 1,927/1,121 tests. Protocol library/integration
-pass 37/288, common 150, Text 77/192 and ASCII integration 152. Three real-process
-cases cover Adventure display, blind/repeat/cure and source-deleted map/history
-reopening. All 44 certificates and current saved/wire artifacts were genuinely
-regenerated (52 client examples, 62 captured server frames). These are scoped
-reconstruction results: detection/mapping and final quick/push/full, native,
-release/performance and hosted gates remain unfinished. Independent 3D changes
-remain isolated, not integrated or qualified by these results.
-
-Characters retain last-seen terrain, doors, stairs and item appearances in the
-saved game. Returning to an explored neighborhood or opening a fresh client
-hydrates a bounded complete map window. Trusted movement retains certified
-coverage and requests only uncovered face regions; uncertain alignment falls
-back to a full bounded refresh. Unseen changes and creature occupants are not
-refreshed or invented. See [remembered maps](play/ascii.md#remembered-map)
-and [the read-only transfer](reference/protocol.md#explored-map-pages). This
-current-format change does not reconstruct visual history absent from older
-saves; retain an older save with its matching build when finishing that run.
-The measured map-compaction change compacts exact appearances and plain
-neighbor evidence, and pools equal owner directories across snapshots; its
-navigation encoding and retained workload were unchanged. The current locomotion
-batch adds explicit learned flight requirements, covered by focused persistence
-and capability-loss tests. The queue fixture has an
-approved 2 MiB logical budget, with its 1 MiB compressed budget and exploration's
-16 MiB logical budget unchanged. The corrected production writer passes both
-capacity/reopen tests: 1,541,092 logical bytes for the queue fixture and 5,247,096
-for 256 explored regions. The [capacity evidence](development/performance.md#explored-map-checkpoint-capacity)
-separates those results from failed-first/model sizes and single correctness-run
-timings. The 256-region reopen took 3.06 seconds including three replayed records;
-passing capacity checks does not establish general responsiveness or release
-performance parity.
-
-Wizard tools can list and spawn named scenario-authored creature recipes with
-explicit population context, destination/explicit depth, shared exact-HD
-construction and ordinary finite birth stock. Standalone archetypes disclose their
-external control and lack of population stock. Discovery stays private and
-read-only; invalid/ambiguous/beyond-capacity requests leave state unchanged.
-See [named creature spawning](development/wizard.md#named-creature-spawning).
-
-Actor population choices can carry zero or one finite ordinary stack at birth
-from explicit source-owned pools. Independent deterministic decisions, complete
-entry rollback, nested historical receipt audits and current-only pinned save
-adapters implement the mechanism. Inventory and death drops use ordinary item state;
-AI tactics follow species defaults and explicit profile overrides rather than
-inventory ownership. Rogue selects a provisional Vampire
-ration/bandage policy with focused activation coverage; earned survival,
-deep-scale storage and numerical balance remain open. See
-[birth-stock authoring](reference/scenario-packages.md#first-entry-population).
-
-Checkpoint population receipt validation binds historical identities to pinned
-authored reservations and the selected starting kit, including after abandoned
-branch boundaries expire; legitimate removed population entities remain valid.
-Equal complete population state is pooled across retained checkpoint boundaries,
-with boundary-specific tick and identity validation preserved. The bounded
-[size regression](development/performance.md#population-checkpoint-size-regression)
-fits the existing codec limit; this does not resolve the documented long
-journal-only restart timeout. See [persistence](architecture/persistence.md).
-
-Opt-in private survival-flow diagnostics retain exact gross committed settlement,
-resource payments, unpaid holds and consumed units without changing gameplay,
-ordinary disclosure or saved authority. Measurement requires a loss-free final
-save barrier bound to independent durable history; stock acquisition/drop/transfer
-flows remain unavailable. See [measurement limits](development/performance.md#private-committed-survival-flows).
-
-The current ordinary magic-item slice adds Drink, Read, paid class-restricted
-Identify and directional Zap through the same exact-item preparation and payment
-boundaries. Text, ASCII (F6/F12) and headless use server-owned choices; spectators
-receive neither choices nor exact instance charge details. Rogue includes healing,
-restore-Strength, confusion, blindness, poison, see-invisible and extra-healing
-potions, selected identify/sleep scrolls, and fire/cold/lightning plus
-invisibility/haste-monster/slow-monster devices. Elemental rays use Intellect + Lore versus
-Speed + Agility; activation has no separate check or Mana cost. Healing overflow
-improves bounded owned HD records rather than adding an unbounded HP modifier.
-Utility wands stop on first creature contact, preserve unknown identities, and
-apply persistent nonstacking effects; opposing wand haste/slow cancels to neutral.
-See [items](reference/items.md#reading-identification-and-charged-devices).
-
-A separate trusted no-time effect-injection limitation remains open: removing the
-current decision can leave a later-ready actor selected before its ready tick.
-Strict checkpoint restore rejects that unsettled schedule. Ordinary accepted
-actions own scheduler settlement; this item slice does not change the injection
-API timing contract or relax restore validation.
-
-The equipment risk/recovery slice adds exact-instance curses and knowledge,
-signed weapon enchantments, physical armor penalties, permanent rust protection,
-and magical armor wards covering Energy, Impact, Keen, Spirit and Vital explicitly.
-Psychic is a separate category excluded from these wards. Rust damages physical
-plating only. Equipment scrolls use frozen targets and the shared paid Read path;
-their success and no-op outcomes do not automatically identify the scroll type.
-Generic stack transfers require matching exact per-unit condition and charge
-state; equipment and devices remain nonstackable.
-
-The fourteen-ring catalog adds shared signed potency, all-category damage reduction,
-attack damage-roll bonuses, source-aware Strength/Speed defense exclusion,
-sustained attributes,
-worn corrosion protection, nonstacking Health recovery acceleration and exact
-fractional digestion, periodic active searching, continual opposed Stealth and
-periodic/random Aggravation location pulses. Rings remain concealed until identified; a paid choice can
-permit both rings and wands. See [worn magic](reference/items.md#worn-magic-and-the-finite-rogue-ring-catalog).
-
-Living-dungeon pressure uses one persisted active-floor wandering clock, an
-8-living-wanderer cap independent of initial population and Create Monster,
-off-screen/out-of-room placement, and ordinary XP without birth loot. Monster
-control uses paid scroll reads, shared Confused conditions, timed Hold and
-occupied-ground-scroll Flee objectives. Awareness contests belong to committed
-movement/contact/battle events; anonymous location leads never grant target
-identity. Manual Sneak remains deferred. See [living dungeon rules](play/rogue.md#living-dungeon-pressure-and-awareness).
-
-Physical discovery uses shared Perception: persistent first-observation passive
-attempts, repeatable paid Search and periodic searching-ring scans. Concealed
-entrances are real opaque closures; discovery is observer-specific and opening
-changes the shared world. Independently seeded generation adds those entrances
-and hidden rust, sleeping-gas, arrow, bear, teleport, poison-dart, mysterious and
-physical trapdoor hazards. Levitation adds horizontal hover and completion-time
-fall arrest; teleport scrolls, rings and utility wands share ordinary relocation. Genuine ground contact triggers traps without
-disarming them; discovery reveals presence and adjacent examination or perceived
-activation reveals family. Placement, DCs and durations remain provisional
-balance, not calibrated Rogue parity.
+Independent compiled inputs are RulesInput **26**, ContentPackage **33** and
+RegionInput **9**. Physical TORB/TORJ/TORR framing is **6**, TORC **1**; rooms **2**,
+grid-rooms **1** and world-family **1** are unchanged. The arena run report is
+**`tor-arena-run-v6`**. Other guides link here instead of duplicating version lists.
 
 ## Implemented scope
 
-| Area | Current capability | Authoritative detail |
+| Area | Current capability | Exact owner |
 | --- | --- | --- |
-| Default adventure | Authored five-chamber retrieval/escape dungeon, persistent death, shared text and ASCII play | [Gameplay](play/gameplay.md) |
-| ASCII play | Three readable status rows with disclosed attributes, resources and typed identified gold; shared displayed-column bump selection; immediate whole-stack pickup for a single eligible stack; conservative Shift-run safety stops | [ASCII guide](play/ascii.md) |
-| Rules and actors | Shared general rules imported by scenarios, validated overrides, pinned resolved catalogs, tracked creature builds and advancement, generic modifiers/conditions/abilities, deterministic 3d6 checks, permanent requirement predicates, deduplicated edge families, preparation-owned one-use tokens, active-time Health recovery, finite supply costs and cooldowns, universal Bind Wounds, ordered strikes and explicit-branch riders, anatomy equipment, timed consumption and explicitly authored nutrition/recovery policies | [Creature rules](reference/creature-rules.md), [items](reference/items.md) |
-| Actions | Simulation-owned admission/execution, deterministic scheduling, paid preparation/resume, self-or-ally targeting, immutable strike plans with live execution validation, atomic cancel-and-step with retained commitment, player/AI/travel lifecycle recovery | [Simulation](architecture/simulation.md) |
-| World | Region-local 3D geometry, all 24 portal rotations, multi-cell bodies, gravity, source-derived flight/stationary/erratic movement, finite material volumes, cardinal/diagonal movement, doors and paired stairs | [Geometry](architecture/geometry.md), [movement](reference/movement.md) |
-| Perception | Range-16 illuminated eye-based 3D sight, body-local awareness, authoritative passive/paid/periodic discovery, observer-specific concealed entrance and trap knowledge, opaque disclosed targets, stale client memory and durable place knowledge | [Perception](architecture/perception.md), [clients](architecture/clients.md) |
-| Sessions and storage | Loopback authenticated WebSockets, control transfer and spectators, background journaling, explicit durability barriers, checkpoints, replay and bounded wizard rewind | [Protocol](reference/protocol.md), [persistence](architecture/persistence.md) |
-| Region lifecycle | Lazy authored/generated content, active/frozen/detached regions, deterministic preparation, independent persistence and asset palettes | [Streaming](architecture/streaming.md) |
-| Authoring | Strict modular TOML packages, one compiler, source provenance, immutable compiled bundles, shared rules imports/overrides | [Packages](reference/scenario-packages.md) |
-| Procedural worlds | Compact seeded finite/open grid-chain descriptors, random stable ports, authored graph composition, bounded declared-depth character starts, lazy materialization and bounded validation | [Packages](reference/scenario-packages.md), [streaming](architecture/streaming.md) |
-| Rogue starter slice | Persistent generated floors, explicit Warrior/Mage first purchases and fixed Mage forms, equipped starting kit, 26-species depth-selected population, finite care and Centaur/Yeti/Troll/Medusa/Xeroc/Vampire/Griffin/Jabberwock/Dragon birth stock and finite Leprechaun gold, selected-character first-entry population, unique Amulet relocation, intentional surface escape and NPC stair policy | [Rogue play](play/rogue.md), [generation](reference/generation.md), [authoring](reference/scenario-packages.md#first-entry-population) |
-| Tools | JSON-lines headless client with opt-in omission of diagnostic map memory, privileged inspection/setup/rewind, bounded context-bound strike detail pages, shared-kernel arena evaluation, matrices and bounded search campaigns | [Headless](reference/headless.md), [wizard](development/wizard.md), [arena](development/arena.md) |
+| Default adventure | Five-chamber retrieval/escape dungeon, persistent death, shared Text/ASCII play | [Gameplay](play/gameplay.md) |
+| Clients | Text parsing/clarification, graphical ASCII with NetHack-shaped controls, headless JSON-lines automation, spectators and explicit control transfer | [Clients](architecture/clients.md), [Text](play/text.md), [ASCII](play/ascii.md), [headless](reference/headless.md) |
+| Simulation | One mutation owner, admitted intentions, deterministic scheduling, private candidates, paid immutable plans, pause/resume/cancel and partial-sequence debt | [Cycle](architecture/simulation-cycle.md), [actions](architecture/simulation.md) |
+| Combat | Shared 3d6/edge, source/modifier folds, ordered primary/rider effects, finite supplies/resources, cooldowns, protection, death and causal fall credit | [Combat](reference/combat.md), [creature rules](reference/creature-rules.md) |
+| Advancement | Ordinary purchases/respec, fixed choices, expertise and retained Intellect learning, earned XP, body/personal ownership, drain/restoration | [Progression](reference/progression.md), [player controls](play/advancement.md) |
+| World | Region-local 3D geometry, 24 portal rotations, finite volumes, multi-cell bodies, gravity, cardinal/diagonal movement, doors and paired stairs | [Geometry](architecture/geometry.md), [movement](reference/movement.md) |
+| Perception and AI | Illuminated eye-based sight, awareness/contact, checked private discovery/guise recognition, remembered navigation and bounded knowledge-limited tactics | [Perception](architecture/perception.md), [AI](reference/ai.md) |
+| Regions | Lazy authored/generated content, active/frozen/detached state, no frozen-time catch-up, load-only spatial preparation and first-entry activation | [Streaming](architecture/streaming.md), [spatial registry](architecture/spatial-registry.md) |
+| Sessions and storage | Authenticated loopback WebSockets, ordered causal outcomes separate from demand-driven pictures, journaling, durability barriers, checkpoints/replay and bounded wizard rewind | [Wire lifecycle](reference/protocol-lifecycle.md), [protocol](reference/protocol.md), [persistence](architecture/persistence.md) |
+| Authoring and generation | Strict modular TOML, canonical compiled bundles, shared rules imports/overrides, deterministic independent stages and compact lazy world families | [Packages](reference/scenario-packages.md), [generation](reference/generation.md) |
+| Rogue | Warrior/Mage presets, 26-species depth selector, nutrition/fainting/starvation, finite care, persistent floors, unique Amulet relocation and intentional surface escape | [Quickstart](play/rogue.md), [mechanics](play/rogue-mechanics.md) |
+| Current Rogue stock | Supplemental completed catalog items, rare treasure rooms, room omissions and dark-room maze trials, without replacing starter kits or original stage weights | [Live policy](reference/scenario-packages.md#live-rogue-content-policy) |
+| Equipment and magic | Explicit primary attack socket, grip capacity, armor/corrosion, curses/enchantment, identification, thrown/projectile/ray attacks, control effects, sensing/mapping and finite portable lights | [Items](reference/items.md), [equipment](reference/equipment.md), [magic](reference/magic-items.md), [effect details](reference/consumable-effects.md) |
+| Forms | Baleful Polymorph, retained personal progression, compatible carried gear, cancellation and pending return | [Polymorph](reference/polymorph.md) |
+| Diagnostics | Privileged inspection/setup/rewind, exact bounded pages, shared-kernel arenas, matrices and search | [Wizard](development/wizard.md), [arena](development/arena.md) |
+| Optional 3D | Independent procedural client with responsive startup, asynchronous model stand-ins, inventory/equipment/portrait, advancement preview/confirmation and combined map/journal; separately qualified from the core workspace | [3D guide](../crates/client-3d/README.md), [art continuation](plans/3d-art-continuation.md) |
 
-Development supports [fast local Rust feedback](development/testing.md#fast-local-rust-feedback)
-for single-target iteration and [Python-authored catalog contracts](development/service-contracts.md)
-against the production Service. Focused feedback does not qualify quick, push,
-full or CI, and Service contracts do not replace unique real transport, client
-or persistence witnesses. The conservative
-[prose-only documentation path](development/testing.md#prose-only-documentation-changes)
-runs documentation/link and tooling checks. Non-prose changes use the
-[risk-based CI plan](development/testing.md#risk-based-ci-assurance): selected
-contract assurance or exhaustive Windows/Linux debug/release qualification.
-Weekly scheduled, on-demand and release full runs retain deferred exhaustive coverage.
-
-Creature state now has a shared permanent compilation beneath its effective
-sheet. Equipment, conditions and restorable losses reuse exact per-HD Health
-provenance and a checked sum without rescanning advancement. All raw seeds and
-choices remain authoritative and survive save/restore. This source-stage cache
-boundary has focused regression coverage; integrated runtime and performance
-qualification remain required. See [derivation](reference/creature-rules.md#derivation-and-sources).
-Ordinary character sheets now project a strict total/per-source HD summary from
-that compilation. Detailed inspection retains exact ordered records, while
-ordinary observations and clients visit only distinct sources. Counts/owners and
-aggregate Health, injury, points, threat and XP prices use checked 64-bit domains;
-wire values are canonical decimal strings. Exact analytical XP projection does
-not loop through untrusted saved tiers. The current 256 actual-HD admission
-and inspection-row guards remain, as do bounded per-HD operands, ranks,
-attributes, resources and purchase indices. Generic population recipes can append
-exact racial rows after an authored depth threshold, with a recoverable atomic
-capacity refusal instead of truncated actors. This intermediate policy preserves
-base class rows and exact Health/restoration provenance. The 256-HD limit is
-accepted for the current functional Rogue scope. Lossless chunked persistence,
-detailed disclosure paging and guard removal are deferred; this scalar
-prerequisite does not establish support for more than 256 actual HD.
-
-Rogue roster study tools retain their eighteen-foe exact-kit Warrior/Mage selection
-with explicit per-arm identities, pinned inputs and a disclosed generic AI proxy.
-They have not been expanded or qualified for L/N/O theft/gold or M/P/X perception additions. The
-bundled package selects all 26 canonical Rogue species, including A/D:
-one four-attempt actor stage with authored depth bands, exact `racial_after`
-depth-26 growth, unchanged finite bandage/ration stages and an appended ordinary
-restore-strength potion stage, followed by an independent per-room gold stage.
-Earlier source-qualified checks cover their specific population contracts;
-the theft/gold batch still requires qualification as described below.
-Centaur is eligible at depths 7–16, Yeti at 11–20; they keep four actual Warrior/racial HD respectively,
-passive provocation and three/two purchased natural strikes. Their 15%/30%
-birth chances share V's provisional equal ration/bandage pool; Y retains cold immunity.
-Rattlesnake is eligible at depths 3–12 with two actual racial HD, owned VN1 on
-HD 1 and one unspent point. Its 1d6 Physical-checked natural bite delivers a
-separate poison exposure resisted with Athletics against authored DC 12; failed
-resistance records Strength−1. Ordinary concealed restore-strength potions remove only
-recorded Strength loss; one finite placement attempt per floor is provisional.
-Wraith is eligible at depths 14–23 with five actual undead racial rows and zero
-carry chance. Parentless DR2 is paid at HD1; four points remain unspent. Its
-passive 1d6 contact adds a separate Spiritual-checked latest-HD drain. Ordinary
-kill-earned regrowth preserves the ordinal Health seed and leaves a ChooseAgain
-purchase slot empty. The controlled authored-HD2 Service composition requires
-ordinary attributed kills earning 160→195→215 XP, real W drain followed by
-external-controller Wait, one 200 debit/15 held, source-free journal reopen and
-ordinary Lore repurchase. The autonomous process owner instead ends at the first
-survived 160-XP/HD1 drain and requires source-free checkpoint reopen. Both cases
-have passed, as has the production depth-14 W birth/owned-row/zero-stock receipt
-and source-free checkpoint case. Autonomous full recovery, starter survival and
-an earned route remain open.
-No recovery potion or new engine mechanic is introduced. Fatal loss and preserved
-injury remain governed by the shared HD rules.
-Jabberwock enters at depth 21 with fifteen actual aberration racial rows,
-Second Strike on HD 2 and Rending Pair on HD 8. The shared purchased signature
-imports its natural 2d12/2d4 sequence/timing and adds one conditional keen 1d6
-rider after two qualifying primary hits in the same preparation. Its passive
-acquisition, exact owned rows and 70% finite birth stock use ordinary content;
-no flight or regeneration is granted. Damage categories and sheet/body operands
-are provisional TOR tuning, with no survival or balance claim.
-J's production depth-21 receipt/restart and controlled authored-HD16
-signature/stock/death/restart cases still require actual-process qualification.
-The latter is advanced controlled acceptance, not starter survival or earned
-depth-21 reachability.
-Troll is eligible at depths 13–22 with six actual racial HD: RG1 on HD 1,
-Second Strike on HD 2 and Third Strike on HD 4, other points unspent. Its mean
-acquisition and separate 1d8/1d8/2d6 strikes reuse shared behavior/combat; its 50%
-carry chance uses the same provisional pool. RG1 halves ordinary Health recovery;
-the regenerative flag is eligibility only. Vampire content uses purchased
-Spiritual-checked maximum-Health drain and ordinary halved-period
-recovery; its provisional birth-stock pool contains one ration or bandage. The
-population's deep tail selects M/V/G/J/D. Depth 31 has weights 9/9/9/9/14,
-and the uniform tail starts at 32. J reaches 256 HD at depth 267 and 257
-at 268; G refuses at 270 and D at 273. Any sampled over-cap recipe refuses
-the whole entry atomically. All-M/V draws can remain valid through 274. No choice is clamped or replaced, and this
-operational capacity boundary is not a terminal floor. No-contact, failed and
-censored outcomes remain explicit; prepared inputs do not establish combat survival or
-balance. Four-U, four-V, four-G and four-J draws remain possible. The frozen
-[earned-route pilot](development/rogue-earned-route.md) keeps its independent E/S
-arm named `production`; it is not relabeled or regenerated from the selected
-population.
-No pilot outcome or numerical qualification is implied by activation. Earned
-growth routes and coupled food/recovery measurements retain their separate
-acceptance requirements. See
-[roster study inputs](development/arena.md#rogue-roster-study-and-bounded-candidate-inputs).
-
-Aquator and Dragon now have source-authored production recipes and exact
-population selection. Aquator's one-contact CO1 rusts item-owned armor reduction;
-Dragon owns a compiled Willpower 3 + Breath rank 2 check, purchased BR1 and
-6d6 Energy/fire breath. Successful Speed + Agility dodges take no damage and
-permit continuation; later encounters with the same ray accumulate disadvantage.
-Dragon's explicit later rank purchases at HD 15/20/25 are provisional tuning,
-with the ordinary rank-five cap. Focused Dragon runtime/persistence checks pass, including actual depth-31
-birth with its HD-15 purchase and source-free restart. Complete cross-platform
-CI remains required before merging this checkpoint.
-
-The architecture and creature-rules refactors are implemented and published.
-They are current architecture, not active refactor plans. This does not close
-all performance work or implement the remaining mechanics below.
-
-Abilities can select negative owner-outgoing edge contributions before the
-existing family/talent caps, with distinct roll roles, independent check/damage
-budgets and preparation-owned token qualification. The authored Measured Cut
-talent uses that shared policy; its initial values still require paired tuning;
-see [edge selection](reference/creature-rules.md#checks-and-edge-allocation).
-
-The shared advancement ledger supports rules-defined point pools and purchase
-kinds, two immutable starting ranks, owned skill/talent purchases, explicit
-choose-again/authored restoration, disclosed dormancy reasons and atomic
-replacement previews with exact subtree refunds. Immediate wizard editing uses
-the same replacement kernel. The default grants one shared talent-or-skill point per HD, alongside the two
-authored starting ranks.
-The simulation supports exact ordinary purchase operations and timed,
-ration-consuming replacements. Strict owner query/action/page wire types are
-defined. Owner-authorized host queries/actions, independent save adapters,
-private history filtering, durable receipts/replay and atomic Store rollback are
-implemented. Text, headless and ASCII clients share exact preview/confirmation
-and bounded private pages, with ordinary paid replacement, cancellation and exact
-resume. The [earned-XP foundation](reference/creature-rules.md#earned-xp-and-future-hit-dice)
-adds direct fatal-effect awards, explicit future-source controls, immediate HD
-growth and paid regrowth after drain. Authored restoration ownership conflicts
-and current numeric fold obstructions retain XP for exact retry; operational
-capacity and invariant failures reject the complete growth candidate. The
-256-HD guard, exact ledgers and current formats remain unchanged. Directly lethal push/fall attribution uses
-one persisted causal episode and the same atomic death/award boundary, including
-journal and checkpoint recovery. Poison ticks still require their shared adapter.
-Source, timing and XP values remain provisional; complete Warrior/Mage HD 1–6
-play remains a separate content and acceptance requirement. See
-[creature rules](reference/creature-rules.md#advancement-points-and-starting-ranks).
-
-Shared restorable attribute and maximum-Health deficits use ordinary fallible
-effects in abilities, riders and consumables. Fixed creature-owned aggregates
-survive rebuilds, saved restart and paid preparation; restoration preserves injury
-and never revives. Personal observations and shared Text/ASCII stats disclose
-these losses without exposing opponent state. Ordinary latest-HD drain removes
-the actual latest ordinal and its purchases; draining the last HD reaches normal
-death. Restoration is limited to previously applied growth and preserves the
-original seeded Health and retained XP progress. Owner views disclose a missing
-restoration source without inventing one. Production restoration loot remains
-separate work. See
-[restorable losses](reference/creature-rules.md#restorable-attribute-and-maximum-health-losses).
-
-Finite supplies and actor-active cooldowns now share ordinary preparation,
-resolution, cancellation and replay. Item-owned holds conserve physical stock;
-clients disclose known supply capability and physical quantity without exposing
-claims or another actor's preparations. Cooldowns start once at successful
-preparation and survive cancellation, grant changes and rebuilds. Universal
-Bind Wounds uses the ordinary Heal pipeline, one finite bandage and self-or-ally
-touch targeting. Its configurable values remain provisional: the documented
-HD 1/6/11 rest/hostile-pressure samples are scoped examples, not final balance.
-See [finite costs and care](reference/creature-rules.md#finite-supplies-and-universal-care).
-
-Autonomous actors can select narrowly recognized harmless self-condition defense
-against currently sensed hostiles. Selection compares their own effective family
-edge and strongest category protection, preserves healing/retreat and paid work,
-and uses ordinary immutable plans and finite costs. This is a shared decision
-mechanism, not an arena-balance acceptance result; see
-[autonomous self-defense](reference/creature-rules.md#autonomous-self-defense).
-
-Shared nutrition exposes independent Hungry, Weak and Empty recovery policies,
-including neutral Normal recovery in every band. Hunger labels alone impose no
-recovery penalty. Rogue explicitly enrolls its selected character; numerical
-balance remains separate acceptance work. See
-[the nutrition contract](reference/creature-rules.md#shared-nutrition-eating-and-starvation).
-
-Shared starter mechanisms include owner-outgoing negative-edge selection,
-strongest-category timed talent protection, perception-conditioned actor-active
-Health recovery, and immutable source-owned form acquisition. Owner catalogs
-keep form options nested under talent roots; player, authoring, inspection and
-save operands retain the exact root/form pair. The authored catalog now contains
-seven Warrior nodes, three independent Mage roots and two shared recovery nodes,
-with six acquired forms. The former 27 production talents are retired; purpose-
-authored generic test fixtures remain local. Named rank-heavy, talent-heavy and
-mixed allocation recipes cover HD 1, 6 and 11, with older diagnostic bands retained.
-The separate starter-study generator prepares all 27 allocation matchups and 54
-class-relative comparisons with bounded paired plans, exact input fingerprints
-and explicit pilot/evidence status. It validates packages without running battles.
-The shared mechanisms and catalog are implemented; complete Warrior/Mage HD 1–6
-play, pressured escape and numerical calibration remain open. See
-[fixed acquisition forms](reference/creature-rules.md#fixed-acquisition-forms) and
-[starter evaluation](development/arena.md#starter-allocation-study).
-
-The shared nutrition foundation adds explicit policy/creature enrollment,
-actor-active reserve deadlines, hunger-controlled Health recovery, exact-unit
-Eat with frozen positive fixed/rolled nourishment and ordinary starvation cleanup.
-Required nutrition keeps its exact policy through runtime-preserving rebuilds;
-standalone cross-policy replacements reject atomically.
-The current format tuple includes these nutrition operands and the shared status
-clock/protection records. The shared bundled policy remains disabled, while
-Rogue explicitly enrolls Warrior/Mage, keeps its 26 selected foe recipes
-exempt and shares its finite ration between eating and respec. Authored bounded empty-depletion triggers
-now use ordinary shared status effects and indexed actor deadlines; personal
-condition facts and events reach ordinary Text/ASCII views. Status restrictions,
-paid-work pauses and follow-up protection use the same typed condition lifecycle.
-Production Ice Monster Frozen and Venus flytrap linked-Held encounters now
-use shared rules. Final Rogue constants and survival balance remain open. See
-[nutrition](reference/creature-rules.md#shared-nutrition-eating-and-starvation).
-
-The internal received-Health-loss timer preserves a rules-authored actor-active
-quiet interval independently of healing, maximum changes and dealing damage.
-Purchase and replacement plans retain exact operations and actor/build-epoch
-provenance, revalidate execution, and reuse runtime-preserving rebuilds. Fresh
-work cannot resume an old preparation; explicit resume retains its original
-identity and remaining active work. Respec reserves one finite ration and spends
-it only at atomic replacement commitment. Perceived danger, actual received
-Health loss or permanent-build changes discard the attempt. The configurable
-advancement timings remain provisional.
-See [received-loss quiet time](reference/creature-rules.md#received-health-loss-and-quiet-time).
-Public-plan observation has typed source-recipient effects,
-foe-qualified outgoing tokens, immutable paid observations, committed observer
-recognition and shared Text/ASCII presentation, reconciled with owner advancement.
-Paid history remains immutable through earned growth and reconnect, with XP
-restricted to owner-authorized advancement pages. Paid Warrior and Mage techniques
-use shared one-cell movement, forced displacement, fixed acquisition forms and
-ordinary client/save adapters. This implements the starter mechanisms, not phase
-6's full play and balance acceptance or the complete Rogue scenario; see
-[paid observations](reference/creature-rules.md#paid-public-plan-observations).
-
-The playable Rogue package exposes those foundations through selected-character
-presets and ordinary purchases. Focused actual-process coverage includes Mage
-form/future-source retention, both starting kits through source-deleted journal
-and checkpoint restart, Rattling Blow and Cold Lance against ordinary foes,
-combat-injury Bind Wounds and its cooldown, and source-deleted first entry to an
-unvisited floor. Direct fatal-push/fall recovery has its own actual-process case.
-The ordinary four-foe walkthrough covers earned HD 2, spending its new point,
-finite floor stock, descent/return without restocking, care, ration respec and
-saved restart. Broad integrated/native verification and final Windows/Linux CI
-remain required gates. This bounded coverage does not establish HD 1–6 pacing,
-pressured escape or calibrated builds. See the
-[playable scope and verification](play/rogue.md#scope-and-verification).
-
-Typed creature behavior is a new reconstruction of the agreed mechanism, not
-an exact restoration of the unavailable implementation. Species own acquisition,
-idle, door, care, equipment, loot and flee defaults alongside memory policy;
-actor-owned engagement and deterministic RNG survive controller changes. Explicit
-AI enrollment can use those defaults without a named profile. Profiles partially
-override supplied tactical fields, and omitted species behavior falls back to
-passive exploration without tools. Population stages with no `ai` remain externally
-controlled. Source-owned interaction semantics license provocation only
-from a committed strike and ordinary disclosed evidence. Non-hostile grants
-reject current modifier-induced harm, and frozen admission checks captured effects
-against source-owned intent. Idle actions use only the actor's senses and known
-routes/items, with bounded useful equipment and supply collection. Known launcher
-and ammunition pairs support a six-shot reserve and ordinary capacity-checked draws. Explicit
-Launch ability priority can prefer ranged gear; equal priorities preserve melee,
-and expertise never implies that preference. Stock NPC builds and loadouts remain
-unchanged. Explicit Wait
-blocks all idle movement, including loot detours, while permitting independently
-enabled useful underfoot actions; acquisition, pursuit and combat stay separate.
-The bundled packages author provisional species distinctions, including Wait-idle
-ice monsters and stone constructs. This does not activate the full Rogue roster,
-add a food economy or establish balance; see
-[behavior and provocation](reference/creature-rules.md#creature-behavior-and-provocation)
-and [authored idle policy](reference/scenario-packages.md#behavior-defaults-and-ai-overrides).
-
-Shared locomotion now derives stationary, flying and explicitly bounded erratic
-capabilities from active sources. Genuine flight permits paid unsupported and
-open-vertical movement with ordinary multicell/portal clearance and NPC stair
-policy, preserves imposed velocity and resumes gravity on capability loss.
-Learned flight-only routes retain their disclosed requirements through persistence.
-B/K/F/G use the shared locomotion sources; F's shared Clutch and
-Tightening Hold use exact live relationships, while ordinary Escape has paid
-preparation/recovery and holder-specific protection. Focused unit, Service,
-recipe-combat and nongraphical actual-process witnesses cover these mechanics,
-including source-free recovery of paid Escape work. Native input and the full
-cross-platform matrix remain merge requirements; these witnesses do not establish
-numerical balance. See
-[locomotion](reference/creature-rules.md#locomotion-capabilities) and
-[the production roster](play/rogue.md#flight-and-linked-holds).
-
-Shared theft transfers ordinary inventory through checked Cognitive riders.
-TR1 takes one source-sized gold roll, capped by all free carried gold; TR2 takes
-one free unequipped magical unit without granting identification. TR3 freezes its
-compiled flag at preparation and permits same-floor relocation only after an
-actual transfer. Held units remain protected, all effects publish atomically,
-and stolen stock remains recoverable through ordinary death drops. Gold is an
-ordinary stack capability, not a separate purse. Quantity expressions resolve to
-checked positive u64 ranges using the relevant birth or preparation depth, with
-no guessed depth in nongenerated contexts. See [theft and gold](reference/items.md#theft-and-gold).
-
-Rogue now selects L/N/O and M/P/X alongside the earlier eighteen foes, for 24
-production species and two remaining. L uses three fey HD, TR1(1), TR3(2), natural 1d1,
-depths 6–15 and finite birth gold. N uses three fey HD, TR2(1), TR3(2), zero
-natural damage and depths 10–19. O uses one humanoid Warrior HD, W02(1), natural
-1d8 and depths 4–13. Gold-interested AI prioritizes self-preservation and
-retaliation before known reachable gold, then ordinary idle behavior. The
-appended room stage makes a 50% gold decision for each present room, without
-reordering existing stages or their streams. Restore-strength potions and the
-Amulet are explicitly magical; ordinary ring mail is not. The unique objective
-helper and its relocation policy are unchanged. This batch adds no UI or 3D
-feature. Focused simulation, strict current-save, load-only source-free recovery,
-catalog integration, Service and ordinary-process witnesses cover these contracts.
-The process fixture uses a labeled durable victim, harmless natural provocation
-and strengthened equipped recovery damage; production L/N/O builds and AI are
-unchanged. This proves ownership, disclosure and recoverability, not pursuit or
-survival balance. Focused evidence does not replace the current
-[required CI assurance gate](development/testing.md#risk-based-ci-assurance).
-
-The M/P/X cohort adds Medusa's eight monstrous-humanoid/reptilian
-HD with GZ1(1), NA1(2), NA2(4), Presence-bound Spellcasting and 3d4/3d4/2d5
-natural strikes; Phantom's eight undead/incorporeal HD with typed invisibility,
-1/5 erratic movement and 4d4 natural damage; and Xeroc's seven aberration/
-shapechanger HD with MI1(1), MI2(6), one mundane mace guise and 4d4 natural
-damage. M remains eligible at every depth from 18 through the pinned selector's
-upper-boundary redistribution, with shared exact racial growth beyond 26.
-P/X bands are 15–24 and 16–25; M/P/X birth chances are 40%/0%/30%.
-The subtype labels grant no immunity, wall passing or extra shapechanging.
-See [perception cohort](play/rogue.md#gaze-invisibility-and-object-guise).
-Focused simulation, encoded Service, source-free persistence and bounded
-ordinary-process witnesses pass for these contracts. The five-arm process
-witness retains production M/P/X builds and real checks, with explicitly
-synthetic room geometry, external foe control and a durable living observer;
-it establishes mechanisms, not autonomous pursuit or survival balance.
-Current scenario certificates, save fixtures and actual wire recordings are
-regenerated, including the separate 3D menagerie certificate. These focused
-checks do not replace the current
-[required CI assurance gate](development/testing.md#risk-based-ci-assurance).
+Gameplay submissions bind to attachment input authority, not picture revision.
+Changed control/origin/operands can invalidate input; a redraw cannot restore it.
+Queries, travel and wizard operations retain their own exact context rules.
+Acknowledgement, execution, visual freshness and durability are separate facts.
 
 ## Important limitations
 
-- Typed voluntary one-cell steps, contact-derived forced pushes and generic
-  autonomous retreat are implemented with the W04/W06 starter techniques. These
-  shared mechanisms do not establish useful escape options at every tested HD
-  band or complete phase 6's paired balance acceptance. See
-  [one-cell translation](architecture/simulation.md#one-cell-ability-translation).
-
-- Clients must be relaunched to reconnect. Active travel does not automatically
-  resume after server restart; valid preparation recovery requires fresh input.
-- The server accepts loopback connections only. Packaged distribution and automatic
-  local-server launch are not provided.
-- Wizard rewind retains a 128-boundary window. It is unavailable in normal play
-  and enabling wizard mode permanently marks the game lineage.
-- The 3d6 kernel keeps the existing initial defense/bonus values; this is not
-  a claim of balanced Rogue builds. The point economy, Health recovery and the
-  initial authored talent values still require content calibration.
-- The Rogue starter slice selects 26-species depth-selected population,
-  finite starting/floor supplies and Centaur/Yeti/Troll/Medusa/Xeroc/Vampire/Griffin/Jabberwock/Dragon birth stock and finite Leprechaun gold, alongside
-  authored hunger/fainting/starvation and ration eating. Calibrated food pressure, the complete item catalog,
-  calibrated depth curve and complete run balancing remain unfinished. The Amulet
-  relocates on each eligible player entry unless carried; intentional surface Up
-  while carrying it is the persistent escape condition.
-  Rations share one finite stock between eating and respec. Numerical calibration
-  remains open; focused activation coverage does not replace the repository
-  verification and exact-head cross-platform CI gates.
-  A successful seed is not balance evidence. The explicit operational depth limit
-  is not a gameplay endpoint; persistent floors and paired returns deliberately
-  differ from Rogue's floor lifecycle.
-- Recipe generation supports the declared stages, not an arbitrary scripting
-  language. Runtime scripting and its language remain undecided.
-- Shared rule/effect infrastructure does not imply complete survival, carrying
-  capacity, curses, enchantment, rust, identification, ranged projectile/ray,
-  secret-search or complete detection/mapping gameplay. See the current references and
-  [remaining requirements](plans/requirements.md) for their boundaries.
-- Rogue actor/player/item appearances use existing asset fields and structural
-  palette forecasts. Text and ASCII share a minimal keyed English vocabulary;
-  ASCII map/look/inventory redraw on palette changes and recover safely.
-  Shared creature seeds and captured corpse appearance support the optional,
-  independently maintained [3D prototype](../crates/client-3d/README.md).
-  Wire revision 64 added each disclosed creature's visibly worn weapons and armour,
-  and the observer's own, as a bounded `worn` list. That list is projected after
-  observer disclosure and carries no more than the items show on the ground; see
-  the [first slice](plans/appearance-composition-contract.md#implemented-first-slice-wire-revision-64).
-  Text examination and the ASCII look line name the visible gear. The 3D client
-  dresses bodies from it: each of Rogue's eight body armours now has its own
-  asset and torso recipe, following the maintainer's style guide.
-  The 3D client now plays what the server offers through the shared client
-  logic: reading, zapping and identifying items, aimed abilities and projectile
-  choices, traps and holds, number-keyed pack actions, resuming and cancelling
-  work, and the advancement, places, chart, history and note screens. The
-  personal stats screen, end-of-game summary, message log, releasing control and
-  running remain ASCII-only; see the [3D guide](../crates/client-3d/README.md).
-  The prototype adds shared body/fitting dimensions, correlated build silhouettes,
-  fitted garment surfaces, an offline swappable wardrobe with garment-owned
-  feminine necklines and lower-panel construction, outfit-owned torso ornaments
-  and pouches, independent offline helm/boots/cloak/breastplate equipment overrides that
-  survive wardrobe changes, fitted torso armor and cloak back clearance during
-  swing, peplums fitted over tunics,
-  reusable closed baldrics
-  with open buckles and clearance over combined torso layers,
-  sewn bindings and straps with coherent surface fitting and
-  support retained across garment openings,
-  hollow faceted shoulder plates fitted to the resolved arms,
-  and family-specific support motion. Feathered fliers and beasts share tapered,
-  closed vanes with a central ridge and proportionate thickness. Reared beasts
-  distinguish supporting legs from grasping limbs; Jabberwock uses bent hind
-  support and free clawed hands. Xeroc combines a larger articulated maw with
-  overlapping physical shell plates. Small shared plate, fang and limb pieces
-  support further species recipes; a general external monster format remains
-  future work. Aquator has connected shoulder/haunch masses and a broad skull
-  with seated dark eyes. Aquator and Xeroc use short splayed supporting limbs
-  and broad soles, with lateral foot placement retained during walking and
-  local actions. Shared profiled segments end in rounded flesh; Xeroc keeps
-  skin-colored shanks and pads with separate pale nails. The rooted flytrap
-  has broad fleshy leaves, a substantial stalk, cupped snapping lobes and
-  staggered cilia, reusing small leaf and fang-row components.
-  The Emu has compact linked supports, substantial hocks and shanks, broad
-  three-toed feet, a breast-rooted throat and larger skull. Both snakes have
-  larger skulls, hinged lower jaws and folding fangs; shared dimensions also
-  place the tongue and support the head during a side fall. Rattlesnake rests
-  extended with its head and warning rattle raised.
-  Equine families share compact linked supports, distinct fore/hind landmarks,
-  fuller ribcage/haunch masses and broad closed hoof wedges with planar soles.
-  Their standing height and shortened travel stride follow those dimensions.
-  Centaur side-fall height and arm support also follow the shared barrel width.
-  Horse and Unicorn bridge, muzzle and lower jaw form a continuous sculpt.
-  Griffin has a larger anatomical skull, a broad sculpted feathered neck,
-  connected shoulder masses, shorter bent supports and broader grounded talons.
-  Griffin and Kestrel share closed ridged upper/lower hooked beaks. Feather/wing
-  joins and complete action/fall surface clearance remain unfinished.
-  Bat and Dragon wing skin and Aquator toe webs share closed tensioned membranes
-  with curved scallops, shallow camber and consistent outward facing on mirrored
-  parts. Bat wing supports are more substantial. Full wing/body contact through
-  every action and the remaining creature anatomy still need review.
-  Dragon has shorter bent supports, connected shoulder/haunch masses, broad
-  grounded claw feet and a larger anatomical skull above a sculpted neck.
-  Dragon/Jabberwock jaw meshes and hinges share the rendered skull dimensions;
-  both use the broader lower-jaw profile and shared substantial claw feet.
-  Full action/fall surface clearance and remaining shape finish stay open.
-  Worn boots share a constructed upper and layered welt/outsole. Heeled outfit
-  choices have a raised arch and tapered block heel; heel and forefoot use the
-  same sole plane. Replacement boots use the same shape rules, and robe contact
-  bounds follow the worn last. Bare, stone and furry feet retain their recipes.
-  Shaft/cuff finish and complete garment contact through motion remain open.
-  Ice Monster refinement is deferred pending a chosen direction.
-  Shared adult female brows use substantial tapered bands fitted to the
-  forehead, with controlled arches and species expressions. Their eyes share
-  almond openings, clipped iris/pupil surfaces, fitted lids and a visible upper
-  lash line; glow belongs to the iris, and Medusa retains slit pupils.
-  Lower-lid rims, species expression and adult cheek/jaw planes remain unfinished.
-  Shoulder cloaks now use connected lined sheets with thickness, fitted upper-back
-  attachment and clean or torn hems. Native and replacement cloaks share that
-  construction; moving vertices belong to each wearer and materials remain shared.
-  Lower cloth follows eased motion beneath pinned upper rows. General cloth
-  collision remains unfinished.
-  Zombie decay survives outfit swaps. Every Rogue
-  monster has its own recipe and motions, drawn from the maintainer's concept
-  sheets (see the [Rogue creature models plan](plans/rogue-creature-models.md)).
-  See the
-  [art continuation plan](plans/3d-art-continuation.md) for visual-review limits
-  and the unfinished garment/equipment authoring boundary.
-  The 2026-10-21 feature-branch sharing checkpoint uses the maintainer-authorized
-  focused local checks without the push gate; complete Windows/Linux
-  debug/release CI remains required before merge.
-  Scenario overrides (including Rogue letters), general trait specifications
-  and server-stored player choices remain deferred. See the
-  [presentation plan](plans/presentation.md).
-- Saves can still require matching compiled bundles for unvisited authored inputs.
-  Portable saved-game export/import and historical migration are not implemented.
+- A working mechanism or successful seed is not a balanced run. Food pressure,
+  XP/recovery economics, later-depth curves and useful earned builds need separate
+  acceptance. The frozen earned-route comparator is not expanded by later loot.
+- The **256 actual-HD** admission/detailed-record guard remains. Wide counts,
+  aggregate Health/XP and analytical funding do not bypass exact row storage.
+  Lossless paged HD storage/inspection is deferred; refusal must be atomic.
+- The live dungeon has an operational **1,000,000-floor** materialization limit,
+  not a designed terminal floor. Unique retrieval separately has **4,096 eligible
+  entry receipts**, even while the Amulet is carried. These independent limits
+  can refuse an entry; they do not grant victory or imply deep-run qualification.
+- Shared grip handling is implemented; general inventory carrying/containers and
+  richer item presentation remain separate work. Portable torches are supported
+  catalog content but not default live stock.
+- Only baleful Polymorph and the explicit emu/snake/troll destinations are current.
+  Temporary forms, expiry, broader form eligibility and cooperative consent are
+  future decisions, not implied by body enrollment.
+- Automatic travel stops for its current actor/Health/displacement hazards; a
+  complete newly discovered trap/dangerous-terrain classifier remains deferred.
+- Clients require relaunch to reconnect. Travel does not silently resume after a
+  restart; retained preparation requires fresh authorized input.
+- Server networking is loopback-only. Installer/distribution, automatic core
+  client server launch, remote authentication/encryption and multiplayer input
+  policy are not implemented merely because alternate clients exist.
+- Wizard rewind retains a 128-boundary window, is unavailable in normal play, and
+  permanently marks the game lineage. This is not ordinary save scumming support.
+- Saves retain canonical content and procedural sources, but uncopied unvisited
+  authored inputs may still require their exact immutable compiled bundle.
+  Portable export/import and historical-format migration are not implemented.
+- Runtime scripting and language selection remain undecided. Declarative recipe
+  support is not an executable script runtime.
+- Performance closure remains open. Sharing and lower operation counts do not
+  prove constant-world latency; history/actor scaling, persistence tails and
+  presentation-held state need measured acceptance. Preserve negative evidence.
+- Optional 3D/model capabilities and native visual qualification have their own
+  owner. Responsive startup and nonblocking model preparation are implemented;
+  the 100+ visible-creature 60 FPS target is not yet qualified. Its current
+  guide/art record defines exact controls, unfinished fitting/animation,
+  accessibility and richer HUD polish, and visual-review limitations.
 
 ## Next work
 
 ### Performance and scalable persistence
 
-Performance closure remains deferred and open; it does not block all feature
-milestones. Existing targets still apply to every change. Resolve save/restore
-and client timing tails, explain longer multi-client workloads, and measure
-remaining history/actor scaling costs. Do not call the work complete from lower
-operation counts or one favorable timing sample. The
-[performance guide](development/performance.md) owns targets, workload boundaries,
-reproduction, evidence and remaining acceptance criteria.
+Measure unresolved save/restore/client tails, long histories, actor-density and
+multi-client behavior against [performance targets](development/performance.md).
+The [server review](development/server-performance-review.md) preserves existing
+measurements; [documentation review findings](development/documentation-review.md#recommended-engineering-work)
+separate source-supported questions from demonstrated runtime defects.
 
 ### Ordered strike acceptance boundary
 
-The reconstructed shared `natural_melee` source imports each invoking species'
-ordered natural strikes and appends explicit ability riders through the ordinary
-compiler. Full-source grant validation includes dormant rows; immutable plans and
-bounded private inspection retain species/ability rider provenance. Species
-activation and integrated save/scenario/content qualification remain separate.
-This is new reconstruction of missing work, not an exact historical restoration.
-
-
-The shared sequence kernel, independent source/save/wire adapters and client
-controls are implemented. Primary and rider checks use one deterministic pipeline;
-source snapshots remain immutable across continuation and replay. Private authored
-source detail uses bounded wizard-only pages rather than eager expansion of every
-ability. The existing main inspection's unrelated ledger/source-row expansion is
-still a separate limitation.
-
-Sequence scheduling still visits actor/preparation candidates; zero plan recaptures
-or zero per-rider Game clones do not imply constant-world execution cost. The
-[performance guide](development/performance.md#ordered-strike-workload-v1) separates
-ordinary-combat comparisons from head-only sequence workloads and reports actual
-executed rows, loaded actor/region density and checkpoint versus journal-tail work.
-Local native input acceptance requires a usable display; exact waived local methods
-remain required by unwaived Windows/Linux CI. These boundaries do not close the
-remaining nutrition and Rogue content milestones. Finite supply/cooldown operation counts are measured separately;
-unchanged scene-build counts alone do not establish per-fragment lookup cost.
+The shared sequence kernel, adapters, ordinary controls and natural-melee riders
+are implemented. Immutable captures and correct replay do not establish cheap
+world-independent scheduling or complete native/content acceptance. Retain
+separate ordinary-combat and sequence workloads and their actual executed rows.
 
 ### Rogue adaptation and shared mechanics
 
-Build on the generated-floor foundation and finite starter content rather than
-recreate them. Performance acceptance, including persistence tails, is distinct
-from whether floor generation exists. Secrets, traps, optional strict room
-omissions and opt-in dark-room mazes are implemented. The maze/perception batch is
-merged with complete Windows/Linux debug and release CI; see the
-[published batch](https://github.com/KCall360/thresholds-of-ruin/pull/186).
-Its actual-process witnesses cover paid Search, traversal and source-free revisits.
-The earlier all-dark discovery failure motivated the approved tactile rule, not a
-weaker fixture, private route oracle or larger navigation cap.
-
-Live maze and omission policies remain disabled; numerical enablement is separate
-work. The separately approved missing-consumables reconstruction is in progress;
-balance tuning and unrelated milestones remain deferred. Remaining work includes
-shared survival, items and
-species behavior, the complete 26-species roster's integrated acceptance and
-pressured runs. Topology/persistence witnesses do not establish survival balance.
-Local graphical waivers were not passes; they did not remove required CI coverage.
-Work beyond the accepted 256-HD guard, including exact-row deep storage and
-disclosure paging, remains deferred rather than a prerequisite for functional Rogue.
-The [Rogue plan](plans/rogue.md) defines the adaptation and dependency order;
-the [tuning plan](plans/rogue-tuning.md) orders calibration milestones. Its
-milestone 1 adds scenario capability switches for owner advancement and
-corpses, authored growth schedules, and the separate Rogue-only
-[`rogue` package](play/rogue.md#rogue-only-scenario) with one locked build; the
-starter `rogue-exploration` package is unchanged. Later milestones add a Rogue
-reference model and per-species targets, an arena encounter study, seeded
-real-process campaigns, `chance_items` and `food_drought` population stages,
-per-choice quantities, Rogue's item table and treasure rooms, and value tuning
-of all 26 species (all 117 judged encounter ratios within ±35%). Recovery
-and regeneration cost follow Rogue's rates, and XP thresholds keep the locked
-build within one level of Rogue's model at every depth by a pacing model.
-Against the ratified tolerances, a sixteen-seed campaign passes levels, food,
-depth-4 share and encounters; the starvation share (5 of 9 deaths) is waived
-as a limit of the bot, which spends more turns per floor than Rogue's food
-supply sustains. Orcs are greedy, the food-drought guarantee forces food on the
-fourth foodless floor as Rogue does, and `died` events name their cause. Signature effects are measured too: all 128 judged encounter ratios are within ±35%. Monster flight on low Health is a scenario capability Rogue disables, and arenas can stand on a floor and report a per-action timeline.
-Rogue species are built through the [progression plan](plans/progression.md)'s
-advancement ledger, edge rules, regeneration and strike sequences; each of its
-phases still needs separate approval.
-Do not equate available framework types with all content being playable.
+The separate Rogue-only [`rogue` package](play/rogue.md#rogue-only-scenario) implements
+the [tuning plan](plans/rogue-tuning.md): scenario capability switches (owner
+advancement, corpses, NPC stairs, low-Health flight), a locked authored build,
+Rogue's item table, treasure rooms and food-drought guarantee, greedy orcs, and
+value tuning of all 26 species against Rogue's encounter ratios and signature
+effects (all 128 judged ratios within ±35%). Seeded campaigns pass levels, food and
+depth-4 share; the starvation share is waived as a limit of the campaign bot.
+`died` events name their cause, arenas can stand on a floor and report a per-step
+timeline, and explicit saves answer `save_behind` while play waits for a lagging
+writer. Broader HD storage, deep-run balance and pressured earned routes remain
+separate increments. Topology/recovery witnesses are not survival evidence;
+graphical waivers are never passes.
 
 ### Other scoped extensions
 
-- The text client reads idioms, modifiers, questions, follow-up answers and
-  confirmations, fights and retraces routes, and words combat from disclosed
-  facts. Repeated fight/follow goals preserve inter-round stop, resync and input
-  permission boundaries; combat prose avoids undisclosed source/effect claims,
-  and end accounts explicitly cover this client session. See
-  [playing in text](play/text.md). Still open, because they cross the
-  client boundary: authored descriptions, synonyms and place prose in scenario
-  packages (the client invents none), disclosing which item the objective names,
-  and any optional model-backed paraphrase layer for unrecognized input.
-- Implement a disclosed-view bot framework with uncertain memory and ordinary
-  action/travel boundaries; bots must not inspect server world state.
-- Design [script extensions](plans/scripting.md) separately from declarative
-  generation, including authority, budgets and deterministic saved state.
-- Reconcile suspend/resume file handling, portable export, stronger recovery,
-  larger retained history, packaging and client launch workflows.
-- Treat remote authentication/encrypted deployment, multiplayer input policy and
-  expansion of the 3D prototype beyond its accepted scope as separate later milestones.
+- Authored language/description/places and optional disclosed-view bots, without
+  giving clients hidden world authority.
+- Portable export, recovery/distribution and future remote/multiplayer policy.
+- [Scripting](plans/scripting.md), [presentation](plans/presentation.md), optional
+  3D/art work and temporary form decisions, each with explicit scope and approval.
 
-Planning approval does not authorize starting an implementation milestone or
-choosing a compatibility-breaking format. Follow [development practices](../CONTRIBUTING.md)
-and obtain the maintainer's required approval.
+Planning approval does not authorize a new implementation milestone or a breaking
+format decision. Follow [development practices](../CONTRIBUTING.md).
 
 ## Updating status
 
-Update this page with the relevant guide when scope changes. Remove fulfilled
-items from plans, replace superseded behavior, and keep historical test counts,
-CI gates and rollout narratives in Git history. Keep a necessary benchmark or
-rejected-alternative record only with its scope, limitations and durable evidence.
-The [documentation checks](../scripts/test_documentation.py) compare format
-identities against code; they do not certify semantic accuracy or fresh CI.
+Keep this page a current scope/format/next-work map. Exact mechanisms belong to
+references and architecture; proposals to plans; measurements to their evidence
+owners. The prior implementation/checkpoint chronology remains in the
+[post-206 tree](https://github.com/KCall360/thresholds-of-ruin/blob/dacbc215e12aaa13ef3cf89900836a296127f074/docs/status.md)
+and [merged 3D integration tree](https://github.com/KCall360/thresholds-of-ruin/blob/b758868a6c790788d2ad46597a8932eac1f954d4/docs/status.md),
+not reusable qualification of changed code.

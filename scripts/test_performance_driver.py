@@ -7,7 +7,80 @@ import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch, Mock
-from performance_driver import DiagnosticLog, JsonProcess, wall_time_ns, stop_all
+from performance_driver import DiagnosticLog, JsonProcess, wall_time_ns, stop_all, same_disclosed_state
+
+
+class DisclosedStateComparison(unittest.TestCase):
+    def test_cross_attachment_identity_is_not_disclosed_content(self):
+        first = dict(snapshot="first", revision="78", wizard_game=False,
+                     observation=dict(tick="100", inventory=[dict(id="item", quantity="1")]))
+        second = dict(first, snapshot="second", revision="1")
+        self.assertTrue(same_disclosed_state(first, second))
+        self.assertEqual(first["snapshot"], "first", "comparison must not mutate input")
+        self.assertFalse(same_disclosed_state(None, second))
+        self.assertFalse(same_disclosed_state(first, None))
+        self.assertFalse(same_disclosed_state(first, dict(second, wizard_game=True)))
+        self.assertFalse(same_disclosed_state(first, dict(second, observation=dict(tick="200", inventory=[]))))
+        self.assertFalse(same_disclosed_state(first, dict(second, extra="must not disappear")))
+
+
+    def test_wait_presentation_requires_exact_receipt_and_every_visual_field(self):
+        from performance_driver import presented_action
+        state = dict(snapshot="fresh", revision="2", observation=dict(tick="200", ready=True, inventory=[]))
+        entry = dict(id="wait", tick="200", content=dict(event=dict(type="waited")))
+        expected = dict(state=state, history=[entry])
+        prior = dict(state={**state, "snapshot":"old", "revision":"1",
+                            "observation":{**state["observation"], "tick":"100"}}, history=[entry])
+        self.assertTrue(presented_action(prior, expected, {"type":"wait"}))
+        self.assertFalse(presented_action(prior, expected, {"type":"move"}))
+        self.assertFalse(presented_action({**prior, "history":[]}, expected, {"type":"wait"}))
+        changed = {**prior, "state":{**prior["state"], "observation":{
+            **prior["state"]["observation"], "inventory":[dict(id="unexpected")]}}}
+        self.assertFalse(presented_action(changed, expected, {"type":"wait"}))
+
+
+class PlacePictureDemand(unittest.TestCase):
+    def test_spectator_wait_requires_every_public_entry_but_no_private_wizard_history(self):
+        from place_performance_driver import presented_place_command
+        state = dict(snapshot="new", revision="2", observation=dict(tick="100", inventory=[]))
+        private = dict(id="setup", audience="private", content=dict(type="wizard"))
+        rename = dict(id="rename", audience="actor", content=dict(type="place_renamed"))
+        waited = dict(id="wait", audience="actor", content=dict(type="action", event=dict(type="waited")))
+        expected = dict(state=state, history=[private, rename, waited])
+        shown = dict(state={**state, "snapshot":"spectator", "revision":"1",
+                            "observation":{**state["observation"], "tick":"0"}},
+                     history=[rename, waited])
+        action = dict(type="wait")
+        self.assertTrue(presented_place_command(shown, expected, action))
+        self.assertFalse(presented_place_command({**shown, "history":[waited]}, expected, action))
+        self.assertFalse(presented_place_command({**shown, "history":expected["history"]}, expected, action))
+        changed = {**shown, "state":{**shown["state"], "observation":{
+            **shown["state"]["observation"], "inventory":[dict(id="unexpected")]}}}
+        self.assertFalse(presented_place_command(changed, expected, action))
+
+    def test_current_picture_demand_keeps_causal_ready_metrics(self):
+        from place_performance_driver import send_observed_command
+        causal = dict(error=None, state=dict(snapshot="old"), memory=["known"])
+        current = dict(error=None, state=dict(snapshot="current"), memory=["known", "new"])
+        class Client:
+            last_reader_work_ms = 2
+            last_queue_delay_ms = 3
+            def send(self, request):
+                self.request = request
+                return causal, 10., 11., 12.
+            def observe(self):
+                self.last_reader_work_ms = 20
+                self.last_queue_delay_ms = 30
+                return current, 14.
+        client = Client()
+        request = {"type": "request", "request": {"type": "command"}}
+        state, start, ack, ready, metrics = send_observed_command(client, request)
+        self.assertIs(client.request, request)
+        self.assertIs(state, current)
+        self.assertEqual((start, ack, ready), (10., 11., 12.))
+        self.assertEqual(metrics, dict(ready_reader_work_ms=2, ready_queue_delay_ms=3,
+            headless_memory_cells=1, headless_ready_bytes=len(json.dumps(causal).encode("utf-8")),
+            request_to_observation_ms=4000.))
 
 
 class SavedExplorationInput(unittest.TestCase):
@@ -43,6 +116,34 @@ class SavedExplorationInput(unittest.TestCase):
         self.assertEqual(elapsed, 4000., "Timing must use the returned frame's receipt")
         self.assertEqual(json.loads(client.child.stdin.getvalue()),
                          {"type": "key", "key": "right"})
+
+    def test_exploration_waits_for_picture_after_causal_admission(self):
+        from saved_exploration_driver import key
+        causal = self.frame(done="right", admit=True)
+        causal["state"]["snapshot"] = "before"
+        picture = self.frame(admit=True)
+        picture["state"]["snapshot"] = "after"
+        client = self.client([(causal, 101.), (picture, 103.)])
+        with patch("saved_exploration_driver.time.perf_counter", return_value=100.):
+            frame, elapsed = key(client, "right", picture_after="before")
+        self.assertIs(frame, picture)
+        self.assertEqual(elapsed, 3000., "Presentation timing includes actual picture receipt")
+        self.assertEqual(json.loads(client.child.stdin.getvalue()), {"type":"key", "key":"right"})
+
+    def test_explicit_observe_preserves_action_timing_and_does_not_reset(self):
+        expected = {"type":"ready", "error":None, "state":{"snapshot":"fresh"}}
+        client = self.client([(expected, 103.)])
+        client.action_timing = {"request_to_outcome_ms": 1000.}
+        client.ack_line_received = 101.
+        client.ack_request_id = "original-action"
+        frame, received = client.observe()
+        self.assertIs(frame, expected)
+        self.assertEqual(received, 103.)
+        self.assertEqual(client.action_timing, {"request_to_outcome_ms":1000.})
+        self.assertEqual(client.ack_line_received, 101.)
+        self.assertEqual(client.ack_request_id, "original-action")
+        self.assertEqual(json.loads(client.child.stdin.getvalue()),
+                         {"type":"request", "request":{"type":"observe"}})
 
     def test_already_permitted_input_returns_its_acknowledged_frame(self):
         from saved_exploration_driver import key
@@ -146,7 +247,7 @@ class DriverTiming(unittest.TestCase):
             {"type": "act", "action": {"type": "wait"}},
             {"type": "request", "request": {"type": "command", "branch": "branch",
                 "context": {"stream": {"stream": "s", "epoch": "1"}, "readiness_revision": "1"},
-                "command": {"type": "act", "expected_revision": "0", "action": {"type": "wait"}}}},
+                "command": {"type": "act", "action": {"type": "wait"}}}},
         ]
         for value in actions:
             with self.subTest(input_type=value["type"]):

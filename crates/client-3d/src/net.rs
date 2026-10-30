@@ -26,7 +26,7 @@ pub enum Event {
     /// A projectile choice in progress, or `None` once it ends.
     Projectile(Option<ProjectilePrompt>),
     /// The advancement pages as the player reads them.
-    Advancement(Vec<String>),
+    Advancement(Box<tor_client_3d_model::AdvancementView>),
     /// The detection charts: the catalog, or the chosen chart's rows.
     Charts(Vec<String>),
     Status(String),
@@ -244,7 +244,7 @@ async fn session(
         publish(tx, event)?;
     }
     let mut menu = None;
-    let mut advancement = Vec::new();
+    let mut advancement = tor_client_3d_model::AdvancementView::default();
     let mut charts = Vec::new();
     loop {
         tokio::select! {
@@ -315,16 +315,18 @@ async fn session(
 /// Publish the advancement display when it changed, or always on request.
 fn present_advancement(
     connection: &Connection,
-    shown: &mut Vec<String>,
+    shown: &mut tor_client_3d_model::AdvancementView,
     tx: &SyncSender<Event>,
     always: bool,
 ) -> Result<(), Error> {
-    let lines = connection
-        .advancement_pages
-        .display(&connection.state.state().observation);
-    if always || lines != *shown {
-        shown.clone_from(&lines);
-        publish(tx, Event::Advancement(lines))?;
+    let view = tor_client_3d_model::AdvancementView::new(
+        &connection.advancement_pages,
+        &connection.state,
+        connection.is_synchronized(),
+    );
+    if always || view != *shown {
+        shown.clone_from(&view);
+        publish(tx, Event::Advancement(Box::new(view)))?;
     }
     Ok(())
 }
@@ -556,6 +558,7 @@ mod tests {
         app.insert_resource(net)
             .insert_resource(game)
             .insert_resource(crate::CameraRig::default())
+            .init_resource::<crate::interact::Panel>()
             .init_resource::<ButtonInput<KeyCode>>()
             .init_resource::<Time>()
             .add_event::<bevy::input::mouse::MouseWheel>()

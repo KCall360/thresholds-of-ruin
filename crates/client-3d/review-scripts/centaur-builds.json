@@ -1,0 +1,418 @@
+{
+  "version": 1,
+  "hz": 50,
+  "viewport": [
+    640,
+    640
+  ],
+  "actors": [
+    {
+      "id": "slender-man",
+      "model": "Centaur",
+      "seed": 17,
+      "body": {
+        "woman": false,
+        "build": 0,
+        "hair": 2
+      },
+      "outfit": "native",
+      "equipment": [],
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "average-man",
+      "model": "Centaur",
+      "seed": 17,
+      "body": {
+        "woman": false,
+        "build": 1,
+        "hair": 2
+      },
+      "outfit": "native",
+      "equipment": [],
+      "position": [
+        4,
+        0,
+        0
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "sturdy-man",
+      "model": "Centaur",
+      "seed": 17,
+      "body": {
+        "woman": false,
+        "build": 2,
+        "hair": 2
+      },
+      "outfit": "native",
+      "equipment": [],
+      "position": [
+        8,
+        0,
+        0
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "slender-woman",
+      "model": "Centaur",
+      "seed": 17,
+      "body": {
+        "woman": true,
+        "build": 0,
+        "hair": 2
+      },
+      "outfit": "native",
+      "equipment": [],
+      "position": [
+        12,
+        0,
+        0
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "average-woman",
+      "model": "Centaur",
+      "seed": 17,
+      "body": {
+        "woman": true,
+        "build": 1,
+        "hair": 2
+      },
+      "outfit": "native",
+      "equipment": [],
+      "position": [
+        16,
+        0,
+        0
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "sturdy-woman",
+      "model": "Centaur",
+      "seed": 17,
+      "body": {
+        "woman": true,
+        "build": 2,
+        "hair": 2
+      },
+      "outfit": "native",
+      "equipment": [],
+      "position": [
+        20,
+        0,
+        0
+      ],
+      "yaw": 0
+    }
+  ],
+  "cameras": [
+    {
+      "id": "slender-man",
+      "position": [
+        2.5,
+        1.7,
+        3.7
+      ],
+      "target": [
+        0,
+        1.0,
+        0
+      ],
+      "fov_degrees": 38
+    },
+    {
+      "id": "average-man",
+      "position": [
+        6.5,
+        1.7,
+        3.7
+      ],
+      "target": [
+        4,
+        1.0,
+        0
+      ],
+      "fov_degrees": 38
+    },
+    {
+      "id": "sturdy-man",
+      "position": [
+        10.5,
+        1.7,
+        3.7
+      ],
+      "target": [
+        8,
+        1.0,
+        0
+      ],
+      "fov_degrees": 38
+    },
+    {
+      "id": "slender-woman",
+      "position": [
+        14.5,
+        1.7,
+        3.7
+      ],
+      "target": [
+        12,
+        1.0,
+        0
+      ],
+      "fov_degrees": 38
+    },
+    {
+      "id": "average-woman",
+      "position": [
+        18.5,
+        1.7,
+        3.7
+      ],
+      "target": [
+        16,
+        1.0,
+        0
+      ],
+      "fov_degrees": 38
+    },
+    {
+      "id": "sturdy-woman",
+      "position": [
+        22.5,
+        1.7,
+        3.7
+      ],
+      "target": [
+        20,
+        1.0,
+        0
+      ],
+      "fov_degrees": 38
+    }
+  ],
+  "events": [
+    {
+      "tick": 0,
+      "actor": "slender-man",
+      "operation": {
+        "type": "teleport",
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "yaw": 0
+      }
+    },
+    {
+      "tick": 0,
+      "actor": "average-man",
+      "operation": {
+        "type": "teleport",
+        "position": [
+          4,
+          0,
+          0
+        ],
+        "yaw": 0
+      }
+    },
+    {
+      "tick": 0,
+      "actor": "sturdy-man",
+      "operation": {
+        "type": "teleport",
+        "position": [
+          8,
+          0,
+          0
+        ],
+        "yaw": 0
+      }
+    },
+    {
+      "tick": 0,
+      "actor": "slender-woman",
+      "operation": {
+        "type": "teleport",
+        "position": [
+          12,
+          0,
+          0
+        ],
+        "yaw": 0
+      }
+    },
+    {
+      "tick": 0,
+      "actor": "average-woman",
+      "operation": {
+        "type": "teleport",
+        "position": [
+          16,
+          0,
+          0
+        ],
+        "yaw": 0
+      }
+    },
+    {
+      "tick": 0,
+      "actor": "sturdy-woman",
+      "operation": {
+        "type": "teleport",
+        "position": [
+          20,
+          0,
+          0
+        ],
+        "yaw": 0
+      }
+    },
+    {
+      "tick": 1,
+      "actor": "slender-man",
+      "operation": {
+        "type": "velocity",
+        "value": [
+          0,
+          0,
+          0.65
+        ]
+      }
+    },
+    {
+      "tick": 1,
+      "actor": "average-man",
+      "operation": {
+        "type": "velocity",
+        "value": [
+          0,
+          0,
+          0.65
+        ]
+      }
+    },
+    {
+      "tick": 1,
+      "actor": "sturdy-man",
+      "operation": {
+        "type": "velocity",
+        "value": [
+          0,
+          0,
+          0.65
+        ]
+      }
+    },
+    {
+      "tick": 1,
+      "actor": "slender-woman",
+      "operation": {
+        "type": "velocity",
+        "value": [
+          0,
+          0,
+          0.65
+        ]
+      }
+    },
+    {
+      "tick": 1,
+      "actor": "average-woman",
+      "operation": {
+        "type": "velocity",
+        "value": [
+          0,
+          0,
+          0.65
+        ]
+      }
+    },
+    {
+      "tick": 1,
+      "actor": "sturdy-woman",
+      "operation": {
+        "type": "velocity",
+        "value": [
+          0,
+          0,
+          0.65
+        ]
+      }
+    }
+  ],
+  "captures": [
+    {
+      "tick": 0,
+      "name": "slender-man-rest",
+      "camera": "slender-man"
+    },
+    {
+      "tick": 0,
+      "name": "average-man-rest",
+      "camera": "average-man"
+    },
+    {
+      "tick": 0,
+      "name": "sturdy-man-rest",
+      "camera": "sturdy-man"
+    },
+    {
+      "tick": 0,
+      "name": "slender-woman-rest",
+      "camera": "slender-woman"
+    },
+    {
+      "tick": 0,
+      "name": "average-woman-rest",
+      "camera": "average-woman"
+    },
+    {
+      "tick": 0,
+      "name": "sturdy-woman-rest",
+      "camera": "sturdy-woman"
+    },
+    {
+      "tick": 25,
+      "name": "slender-man-walk",
+      "camera": "slender-man"
+    },
+    {
+      "tick": 25,
+      "name": "average-man-walk",
+      "camera": "average-man"
+    },
+    {
+      "tick": 25,
+      "name": "sturdy-man-walk",
+      "camera": "sturdy-man"
+    },
+    {
+      "tick": 25,
+      "name": "slender-woman-walk",
+      "camera": "slender-woman"
+    },
+    {
+      "tick": 25,
+      "name": "average-woman-walk",
+      "camera": "average-woman"
+    },
+    {
+      "tick": 25,
+      "name": "sturdy-woman-walk",
+      "camera": "sturdy-woman"
+    }
+  ]
+}

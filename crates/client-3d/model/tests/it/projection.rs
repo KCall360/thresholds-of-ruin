@@ -3,6 +3,29 @@ use tor_client_common::{test_support::observation, ClientState, Palette};
 use tor_protocol::{ItemClass, ItemTarget, ItemView, Snapshot, StreamContext, StreamId};
 
 #[test]
+fn character_attributes_follow_disclosure_and_do_not_survive_redaction() {
+    let mut observed = observation();
+    let mut stats = tor_client_common::test_support::stats();
+    stats.attributes.strength = 7;
+    stats.attributes.speed = 4;
+    observed.combat.as_mut().unwrap().own_stats = Some(stats);
+    let projected = view(&from_observation(observed.clone()), &Palette::default());
+    let attributes = projected.attributes.unwrap();
+    assert_eq!(attributes.strength, 7);
+    assert_eq!(attributes.speed, 4);
+    observed.combat.as_mut().unwrap().own_stats = None;
+    assert!(
+        view(&from_observation(observed.clone()), &Palette::default())
+            .attributes
+            .is_none()
+    );
+    observed.combat = None;
+    assert!(view(&from_observation(observed), &Palette::default())
+        .attributes
+        .is_none());
+}
+
+#[test]
 fn upper_body_and_portal_images_do_not_replace_the_players_known_foot_position() {
     use tor_protocol::{AppearanceSeed, CreatureAppearance, Position, WornView};
     let mut observed = observation();
@@ -79,7 +102,7 @@ fn from_observation(observed: tor_protocol::Observation) -> ClientState {
         "context": StreamContext { stream: StreamId("projection".into()), epoch: 0 },
         "actor": observed.actor, "branch": "play", "cursor": {"sequence": "0", "tick": observed.tick.to_string()},
         "has_control": true, "intentions": [], "history": {"entries": [], "older_before": null},
-        "state": {"wizard_game": false, "revision": "0", "observation": observed},
+        "state": {"snapshot":"fixture-snapshot","wizard_game": false, "revision": "0", "observation": observed},
     })).unwrap();
     ClientState::from_snapshot(snapshot).unwrap()
 }
@@ -193,7 +216,7 @@ fn hydrated_terrain_is_dim_and_never_grants_live_occupants_or_door_controls() {
     };
     let page = MapPage {
         transfer: "transfer".into(),
-        actor: client.snapshot().actor,
+        actor: client.actor(),
         branch: client.branch().clone(),
         base: client.observation_base(),
         window: query.window,
@@ -275,7 +298,7 @@ fn portable_light_projection_and_real_commands_follow_disclosed_eligibility() {
     for lit in [false, true] {
         let observed = tor_client_common::test_support::portable_light_observation(lit);
         let item = observed.inventory[0].id;
-        let mut snapshot = from_observation(observed).snapshot();
+        let mut snapshot = from_observation(observed).reset_snapshot().unwrap();
         snapshot.readiness.admission = true;
         let state = ClientState::from_snapshot(snapshot).unwrap();
         let projected = view(&state, &Palette::default());
@@ -507,7 +530,7 @@ fn hydrated_stair_art_repairs_with_palette_then_current_none_overrides_only_that
     .collect();
     let page = MapPage {
         transfer: "historical-stair-transfer".into(),
-        actor: client.snapshot().actor,
+        actor: client.actor(),
         branch: client.branch().clone(),
         base: client.observation_base(),
         window: query.window,
@@ -551,6 +574,7 @@ fn hydrated_stair_art_repairs_with_palette_then_current_none_overrides_only_that
     }
     let mut next = client.state().clone();
     next.revision += 1;
+    next.snapshot = SnapshotId(format!("fixture-display-{}", next.revision));
     next.observation.visible_cells.push(CellView {
         object_presentation: None,
         key: "current-stair".into(),

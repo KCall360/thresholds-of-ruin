@@ -22,7 +22,7 @@ const GOLD: u32 = 0xedc579;
 const DANGER: u32 = 0xef958c;
 
 /// The key hint under the status lines.
-const HINT: &str = "? help  hjklyubn move/run  < > stairs  _ travel  ; look  i inventory  m charts  @ stats  z abilities  g pick up  a attack  ^P messages";
+const HINT: &str = "? help  # commands  hjklyubn move/run  , pickup  s search  r read  z zap  Z abilities  a apply  t throw  ^X stats  ^P messages  S save/close";
 
 /// The map as drawn: one tile per column, current and remembered.
 pub fn map_tiles(
@@ -272,7 +272,8 @@ impl Canvas {
             }
         }
         let hint = if app.role == AccessRole::Spectator {
-            "READ-ONLY   ? help   ^P messages   F2 history   F5 places   Esc quit".into()
+            "READ-ONLY   ? help   # commands   ^P messages   F2 history   F5 places   S close"
+                .into()
         } else {
             app.intention_hint().unwrap_or_else(|| HINT.into())
         };
@@ -288,6 +289,33 @@ impl Canvas {
     }
 
     fn draw_screens(&mut self, app: &App) {
+        if let Some(line) = &app.command_line {
+            self.screen(
+                "EXTENDED COMMANDS",
+                "Type to filter   UP/DOWN selects   ENTER chooses   ESC cancels",
+            );
+            let rows = app.command_rows();
+            let start = app.command_selected.saturating_sub(19);
+            for (index, row) in rows.iter().skip(start).take(20).enumerate() {
+                self.text(
+                    72,
+                    152 + index * 24,
+                    row,
+                    if start + index == app.command_selected {
+                        GOLD
+                    } else {
+                        TEXT
+                    },
+                    1,
+                    105,
+                );
+            }
+            if rows.is_empty() {
+                self.text(72, 152, "No supported command matches.", MUTED, 2, 65);
+            }
+            self.text(72, 662, &format!("# {line}"), GOLD, 2, 65);
+            return;
+        }
         if app.charts_open {
             self.screen(
                 "DETECTION CHARTS — READ ONLY",
@@ -322,7 +350,7 @@ impl Canvas {
                 self.text(
                     252,
                     424,
-                    "Enter closes this   ^P messages   F2 history   Esc quits",
+                    "Enter closes this   ^P messages   F2 history   S saves/closes",
                     MUTED,
                     1,
                     80,
@@ -398,6 +426,7 @@ impl Canvas {
             self.panel(160, 150, 880, 480);
             let title = match app.item_operation {
                 Some(operation) => format!("WHAT DO YOU WANT TO {}?", operation.verb()),
+                None if app.applying => "WHAT LIGHT DO YOU WANT TO APPLY?".into(),
                 None if app.dropping => "WHAT DO YOU WANT TO DROP?".into(),
                 None => "WHAT DO YOU WANT TO PICK UP?".into(),
             };
@@ -405,7 +434,7 @@ impl Canvas {
             self.text(
                 188,
                 208,
-                &if app.item_operation.is_some() {
+                &if app.item_operation.is_some() || app.applying {
                     "letter or UP/DOWN + ENTER chooses   ESC cancels".to_owned()
                 } else {
                     format!(
@@ -491,7 +520,7 @@ impl Canvas {
         if app.stats_open {
             self.screen(
                 app.stats_title(),
-                "UP/DOWN scroll   PGUP/PGDN page   ESC or @ closes",
+                "UP/DOWN scroll   PGUP/PGDN page   ESC or CTRL-X closes",
             );
             let rows = app.stats_rows();
             let start = app
@@ -505,9 +534,9 @@ impl Canvas {
             self.screen(
                 "ABILITIES",
                 if app.weapon_selection_available() {
-                    "UP/DOWN selects   TAB weapon   ENTER target   ESC cancels"
+                    "UP/DOWN selects   TAB weapon   ENTER selects/uses   ESC cancels"
                 } else {
-                    "UP/DOWN selects   ENTER target   ESC cancels"
+                    "UP/DOWN selects   ENTER selects/uses   ESC cancels"
                 },
             );
             for (i, ability) in app.ability_choices.iter().enumerate() {

@@ -23,13 +23,15 @@ works while ordinary work is in progress.
 | `overview` | Starting skills, points, earned/held XP, next threshold, explicit future growth source, provisional timing, readiness and respec progress |
 | `ledger` | Existing purchases, their HD owner/pool/source and Active/Dormant state |
 | `balances` | Granted, spent and unspent points in each exact HD/pool |
-| `skills`, `talents` | Server catalog IDs and names; catalog membership does not establish eligibility |
+| `skills`, `talents`, `expertises` | Server catalog IDs and names; catalog membership does not establish eligibility |
+| `intellect-expertises` | Retained Intellect thresholds and their choices |
+| `intellect-expertise <threshold> <expertise ID>` | Preview a non-specialist expertise for an eligible retained threshold; spends no HD pool point |
 | `next`, `previous` | Another bounded page of the current section |
 | `source racial`, `source class <class ID>` | Preview a future HD source; confirm applies retained XP when eligible |
-| `purchase <HD> <pool ID> <skill\|talent> <ID> [form <form ID>]` | Preview that exact purchase; a choice-bearing talent requires its listed form ID |
+| `purchase <HD> <pool ID> <skill\|talent\|expertise> <ID> [form <form ID>]` | Preview that exact purchase; a choice-bearing talent requires its listed form ID |
 | `remove <HD> <purchase number>` | Preview removing an existing purchase without a replacement |
-| `replace <HD> <purchase number> <pool ID> <skill\|talent> <ID> [form <form ID>]` | Preview replacing an existing purchase at its same HD owner, retaining the exact form choice |
-| `details <section>` | Preview section: `summary`, `removed`, `refunds`, `balances`, `skills`, `talents`, or `conditions` |
+| `replace <HD> <purchase number> <pool ID> <skill\|talent\|expertise> <ID> [form <form ID>]` | Preview replacing an existing purchase at its same HD owner, retaining the exact form choice |
+| `details <section>` | Preview section: `summary`, `removed`, `refunds`, `balances`, `skills`, `talents`, `expertises`, or `conditions` |
 | `supplies` | Eligible carried or explicitly touch-reachable known ration sources |
 | `confirm [using carried\|<name or #item>]` | Commit the exact retained proposal through ordinary action admission |
 | `resume` | Resume the exact paused respec shown by the current overview, when permitted |
@@ -37,6 +39,9 @@ works while ordinary work is in progress.
 
 HD and purchase numbers in these controls start at **1**. The protocol uses
 zero-based owner and source indices; the client preserves those exact operands.
+Intellect threshold numbers are already one-based and are not zero-based HD
+wire owners. Body-package pools are locked; the live presets' first purchasable
+class owner is HD 2. See [progression ownership](../reference/progression.md).
 Copy pool and selection IDs from the server's pages. No pool is chosen silently.
 A talent catalog keeps each root on one row with up to sixteen named form options.
 Use `talent <root ID> form <form ID>` only for a root that lists choices. The

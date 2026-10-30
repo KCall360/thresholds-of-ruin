@@ -5,6 +5,49 @@ use tor_client_3d_model::Actor;
 struct Fixture(View);
 
 #[test]
+fn pending_figures_accept_disclosed_movement_changes_and_disappearance() {
+    let mut app = app(CreatureModel::Human);
+    app.world_mut()
+        .insert_resource(creatures::loading::ModelLoading::blocked_for_tests());
+    app.update();
+    let id = app.world().resource::<Fixture>().0.actors[0].id;
+    let first = app.world().resource::<Game>().actors[&id];
+    assert_eq!(
+        app.world().get::<creatures::Rig>(first).unwrap().plan,
+        creatures::Plan::Marker
+    );
+    assert!(
+        app.world().get::<crate::picking::Pick>(first).is_some(),
+        "an egg is still selectable"
+    );
+    {
+        let mut fixture = app.world_mut().resource_mut::<Fixture>();
+        fixture.0.actors[0].position.x = 2;
+        fixture.0.actors[0].name = "updated while loading".into();
+        fixture.0.actors[0].hostile = true;
+    }
+    app.update();
+    assert_eq!(app.world().resource::<Game>().actors[&id], first);
+    let body = app.world().get::<ActorBody>(first).unwrap();
+    assert_eq!(body.goal.x, 2.0);
+    assert_eq!(body.name, "updated while loading");
+    assert!(body.hostile);
+    app.world_mut().resource_mut::<Fixture>().0.actors[0].model = CreatureModel::Emu;
+    app.update();
+    let replacement = app.world().resource::<Game>().actors[&id];
+    assert_ne!(replacement, first);
+    assert!(!app.world().entities().contains(first));
+    assert!(app
+        .world()
+        .get::<creatures::loading::PendingModel>(replacement)
+        .is_some());
+    app.world_mut().resource_mut::<Fixture>().0.actors.clear();
+    app.update();
+    assert!(app.world().resource::<Game>().actors.is_empty());
+    assert!(!app.world().entities().contains(replacement));
+}
+
+#[test]
 fn identifying_a_corpse_refreshes_its_cached_recipe_without_rebuilding_unchanged_views() {
     use tor_protocol::{AppearanceSeed, ItemTarget};
     let mut app = app(CreatureModel::Placeholder);
@@ -25,9 +68,9 @@ fn identifying_a_corpse_refreshes_its_cached_recipe_without_rebuilding_unchanged
             position: Position { x: 1, y: 0, z: 0 },
             reachable: false,
         });
-    app.update();
+    update(&mut app);
     let before = app.world().resource::<Game>().corpses[&id].entity;
-    app.update();
+    update(&mut app);
     assert_eq!(
         app.world().resource::<Game>().corpses[&id].entity,
         before,
@@ -41,7 +84,7 @@ fn identifying_a_corpse_refreshes_its_cached_recipe_without_rebuilding_unchanged
         view.0.revision += 1;
         view.0.shown.revision = view.0.revision;
     }
-    app.update();
+    update(&mut app);
     let after = app.world().resource::<Game>().corpses[&id].entity;
     assert_ne!(
         before, after,
@@ -59,14 +102,14 @@ fn identifying_a_corpse_refreshes_its_cached_recipe_without_rebuilding_unchanged
             .is_some(),
         "disclosed zombie uses its articulated recipe"
     );
-    app.update();
+    update(&mut app);
     assert_eq!(app.world().resource::<Game>().corpses[&id].entity, after);
 }
 
 #[test]
 fn a_new_stream_or_branch_drops_abandoned_ui_intentions_and_state_cues() {
     let mut app = app(CreatureModel::Placeholder);
-    app.update();
+    update(&mut app);
     app.world_mut()
         .resource_mut::<interact::Pursuit>()
         .fetch(tor_protocol::ItemTarget::from_digest([9; 32]));
@@ -83,7 +126,7 @@ fn a_new_stream_or_branch_drops_abandoned_ui_intentions_and_state_cues() {
         view.0.branch.0 = "rewound".into();
         view.0.shown.branch = view.0.branch.clone();
     }
-    app.update();
+    update(&mut app);
     let mut retained = Vec::new();
     if app.world().resource::<interact::Pursuit>().active() {
         retained.push("pursuit");
@@ -133,7 +176,7 @@ fn only_the_same_cosmetic_identity_in_the_same_3d_cell_reuses_a_fallen_body() {
     use tor_protocol::{AppearanceSeed, ItemTarget};
     for (height, seed, expected) in [(3, 19, false), (0, 37, false), (0, 19, true)] {
         let mut app = app(CreatureModel::Placeholder);
-        app.update();
+        update(&mut app);
         let entity = *app
             .world()
             .resource::<Game>()
@@ -169,7 +212,7 @@ fn only_the_same_cosmetic_identity_in_the_same_3d_cell_reuses_a_fallen_body() {
                 },
                 reachable: false,
             });
-        app.update();
+        update(&mut app);
         assert_eq!(
             app.world().resource::<Game>().dying[0].holds,
             expected,
@@ -226,7 +269,10 @@ fn app(model: CreatureModel) -> App {
             crystal_mat: default(),
             hostile_ring: default(),
         })
-        .add_systems(Update, project);
+        .add_systems(
+            Update,
+            (project, creatures::loading::poll, refresh_held).chain(),
+        );
     app
 }
 
@@ -242,7 +288,7 @@ fn observer_role_and_interaction_target_do_not_change_the_rendered_appearance() 
             actor.appearance_seed =
                 Some(tor_protocol::AppearanceSeed::from_digest([variation; 32]));
         }
-        app.update();
+        update(&mut app);
         let entity = *app
             .world()
             .resource::<Game>()
@@ -275,7 +321,7 @@ fn repeated_body_cells_create_one_rig_and_one_label() {
         .0
         .actors
         .push(upper);
-    app.update();
+    update(&mut app);
     let game = app.world().resource::<Game>();
     assert_eq!(game.actors.len(), 1);
     assert_eq!(
@@ -288,7 +334,7 @@ fn repeated_body_cells_create_one_rig_and_one_label() {
 #[test]
 fn a_cached_rig_does_not_jump_to_a_later_alias_in_the_same_view() {
     let mut app = app(CreatureModel::Placeholder);
-    app.update();
+    update(&mut app);
     let entity = *app
         .world()
         .resource::<Game>()
@@ -304,7 +350,7 @@ fn a_cached_rig_does_not_jump_to_a_later_alias_in_the_same_view() {
         .0
         .actors
         .push(echo);
-    app.update();
+    update(&mut app);
     assert_eq!(
         app.world().get::<ActorBody>(entity).unwrap().goal,
         expected,
@@ -315,9 +361,9 @@ fn a_cached_rig_does_not_jump_to_a_later_alias_in_the_same_view() {
 #[test]
 fn disclosed_renaming_updates_the_existing_label() {
     let mut app = app(CreatureModel::Placeholder);
-    app.update();
+    update(&mut app);
     app.world_mut().resource_mut::<Fixture>().0.actors[0].name = "new name".into();
-    app.update();
+    update(&mut app);
     let actor = *app
         .world()
         .resource::<Game>()
@@ -333,9 +379,9 @@ fn disclosed_renaming_updates_the_existing_label() {
 #[test]
 fn hostility_changes_refresh_the_label_cue_as_well_as_the_ring() {
     let mut app = app(CreatureModel::Placeholder);
-    app.update();
+    update(&mut app);
     app.world_mut().resource_mut::<Fixture>().0.actors[0].hostile = true;
-    app.update();
+    update(&mut app);
     let actor = *app
         .world()
         .resource::<Game>()
@@ -353,10 +399,10 @@ fn hostility_changes_refresh_the_label_cue_as_well_as_the_ring() {
 #[test]
 fn a_removed_body_does_not_leave_a_stale_hand_entry() {
     let mut app = app(CreatureModel::Humanoid);
-    app.update();
+    update(&mut app);
     assert_eq!(app.world().resource::<Game>().hands.len(), 1);
     app.world_mut().resource_mut::<Fixture>().0.actors.clear();
-    app.update();
+    update(&mut app);
     assert!(
         app.world().resource::<Game>().hands.is_empty(),
         "removed rigs cannot retain hand references"
@@ -372,7 +418,7 @@ fn a_body_is_not_lowered_into_unseen_space_beneath_its_disclosed_cell() {
         view.0.actors[0].position = position;
         view.0.visible[0].position = position;
     }
-    app.update();
+    update(&mut app);
     let actor = *app
         .world()
         .resource::<Game>()
@@ -409,7 +455,7 @@ fn remembered_terrain_builds_dim_geometry_without_decorative_lighting() {
     use tor_protocol::RememberedMapCell;
     let mut app = app(CreatureModel::Placeholder);
     app.add_systems(Update, project_terrain.after(project));
-    app.update();
+    update(&mut app);
     assert!(!app
         .world()
         .resource::<Game>()
@@ -438,7 +484,7 @@ fn remembered_terrain_builds_dim_geometry_without_decorative_lighting() {
         ..wall.clone()
     };
     app.world_mut().resource_mut::<Fixture>().0.memory = vec![wall, floor];
-    app.update();
+    update(&mut app);
     let game = app.world().resource::<Game>();
     let solid = &game.cave.solids[&IVec3::new(2, 0, 2)];
     assert!(!solid.seen && !solid.lit);
@@ -474,7 +520,7 @@ fn present_held(
 fn other_figures_hold_their_disclosed_weapon_and_nothing_when_none_is_disclosed() {
     let mut app = app(CreatureModel::Human);
     app.add_systems(Update, present_held.after(project));
-    app.update();
+    update(&mut app);
     assert!(
         app.world().resource::<Game>().held.is_empty(),
         "no disclosed weapon, no guessed one"
@@ -482,7 +528,7 @@ fn other_figures_hold_their_disclosed_weapon_and_nothing_when_none_is_disclosed(
     app.world_mut().resource_mut::<Fixture>().0.actors[0]
         .wearing
         .weapons[0] = Some(ItemModel::Mace);
-    app.update();
+    update(&mut app);
     let (hand, (kind, model)) = held_one(&app);
     assert_eq!(kind, ItemModel::Mace);
     assert_eq!(
@@ -495,7 +541,7 @@ fn other_figures_hold_their_disclosed_weapon_and_nothing_when_none_is_disclosed(
     app.world_mut().resource_mut::<Fixture>().0.actors[0]
         .wearing
         .weapons[0] = None;
-    app.update();
+    update(&mut app);
     assert!(app.world().resource::<Game>().held.is_empty());
     assert!(
         app.world().get_entity(model).is_err(),
@@ -525,7 +571,7 @@ fn cosmetic_item_models_never_reuse_real_corpse_rigs_or_acquire_cell_picks() {
                 position: Position { x: 1, y: 0, z: 0 },
                 reachable: true,
             });
-        app.update();
+        update(&mut app);
         let game = app.world().resource::<Game>();
         assert!(
             game.corpses.is_empty(),
@@ -554,7 +600,7 @@ fn unknown_stair_recipe_changes_scene_models_and_cure_restores_real_stairs() {
         .visible
         .push(stair);
     app.add_systems(Update, project_terrain.after(project));
-    app.update();
+    update(&mut app);
     let old = app.world().resource::<Game>().cells[&ivec(at)].0;
     assert!(matches!(
         app.world().resource::<Game>().cells[&ivec(at)].1,
@@ -578,7 +624,7 @@ fn unknown_stair_recipe_changes_scene_models_and_cure_restores_real_stairs() {
             });
             fixture.0.object_models.insert(at, model);
         }
-        app.update();
+        update(&mut app);
         let game = app.world().resource::<Game>();
         let (entity, look) = game.cells[&ivec(at)];
         assert!(matches!(look, CellLook::Object(selected) if selected == model));
@@ -595,7 +641,7 @@ fn unknown_stair_recipe_changes_scene_models_and_cure_restores_real_stairs() {
         fixture.0.visible[1].object_presentation = None;
         fixture.0.object_models.remove(&at);
     }
-    app.update();
+    update(&mut app);
     assert!(matches!(
         app.world().resource::<Game>().cells[&ivec(at)].1,
         CellLook::StairsUp
@@ -625,7 +671,7 @@ fn ordinary_corpse_rig_and_real_pick_return_after_a_cosmetic_item_is_cured() {
         fixture.0.actors.clear();
         fixture.0.items = vec![corpse.clone()];
     }
-    app.update();
+    update(&mut app);
     let initial = app.world().resource::<Game>().corpses[&id].entity;
     for step in 0..3 {
         if step == 1 {
@@ -636,7 +682,7 @@ fn ordinary_corpse_rig_and_real_pick_return_after_a_cosmetic_item_is_cured() {
         } else if step == 2 {
             app.world_mut().resource_mut::<Fixture>().0.items[0] = corpse.clone();
         }
-        app.update();
+        update(&mut app);
         let game = app.world().resource::<Game>();
         let entity = if step == 1 {
             assert!(game.corpses.is_empty());
@@ -717,7 +763,7 @@ fn live_sword_swaps_align_handles_and_clear_unequipped_meshes() {
     let mut previous = None;
     for (kind, scale) in [(ItemModel::Greatsword, 1.0), (ItemModel::ShortSword, 0.62)] {
         app.world_mut().resource_mut::<Fixture>().0.inventory[0].model = kind;
-        app.update();
+        update(&mut app);
         let (hand, (actual, entity)) = held_one(&app);
         assert_eq!(actual, kind);
         let held = app.world().get::<Transform>(entity).unwrap();
@@ -737,7 +783,7 @@ fn live_sword_swaps_align_handles_and_clear_unequipped_meshes() {
             );
         }
         previous = Some(entity);
-        app.update();
+        update(&mut app);
         assert_eq!(
             held_one(&app).1 .1,
             entity,
@@ -745,7 +791,7 @@ fn live_sword_swaps_align_handles_and_clear_unequipped_meshes() {
         );
     }
     app.world_mut().resource_mut::<Fixture>().0.inventory[0].equipped = None;
-    app.update();
+    update(&mut app);
     assert!(app.world().resource::<Game>().held.is_empty());
     assert!(app.world().get_entity(previous.unwrap()).is_err());
 }
@@ -755,7 +801,7 @@ fn disclosed_equipment_changes_rebuild_the_rig_and_removal_restores_the_costume(
     let mut app = app(CreatureModel::Human);
     let rendered = |app: &mut App, wearing: tor_client_3d_model::Wearing| {
         app.world_mut().resource_mut::<Fixture>().0.actors[0].wearing = wearing;
-        app.update();
+        update(app);
         let entity = *app
             .world()
             .resource::<Game>()
@@ -793,7 +839,7 @@ fn disclosed_equipment_changes_rebuild_the_rig_and_removal_restores_the_costume(
 fn a_weapon_change_alone_keeps_the_rig() {
     let mut app = app(CreatureModel::Human);
     app.add_systems(Update, present_held.after(project));
-    app.update();
+    update(&mut app);
     let body = |app: &App| {
         *app.world()
             .resource::<Game>()
@@ -806,7 +852,7 @@ fn a_weapon_change_alone_keeps_the_rig() {
     app.world_mut().resource_mut::<Fixture>().0.actors[0]
         .wearing
         .weapons[0] = Some(ItemModel::ShortSword);
-    app.update();
+    update(&mut app);
     assert_eq!(body(&app), before, "only the hand's prop changes");
     assert_eq!(held_one(&app).1 .0, ItemModel::ShortSword);
 }
@@ -829,7 +875,7 @@ fn a_discovered_trap_is_drawn_and_redrawn_once_its_family_is_known() {
         .0
         .visible
         .push(floor);
-    app.update();
+    update(&mut app);
     let (first, look) = app.world().resource::<Game>().cells[&ivec(at)];
     assert!(matches!(look, CellLook::Trap(None)));
     app.world_mut().resource_mut::<Fixture>().0.visible[1]
@@ -837,7 +883,7 @@ fn a_discovered_trap_is_drawn_and_redrawn_once_its_family_is_known() {
         .as_mut()
         .unwrap()
         .family = Some(tor_protocol::TrapFamily::Teleport);
-    app.update();
+    update(&mut app);
     let (second, look) = app.world().resource::<Game>().cells[&ivec(at)];
     assert!(matches!(
         look,
@@ -845,4 +891,34 @@ fn a_discovered_trap_is_drawn_and_redrawn_once_its_family_is_known() {
     ));
     assert_ne!(first, second, "the identified trap is redrawn");
     assert!(!app.world().entities().contains(first));
+}
+
+/// Existing scene contracts assert a fully prepared scene. Waiting belongs to
+/// this fixture driver; production only polls the worker once per update.
+fn update(app: &mut App) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    loop {
+        app.update();
+        if app
+            .world_mut()
+            .query::<&creatures::loading::PendingModel>()
+            .iter(app.world())
+            .next()
+            .is_none()
+        {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "model preparation timed out"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    assert_eq!(
+        app.world_mut()
+            .query::<&creatures::loading::LoadFailed>()
+            .iter(app.world())
+            .count(),
+        0
+    );
 }

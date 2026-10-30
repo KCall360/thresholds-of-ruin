@@ -1,5 +1,6 @@
 """Creature abilities through authored packages and real client processes."""
 from scalar_wire import u64
+from rogue_test_support import disclosed_frames, ordered_combat_events
 from process_harness import content_ids, hit_die_counts, read_capture
 import shutil
 import subprocess
@@ -52,7 +53,7 @@ class CreatureAbilityProcesses(ProcessTestCase):
         shutil.rmtree(package)
         self.server("--checkpoint-interval", 1, scenario="two-room", wizard=True, seed=None)
         player, restored = self.client()
-        self.assertEqual(restored["state"], before["state"])
+        self.assertDisclosedStateEqual(restored["state"], before["state"])
         self.assertEqual(checkpoint(self, player), saved)
         self.assertEqual(restored["state"]["observation"]["combat"]["hp"], combat["hp"])
         for frame in (initial, before, restored):
@@ -150,7 +151,7 @@ class CreatureAbilityProcesses(ProcessTestCase):
         self.assertTrue(all("health_seed" in die and "purchases" in die for die in report["hit_dice"]))
         text, _ = self.text_client(observe=True)
         self.assertIn("Hit dice: 4 (4 Warrior)", text.command("stats"))
-        self.assertEqual(self.request(observer, {"type": "snapshot"})["state"], initial["state"])
+        self.assertDisclosedStateEqual(self.request(observer, {"type": "snapshot"})["state"], initial["state"])
 
     def test_default_dungeon_build_and_equipped_source_survive_restart(self):
         import json
@@ -186,8 +187,10 @@ class CreatureAbilityProcesses(ProcessTestCase):
             ready = self.command(wizard, {"type": "wizard", "command": "creature inspect 1"})
             self.assertFalse(ready.get("error"), ready.get("error"))
             messages = [json.loads(line).get("message") for line in wizard.transcript if line.startswith("{")]
-            return next(message["report"] for message in reversed(messages)
-                        if message and message["type"] == "creature_inspection")
+            report = next(message["report"] for message in reversed(messages)
+                          if message and message["type"] == "creature_inspection")
+            self.assertEqual(report["revision"], ready["state"]["revision"])
+            return report
 
         source = inspect()
         self.assertEqual(source["species"]["id"], "human")
@@ -220,7 +223,7 @@ class CreatureAbilityProcesses(ProcessTestCase):
         wizard, _ = self.client(WIZARD_TOKEN, observe=True)
         self.assertEqual(restored["state"]["observation"]["combat"]["own_stats"], stats)
         self.assertEqual(weapon(restored), declared)
-        self.assertEqual(inspect(), source)
+        self.assertDisclosedInspectionEqual(inspect(), source)
 
     def test_all_ai_arena_stops_at_exact_tick_and_survives_server_restart(self):
         package = creature_package(self, "arena")
@@ -401,14 +404,23 @@ class CreatureAbilityProcesses(ProcessTestCase):
             actor["position"]["x"], actor["position"]["y"], actor["position"]["z"], actor["name"],
         ))["id"]
         self.assertEqual(resource(approached, "mana")["balance"], initial_mana)
+        outcome_start = len(player.transcript)
         started = self.act(player, {"type": "use_ability", "id": "falter", "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}}})
         self.assertIsNone(started["error"])
-        self.assertTrue(started["state"]["observation"]["combat"]["preparation_active"])
-        self.assertEqual(resource(started, "mana")["balance"], initial_mana - 1)
-        self.assertEqual(resource(started, "mana")["reserved"], 1)
+        # Autonomous pictures may coalesce the paid prefix and resolution.
+        # Exact Falter start payment/reservation with this same bundled build is
+        # independently held and asserted by
+        # test_wizard_removes_owned_hit_dice_and_restores_them_after_rewind.
         completed = settle_rogue_action(self, player, started)
         self.assertEqual(resource(completed, "mana")["reserved"], 0)
         self.assertEqual(resource(completed, "mana")["balance"], initial_mana - 2)
+        self.assertFalse(completed["state"]["observation"]["combat"]["preparation_active"])
+        self.assertEqual(completed["intentions"], [])
+        resolved = [event for event in ordered_combat_events(disclosed_frames(player, outcome_start))
+                    if event["type"] == "ability" and event["ability"]["id"] == "falter"
+                    and event["caster"] == completed["state"]["observation"]["self_target"]]
+        self.assertEqual(len(resolved), 1)
+        self.assertEqual(resolved[0]["target"], target)
 
     def test_wizard_arena_steps_preserve_paid_preparation_across_restart(self):
         package = creature_package(self, "arena-step", hostile=True, abilities=("fixture_focus_fear",))
@@ -508,8 +520,9 @@ class CreatureAbilityProcesses(ProcessTestCase):
         self.assertEqual(u64(initial["hit_dice"]["total"]), 3)
         initial_mana = resource(original, "mana")["balance"]
         self.assertNotIn("Server error", wizard.command("wizard arena step"))
-        prepared = self.frame(observer, lambda frame: frame.get("state") is not None
-                              and resource(frame, "mana")["reserved"] == 1)
+        prepared = self.request(observer, {"type": "observe"})
+        self.assertIsNone(prepared["error"])
+        self.assertEqual(resource(prepared, "mana")["reserved"], 1)
         self.assertTrue(prepared["state"]["observation"]["combat"]["preparation_active"])
         remaining_preparation = prepared["state"]["observation"]["combat"]["preparation_remaining"]
         self.assertIsNotNone(remaining_preparation)
@@ -594,9 +607,10 @@ class CreatureAbilityProcesses(ProcessTestCase):
                 server.stop()
 
     def check_ability(self, ability, pool):
-        package = creature_package(self, ability)
+        package = creature_package(self, ability, controlled_target=True)
         self.server(scenario=package)
         player, initial = self.client()
+        peer, _ = self.client(actor=2)
         target = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"]
                       if actor["name"] == "practice target")
         started = self.act(player, {"type": "use_ability", "id": ability, "invocation": {"aim": {"kind": "actor_target", "target": target}, "weapon": {"kind": "default"}}})
@@ -604,6 +618,7 @@ class CreatureAbilityProcesses(ProcessTestCase):
         self.assertTrue(started["state"]["observation"]["combat"]["preparation_active"])
         self.assertEqual(resource(started, pool)["balance"], resource(initial, pool)["balance"] - 1)
         self.assertEqual(resource(started, pool)["reserved"], 1)
+        self.assertIsNone(self.act(peer, {"type": "wait"})["error"])
         completed = self.frame(player, lambda frame: (
             frame.get("state") is not None
             and frame["state"]["observation"]["ready"]
@@ -714,7 +729,7 @@ class NativeCreatureAbilityProcesses(ProcessTestCase):
             self.assertEqual(resource(completed, pool)["balance"], resource(initial, pool)["balance"])
             self.assertEqual(resource(completed, pool)["reserved"], 0)
         offset = len(wizard.transcript)
-        self.assertFalse(self.command(wizard, {"type": "wizard", "command": "combat inspect"}).get("error"))
+        self.wizard_command(wizard, "combat inspect")
         messages = [json.loads(line).get("message") for line in wizard.transcript[offset:] if line.startswith("{")]
         reports = [message["report"] for message in messages if message and message["type"] == "combat_diagnostics"]
         self.assertEqual(len(reports), 1)
@@ -737,20 +752,26 @@ class NativeCreatureAbilityProcesses(ProcessTestCase):
             "--report-frames", "--capture", capture])
         initial = self.ascii_frame(window, lambda f: f["has_control"] and not f["busy"])
         observer, observed = self.client(observe=True)
-        self.assertEqual(observed["state"], initial["state"])
+        self.assertDisclosedStateEqual(observed["state"], initial["state"])
         native = self.native_keys(window)
         def press(name, reported):
+            if name == "Z":
+                native("Shift_L", True)
+                try:
+                    return self.native_press(window, native, "z", reported)
+                finally:
+                    native("Shift_L", False)
             return self.native_press(window, native, name, reported)
         def title_pixels():
             pixels = read_capture(capture).split(b"\n", 3)[3]
             return b"".join(pixels[(y * 1200 + 72) * 3:(y * 1200 + 420) * 3]
                             for y in range(96, 112))
         normal_title = title_pixels()
-        native("Shift_L", True)
+        native("Control_L", True)
         try:
-            stats = press("2", "stats")
+            stats = press("x", "stats")
         finally:
-            native("Shift_L", False)
+            native("Control_L", False)
         self.assertIn("Strength 2", "\n".join(stats["stats_rows"]))
         self.assertIn("Health recovery: 1 per 1160 active ticks", "\n".join(stats["stats_rows"]))
         self.assertTrue(stats["window_open"])
@@ -759,7 +780,7 @@ class NativeCreatureAbilityProcesses(ProcessTestCase):
         self.assertIn(bytes((103, 216, 189)), [title[n:n + 3] for n in range(0, len(title), 3)])
         self.assertEqual(stats["state"], initial["state"])
         press("Escape", "escape")
-        menu = press("z", "abilities")
+        menu = press("Z", "abilities")
         self.assertEqual(content_ids(menu["ability_choices"]), ["fixture_mana_bolt"])
         self.assertEqual(menu["state"], initial["state"])
         selected = press("Return", "enter")
@@ -769,7 +790,7 @@ class NativeCreatureAbilityProcesses(ProcessTestCase):
         targeted = press("Up", "up")
         self.assertEqual(targeted["selected_ability"]["id"], "fixture_mana_bolt")
         self.assertEqual(targeted["state"], initial["state"])
-        self.assertEqual(self.request(observer, {"type": "snapshot"})["state"], initial["state"])
+        self.assertDisclosedStateEqual(self.request(observer, {"type": "snapshot"})["state"], initial["state"])
         accepted = press("Return", "enter")
         def resolved(frame):
             observation = frame["state"]["observation"]
@@ -777,7 +798,7 @@ class NativeCreatureAbilityProcesses(ProcessTestCase):
                     and observation["ready"] and observation["combat"]["preparation_remaining"] is None)
         completed = accepted if resolved(accepted) else self.ascii_frame(window, resolved)
         authoritative = self.request(observer, {"type": "snapshot"})
-        self.assertEqual(completed["state"], authoritative["state"])
+        self.assertDisclosedStateEqual(completed["state"], authoritative["state"])
         self.assertIn("fixture_mana_bolt", str(authoritative["history"]))
         self.assertEqual(resource(completed, "mana")["reserved"], 0)
         self.assertLess(resource(completed, "mana")["balance"], resource(initial, "mana")["balance"])

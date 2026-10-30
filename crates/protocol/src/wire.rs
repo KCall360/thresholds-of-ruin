@@ -5,7 +5,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-pub const PROTOCOL_VERSION: u32 = 65;
+pub const PROTOCOL_VERSION: u32 = 67;
 /// The maximum disclosed primary strike ordinal plus one.
 pub const MAX_SEQUENCE_STRIKES: u16 = 16;
 
@@ -78,6 +78,7 @@ impl AccessRole {
                 request,
                 Request::Attach { .. }
                     | Request::Snapshot
+                    | Request::Observe
                     | Request::Palette
                     | Request::Map { .. }
                     | Request::Chart { .. }
@@ -89,6 +90,27 @@ impl AccessRole {
 
 pub const MAX_NOTE_BYTES: usize = 4096;
 pub const MAX_HISTORY_PAGE: usize = 100;
+
+/// Opaque capability for one issued visual snapshot, independent of rules activity.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(transparent)]
+pub struct SnapshotId(pub String);
+
+impl SnapshotId {
+    pub fn is_valid(&self) -> bool {
+        !self.0.is_empty() && self.0.len() <= 128 && !self.0.chars().any(char::is_control)
+    }
+}
+
+impl<'de> Deserialize<'de> for SnapshotId {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = Self(String::deserialize(deserializer)?);
+        if !value.is_valid() {
+            return Err(serde::de::Error::custom("invalid snapshot identity"));
+        }
+        Ok(value)
+    }
+}
 
 /// Opaque history identities use server entropy, never simulation randomness.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -1504,6 +1526,7 @@ pub struct DoorView {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StateView {
+    pub snapshot: SnapshotId,
     pub wizard_game: bool,
     #[serde(with = "crate::integers::unsigned")]
     pub revision: u64,
@@ -1547,11 +1570,8 @@ pub enum Author {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Anchor {
-    /// A disclosed observation/decision state on this entry's branch.
-    State {
-        #[serde(with = "crate::integers::unsigned")]
-        revision: u64,
-    },
+    /// An issued visual snapshot, normalized to its exact causal state by the host.
+    State { snapshot: SnapshotId },
     /// An accessible action/event pair or an earlier annotation.
     Entry { id: EntryId },
 }
@@ -1591,13 +1611,9 @@ pub enum Command {
         cursor: Option<crate::StrikePageCursor>,
     },
     ResumeIntention {
-        #[serde(with = "crate::integers::unsigned")]
-        expected_revision: u64,
         intention: IntentionId,
     },
     CancelIntention {
-        #[serde(with = "crate::integers::unsigned")]
-        expected_revision: u64,
         intention: IntentionId,
         #[serde(deserialize_with = "required_option")]
         step: Option<Direction>,
@@ -1619,8 +1635,6 @@ pub enum Command {
         operation: String,
     },
     Act {
-        #[serde(with = "crate::integers::unsigned")]
-        expected_revision: u64,
         action: Action,
     },
     Annotate {
@@ -1771,6 +1785,8 @@ pub enum Request {
     AcquireControl,
     ReleaseControl,
     Snapshot,
+    /// Request a fresh visual snapshot without resetting attachment or input authority.
+    Observe,
     /// Read-only appearances owned by the attached actor.
     Map {
         query: crate::MapQuery,
@@ -1807,6 +1823,7 @@ pub struct InputContext {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReplyContext {
+    pub snapshot: SnapshotId,
     pub input: InputContext,
     pub actor: ActorId,
     pub branch: BranchId,
@@ -1819,6 +1836,7 @@ impl<'de> Deserialize<'de> for ReplyContext {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Fields {
+            snapshot: SnapshotId,
             input: InputContext,
             actor: ActorId,
             branch: BranchId,
@@ -1828,6 +1846,7 @@ impl<'de> Deserialize<'de> for ReplyContext {
         }
         let fields: Fields = crate::bounded::named_map(d)?;
         Ok(Self {
+            snapshot: fields.snapshot,
             input: fields.input,
             actor: fields.actor,
             branch: fields.branch,
@@ -1878,6 +1897,7 @@ pub struct Snapshot {
 impl Snapshot {
     pub fn reply_context(&self) -> ReplyContext {
         ReplyContext {
+            snapshot: self.state.snapshot.clone(),
             input: InputContext {
                 stream: self.context.clone(),
                 readiness_revision: self.readiness.revision,
@@ -1893,6 +1913,12 @@ impl Snapshot {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum UpdateBody {
+    /// Ordered event-time facts, independent of visual snapshot publication.
+    Outcome {
+        visual_changed: bool,
+        facts: crate::OutcomeFacts,
+        event: Option<Box<HistoryEntry>>,
+    },
     Readiness {
         readiness: Readiness,
     },
@@ -2322,5 +2348,27 @@ impl<'de> Deserialize<'de> for AbilityAim {
                 delivery,
             },
         })
+    }
+}
+
+#[cfg(test)]
+mod snapshot_capability_tests {
+    use super::*;
+
+    #[test]
+    fn snapshot_identity_is_bounded_and_legacy_state_anchor_is_rejected() {
+        let id: SnapshotId = serde_json::from_str("\"opaque-issued-snapshot\"").unwrap();
+        assert!(id.is_valid());
+        for bad in [String::new(), "x".repeat(129), "bad\nidentity".into()] {
+            assert!(serde_json::from_value::<SnapshotId>(serde_json::json!(bad)).is_err());
+        }
+        let anchor = Anchor::State { snapshot: id };
+        let encoded = serde_json::to_value(&anchor).unwrap();
+        assert_eq!(serde_json::from_value::<Anchor>(encoded).unwrap(), anchor);
+        assert!(serde_json::from_value::<Anchor>(
+            serde_json::json!({"type":"state","revision":"1"})
+        )
+        .is_err());
+        assert!(AccessRole::Spectator.permits(&Request::Observe));
     }
 }

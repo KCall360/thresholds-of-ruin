@@ -119,7 +119,7 @@ fn submit(engine: &mut Engine, actor: ActorId, id: &str, command: Command) -> Co
 }
 fn admit(engine: &mut Engine, actor: ActorId, id: &str) -> (CommandResult, Command) {
     let command = Command::AdmitIntention {
-        expected_revision: engine.revision(actor).unwrap(),
+        expected_boundary: engine.causal_boundary(actor).unwrap(),
         action: care(actor),
     };
     (submit(engine, actor, id, command.clone()), command)
@@ -210,7 +210,7 @@ fn cancelling_unpaid_claim_allows_other_actor_without_refunding_cooldown() {
     let (admitted, _) = admit(&mut engine, PLAYER, "first");
     engine.execute_next_intention().unwrap().unwrap();
     let cancel = Command::CancelIntention {
-        expected_revision: engine.revision(PLAYER).unwrap(),
+        expected_boundary: engine.causal_boundary(PLAYER).unwrap(),
         admission: admitted.entry.id,
         step: None,
     };
@@ -262,7 +262,7 @@ fn saved_claim_resumes_once_and_spent_source_retry_needs_no_live_item() {
         assert_eq!(retry.entry, admitted.entry);
         assert_eq!(engine.state(PLAYER).unwrap(), paused);
         let resume = Command::ResumeIntention {
-            expected_revision: engine.revision(PLAYER).unwrap(),
+            expected_boundary: engine.causal_boundary(PLAYER).unwrap(),
             admission: admitted.entry.id.clone(),
         };
         submit(&mut engine, PLAYER, "resume", resume);
@@ -303,9 +303,10 @@ fn stale_exact_ground_source_rejection_is_atomic_after_ordinary_pickup() {
     )
     .unwrap();
     let before = engine.state(PARTNER).unwrap();
+    let before_boundary = engine.causal_boundary(PARTNER).unwrap();
     let counts = engine.profile_counts();
     let command = Command::AdmitIntention {
-        expected_revision: before.revision,
+        expected_boundary: before_boundary,
         action: care(PARTNER),
     };
     assert!(engine
@@ -331,7 +332,7 @@ fn ordinary_action(engine: &mut Engine, action: Action, serial: &mut u64) -> Com
     *serial += 1;
     let actor = PLAYER;
     let request = Command::AdmitIntention {
-        expected_revision: engine.revision(actor).unwrap(),
+        expected_boundary: engine.causal_boundary(actor).unwrap(),
         action,
     };
     let admitted = submit(engine, actor, &format!("measurement-{serial}"), request);
@@ -469,7 +470,7 @@ fn pressure_measurement(hd: usize, stock: u64) -> Value {
                 .take()
                 .expect("interrupted ordinary care admission");
             let command = Command::CancelIntention {
-                expected_revision: engine.revision(PLAYER).unwrap(),
+                expected_boundary: engine.causal_boundary(PLAYER).unwrap(),
                 admission: source,
                 step: None,
             };
@@ -636,7 +637,7 @@ fn ordinary_ai_loses_held_last_bandage_then_heals_when_human_cancels() {
     assert_eq!(cooldown(&engine, PARTNER), 0);
     assert_eq!(bandages(&engine, PLAYER), 1);
     let command = Command::CancelIntention {
-        expected_revision: engine.revision(PLAYER).unwrap(),
+        expected_boundary: engine.causal_boundary(PLAYER).unwrap(),
         admission: human.entry.id,
         step: None,
     };
@@ -717,7 +718,7 @@ fn late_store_rejection_preserves_queued_supply_start_and_exact_saved_retry() {
         };
         *id = tor_simulation::content_ids::AbilityId::new("paid_care").unwrap();
         let request = Command::AdmitIntention {
-            expected_revision: engine.revision(PLAYER).unwrap(),
+            expected_boundary: engine.causal_boundary(PLAYER).unwrap(),
             action,
         };
         let admitted = submit(&mut engine, PLAYER, "paid-care", request.clone());
@@ -811,6 +812,7 @@ fn late_store_rejection_preserves_queued_supply_start_and_exact_saved_retry() {
 fn unowned_backend_drink_is_atomic_but_ordinary_admission_spends_once() {
     let mut engine = Engine::memory(scenario(1, 0, Some(false), 1)).unwrap();
     let before = [PLAYER, PARTNER].map(|actor| engine.state(actor).unwrap());
+    let before_boundary = engine.causal_boundary(PLAYER).unwrap();
     let histories =
         [PLAYER, PARTNER].map(|actor| engine.history(actor, "player", None, 50).unwrap());
     let save_status = serde_json::to_value(engine.save_status()).unwrap();
@@ -822,7 +824,7 @@ fn unowned_backend_drink_is_atomic_but_ordinary_admission_spends_once() {
         .iter()
         .any(|item| item.id == dose && item.quantity == 1));
     let unowned = Command::Act {
-        expected_revision: before[0].revision,
+        expected_boundary: before_boundary,
         action: Action::Drink { item: 11 },
     };
     assert!(engine
@@ -851,7 +853,7 @@ fn unowned_backend_drink_is_atomic_but_ordinary_admission_spends_once() {
     // The rejected direct call left no receipt; the real wire path admits this
     // ordinary finite-item command and supplies its durable intention identity.
     let request = Command::AdmitIntention {
-        expected_revision: before[0].revision,
+        expected_boundary: before_boundary,
         action: Action::Drink { item: 11 },
     };
     let admitted = submit(&mut engine, PLAYER, "drink", request.clone());

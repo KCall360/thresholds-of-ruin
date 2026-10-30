@@ -1,0 +1,168 @@
+# Ordinary low-depth foes. Attributes and timings are provisional.
+namespace = "rogue"
+
+[actors."rogue.emu"]
+asset = "creature.bird.emu"
+turn_ticks = 100
+body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 35 }
+creature = { species = "rogue.emu", name = "emu", faction = "dungeon_foes", binding = "awareness", starting_skills = ["light_weaponry", "athletics"], restoration = "authored", nutrition = { kind = "exempt" }, future_growth = { kind = "disabled" }, hit_dice = [{ source = "racial", purchases = [] }] }
+
+[actors."rogue.snake"]
+asset = "creature.serpent.snake"
+turn_ticks = 100
+body = { cells = [[0,0,0]], eye = [0,0,0], mass = 3 }
+creature = { species = "rogue.snake", name = "snake", faction = "dungeon_foes", binding = "awareness", starting_skills = ["light_weaponry", "stealth"], restoration = "authored", nutrition = { kind = "exempt" }, future_growth = { kind = "disabled" }, hit_dice = [{ source = "racial", purchases = [] }] }
+
+# Complete accepted combat purchases; scenario selection controls population eligibility.
+# Species dispositions are declared in creatures.toml; centaur/yeti carry loot remains unimplemented.
+[actors."rogue.hobgoblin"]
+asset = "creature.goblin.hobgoblin"
+turn_ticks = 100
+body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 70 }
+[actors."rogue.hobgoblin".creature]
+species = "rogue.hobgoblin"
+name = "hobgoblin"
+faction = "dungeon_foes"
+binding = "awareness"
+starting_skills = ["heavy_weaponry", "discipline"]
+restoration = "authored"
+future_growth = { kind = "disabled" }
+nutrition = { kind = "exempt" }
+hit_dice = [
+  { source = "warrior", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "rattling_blow" } }] },
+]
+
+[actors."rogue.zombie"]
+asset = "creature.undead.zombie"
+turn_ticks = 100
+body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 80 }
+[actors."rogue.zombie".creature]
+species = "rogue.zombie"
+name = "zombie"
+faction = "dungeon_foes"
+binding = "awareness"
+starting_skills = ["heavy_weaponry", "athletics"]
+restoration = "authored"
+future_growth = { kind = "disabled" }
+nutrition = { kind = "exempt" }
+hit_dice = [
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [] },
+]
+
+[actors."rogue.quagga"]
+asset = "creature.equine.quagga"
+turn_ticks = 100
+body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 250 }
+[actors."rogue.quagga".creature]
+species = "rogue.quagga"
+name = "quagga"
+faction = "dungeon_foes"
+binding = "awareness"
+starting_skills = ["light_weaponry", "athletics"]
+restoration = "authored"
+future_growth = { kind = "disabled" }
+nutrition = { kind = "exempt" }
+hit_dice = [
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "second_strike" } }] },
+  { source = "racial", purchases = [] },
+]
+
+[actors."rogue.centaur"]
+asset = "creature.centaur"
+turn_ticks = 100
+body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 400 }
+[actors."rogue.centaur".creature]
+species = "rogue.centaur"
+name = "centaur"
+faction = "dungeon_foes"
+binding = "awareness"
+starting_skills = ["heavy_weaponry", "athletics"]
+restoration = "authored"
+future_growth = { kind = "disabled" }
+nutrition = { kind = "exempt" }
+hit_dice = [
+  { source = "warrior", purchases = [] },
+  { source = "warrior", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "second_strike" } }] },
+  { source = "warrior", purchases = [] },
+  { source = "warrior", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "third_strike" } }] },
+]
+
+[actors."rogue.yeti"]
+asset = "creature.ape.yeti"
+turn_ticks = 100
+body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 250 }
+[actors."rogue.yeti".creature]
+species = "rogue.yeti"
+name = "yeti"
+faction = "dungeon_foes"
+binding = "awareness"
+starting_skills = ["heavy_weaponry", "athletics"]
+restoration = "authored"
+future_growth = { kind = "disabled" }
+nutrition = { kind = "exempt" }
+hit_dice = [
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "second_strike" } }] },
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [] },
+]
+
+[actors."rogue.black_unicorn"]
+asset = "creature.equine.unicorn.black"
+turn_ticks = 100
+body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 350 }
+[actors."rogue.black_unicorn".creature]
+species = "rogue.black_unicorn"
+name = "black unicorn"
+faction = "dungeon_foes"
+binding = "awareness"
+starting_skills = ["light_weaponry", "athletics"]
+restoration = "authored"
+future_growth = { kind = "disabled" }
+nutrition = { kind = "exempt" }
+hit_dice = [
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "second_strike" } }] },
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "third_strike" } }] },
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [] },
+]
+
+
+# CH1 is owned by the first racial HD, not a free species grant. Body/mass and
+# action timings are provisional; this authored minion is not in floor pools.
+[actors."rogue.ice_monster"]
+asset = "creature.elemental.ice"
+turn_ticks = 100
+body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 40 }
+creature = { species = "rogue.ice_monster", name = "ice monster", faction = "dungeon_foes", binding = "awareness", starting_skills = ["light_weaponry", "athletics"], restoration = "authored", nutrition = { kind = "exempt" }, future_growth = { kind = "disabled" }, hit_dice = [{ source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "rogue.freezing_touch" } }] }] }
+
+# Eight actual racial rows. Only the accepted DR1(1), RG1(2) purchases are spent;
+# ordinary authored restoration retains their exact ordinals and seeded Health.
+[actors."rogue.vampire"]
+asset = "creature.undead.vampire"
+turn_ticks = 100
+body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 70 }
+[actors."rogue.vampire".creature]
+species = "rogue.vampire"
+name = "vampire"
+faction = "dungeon_foes"
+binding = "awareness"
+starting_skills = ["heavy_weaponry", "discipline"]
+restoration = "authored"
+future_growth = { kind = "disabled" }
+nutrition = { kind = "exempt" }
+hit_dice = [
+  { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "rogue.drain_vitality" } }] },
+  { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "rogue.regeneration" } }] },
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [] },
+]

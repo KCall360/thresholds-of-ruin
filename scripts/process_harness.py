@@ -295,12 +295,16 @@ def ascii_input_completion(key, *, wait_for_simulation=True, wait_for_ready=Fals
             return False
         if wait_for_admission and frame.get("can_admit_intention") is not True:
             return False
+        # A causal completion can precede the demanded picture. The actual
+        # native client exposes whether that presentation work is still due.
+        if wait_for_simulation and frame.get("observation_current") is False:
+            return False
         if wait_for_ready:
             observation = (frame.get("state") or {}).get("observation")
             if observation is None:
                 return False
             combat = observation["combat"]
-            return combat["dead"] or (observation["ready"]
+            return combat["dead"] or (frame.get("character_ready", observation["ready"])
                 and not combat["preparation_active"]
                 and not phases.intersection({"queued", "started"}))
         return not wait_for_simulation or "queued" not in phases
@@ -349,7 +353,7 @@ def binaries():
 
 def creature_package(test, name, *, hostile=False,
                      abilities=("fixture_stamina_strike", "fixture_mana_bolt", "fixture_focus_fear"),
-                     ability_aliases=None, extra_abilities=(), target_x=2):
+                     ability_aliases=None, extra_abilities=(), target_x=2, controlled_target=False):
     """Construct a generic transport fixture with explicit grants and geometry."""
     package = test.directory / name
     shutil.copytree(ROOT / "scenarios/two-room", package)
@@ -392,8 +396,12 @@ def creature_package(test, name, *, hostile=False,
     source = region.read_text(encoding="utf-8")
     source = "\n".join(line for line in source.splitlines() if not line.startswith("items =")) + "\n"
     faction = "foe" if hostile else "neutral"
-    source += ('\n[[actors]]\nid = 2\nat = [' + str(target_x) + ', 1, 0]\ncontroller = "ai"\nai = "practice"\n'
-               'creature = { species = "human", name = "practice target", '
+    # Dedicated payment probes can hold the preparation boundary with an
+    # ordinary peer. All other callers retain their authored autonomous target.
+    controller = ('controller = "external"\nturn_ticks = 1000\n' if controlled_target
+                  else 'controller = "ai"\nai = "practice"\n')
+    source += ('\n[[actors]]\nid = 2\nat = [' + str(target_x) + ', 1, 0]\n' + controller
+               + 'creature = { species = "human", name = "practice target", '
                'faction = "' + faction + '", binding = "intellect", '
                'starting_skills = ["athletics", "lore"], restoration = "authored", nutrition = { kind = "exempt" }, '
                'hit_dice = [{ source = "racial" }] }\n')
@@ -1036,6 +1044,19 @@ class ProcessTestCase(unittest.TestCase):
             if not line.startswith("{"):
                 return False
             value = json.loads(line)
+            # The real client has already validated/applied this ordered message.
+            # Track only pending visual demand, never infer it from readiness,
+            # tick or picture identity. Causal-only outcomes need no picture.
+            message = value.get("message") or {}
+            body = (message.get("update") or {}).get("body") or {}
+            if message.get("type") == "snapshot" or (message.get("type") == "update"
+                    and body.get("type") in ("observation", "observation_delta")):
+                client._picture_dirty = False
+                client._picture_stale = False
+            elif message.get("type") == "update" and body.get("type") == "outcome":
+                client._picture_stale = True
+                client._picture_dirty = (getattr(client, "_picture_dirty", False) is True
+                                         or body["visual_changed"])
             if predicate(value):
                 found.append(value)
                 return True
@@ -1061,6 +1082,33 @@ class ProcessTestCase(unittest.TestCase):
     def request(self, client, request):
         return self.command(client, {"type": "request", "request": request})
 
+    def picture_after(self, client, current):
+        """Finish already-requested visual work, without advancing or resetting play."""
+        if getattr(client, "_picture_dirty", False) is True:
+            current = self.frame(client, lambda frame: not frame.get("state_omitted", False)
+                                 and getattr(client, "_picture_dirty", False) is not True)
+        if getattr(client, "_picture_stale", False) is True:
+            # A causal-only effect (for example Wait) need not publish a picture.
+            # This settle-and-inspect helper explicitly asks for the current view;
+            # Observe preserves the stream epoch, unlike a repair Snapshot.
+            return self.request(client, {"type": "observe"})
+        return current
+
+    def assertDisclosedStateEqual(self, actual, expected, message=None):
+        """Picture capabilities are local; every disclosed payload field is exact."""
+        def contents(state):
+            return {key: value for key, value in state.items()
+                    if key not in ("snapshot", "revision")}
+        self.assertEqual(contents(actual), contents(expected), message)
+
+    def assertDisclosedInspectionEqual(self, actual, expected, message=None):
+        """A private report binds an issued display; every other field is exact."""
+        from scalar_wire import u64
+        u64(actual["revision"])
+        u64(expected["revision"])
+        self.assertEqual({key: value for key, value in actual.items() if key != "revision"},
+                         {key: value for key, value in expected.items() if key != "revision"}, message)
+
     def act(self, client, action):
         # This helper authors current valid requests. Raw command/request helpers
         # remain unchanged for missing-field and malformed-wire tests.
@@ -1072,7 +1120,7 @@ class ProcessTestCase(unittest.TestCase):
         pending = next((status for status in accepted.get("intentions", [])
                         if status["phase"] == "queued"), None)
         if pending is None:
-            return accepted
+            return self.picture_after(client, accepted)
         # Request acknowledgement is admission. Assert action effects only after
         # the matching ordered lifecycle update from simulation execution.
         executed = self.frame(client, lambda frame: (
@@ -1083,14 +1131,15 @@ class ProcessTestCase(unittest.TestCase):
                 ("started", "paused", "resolved", "failed", "cancelled", "suspended")))
         phase = executed["message"]["update"]["body"]["status"]["phase"]
         if phase == "started":
-            return executed
+            return self.picture_after(client, executed)
         # Work may start and be interrupted in one publication, reporting paused
         # without a separate started phase. Paused/completed/suspended work
         # changes the controls; wait for that ordered permission update. Pause
         # is not completion: the caller decides whether to resume the paid work.
         revision = int(executed["readiness"]["revision"])
-        return self.frame(client, lambda frame: not frame.get("state_omitted", False)
-                          and int(frame["readiness"]["revision"]) > revision)
+        permitted = self.frame(client, lambda frame: not frame.get("state_omitted", False)
+                               and int(frame["readiness"]["revision"]) > revision)
+        return self.picture_after(client, permitted)
 
     def play(self, client, steps):
         """Play fixture steps as ordinary actions: `{"move": direction}` or `{"take": item name}`."""
@@ -1113,6 +1162,12 @@ class ProcessTestCase(unittest.TestCase):
 
     def wizard_command(self, wizard, command, succeeds=True):
         """Run one developer command (the text client's form, with or without `wizard `)."""
+        if succeeds is True:
+            # Setup commands target the current disclosed boundary, not a stale
+            # spectator picture. This is a fresh read before submission, never
+            # an automatic retry of a possibly applied mutation.
+            observed = self.request(wizard, {"type": "observe"})
+            self.assertIsNone(observed["error"], "refresh before " + command)
         frame = self.command(wizard, {"type": "wizard", "command": command.removeprefix("wizard ")})
         if succeeds is not None:
             (self.assertIsNone if succeeds else self.assertIsNotNone)(frame["error"], command)
@@ -1203,13 +1258,13 @@ class ProcessTestCase(unittest.TestCase):
             return record.get("type") == "native_release" and record.get("sequence") == sequence
 
         self.frame(process, released, seconds=max(0, deadline - time.monotonic()))
-        if wait_for_admission:
-            def permitted(frame):
-                return complete(frame) and frame.get("can_admit_intention") is True
+        def permitted(frame):
+            return complete(frame) and (not wait_for_admission
+                                        or frame.get("can_admit_intention") is True)
 
-            if not permitted(completed):
-                completed = self.ascii_frame(process, permitted,
-                                             seconds=max(0, deadline - time.monotonic()))
+        if not permitted(completed):
+            completed = self.ascii_frame(process, permitted,
+                                         seconds=max(0, deadline - time.monotonic()))
         return completed
 
     def _native_window(self, client):
@@ -1267,7 +1322,8 @@ class ProcessTestCase(unittest.TestCase):
             def key(name, down):
                 vk = {"i": 0x49, "semicolon": 0xBA, "o": 0x4F, "c": 0x43, "Right": 0x27, "Up": 0x26, "Escape": 0x1B, "y": 0x59, "u": 0x55, "b": 0x42,
                       "n": 0x4E, "F4": 0x73, "F6": 0x75, "F7": 0x76, "F8": 0x77, "F9": 0x78, "F10": 0x79, "F11": 0x7A, "F12": 0x7B, "Shift_L": 0x10, "comma": 0xBC, "period": 0xBE, "g": 0x47,
-                      "w": 0x57, "t": 0x54, "q": 0x51, "e": 0x45, "z": 0x5A, "x": 0x58, "v": 0x56, "2": 0x32, "Return": 0x0D, "Down": 0x28,
+                      "w": 0x57, "t": 0x54, "q": 0x51, "e": 0x45, "z": 0x5A, "x": 0x58, "v": 0x56, "2": 0x32,
+                      "Control_L": 0x11, "k": 0x4B, "r": 0x52, "s": 0x53, "a": 0x41, "f": 0x46, "3": 0x33, "Return": 0x0D, "Down": 0x28,
                       "PageUp": 0x21, "PageDown": 0x22, "Tab": 0x09, "space": 0x20,
                       "bracketleft": 0xDB, "bracketright": 0xDD}[name]
                 scan = user32.MapVirtualKeyW(vk, 0)

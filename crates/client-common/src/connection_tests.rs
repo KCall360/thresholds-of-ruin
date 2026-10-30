@@ -28,9 +28,13 @@ async fn next_non_map_frame(
 }
 fn visible_model(
     state: &ClientState,
-) -> (Snapshot, Vec<crate::RememberedCell>, Vec<RememberedMapCell>) {
+) -> (
+    crate::ClientSessionState,
+    Vec<crate::RememberedCell>,
+    Vec<RememberedMapCell>,
+) {
     (
-        state.snapshot(),
+        state.session().clone(),
         state.memory().cloned().collect(),
         state.map_memory().map(|c| c.appearance()).collect(),
     )
@@ -240,7 +244,7 @@ async fn canceled_partial_snapshot_read_keeps_assembly_and_disables_requests() {
             snapshot: Box::new(expected.clone()),
         }
     );
-    assert_eq!(client.state.snapshot(), expected);
+    assert_eq!(client.state.reset_snapshot().unwrap(), expected);
     assert!(client.is_synchronized());
     server.await.unwrap();
 }
@@ -333,6 +337,7 @@ async fn receipts_keep_original_branch_identity_but_cannot_name_another_actor() 
                 .await
                 .unwrap();
             let before = visible_model(&client.state);
+            let before_context = client.state.reply_context();
             let id = client.request(Request::Save).await.unwrap();
             let result = client.next().await;
             if foreign_actor {
@@ -344,7 +349,7 @@ async fn receipts_keep_original_branch_identity_but_cannot_name_another_actor() 
                 assert_eq!(
                     result.unwrap(),
                     ServerMessage::Ack {
-                        context: before.0.reply_context(),
+                        context: before_context,
                         request_id: id,
                         receipt: expected
                     }
@@ -374,6 +379,7 @@ async fn backpressure_observation(block_map_first: bool) {
     let initial = snapshot();
     let mut state = Arc::unwrap_or_clone(initial.state.clone());
     state.revision += 1;
+    state.snapshot = tor_protocol::SnapshotId(format!("fixture-{}", state.revision));
     state.observation.visible_cells[0].asset = Some("missing.test.asset".into());
     let update = ServerMessage::Update {
         update: Box::new(StreamUpdate {
@@ -395,6 +401,7 @@ async fn backpressure_observation(block_map_first: bool) {
     let mut context = initial.reply_context();
     context.cursor.sequence += 1;
     context.revision = state.revision;
+    context.snapshot = state.snapshot.clone();
     let (sent, arrived) = tokio::sync::oneshot::channel();
     let (release, drain) = tokio::sync::oneshot::channel::<usize>();
     let (map_blocked, allow_update) = tokio::sync::oneshot::channel();
@@ -492,7 +499,7 @@ async fn backpressure_observation(block_map_first: bool) {
                         transfer: "obsolete-map".into(),
                         actor: ActorId(1),
                         branch: query.branch,
-                        base: query.base,
+                        base: query.base.clone(),
                         window: query.window,
                         start: 0,
                         page: 0,
@@ -737,7 +744,7 @@ async fn advertised_request_limit_rejects_locally_and_keeps_connection_usable() 
             client.next().await.unwrap(),
             ServerMessage::Update { .. }
         ));
-        assert_eq!(client.state.snapshot().cursor.sequence, sequence);
+        assert_eq!(client.state.cursor().sequence, sequence);
         assert!(client.is_synchronized());
         assert!(client.state.map_hydration().failed);
         assert!(!client.state.map_hydration().pending);
@@ -1185,7 +1192,7 @@ async fn ordered_strikes_detail_reply_is_private_validated_and_completes_only_it
         let mut client = Connection::connect(address, "test".into(), ActorId(1), "headless")
             .await
             .unwrap();
-        let before = client.state.snapshot();
+        let before = client.state.session().clone();
         let id = if role == AccessRole::Wizard {
             client.request(ordered_strike_query(&client)).await.unwrap()
         } else {
@@ -1203,7 +1210,7 @@ async fn ordered_strikes_detail_reply_is_private_validated_and_completes_only_it
             ));
             let mut unrelated = crate::PendingRequest::new("other".into());
             assert!(unrelated.observe(&client, &message).is_none());
-            assert_eq!(client.state.snapshot(), before);
+            assert_eq!(client.state.session().clone(), before);
         } else {
             assert!(
                 result.is_err(),
@@ -1394,6 +1401,7 @@ async fn advancement_transport_installs_only_correlated_owned_bounded_pages_and_
 ) {
     for case in [
         "owner",
+        "owner_cursor",
         "external",
         "observer",
         "spectator",
@@ -1409,7 +1417,7 @@ async fn advancement_transport_installs_only_correlated_owned_bounded_pages_and_
         } else {
             AccessRole::Player
         };
-        let context = initial.reply_context();
+        let mut context = initial.reply_context();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let server = tokio::spawn(async move {
@@ -1459,6 +1467,31 @@ async fn advancement_transport_installs_only_correlated_owned_bounded_pages_and_
                 };
                 request_id
             };
+            if case == "owner_cursor" {
+                context.cursor.sequence += 1;
+                let facts = OutcomeFacts::capture(
+                    &initial.state.observation,
+                    &initial.state.observation,
+                    None,
+                );
+                send(
+                    &mut socket,
+                    ServerMessage::Update {
+                        update: Box::new(StreamUpdate {
+                            context: initial.context.clone(),
+                            actor: initial.actor,
+                            branch: initial.branch.clone(),
+                            cursor: context.cursor,
+                            body: UpdateBody::Outcome {
+                                visual_changed: false,
+                                facts,
+                                event: None,
+                            },
+                        }),
+                    },
+                )
+                .await;
+            }
             let message =
                 owner_advancement_message(context, if case == "wrong_id" { "wrong" } else { &id });
             if case == "oversized" {
@@ -1468,7 +1501,7 @@ async fn advancement_transport_installs_only_correlated_owned_bounded_pages_and_
             } else {
                 send(&mut socket, message).await;
             }
-            if matches!(case, "owner" | "external") {
+            if matches!(case, "owner" | "owner_cursor" | "external") {
                 send(
                     &mut socket,
                     ServerMessage::Update {
@@ -1477,7 +1510,8 @@ async fn advancement_transport_installs_only_correlated_owned_bounded_pages_and_
                             actor: initial.actor,
                             branch: initial.branch,
                             cursor: StreamCursor {
-                                sequence: initial.cursor.sequence + 1,
+                                sequence: initial.cursor.sequence
+                                    + if case == "owner_cursor" { 2 } else { 1 },
                                 tick: initial.cursor.tick,
                             },
                             body: UpdateBody::Control { has_control: false },
@@ -1507,12 +1541,19 @@ async fn advancement_transport_installs_only_correlated_owned_bounded_pages_and_
         } else {
             None
         };
+        if case == "owner_cursor" {
+            assert!(matches!(
+                client.next().await.unwrap(),
+                ServerMessage::Update { .. }
+            ));
+            assert_eq!(client.state.state(), &before);
+        }
         let result = client.next().await;
-        if matches!(case, "owner" | "external") {
+        if matches!(case, "owner" | "owner_cursor" | "external") {
             let message = result.unwrap();
             assert_eq!(
                 client.advancement_pages.overview().is_some(),
-                case == "owner"
+                matches!(case, "owner" | "owner_cursor")
             );
             let mut pending = crate::PendingRequest::new(id.unwrap());
             assert!(matches!(
@@ -1717,7 +1758,7 @@ async fn creature_catalog_reply_is_private_validated_and_completes_only_its_quer
         let mut client = Connection::connect(address, "test".into(), ActorId(1), "headless")
             .await
             .unwrap();
-        let before = client.state.snapshot();
+        let before = client.state.session().clone();
         let id = if role == AccessRole::Wizard {
             client
                 .request(creature_catalog_query(&client))
@@ -1738,7 +1779,7 @@ async fn creature_catalog_reply_is_private_validated_and_completes_only_its_quer
             ));
             let mut unrelated = crate::PendingRequest::new("other".into());
             assert!(unrelated.observe(&client, &message).is_none());
-            assert_eq!(client.state.snapshot(), before);
+            assert_eq!(client.state.session().clone(), before);
         } else {
             assert!(
                 result.is_err(),
@@ -1921,7 +1962,7 @@ async fn creature_catalog_rejects_wrong_attachment_actor_and_malformed_payload()
         let mut client = Connection::connect(address, "test".into(), ActorId(1), "headless")
             .await
             .unwrap();
-        let before = client.state.snapshot();
+        let before = client.state.session().clone();
         let error = client.next().await.unwrap_err().to_string();
         if fault == "stale-player" {
             assert!(
@@ -1929,7 +1970,7 @@ async fn creature_catalog_rejects_wrong_attachment_actor_and_malformed_payload()
                 "privacy rejection precedes stale query recovery: {error}"
             );
         }
-        assert_eq!(client.state.snapshot(), before);
+        assert_eq!(client.state.session().clone(), before);
         server.await.unwrap();
     }
 }
@@ -2004,7 +2045,7 @@ async fn spectator_map_hydration_survives_cancellation_without_blocking_live_sta
             transfer: "hydration".into(),
             actor: initial.actor,
             branch: initial.branch.clone(),
-            base: query.base,
+            base: query.base.clone(),
             window: query.window,
             start: 0,
             page: 0,
@@ -2065,7 +2106,7 @@ async fn spectator_map_hydration_survives_cancellation_without_blocking_live_sta
         seen = query_seen => seen.unwrap(),
     }
     assert!(client.is_synchronized());
-    assert_eq!(client.state.snapshot(), expected);
+    assert_eq!(client.state.reset_snapshot().unwrap(), expected);
     assert!(client.state.map_hydration().pending);
     release.send(()).unwrap();
     let first = client.next().await.unwrap();
@@ -2081,7 +2122,7 @@ async fn spectator_map_hydration_survives_cancellation_without_blocking_live_sta
         .state
         .memory()
         .any(|cell| cell.key == "hydrated-second"));
-    assert_eq!(client.state.snapshot(), expected);
+    assert_eq!(client.state.reset_snapshot().unwrap(), expected);
     server.await.unwrap();
 }
 
@@ -2200,7 +2241,7 @@ async fn canceled_map_reply_is_discarded_and_map_error_cannot_cancel_another_con
                             transfer: "late".into(),
                             actor,
                             branch: initial.branch.clone(),
-                            base: query.base,
+                            base: query.base.clone(),
                             window: query.window,
                             start: 0,
                             page: 0,
@@ -2291,6 +2332,7 @@ async fn projectile_transport_keeps_pages_private_bounded_and_correlated() {
                 tick: 0,
             },
             state: Arc::new(StateView {
+                snapshot: tor_protocol::SnapshotId("fixture".into()),
                 wizard_game: false,
                 revision: 1,
                 observation: crate::test_support::observation(),
@@ -2405,7 +2447,7 @@ async fn projectile_transport_keeps_pages_private_bounded_and_correlated() {
         let mut client = Connection::connect(address, "token".into(), actor, "text")
             .await
             .unwrap();
-        let before = client.state.snapshot();
+        let before = client.state.session().clone();
         let id = if matches!(case, "observer" | "spectator") {
             "unsolicited".into()
         } else {
@@ -2435,11 +2477,11 @@ async fn projectile_transport_keeps_pages_private_bounded_and_correlated() {
                 let mut pending = crate::PendingRequest::new(id);
                 let completed = pending.observe(&client, &reply).is_some();
                 assert_eq!(completed, case == "owner");
-                assert_eq!(client.state.snapshot(), before);
+                assert_eq!(client.state.session().clone(), before);
             }
             "oversized" => {
                 assert!(client.next().await.is_err());
-                assert_eq!(client.state.snapshot(), before);
+                assert_eq!(client.state.session().clone(), before);
             }
             _ => {
                 let error = client.next().await.unwrap_err().to_string();
@@ -2477,7 +2519,6 @@ fn timing_request_diagnostics_serialize_actual_request_classification() {
         context: state.input_context(),
         branch: state.branch().clone(),
         command: Command::Act {
-            expected_revision: 17,
             action: Action::Wait,
         },
     };
@@ -2488,7 +2529,6 @@ fn timing_request_diagnostics_serialize_actual_request_classification() {
                 context: state.input_context(),
                 branch: state.branch().clone(),
                 command: Command::ResumeIntention {
-                    expected_revision: 17,
                     intention: IntentionId("pending-intention".into()),
                 },
             },
@@ -2599,7 +2639,7 @@ async fn chart_continuations_are_pure_atomic_and_old_generation_pages_do_not_res
         let prefix = ChartPage {
             context: first.context.clone(),
             branch: first.branch.clone(),
-            base: first.base,
+            base: first.base.clone(),
             chart: first.chart.clone(),
             kind: ChartKind::Monsters,
             mode: ChartMode::Live,
@@ -2636,7 +2676,7 @@ async fn chart_continuations_are_pure_atomic_and_old_generation_pages_do_not_res
         let page = ChartPage {
             context: query.context,
             branch: query.branch,
-            base: query.base,
+            base: query.base.clone(),
             chart: query.chart,
             kind: ChartKind::Monsters,
             mode: ChartMode::Live,
@@ -2668,6 +2708,7 @@ async fn chart_continuations_are_pure_atomic_and_old_generation_pages_do_not_res
         .await;
         let mut next = (*initial.state).clone();
         next.revision += 1;
+        next.snapshot = tor_protocol::SnapshotId(format!("fixture-{}", next.revision));
         next.observation.tick += 1;
         next.observation.charts[0].status = ChartStatus::Inactive;
         next.observation.charts[0].acquired_at = None;
@@ -2695,7 +2736,7 @@ async fn chart_continuations_are_pure_atomic_and_old_generation_pages_do_not_res
     let mut connection = Connection::connect(address, "token".into(), expected.actor, "chart-test")
         .await
         .unwrap();
-    let before = connection.state.snapshot();
+    let before = connection.state.session().clone();
     let request = connection
         .charts
         .request(
@@ -2709,7 +2750,7 @@ async fn chart_continuations_are_pure_atomic_and_old_generation_pages_do_not_res
         matches!(connection.next().await.unwrap(), ServerMessage::ChartPage { page, .. } if page.next.is_some())
     );
     assert!(connection.charts.display().is_none());
-    assert_eq!(connection.state.snapshot(), before);
+    assert_eq!(connection.state.session().clone(), before);
     assert!(
         matches!(connection.next().await.unwrap(), ServerMessage::ChartPage { page, .. } if page.next.is_none())
     );
@@ -2719,7 +2760,7 @@ async fn chart_continuations_are_pure_atomic_and_old_generation_pages_do_not_res
         .lines(&connection.state)
         .join("\n")
         .contains(": creature"));
-    assert_eq!(connection.state.snapshot(), before);
+    assert_eq!(connection.state.session().clone(), before);
     assert!(matches!(
         connection.next().await.unwrap(),
         ServerMessage::Update { .. }
@@ -2732,4 +2773,270 @@ async fn chart_continuations_are_pure_atomic_and_old_generation_pages_do_not_res
         .join("\n")
         .contains("inactive"));
     server.await.unwrap();
+}
+
+/// Independent positive fixture: this transport regression must not wait for
+/// a newly recorded protocol golden before it can exercise the write fault.
+fn outcome_transport_snapshot() -> Snapshot {
+    Snapshot {
+        context: StreamContext {
+            stream: StreamId("outcome-pump".into()),
+            epoch: 0,
+        },
+        readiness: Readiness {
+            revision: 0,
+            admission: false,
+            resume: vec![],
+            cancel: vec![],
+        },
+        intentions: vec![],
+        travel: None,
+        actor: ActorId(1),
+        branch: BranchId("main".into()),
+        cursor: StreamCursor {
+            sequence: 0,
+            tick: 0,
+        },
+        state: Arc::new(StateView {
+            snapshot: SnapshotId("outcome-pump-initial".into()),
+            revision: 1,
+            wizard_game: false,
+            observation: crate::test_support::observation(),
+        }),
+        has_control: false,
+        history: HistoryPage {
+            entries: vec![],
+            older_before: None,
+        },
+    }
+}
+
+#[tokio::test]
+async fn blocked_observe_flush_keeps_ordered_outcomes_live_and_query_identity_stable() {
+    use tokio::io::AsyncReadExt;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let initial = outcome_transport_snapshot();
+    ClientState::from_snapshot(initial.clone()).unwrap();
+    let mut previous = initial.state.observation.clone();
+    let mut updates = Vec::new();
+    for (sequence, hp, visual_changed) in [(1, 12, false), (2, 11, true), (3, 10, true)] {
+        let mut current = previous.clone();
+        current.tick = sequence;
+        current.combat.as_mut().unwrap().hp = hp;
+        let facts = OutcomeFacts::capture(&previous, &current, Some(&Event::Waited));
+        facts.validate_at(sequence).unwrap();
+        updates.push(ServerMessage::Update {
+            update: Box::new(StreamUpdate {
+                context: initial.context.clone(),
+                actor: initial.actor,
+                branch: initial.branch.clone(),
+                cursor: StreamCursor {
+                    sequence,
+                    tick: sequence,
+                },
+                body: UpdateBody::Outcome {
+                    visual_changed,
+                    facts,
+                    event: None,
+                },
+            }),
+        });
+        previous = current;
+    }
+    let expected = updates[2].clone();
+    let mut picture = initial.state.as_ref().clone();
+    picture.revision += 1;
+    picture.snapshot = SnapshotId("outcome-pump-final".into());
+    picture.observation = previous;
+    let final_picture = ServerMessage::Update {
+        update: Box::new(StreamUpdate {
+            context: initial.context.clone(),
+            actor: initial.actor,
+            branch: initial.branch.clone(),
+            cursor: StreamCursor {
+                sequence: 4,
+                tick: 3,
+            },
+            body: UpdateBody::Observation {
+                state: Arc::new(picture),
+                event: None,
+            },
+        }),
+    };
+    let (release_outcome, await_outcome) = tokio::sync::oneshot::channel();
+    let (release_padding, await_padding) = tokio::sync::oneshot::channel::<usize>();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut socket = accept_async(stream).await.unwrap();
+        assert!(matches!(
+            receive(&mut socket).await,
+            ClientMessage::Hello { .. }
+        ));
+        send(
+            &mut socket,
+            ServerMessage::Welcome {
+                protocol: PROTOCOL_VERSION,
+                capabilities: ServerCapabilities::new(MAX_RESPONSE_BYTES as u32, 16),
+                user: "test".into(),
+                actors: vec![initial.actor],
+                role: AccessRole::Spectator,
+            },
+        )
+        .await;
+        assert!(
+            matches!(receive(&mut socket).await, ClientMessage::Request { request, .. }
+            if matches!(*request, Request::Attach { .. }))
+        );
+        send(
+            &mut socket,
+            ServerMessage::Snapshot {
+                request_id: "attach".into(),
+                snapshot: Box::new(initial),
+            },
+        )
+        .await;
+        send(&mut socket, updates.remove(0)).await;
+        send(&mut socket, updates.remove(0)).await;
+        await_outcome.await.unwrap();
+        send(&mut socket, updates.remove(0)).await;
+        // Do not drain the client's writes until it has consumed the Outcome.
+        let mut remaining = await_padding.await.unwrap();
+        let mut buffer = vec![0; 65536];
+        while remaining > 0 {
+            let size = remaining.min(buffer.len());
+            socket
+                .get_mut()
+                .read_exact(&mut buffer[..size])
+                .await
+                .unwrap();
+            remaining -= size;
+        }
+        let ClientMessage::Request {
+            request_id,
+            request,
+        } = receive(&mut socket).await
+        else {
+            panic!("expected the one queued Observe");
+        };
+        assert!(matches!(*request, Request::Observe));
+        send(&mut socket, final_picture).await;
+        // A later ordinary write is a barrier behind any accidentally duplicated
+        // Observe frame, making exactly-once queueing an explicit assertion.
+        assert!(
+            matches!(receive(&mut socket).await, ClientMessage::Request { request, .. }
+            if matches!(*request, Request::AcquireControl))
+        );
+        request_id
+    });
+    let mut client = Connection::connect(address, "token".into(), ActorId(1), "test")
+        .await
+        .unwrap();
+    client.palette.apply(&PaletteUpdate {
+        revision: 0,
+        body: PaletteBody::Full {
+            assets: Default::default(),
+        },
+    });
+    // This witness isolates Observe from optional map hydration. Reject its
+    // unsent query through the normal navigator path; map flush has its own test.
+    client.prepare_map_request().unwrap();
+    if let Some((pending, _)) = client.map_request.take() {
+        assert!(client.state.reject_map_query(&pending.request_id));
+    }
+    let causal_only = timeout(Duration::from_secs(2), client.next())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(matches!(causal_only, ServerMessage::Update { update }
+        if matches!(update.body, UpdateBody::Outcome { visual_changed: false, .. })));
+    assert!(!client.observation_demand.dirty);
+    client.prepare_observation_request().unwrap();
+    assert!(
+        client.observation_demand.pending.is_none(),
+        "causal-only events do not request pictures"
+    );
+    client.next().await.unwrap();
+    assert!(client.observation_demand.dirty);
+    let MaybeTlsStream::Plain(stream) = client.socket.get_ref() else {
+        panic!("plain loopback TCP")
+    };
+    let padding = vec![0; 65536];
+    let mut written = 0;
+    loop {
+        match stream.try_write(&padding) {
+            Ok(bytes) => written += bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
+            Err(error) => panic!("padding write failed: {error}"),
+        }
+        assert!(
+            written < 32 * 1024 * 1024,
+            "test pressure must stay bounded"
+        );
+    }
+    assert!(timeout(Duration::from_millis(50), client.next())
+        .await
+        .is_err());
+    let pending = client.observation_demand.pending.as_ref().unwrap();
+    assert!(
+        pending.phase == QueryPhase::Flush,
+        "Observe must really be blocked in flush"
+    );
+    let identity = pending.request_id.clone();
+    // An explicit reader joins the canceled automatic flush, not a second
+    // request. Its completion belongs to the picture, never a causal Outcome.
+    assert_eq!(client.request(Request::Observe).await.unwrap(), identity);
+    let mut explicit = crate::PendingRequest::new(identity.clone());
+    let mut unrelated = crate::PendingRequest::new("another-demand".into());
+    assert!(timeout(Duration::from_millis(20), client.next())
+        .await
+        .is_err());
+    let pending = client.observation_demand.pending.as_ref().unwrap();
+    assert!(pending.phase == QueryPhase::Flush);
+    assert_eq!(pending.request_id, identity);
+    release_outcome.send(()).unwrap();
+    assert_eq!(
+        timeout(Duration::from_secs(2), client.next())
+            .await
+            .unwrap()
+            .unwrap(),
+        expected
+    );
+    assert!(explicit.observe(&client, &expected).is_none());
+    assert_eq!(client.state.cursor().sequence, 3);
+    assert_eq!(client.state.outcome_status().unwrap().hp, 10);
+    assert_eq!(
+        client.state.state().observation.combat.as_ref().unwrap().hp,
+        12,
+        "semantic authority advances without inventing a new picture"
+    );
+    assert_eq!(
+        client
+            .observation_demand
+            .pending
+            .as_ref()
+            .unwrap()
+            .request_id,
+        identity
+    );
+    release_padding.send(written).unwrap();
+    let picture = timeout(Duration::from_secs(2), client.next())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(matches!(&picture,
+        ServerMessage::Update { update } if matches!(update.body, UpdateBody::Observation { .. })));
+    assert!(matches!(
+        explicit.observe(&client, &picture),
+        Some(crate::RequestCompletion::Reply(
+            crate::ConfirmedReply::Completed
+        ))
+    ));
+    assert!(unrelated.observe(&client, &picture).is_none());
+    assert!(client.observation_demand.pending.is_none());
+    assert!(!client.observation_demand.dirty);
+    client.request(Request::AcquireControl).await.unwrap();
+    assert_eq!(server.await.unwrap(), identity);
+    client.require_snapshot();
+    assert!(!client.completed_observation_request(&identity, &picture));
 }

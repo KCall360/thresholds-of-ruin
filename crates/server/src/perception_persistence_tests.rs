@@ -165,7 +165,8 @@ fn wizard(engine: &mut Engine, operation: WizardOperation) {
         engine,
         OWNER,
         Command::Wizard {
-            expected_revision: engine.revision(ActorId(OWNER)).unwrap(),
+            display_basis: None,
+            expected_boundary: engine.causal_boundary(ActorId(OWNER)).unwrap(),
             operation,
         },
     );
@@ -201,7 +202,7 @@ fn admit_attack(engine: &mut Engine, actor: u64, target: u64, contact: bool) {
         engine,
         actor,
         Command::AdmitIntention {
-            expected_revision: engine.revision(ActorId(actor)).unwrap(),
+            expected_boundary: engine.causal_boundary(ActorId(actor)).unwrap(),
             action: Action::UseAbility {
                 id: AbilityId::new("basic_melee").unwrap(),
                 invocation: if contact {
@@ -234,7 +235,7 @@ fn step(engine: &mut Engine) {
         engine,
         actor.0,
         Command::Act {
-            expected_revision: engine.revision(actor).unwrap(),
+            expected_boundary: engine.causal_boundary(actor).unwrap(),
             action: Action::Wait,
         },
     );
@@ -291,7 +292,7 @@ fn assert_mundane_and_apparent_mace_rows(engine: &Engine) {
         let scope = crate::wire_adapter::TargetScope::new(Uuid::from_u128(7), SimActor(observer));
         let encoded = serde_json::to_value(crate::adapt::observation(
             view,
-            scene,
+            &scene,
             "perception-fixture",
             true,
             &|_| [None, None, None],
@@ -333,7 +334,7 @@ fn prepare_distant_ambush(engine: &mut Engine) -> Option<Value> {
         engine,
         OWNER,
         Command::Act {
-            expected_revision: engine.revision(ActorId(OWNER)).unwrap(),
+            expected_boundary: engine.causal_boundary(ActorId(OWNER)).unwrap(),
             action: Action::Drop {
                 item: mace,
                 quantity: None,

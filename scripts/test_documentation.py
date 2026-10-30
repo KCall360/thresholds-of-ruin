@@ -18,6 +18,7 @@ MARKDOWN_LINK = re.compile(r"(?<!!)\[[^]]+\]\(([^)]+)\)")
 
 # Versioned identifiers that name benchmark workloads or fixtures, not rulesets.
 WORKLOAD_IDENTIFIERS = {
+    "active-mobs-v1",
     "rogue-descriptor-v2",
     "rogue-earned-baseline-v19",
     "rogue-earned-baseline-v20",
@@ -155,6 +156,7 @@ class DocumentationTests(unittest.TestCase):
         manifests = sorted((ROOT / "scenarios").rglob("scenario.toml"))
         manifests.append(ROOT / "crates/client-3d/scenarios/menagerie/scenario.toml")
         manifests.append(ROOT / "crates/client-3d/scenarios/crowd/scenario.toml")
+        manifests.append(ROOT / "crates/client-3d/scenarios/crowd-hundred/scenario.toml")
         for path in manifests:
             with self.subTest(package=str(path.relative_to(ROOT))):
                 manifest = tomllib.loads(path.read_text(encoding="utf-8"))

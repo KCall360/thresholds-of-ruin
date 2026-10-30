@@ -550,7 +550,7 @@ impl Action {
 )]
 pub(crate) enum Anchor {
     State {
-        revision: u64,
+        snapshot: wire::SnapshotId,
     },
     Entry {
         #[serde(with = "EntryId")]
@@ -620,63 +620,6 @@ pub(crate) mod optional_entry {
         deserializer: D,
     ) -> Result<Option<wire::EntryId>, D::Error> {
         Option::<Owned>::deserialize(deserializer).map(|value| value.map(|value| value.0))
-    }
-}
-
-/// Revision keys stay numeric actor identities regardless of their wire encoding.
-pub(crate) mod revisions {
-    use super::*;
-    use serde::ser::SerializeMap;
-    use std::collections::BTreeMap;
-    pub(crate) fn serialize<S: serde::Serializer>(
-        values: &BTreeMap<wire::ActorId, u64>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        let mut map = serializer.serialize_map(Some(values.len()))?;
-        for (actor, revision) in values {
-            map.serialize_entry(&actor.0, revision)?;
-        }
-        map.end()
-    }
-    pub(crate) fn deserialize<'de, D: serde::Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<BTreeMap<wire::ActorId, u64>, D::Error> {
-        struct Visitor;
-        impl<'de> serde::de::Visitor<'de> for Visitor {
-            type Value = BTreeMap<wire::ActorId, u64>;
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("stored actor revisions with numeric identity keys")
-            }
-            fn visit_map<M: serde::de::MapAccess<'de>>(
-                self,
-                mut map: M,
-            ) -> Result<Self::Value, M::Error> {
-                let mut values = BTreeMap::new();
-                while let Some((actor, revision)) = map.next_entry::<u64, u64>()? {
-                    if values.insert(wire::ActorId(actor), revision).is_some() {
-                        return Err(serde::de::Error::custom("duplicate stored actor revision"));
-                    }
-                }
-                Ok(values)
-            }
-        }
-        deserializer.deserialize_map(Visitor)
-    }
-}
-
-pub(crate) mod shared_revisions {
-    use super::*;
-    use std::collections::BTreeMap;
-    pub(crate) fn serialize<S: serde::Serializer>(
-        values: &tor_world::Shared<BTreeMap<wire::ActorId, u64>>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        revisions::serialize(values, serializer)
-    }
-    pub(crate) fn deserialize<'de, D: serde::Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<tor_world::Shared<BTreeMap<wire::ActorId, u64>>, D::Error> {
-        revisions::deserialize(deserializer).map(tor_world::Shared::new)
     }
 }
 
@@ -1692,17 +1635,18 @@ mod tests {
                 "tick": 18446744073709551615,
                 "author": {"type":"user", "user":"owner"}, "audience":"actor",
                 "content": {"type":"intention_admitted", "intention":1,
+                    "human_operands":{"weapon":{"kind":"natural"},"items":[],"preparation":null},
                     "action":{"type":"use_ability", "id":"basic_melee", "invocation":{"aim":{"kind":"actor_target","target":18446744073709551615},"weapon":{"kind":"default"}},"supplies":{"kind":"carried"}}}
             },
             "receipt": {"user":"owner", "frontend":"test", "request_id":"request",
                 "actor":18446744073709551615, "branch":"branch",
-                "command":{"type":"admit_intention", "expected_revision":18446744073709551615,
+                "command":{"type":"admit_intention", "expected_boundary":18446744073709551615,
                     "action":{"type":"use_ability", "id":"basic_melee", "invocation":{"aim":{"kind":"actor_target","target":18446744073709551615},"weapon":{"kind":"default"}},"supplies":{"kind":"carried"}}}}
         }"#,
         );
         check_stored::<crate::journal::Command>(
             r#"{
-            "type":"annotate", "anchor":{"type":"state", "revision":18446744073709551615},
+            "type":"annotate", "anchor":{"type":"state", "snapshot":"issued-snapshot"},
             "text":"note", "source":"user", "audience":"actor", "category":"note"
         }"#,
         );
@@ -1718,27 +1662,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn checkpoint_revision_maps_preserve_numeric_keys_and_values() {
-        check_stored::<crate::engine::Revisions>(
-            r#"{
-            "loaded":{"9007199254740993":18446744073709551615},
-            "parked":{"18446744073709551615":9007199254740993}
-        }"#,
-        );
-        for invalid in [
-            r#"{"loaded":{"1":1,"1":2},"parked":{}}"#,
-            r#"{"loaded":{"1":"2"},"parked":{}}"#,
-            r#"{"loaded":{"18446744073709551616":1},"parked":{}}"#,
-            r#"{"loaded":{},"parked":{},"extra":0}"#,
-        ] {
-            assert!(
-                super::super::codec::strict::<crate::engine::Revisions>(invalid.as_bytes())
-                    .is_err(),
-                "{invalid}"
-            );
-        }
-    }
     #[test]
     fn metadata_identities_and_all_direction_variants_keep_stored_names() {
         for direction in [
@@ -1759,7 +1682,7 @@ mod tests {
         }
         for target in ["null", r#""entry\\escaped\"identity""#] {
             check_stored::<crate::journal::Command>(&format!(
-                r#"{{"type":"wizard","expected_revision":1,"operation":{{"type":"rewind","target":{target}}}}}"#
+                r#"{{"type":"wizard","expected_boundary":1,"display_basis":null,"operation":{{"type":"rewind","target":{target}}}}}"#
             ));
         }
         for source in ["user", "frontend"] {
@@ -1777,7 +1700,7 @@ mod tests {
             r#"{"type":"backend","component":"scheduler"}"#,
         ] {
             check_stored::<crate::journal::JournalEntry>(&format!(
-                r#"{{"intention_suspensions":[],"intention_ends":[],"id":"entry","branch":"branch","actor":1,"tick":0,"author":{author},"audience":"actor","content":{{"type":"annotation","anchor":{{"type":"state","revision":0}},"category":"note","text":"note"}}}}"#
+                r#"{{"intention_suspensions":[],"intention_ends":[],"id":"entry","branch":"branch","actor":1,"tick":0,"author":{author},"audience":"actor","content":{{"type":"annotation","anchor":{{"type":"state","snapshot":"issued-snapshot","boundary":null}},"category":"note","text":"note"}}}}"#
             ));
         }
     }

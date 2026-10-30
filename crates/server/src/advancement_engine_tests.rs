@@ -9,6 +9,7 @@ use crate::{
 const OWNER: ActorId = ActorId(1);
 fn context(engine: &Engine) -> p::ReplyContext {
     p::ReplyContext {
+        snapshot: tor_protocol::SnapshotId("fixture".into()),
         input: p::InputContext {
             stream: p::StreamContext {
                 stream: p::StreamId("owner-test-stream".into()),
@@ -22,7 +23,7 @@ fn context(engine: &Engine) -> p::ReplyContext {
             sequence: 0,
             tick: engine.game.tick(),
         },
-        revision: engine.revision(OWNER).unwrap(),
+        revision: engine.causal_boundary(OWNER).unwrap(),
     }
 }
 fn basis(engine: &Engine) -> s::player_advancement::AdvancementBasis {
@@ -72,7 +73,7 @@ fn submit(
 }
 fn admission(engine: &Engine, action: Action) -> Command {
     Command::AdmitIntention {
-        expected_revision: engine.revision(OWNER).unwrap(),
+        expected_boundary: engine.causal_boundary(OWNER).unwrap(),
         action,
     }
 }
@@ -81,7 +82,7 @@ fn wait_request(engine: &Engine) -> (ActorId, Command) {
     (
         actor,
         Command::Act {
-            expected_revision: engine.revision(actor).unwrap(),
+            expected_boundary: engine.causal_boundary(actor).unwrap(),
             action: Action::Wait,
         },
     )
@@ -631,7 +632,7 @@ fn owner_host_paused_respec_reopens_with_original_basis_and_exact_resume_identit
             .is_err());
         assert_eq!(engine.game, before);
         let resume = Command::ResumeIntention {
-            expected_revision: engine.revision(OWNER).unwrap(),
+            expected_boundary: engine.causal_boundary(OWNER).unwrap(),
             admission: accepted.entry.id.clone(),
         };
         submit(&mut engine, OWNER, "resume", resume);
@@ -921,7 +922,7 @@ fn owner_ancestry_a_b_a_build_rejects_old_basis_but_matching_receipt_still_wins(
         .advancement_query(
             OWNER,
             engine.branch(),
-            engine.revision(OWNER).unwrap(),
+            engine.causal_boundary(OWNER).unwrap(),
             &p::AdvancementQuery::Ledger {
                 basis: old_basis,
                 offset: 0
@@ -956,7 +957,7 @@ fn owner_ancestry_accepted_ancestor_purchase_survives_rewind_but_old_future_work
     let actor = ActorId(2);
     let mut ctx = context(&engine);
     ctx.actor = actor;
-    ctx.revision = engine.revision(actor).unwrap();
+    ctx.revision = engine.causal_boundary(actor).unwrap();
     let old_branch = engine.branch().clone();
     let old_basis = engine.advancement_basis(&ctx).unwrap();
     let action = Action::Purchase {
@@ -970,17 +971,17 @@ fn owner_ancestry_accepted_ancestor_purchase_survives_rewind_but_old_future_work
         },
     };
     let command = Command::AdmitIntention {
-        expected_revision: engine.revision(actor).unwrap(),
+        expected_boundary: engine.causal_boundary(actor).unwrap(),
         action: action.clone(),
     };
     let accepted = submit(&mut engine, actor, "ancestor", command.clone());
     let public_wait = Command::Act {
-        expected_revision: engine.revision(OWNER).unwrap(),
+        expected_boundary: engine.causal_boundary(OWNER).unwrap(),
         action: Action::Wait,
     };
     let boundary = submit(&mut engine, OWNER, "public-boundary", public_wait);
     engine.execute_next_intention().unwrap().unwrap();
-    ctx.revision = engine.revision(actor).unwrap();
+    ctx.revision = engine.causal_boundary(actor).unwrap();
     let future_basis = engine.advancement_basis(&ctx).unwrap();
     let future_action = Action::Purchase {
         basis: Box::new(adapter::basis(&future_basis).unwrap()),
@@ -992,17 +993,19 @@ fn owner_ancestry_accepted_ancestor_purchase_survives_rewind_but_old_future_work
             },
         },
     };
+    let future_boundary = engine.causal_boundary(actor).unwrap();
     let future = submit(
         &mut engine,
         actor,
         "future",
         Command::AdmitIntention {
-            expected_revision: ctx.revision,
+            expected_boundary: future_boundary,
             action: future_action.clone(),
         },
     );
     let rewind = Command::Wizard {
-        expected_revision: engine.revision(OWNER).unwrap(),
+        display_basis: None,
+        expected_boundary: engine.causal_boundary(OWNER).unwrap(),
         operation: crate::journal::WizardOperation::Rewind {
             target: Some(boundary.entry.id),
         },
@@ -1012,7 +1015,7 @@ fn owner_ancestry_accepted_ancestor_purchase_survives_rewind_but_old_future_work
     assert!(engine.has_pending_intention(actor));
     let before = engine.game.clone();
     let abandoned = Command::ResumeIntention {
-        expected_revision: engine.revision(actor).unwrap(),
+        expected_boundary: engine.causal_boundary(actor).unwrap(),
         admission: future.entry.id,
     };
     assert!(engine
@@ -1041,7 +1044,7 @@ fn owner_ancestry_accepted_ancestor_purchase_survives_rewind_but_old_future_work
     );
     let before = engine.game.clone();
     let fresh_future = Command::AdmitIntention {
-        expected_revision: engine.revision(actor).unwrap(),
+        expected_boundary: engine.causal_boundary(actor).unwrap(),
         action: future_action,
     };
     assert_eq!(
@@ -1263,7 +1266,7 @@ fn owner_form_purchase_reopens_exact_operands_receipt_and_final_grant() {
         let inspection = crate::creature_view::inspect(
             &engine.game,
             s::ActorId(1),
-            engine.revision(OWNER).unwrap(),
+            engine.causal_boundary(OWNER).unwrap(),
         )
         .unwrap();
         inspection.validate().unwrap();
@@ -1452,7 +1455,8 @@ fn growth_source_rewind_restores_initial_policy_and_invalidates_abandoned_basis(
     let abandoned = basis(&engine);
     assert_ne!(overview(&engine).growth.future, initial.future);
     let rewind = Command::Wizard {
-        expected_revision: engine.revision(OWNER).unwrap(),
+        display_basis: None,
+        expected_boundary: engine.causal_boundary(OWNER).unwrap(),
         operation: crate::journal::WizardOperation::Rewind { target: None },
     };
     submit(&mut engine, OWNER, "rewind-growth", rewind);
@@ -1571,7 +1575,8 @@ fn earned_fatal_growth_survives_receipts_checkpoint_replay_and_rewind_branches()
         engine.enable_wizard().unwrap();
         let branch = engine.branch().clone();
         let rewind = Command::Wizard {
-            expected_revision: engine.revision(OWNER).unwrap(),
+            display_basis: None,
+            expected_boundary: engine.causal_boundary(OWNER).unwrap(),
             operation: crate::journal::WizardOperation::Rewind { target: None },
         };
         submit(&mut engine, OWNER, "rewind-before-death", rewind);

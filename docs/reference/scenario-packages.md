@@ -480,22 +480,60 @@ queries and NPC entry do not activate it; first protagonist entry, rollback,
 source-free recovery and revisits keep the ordinary once-only policy.
 
 The [inert treasure stage example](../../scenarios/rogue-exploration/examples/treasure-stage.toml)
-is not imported by the bundled Rogue package. Append it explicitly to opt in.
-Its 1/20 chance, independent 2–9 item / 4–11 actor requests and illustrative
-Hobgoblin/Orc bands are example policy, not new live balance or exact Rogue parity.
-The actual-process fixture composes this authored fragment with a copied
-production catalog; it forces chance/counts only for deterministic acceptance.
+is not imported by the bundled Rogue package. Its independent 2–9 item / 4–11 actor
+requests and illustrative Hobgoblin/Orc bands remain authoring examples, not the
+live policy. The example's actual-process fixture composes that fragment with a
+copied production catalog and forces chance/counts only for deterministic acceptance.
+The playable package authors its own smaller treasure stage described below.
 
 The selected Rogue magic-item catalog appends finite potion, scroll and device
-stages after the existing actor, bandage, ration, restore-Strength and room-Gold
-stages. Every new stage makes one item-placement attempt per first entered floor;
-failed placement is recorded, and revisits never refill it. Equal subtype weights
-are provisional TOR tuning, not the source game's full item probability table.
-Existing carried-supply pools and their source policies are unchanged.
+stages after the original actor, bandage, ration, restore-Strength and room-Gold
+stages. Each of these three magic-item stages makes one item-placement attempt per
+first entered floor; failed placement is recorded, and revisits never refill it.
+Equal subtype weights are provisional TOR tuning, not the source game's full item
+probability table. Existing carried-supply pools and their source policies are unchanged.
 
-Initial identify scrolls target potions, scrolls or wands separately. Source
-weapon/armor identify and the combined ring-or-wand category remain deferred;
-wand-only selection is an explicit initial TOR adaptation. Sleep applies four to
+#### Live Rogue content policy
+
+The live package preserves every pre-existing stage's identity, version, relative
+order, counts and weights, then appends the following stages from depth 1 onward:
+
+| Stage | Provisional policy |
+| --- | --- |
+| `rogue.expanded_stock` | `kind = "items"`, `count = [0, 1]`, quantity 1, equal weight 1 for each of the 17 choices below |
+| `rogue.treasure_room` | `kind = "room_cluster"`, chance 1/20, independent `item_count = [2, 4]` and `actor_count = [1, 3]`, quantity 1, effective actor birth depth = floor depth + 1 |
+
+The supplemental choices are `rogue.haste`, `rogue.gain_strength`,
+`rogue.raise_level`, `rogue.hallucination`, `rogue.monster_detection`,
+`rogue.magic_detection`, `rogue.food_detection`, `rogue.magic_mapping`,
+`rogue.wand_nothing`, `rogue.wand_light`, `rogue.wand_drain_life`,
+`rogue.wand_cancellation`, `rogue.wand_magic_missile`, `rogue.wand_polymorph`,
+`rogue.fruit`, `rogue.dart` and `rogue.shuriken`. Quantity 1 also applies to missiles.
+
+Treasure item choices are `rogue.gold`, `rogue.healing`, `rogue.fruit`, `rogue.dart`
+and `rogue.shuriken`, each weight 1. Its authored actor bands copy the ordinary
+population's existing depth bands and weights, evaluated at effective birth depth;
+AI remains `rogue_hostile`, growth remains `racial_after` depth 26, and
+`avoid_protagonist_sight = false`. This permits visible treasure foes without
+relaxing body fit or protected-cell exclusion. The same species birth-stock rules
+apply at effective depth. Counts remain bounded by room area and placement can fail.
+
+These stages add finite stock and foes rather than replacing ordinary stages.
+They are conservative activation policy, not calibrated survival balance or exact
+Rogue treasure parity. Torches remain catalog-only; the existing Polymorph
+emu/snake/troll destination pool, kits, care, respec, nutrition, traps and rules
+are unchanged. The existing room-omission and maze mechanisms are also enabled
+with [provisional layout policy](generation.md#optional-room-omissions); their
+changed geometry can alter placements despite preserved earlier stage streams.
+
+#### Existing magic-item behavior
+
+Current identify scrolls target potions, scrolls, weapons or armor by category;
+weapon and armor identification are selected by the live `rogue.equipment_scrolls`
+stage. The `rogue.identify_wand` scroll in `rogue.magic_scrolls` permits either a
+ring or a wand/staff through one paid owner-only choice. See
+[identification](items.md#reading-identification-and-charged-devices).
+Sleep applies four to
 eight actor turns of forced inaction. Potion confusion lasts nineteen to twenty
 actor turns and blindness lasts 808 to 892; repeated doses extend their active
 duration, and ordinary expiry grants no gaze-style protection. These source
@@ -1144,6 +1182,9 @@ without objectives may omit a build.
 
 ## Behavior defaults and AI overrides
 
+The [AI reference](ai.md) owns runtime decision priority and remembered tactics;
+these fields configure permissions, not a separate combat engine.
+
 A species may author a `behavior` record. Its resolved policy contains
 `disposition`, `idle`, `memory_ticks`, `doors`, `care`, `equipment`, `loot`,
 `gold` and `flee_percent`. Omitting behavior gives conservative passive acquisition with
@@ -1162,7 +1203,7 @@ Unknown names and invalid values are rejected.
 
 | Field | Meaning |
 | --- | --- |
-| `disposition` | `passive` requires ordinary hostile provocation; `mean` uses the existing seeded acquisition check; `greedy` collects known Gold it can safely reach and otherwise acquires as `mean` does |
+| `disposition` | `passive` requires ordinary hostile provocation; `mean` directly acquires an eligible visible foe; `greedy` collects known Gold it can safely reach and otherwise acquires as `mean` does; continual-Stealth awareness can gate eligibility |
 | `idle` | `explore` permits autonomous exploration and useful-item detours; `wait` forbids all idle movement |
 | `memory_ticks` | Actor-active engagement memory, from 0 through 1000000 inclusive |
 | `doors` | Permit opening reachable known doors; anatomy or creature kind never infers this permission |
@@ -1211,6 +1252,11 @@ for how lighting controls perception and [generation recipes](generation.md)
 for generated room lighting.
 
 ## Verification and performance boundaries
+
+The unique-retrieval ledger independently admits at most 4,096 eligible entry
+receipts, including entries while the Amulet is already carried. Exhaustion
+refuses an entry atomically; it is not a terminal floor or victory. See
+[unique retrieval](../../crates/simulation/src/unique_retrieval.rs).
 
 The [scenario integration suite](../../crates/server/tests/it/scenario_packages.rs),
 [package reference check](../../scripts/test_scenario_references.py) and actual-process

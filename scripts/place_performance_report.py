@@ -6,6 +6,7 @@ import sys
 from workload_report import is_duration, require, nonnegative_counts, positive_counts
 
 SPEC = json.loads((Path(__file__).resolve().parents[1] / "crates/server/fixtures/place-knowledge-v1.json").read_text())
+OUTCOME_METRICS = ("outcome_encode_ms", "outcome_apply_ms")
 METRICS = ("command_ms", "observation_ms", "encode_ms", "apply_ms", "render_ms")
 
 
@@ -20,6 +21,10 @@ def validate(rows, *, selected_rooms=None):
         if row.get("kind") == "sample":
             nonnegative_counts(row, ("sample", "navigation_refreshes"))
             positive_counts(row, ("records", "wire_bytes"))
+            if any(field in row for field in (*OUTCOME_METRICS, "outcome_wire_bytes")):
+                positive_counts(row, ("outcome_wire_bytes",))
+                require(all(is_duration(row.get(field)) for field in OUTCOME_METRICS),
+                        "Causal delivery measurements must be complete durations")
         elif row.get("kind") == "discovery":
             nonnegative_counts(row, ("room",))
         elif row.get("kind") == "recovery":
@@ -53,7 +58,10 @@ def validate(rows, *, selected_rooms=None):
         for label in ("rename", "wait"):
             values = [r for r in samples if r["label"] == label]
             result = dict(places=count, label=label, n=len(values), wire_bytes=max(r["wire_bytes"] for r in values))
-            for metric in METRICS:
+            outcome_metrics = OUTCOME_METRICS if any("outcome_apply_ms" in row for row in values) else ()
+            require(all(all(field in row for field in outcome_metrics) for row in values),
+                    "Causal delivery samples must be complete")
+            for metric in (*METRICS, *outcome_metrics):
                 ordered = sorted(r[metric] for r in values)
                 result[metric] = dict(p50=ordered[math.ceil(len(ordered)*.5)-1],
                                       p95=ordered[math.ceil(len(ordered)*.95)-1], maximum=ordered[-1])

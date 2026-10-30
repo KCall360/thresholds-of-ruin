@@ -336,7 +336,6 @@ fn imported_raise_repeated_blocked_doses_fund_successive_levels_and_reopen_witho
         context: context.input,
         branch: context.branch,
         command: Command::Act {
-            expected_revision: context.revision,
             action: Action::ChooseGrowthSource {
                 basis: Box::new(page.basis),
                 source: serde_json::from_value(json!({"kind":"class","class":"warrior"})).unwrap(),
@@ -502,7 +501,6 @@ fn imported_strength_pending_interval_one_reopen_keeps_unexecuted_boon_and_exact
         context: snapshot.reply_context().input,
         branch: snapshot.branch.clone(),
         command: Command::ResumeIntention {
-            expected_revision: snapshot.state.revision,
             intention: snapshot.readiness.resume[0].clone(),
         },
     };

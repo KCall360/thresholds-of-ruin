@@ -81,7 +81,7 @@ class HealthRecoveryProcesses(ProcessTestCase):
         shutil.rmtree(package)
         self.server(scenario=ROOT / "scenarios/two-room", seed=None, wizard=True)
         player, restored = self.client()
-        self.assertEqual(restored["state"], before["state"])
+        self.assertDisclosedStateEqual(restored["state"], before["state"])
         start = int(restored["state"]["observation"]["tick"])
         for _ in range(30):
             rested = self.completed(player, self.act(player, {"type": "wait"}))

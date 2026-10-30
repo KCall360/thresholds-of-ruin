@@ -1,3 +1,4 @@
+use super::websocket::assert_picture_payload;
 use futures_util::SinkExt;
 use std::collections::BTreeSet;
 use tokio::{net::TcpListener, sync::oneshot};
@@ -293,7 +294,7 @@ async fn common_wizard_gate_refuses_players_and_spectators_before_parsing() {
         let ServerMessage::Snapshot { snapshot, .. } = receive(&mut game.player).await else {
             panic!("snapshot")
         };
-        assert_eq!(snapshot.state, game.initial.state);
+        assert_picture_payload(&snapshot.state, &game.initial.state);
         assert_eq!(snapshot.history, game.initial.history);
         game.finish().await;
     }
@@ -328,7 +329,7 @@ async fn without_wizard_mode_the_wizard_is_refused_too() {
     let ServerMessage::Snapshot { snapshot, .. } = receive(&mut game.wizard).await else {
         panic!("snapshot")
     };
-    assert_eq!(snapshot.state, game.initial.state);
+    assert_picture_payload(&snapshot.state, &game.initial.state);
     assert_eq!(snapshot.history, game.initial.history);
     game.finish().await;
 }
@@ -339,7 +340,7 @@ async fn an_accepted_wizard_command_reaches_every_client_and_its_retry_is_acknow
     let command = wizard_request(
         game.wizard.input_context(),
         &game.initial.branch,
-        0,
+        game.initial.state.revision,
         teleport(),
     );
     game.wizard.request("accepted", command.clone()).await;
@@ -380,14 +381,20 @@ async fn a_wizard_rewind_forks_every_client_and_the_old_branch_is_refused() {
     game.wizard
         .request(
             "teleport",
-            wizard_request(game.wizard.input_context(), &branch, 0, teleport()),
+            wizard_request(
+                game.wizard.input_context(),
+                &branch,
+                game.initial.state.revision,
+                teleport(),
+            ),
         )
         .await;
+    let mut teleport_revision = None;
     for client in [&mut game.wizard, &mut game.player, &mut game.spectator] {
-        assert!(matches!(
-            receive(client).await,
-            ServerMessage::Snapshot { .. }
-        ));
+        let ServerMessage::Snapshot { snapshot, .. } = receive(client).await else {
+            panic!("teleport snapshot")
+        };
+        teleport_revision.get_or_insert(snapshot.state.revision);
     }
     assert!(matches!(
         receive(&mut game.wizard).await,
@@ -397,7 +404,12 @@ async fn a_wizard_rewind_forks_every_client_and_the_old_branch_is_refused() {
     game.wizard
         .request(
             "rewind",
-            wizard_request(game.wizard.input_context(), &branch, 1, rewind.clone()),
+            wizard_request(
+                game.wizard.input_context(),
+                &branch,
+                teleport_revision.unwrap(),
+                rewind.clone(),
+            ),
         )
         .await;
     for client in [&mut game.wizard, &mut game.player, &mut game.spectator] {
@@ -435,7 +447,9 @@ async fn immediate_note_receipt_retry_after_rewind_keeps_the_original_branch() {
         context: game.wizard.input_context(),
         branch: branch.clone(),
         command: tor_protocol::Command::Annotate {
-            anchor: Anchor::State { revision: 0 },
+            anchor: Anchor::State {
+                snapshot: game.initial.state.snapshot.clone(),
+            },
             text: "Original branch note".into(),
             source: ClientSource::User,
             audience: Audience::Private,
@@ -470,7 +484,7 @@ async fn immediate_note_receipt_retry_after_rewind_keeps_the_original_branch() {
             wizard_request(
                 game.wizard.input_context(),
                 &branch,
-                0,
+                game.initial.state.revision,
                 WizardOperation::Rewind { target: None },
             ),
         )
@@ -546,7 +560,11 @@ async fn named_creature_catalog_is_private_read_only_and_context_checked() {
         game.wizard
             .request(
                 "catalog",
-                request(&game.wizard, 0, game.initial.branch.clone()),
+                request(
+                    &game.wizard,
+                    game.initial.state.revision,
+                    game.initial.branch.clone(),
+                ),
             )
             .await;
         if enabled {
@@ -561,10 +579,14 @@ async fn named_creature_catalog_is_private_read_only_and_context_checked() {
             game.wizard
                 .request(
                     "catalog-stale",
-                    request(&game.wizard, 1, game.initial.branch.clone()),
+                    request(
+                        &game.wizard,
+                        game.initial.state.revision + 1,
+                        game.initial.branch.clone(),
+                    ),
                 )
                 .await;
-            assert_error(&mut game.wizard, ErrorCode::StaleRevision).await;
+            assert_error(&mut game.wizard, ErrorCode::StaleContext).await;
             game.wizard
                 .request(
                     "catalog-branch",
@@ -581,7 +603,7 @@ async fn named_creature_catalog_is_private_read_only_and_context_checked() {
         let ServerMessage::Snapshot { snapshot, .. } = receive(&mut game.wizard).await else {
             panic!("snapshot")
         };
-        assert_eq!(snapshot.state, game.initial.state);
+        assert_picture_payload(&snapshot.state, &game.initial.state);
         assert_eq!(snapshot.history, game.initial.history);
         game.finish().await;
     }
@@ -602,6 +624,7 @@ async fn explored_map_pages_round_trip_without_control_or_game_mutation() {
         context: before.context.clone(),
         branch: before.branch.clone(),
         base: ObservationBase {
+            snapshot: before.state.snapshot.clone(),
             cursor: before.cursor,
             revision: before.state.revision,
         },
@@ -650,7 +673,7 @@ async fn explored_map_pages_round_trip_without_control_or_game_mutation() {
     else {
         panic!("unchanged spectator snapshot")
     };
-    assert_eq!(after.state, before.state);
+    assert_picture_payload(&after.state, &before.state);
     assert_eq!(after.history, before.history);
     game.finish().await;
 }

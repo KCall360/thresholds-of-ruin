@@ -137,7 +137,7 @@ async fn run() -> Result<(), Error> {
                                 "yes" | "y" => {
                                     match preview.confirm(&connection.state) {
                                         Ok(action) => {
-                                            let command = Command::Act { expected_revision: connection.state.state().revision, action };
+                                            let command = Command::Act {  action };
                                             let request = connection.state.command_request(command);
                                             transact(&mut connection, request).await?;
                                         }
@@ -175,16 +175,20 @@ async fn run() -> Result<(), Error> {
                             Ok(Input::Stats) => println!("{}", tor_client_text::stats(connection.state.state())),
                             Ok(Input::Help) => println!("{HELP}"),
                             Ok(Input::Advancement(input)) => {
-                                match connection.advancement_pages.request(input, &connection.state) {
-                                    Ok(Some(request)) => transact(&mut connection, request).await?,
-                                    Ok(None) => for line in connection.advancement_pages.display(&connection.state.state().observation) { println!("{}", safe(&line)); },
-                                    Err(error) => println!("{}", safe(&error)),
+                                if matches!(input, tor_client_common::advancement::AdvancementInput::Overview) {
+                                    open_overview(&mut connection).await?;
+                                } else {
+                                    match connection.advancement_pages.request(input, &connection.state) {
+                                        Ok(Some(request)) => transact(&mut connection, request).await?,
+                                        Ok(None) => for line in connection.advancement_pages.display(&connection.state.state().observation) { println!("{}", safe(&line)); },
+                                        Err(error) => println!("{}", safe(&error)),
+                                    }
                                 }
                             }
                             Ok(input @ (Input::StrikeSource(_) | Input::StrikeNext | Input::StrikePrevious)) => {
                                 if connection.role() != AccessRole::Wizard { println!("Wizard authority is required."); }
                                 else {
-                                    let context = connection.state.snapshot().reply_context();
+                                    let context = connection.state.reply_context();
                                     match tor_client_text::strike_command(&input, &mut connection.inspection_pages, &context) {
                                         Ok(command) => { let request = connection.state.command_request(command); transact(&mut connection, request).await?; },
                                         Err(error) => println!("{}", safe(&error)),
@@ -248,18 +252,59 @@ fn ready() -> io::Result<()> {
     io::stdout().flush()
 }
 
-async fn transact(connection: &mut Connection, request: Request) -> Result<(), Error> {
-    if !connection.role().permits(&request) {
-        println!("Spectator access is read-only.");
+async fn open_overview(connection: &mut Connection) -> Result<(), Error> {
+    use tor_client_common::advancement::{AdvancementInput, OpenOverview};
+    let plan = match OpenOverview::new(&connection.state) {
+        Ok(plan) => plan,
+        Err(error) => {
+            println!("{}", safe(&error));
+            return Ok(());
+        }
+    };
+    if !transact_observation_result(connection, plan.observation_request()).await? {
+        println!("Observation was not confirmed. Open advancement again.");
         return Ok(());
     }
+    if let Err(error) = plan.finish(&connection.state) {
+        println!("{}", safe(&error));
+        return Ok(());
+    }
+    match connection
+        .advancement_pages
+        .request(AdvancementInput::Overview, &connection.state)
+    {
+        Ok(Some(request)) => transact(connection, request).await?,
+        Ok(None) => {}
+        Err(error) => println!("{}", safe(&error)),
+    }
+    Ok(())
+}
+
+async fn transact(connection: &mut Connection, request: Request) -> Result<(), Error> {
+    transact_observation_result(connection, request)
+        .await
+        .map(|_| ())
+}
+
+/// Return exact Observe completion without swallowing any presented messages.
+async fn transact_observation_result(
+    connection: &mut Connection,
+    request: Request,
+) -> Result<bool, Error> {
+    if !connection.role().permits(&request) {
+        println!("Spectator access is read-only.");
+        return Ok(false);
+    }
     let id = connection.request(request).await?;
-    let mut pending = tor_client_common::PendingRequest::new(id);
+    let mut pending = tor_client_common::PendingRequest::new(id.clone());
+    let mut observed = false;
     timeout(Duration::from_secs(10), async {
         let mut admitted = None;
+        let mut finished = false;
         loop {
             let message = connection.next().await?;
             present(connection, &message)?;
+            observed |= connection.completed_observation_request(&id, &message);
             let recovered = connection.is_recovery_snapshot(&message);
             let complete = match pending.observe(connection, &message) {
                 Some(tor_client_common::RequestCompletion::Reply(tor_client_common::ConfirmedReply::Receipt(
@@ -280,10 +325,17 @@ async fn transact(connection: &mut Connection, request: Request) -> Result<(), E
                 None => false,
             };
             let executed = admitted.as_mut().is_some_and(|boundary| boundary.observe(&message));
-            if complete || executed { return Ok::<(), Error>(()); }
+            finished |= complete || executed;
+            // Causal completion can precede its demanded picture. Keep reading
+            // through the existing Observe pump before accepting another script
+            // command that parses or describes inventory, targets, or position.
+            // The completed receipt remains latched while that picture arrives.
+            if finished && connection.state.observation_current() {
+                return Ok::<(), Error>(());
+            }
         }
     }).await.map_err(|_| "Server response timed out; command outcome may be unknown. Reconnect and inspect history before retrying.")??;
-    Ok(())
+    Ok(observed)
 }
 
 fn present(connection: &Connection, message: &ServerMessage) -> Result<(), Error> {
@@ -291,10 +343,12 @@ fn present(connection: &Connection, message: &ServerMessage) -> Result<(), Error
         ServerMessage::Update { update } => match &update.body {
             UpdateBody::Readiness { .. } | UpdateBody::Travel { .. } => {}
             UpdateBody::Intention { status } => println!("Action: {:?}.", status.phase),
-            UpdateBody::Observation { event, .. } | UpdateBody::ObservationDelta { event, .. } => {
-                if let Some(entry) = event {
-                    println!("{}", history(entry));
+            UpdateBody::Outcome { .. } => {
+                for line in connection.state.narration_lines() {
+                    println!("{}", line.text);
                 }
+            }
+            UpdateBody::Observation { .. } | UpdateBody::ObservationDelta { .. } => {
                 println!("{}", describe(connection.state.state()));
                 if let Some(prompt) = tor_client_common::items::identification_prompt(
                     &connection.state.state().observation,

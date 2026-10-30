@@ -39,6 +39,7 @@ pub struct View {
     pub actors: Vec<Actor>,
     pub items: Vec<GroundItem>,
     pub inventory: Vec<Carried>,
+    pub equipment: crate::Equipment,
     /// Holds on the character it may try to escape, labelled by holder.
     pub holds: Vec<tor_client_common::holds::HoldChoice>,
     /// Granted abilities beyond the basic attack, in the server's order.
@@ -51,6 +52,8 @@ pub struct View {
     /// gold, hunger, time, holds and combat state.
     pub status: [String; 2],
     pub hp: Option<(u64, u64)>,
+    /// Owner-disclosed attributes; absent when the server withholds own stats.
+    pub attributes: Option<AttributeView>,
     pub has_control: bool,
     /// Whether a new action would be admitted now (no journey or work under way).
     pub can_act: bool,
@@ -304,6 +307,7 @@ pub fn view(state: &ClientState, palette: &Palette) -> View {
                 }
             })
             .collect(),
+        equipment: crate::Equipment::from_observation(o),
         holds: tor_client_common::holds::hold_choices(o),
         abilities: tor_client_common::abilities::choices(o)
             .into_iter()
@@ -329,6 +333,11 @@ pub fn view(state: &ClientState, palette: &Palette) -> View {
         narration: state.narration().to_vec(),
         status: tor_client_common::status::lines(state, &[]),
         hp: o.combat.as_ref().map(|c| (c.hp, c.max_hp)),
+        attributes: o
+            .combat
+            .as_ref()
+            .and_then(|c| c.own_stats.as_ref())
+            .map(|s| s.attributes),
         has_control: state.has_control(),
         can_act: state.can_admit_intention(),
         history: {

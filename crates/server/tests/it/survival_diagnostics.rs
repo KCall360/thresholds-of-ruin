@@ -24,7 +24,7 @@ fn only_successful_live_history_emits_survival_commits() {
     engine.enable_survival_diagnostics(&path).unwrap();
     let branch = engine.branch().clone();
     let command = tor_server::journal::Command::Act {
-        expected_revision: engine.revision(support::CHARACTER).unwrap(),
+        expected_boundary: engine.causal_boundary(support::CHARACTER).unwrap(),
         action: tor_server::journal::Action::Wait,
     };
     let first = engine

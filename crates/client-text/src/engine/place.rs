@@ -610,7 +610,7 @@ mod tests {
             }
         }
         serde_json::from_value(serde_json::json!({
-            "wizard_game": false, "revision": "0", "observation": {
+            "snapshot":"fixture-snapshot","wizard_game": false, "revision": "0", "observation": {
                 "actor": "1", "self_target":tor_protocol::ActorTarget::from_digest([1; 32]),"tick": "0", "position": {"x": 0, "y": 0, "z": 0},
                 "ready": true, "places": [], "visible_cells": cells,
                 "ground_items": [], "inventory": [], "charts":[],"linked_holds":[],"visible_actors": []

@@ -37,9 +37,13 @@ class RogueBundledPolicy(unittest.TestCase):
         geometry = tomllib.loads((ROOT / "scenarios/tests/rogue-geometry/scenario.toml").read_text(encoding="utf-8"))
         self.assertEqual(geometry["procedural_worlds"], actual["procedural_worlds"])
         # This fixture owns feature-free geometry traversal, not concealed
-        # entrances or pressure traps. Keep the unchanged geometry/lighting
-        # recipe without silently adding gameplay obstacles to that workload.
-        features = ("secret_entrances", "hidden_traps")
+        # entrances, pressure traps, omitted rooms or mazes. Pin the live layout
+        # additions before removing them from the unchanged geometry/lighting
+        # workload comparison; do not silently adopt future policy changes.
+        live_recipe = actual["generation_recipes"]["exploration"]
+        self.assertEqual(live_recipe["room_omissions"], {"count": [0, 1]})
+        self.assertEqual(live_recipe["maze_rooms"], {"one_in": 15})
+        features = ("secret_entrances", "hidden_traps", "room_omissions", "maze_rooms")
         self.assertEqual(geometry["generation_recipes"], {
             name: {key: value for key, value in recipe.items() if key not in features}
             for name, recipe in actual["generation_recipes"].items()
@@ -152,7 +156,7 @@ class RogueExplorationProcess(ProcessTestCase):
         shutil.rmtree(package)
         server = self.server("--checkpoint-interval", 0, seed=None)
         player, resumed = self.client()
-        self.assertEqual(resumed["state"], before["state"])
+        self.assertDisclosedStateEqual(resumed["state"], before["state"])
         self.assertEqual(resumed["history"], before["history"])
         self.assert_private_floor_metadata(resumed["state"])
         continued = self.act(player, {"type": "wait"})
@@ -210,7 +214,7 @@ class RogueExplorationProcess(ProcessTestCase):
         self.assertIsNone(arrived["error"])
         self.assertTrue(underfoot(arrived["state"])["stairs_up"])
         observer, watched = self.client(token=SPECTATOR_TOKEN, observe=True, omit_memory=True, compact_background=True)
-        self.assertEqual(watched["state"], arrived["state"])
+        self.assertDisclosedStateEqual(watched["state"], arrived["state"])
         self.assert_private_floor_metadata(watched["state"])
         self.flush_save()
         player.stop()
@@ -233,10 +237,10 @@ class RogueExplorationProcess(ProcessTestCase):
         shutil.rmtree(package)
         self.server("--checkpoint-interval", 64, seed=None)
         player, resumed = self.client(omit_memory=True, compact_background=True)
-        self.assertEqual(resumed["state"], arrived["state"])
+        self.assertDisclosedStateEqual(resumed["state"], arrived["state"])
         self.assert_private_floor_metadata(resumed["state"])
         observer, watched = self.client(token=SPECTATOR_TOKEN, observe=True, omit_memory=True, compact_background=True)
-        self.assertEqual(watched["state"], resumed["state"])
+        self.assertDisclosedStateEqual(watched["state"], resumed["state"])
         returned = self.act(player, {"type": "move", "direction": "up"})
         self.assertIsNone(returned["error"])
         self.assertEqual(underfoot(returned["state"])["key"], origin)

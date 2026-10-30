@@ -138,6 +138,7 @@ pub(super) fn base<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Observation
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
     struct Fields {
+        snapshot: crate::SnapshotId,
         #[serde(deserialize_with = "cursor")]
         cursor: crate::StreamCursor,
         #[serde(with = "crate::integers::unsigned")]
@@ -145,6 +146,7 @@ pub(super) fn base<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Observation
     }
     let f: Fields = crate::bounded::named_map(d)?;
     Ok(ObservationBase {
+        snapshot: f.snapshot,
         cursor: f.cursor,
         revision: f.revision,
     })
@@ -185,6 +187,7 @@ pub(super) fn reply_context<'de, D: serde::Deserializer<'de>>(
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
     struct Fields {
+        snapshot: crate::SnapshotId,
         #[serde(deserialize_with = "input")]
         input: crate::InputContext,
         actor: crate::ActorId,
@@ -197,6 +200,7 @@ pub(super) fn reply_context<'de, D: serde::Deserializer<'de>>(
     }
     let f: Fields = crate::bounded::named_map(d)?;
     Ok(crate::ReplyContext {
+        snapshot: f.snapshot,
         input: f.input,
         actor: f.actor,
         branch: f.branch,

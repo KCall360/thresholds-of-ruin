@@ -59,7 +59,7 @@ class AsciiMemoryProcesses(ProcessTestCase):
         if os.environ.get("TOR_MEMORY_CAPTURE"):
             Path(os.environ["TOR_MEMORY_CAPTURE"]).write_bytes(read_capture(self.capture))
         self.assertNotIn("stone tablet",json.dumps(closed["state"]))
-        self.assertEqual(self.request(observer,{"type":"snapshot"})["state"],closed["state"])
+        self.assertDisclosedStateEqual(self.request(observer,{"type":"snapshot"})["state"],closed["state"])
         shifted = self.key(window, "left", wait_for_admission=True)
         self.assertTrue(self.tile(shifted,5)["remembered"])
         self.assertEqual(self.tile(shifted,5)["glyph"],"(")
@@ -74,7 +74,7 @@ class AsciiMemoryProcesses(ProcessTestCase):
         refreshed = self.key(window, "right", wait_for_admission=True)
         self.assertEqual(self.tile(refreshed,4)["glyph"],".")
         self.assertTrue(self.tile(refreshed,4)["remembered"])
-        self.key(window, "escape", wait_for_admission=True)
+        self.key(window, "save_quit", wait_for_admission=True)
         window.child.wait(timeout=10)
         observer.stop(); server.stop()
         self.server()
@@ -85,7 +85,7 @@ class AsciiMemoryProcesses(ProcessTestCase):
                        for tile in frame["map_tiles"])
         if not restored_memory(resumed):
             resumed = self.frame(window, restored_memory)
-        self.assertEqual(resumed["state"], refreshed["state"])
+        self.assertDisclosedStateEqual(resumed["state"], refreshed["state"])
         restored = self.tile(resumed, 4)
         self.assertEqual(restored["glyph"], ".")
         self.assertEqual(restored["color"], 0x626262)

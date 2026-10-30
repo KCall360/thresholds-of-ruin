@@ -14,7 +14,7 @@ fn combat(record: Value) -> Value {
         "victory":false,"dead":false,"terminal":false,"public_plan":record})
 }
 fn state(record: Value) -> StateView {
-    serde_json::from_value(json!({"wizard_game":false,"revision":"1","observation":{
+    serde_json::from_value(json!({"snapshot":"fixture", "wizard_game":false,"revision":"1","observation":{
         "charts":[],"linked_holds":[],"actor":"1","self_target":ActorTarget::from_digest([1;32]),"tick":"100",
         "position":{"x":0,"y":0,"z":0},"visible_cells":[],"ground_items":[],
         "inventory":[],"visible_actors":[],"places":[],"ready":false,

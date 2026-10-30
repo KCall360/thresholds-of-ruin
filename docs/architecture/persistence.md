@@ -255,8 +255,9 @@ the maximum is 1,000,000. Captures do not trigger disk writes: the ordinary save
 policy still chooses batch timing. A durable save covers any captured checkpoint
 in its batch. An unsaved snapshot may disappear with an unsaved tail after a crash.
 
-Capture copies the current game and revision map and shares the existing immutable
-rewind boundaries. It does not clone the complete history or receipt index. One
+Capture copies the current game and shares the existing immutable rewind
+boundaries. Attachment display revisions, picture bases and presentation caches
+are not checkpoint state. It does not clone the complete history or receipt index. One
 snapshot may be encoding and one newer snapshot may be pending; newer pending
 captures replace older ones. Encoding, checksum calculation, world/navigation deduplication,
 and database work happen in the storage worker outside the engine/session lock.
@@ -264,8 +265,9 @@ Snapshots can still consume CPU and storage bandwidth while gameplay proceeds;
 profiling tracks their effect rather than assuming background work is free.
 
 The snapshot contains the current simulation and scheduler state, navigation
-knowledge, identities, current branch, revisions, permanent wizard flag and all
-retained boundaries. The server keeps the union of the latest 128 selectable
+knowledge, identities, current branch, permanent wizard flag and all retained
+boundaries. Reopened clients establish new presentation streams; they do not
+restore a saved observation revision map. The server keeps the union of the latest 128 selectable
 gameplay states and the latest 128 raw transaction states, at most 256 shared
 boundaries. Private admission and queue-control records cannot shorten the
 selectable rewind window. Selectability is derived from journal content on

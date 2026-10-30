@@ -65,7 +65,7 @@ class NutritionTriggerProcesses(ProcessTestCase):
         self.server("--checkpoint-interval", 1, seed=None)
         player, restored = self.client()
         peer, _ = self.client(actor=2)
-        self.assertEqual(restored["state"], paused["state"])
+        self.assertDisclosedStateEqual(restored["state"], paused["state"])
         self.assertEqual(checkpoint(self, player), saved)
         for _ in range(851):
             saved = checkpoint(self, player)
@@ -143,7 +143,7 @@ class RogueNutritionProcesses(ProcessTestCase):
                             path.unlink()
                 resumed = self.server(seed=None, save_actor=actor)
                 player, reopened = self.client(actor=actor)
-                self.assertEqual(reopened["state"], eaten["state"])
+                self.assertDisclosedStateEqual(reopened["state"], eaten["state"])
                 self.assertFalse(reopened["state"]["wizard_game"])
                 player.stop(); resumed.stop()
 
@@ -154,7 +154,7 @@ class RogueNutritionProcesses(ProcessTestCase):
         meal = next(item for item in observation(initial)["inventory"] if item["name"] == "food ration")
         self.assertEqual(meal["quantity"], "1")
         self.assertIn("Nutrition: 1300/2000 (nourished)", text.command("stats"))
-        self.assertIn("ItemStarted", text.command("eat food ration"))
+        self.assertIn("You begin to eat the food ration.", text.command("eat food ration"))
         current = self.request(observer, {"type": "snapshot"})
         def finished(frame):
             return observed_meal_complete(frame, meal["id"], 1300)
@@ -185,11 +185,11 @@ class NutritionTriggerNativeProcesses(ProcessTestCase):
         self.ascii_frame(window, lambda frame: frame["state"] is not None and not frame["busy"])
         before = read_capture(capture)
         native = self.native_keys(window)
-        native("Shift_L", True)
+        native("Control_L", True)
         try:
-            shown = self.native_press(window, native, "2", "stats")
+            shown = self.native_press(window, native, "x", "stats")
         finally:
-            native("Shift_L", False)
+            native("Control_L", False)
         rows = "\n".join(shown["stats_rows"])
         self.assertIn("Nutrition: -1/2000 (empty)", rows)
         self.assertIn("Fixture Faint: 1100 active ticks remaining", rows)
@@ -214,11 +214,11 @@ class NutritionTriggerNativeProcesses(ProcessTestCase):
         final = accepted if finished(accepted) else self.ascii_frame(window, finished)
         self.assertFalse(final["state"]["wizard_game"])
         self.assertFalse(any(item["name"] == "food ration" for item in observation(final)["inventory"]))
-        native("Shift_L", True)
+        native("Control_L", True)
         try:
-            shown = self.native_press(window, native, "2", "stats")
+            shown = self.native_press(window, native, "x", "stats")
         finally:
-            native("Shift_L", False)
+            native("Control_L", False)
         self.assertIn("Nutrition:", "\n".join(shown["stats_rows"]))
         self.assertTrue(shown["window_open"])
 

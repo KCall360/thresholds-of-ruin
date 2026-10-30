@@ -7,7 +7,7 @@ fn snapshot(cell_id: u64, tick: u64, revision: u64) -> Snapshot {
         "readiness":{"revision":"0","admission":false,"resume":[],"cancel":[]},"context":super::stream_context(0),
         "actor":"1","branch":"first","cursor":{"sequence":"0","tick":tick.to_string()},
         "has_control":false, "intentions":[],"history":{"entries":[],"older_before":null},
-        "state":{"wizard_game":false,"revision":revision.to_string(),"observation":{
+        "state":{"snapshot":format!("fixture-{revision}"), "wizard_game":false,"revision":revision.to_string(),"observation":{
             "actor":"1","self_target":tor_protocol::ActorTarget::from_digest([1; 32]),"tick":tick.to_string(),"position":{"x":1,"y":1,"z":0},
             "places":[],"visible_cells":[{"key":cell_id.to_string(),"trap":null,"object_presentation":null,"stairs_up":false,"stairs_down":false,"position":{"x":1,"y":1,"z":0},"wall":false,"lit":true,"place_hint":false}],"ground_items":[],"inventory":[],"charts":[],"linked_holds":[],"visible_actors":[],
             "ready":true
@@ -44,24 +44,39 @@ fn free_rename_updates_and_authoritative_place_snapshots_survive_reconnect() {
             name: "Quiet Reverie".into(),
             origin: PlaceNameOrigin::Authored,
         });
-    let mut change = update(&client, next.clone(), 1);
-    if let UpdateBody::Observation { event, .. } = &mut change.body {
-        *event = Some(Box::new(HistoryEntry {
-            id: EntryId("rename".into()),
+    let entry = HistoryEntry {
+        id: EntryId("rename".into()),
+        branch: next.branch.clone(),
+        actor: ActorId(1),
+        tick: 0,
+        author: Author::User {
+            user: "player".into(),
+        },
+        audience: Audience::Actor,
+        content: HistoryContent::PlaceRenamed {
+            key: "offscreen".into(),
+            name: "Quiet Reverie".into(),
+        },
+    };
+    let facts = OutcomeFacts::capture(&client.state().observation, &next.state.observation, None);
+    client
+        .apply(StreamUpdate {
+            context: client.context().clone(),
+            actor: next.actor,
             branch: next.branch.clone(),
-            actor: ActorId(1),
-            tick: 0,
-            author: Author::User {
-                user: "player".into(),
+            cursor: StreamCursor {
+                sequence: 1,
+                tick: 0,
             },
-            audience: Audience::Actor,
-            content: HistoryContent::PlaceRenamed {
-                key: "offscreen".into(),
-                name: "Quiet Reverie".into(),
+            body: UpdateBody::Outcome {
+                visual_changed: true,
+                facts,
+                event: Some(Box::new(entry)),
             },
-        }));
-    }
-    client.apply(change).unwrap();
+        })
+        .unwrap();
+    client.apply(update(&client, next.clone(), 2)).unwrap();
+    assert_eq!(client.history().len(), 1);
     assert_eq!(
         client.state().observation.places,
         next.state.observation.places

@@ -227,8 +227,7 @@ class CatalogServiceContracts(unittest.TestCase):
             self.host.request(case=self.case, connection=player, request_id=f"wait-{turn}",
                 request={"type": "command", "context": {"stream": current["context"],
                     "readiness_revision": current["readiness"]["revision"]}, "branch": current["branch"],
-                    "command": {"type": "act", "expected_revision": current["state"]["revision"],
-                        "action": {"type": "wait"}}})
+                    "command": {"type": "act", "action": {"type": "wait"}}})
             receipts = [row["receipt"] for row in checked_drain(player) if row["type"] == "ack"]
             self.assertEqual(len(receipts), 1)
             self.assertEqual(receipts[0]["type"], "admitted")
@@ -287,7 +286,7 @@ class CatalogServiceContracts(unittest.TestCase):
             self.host.request(case=self.case, connection=connection, request_id=request_id,
                 request={"type": "command", "context": {"stream": current["context"],
                     "readiness_revision": current["readiness"]["revision"]},
-                    "branch": current["branch"], "command": {"expected_revision": current["state"]["revision"],
+                    "branch": current["branch"], "command": {**({"expected_revision": current["state"]["revision"]} if command["type"] not in ("act", "resume_intention", "cancel_intention") else {}),
                         **command}})
             return checked_drain(connection)
 

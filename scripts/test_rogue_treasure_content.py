@@ -27,10 +27,10 @@ class RogueTreasureContent(unittest.TestCase):
                      "choices": [{"archetype": "rogue.orc", "weight": 1}]}]}]}}}})
         manifest_text = (PACKAGE / "scenario.toml").read_text(encoding="utf-8")
         manifest = tomllib.loads(manifest_text)
-        self.assertNotIn("treasure", manifest_text)
+        self.assertIn("rogue.treasure_room", manifest_text)
         self.assertEqual(manifest["floor_activation"]["families"], {"dungeon": "rogue.low_depth"})
         self.assertEqual(set(manifest["floor_activation"]["profiles"]), {"rogue.low_depth"})
-        self.assertNotIn("room_cluster", {stage["kind"] for stage in
+        self.assertIn("room_cluster", {stage["kind"] for stage in
             manifest["floor_activation"]["profiles"]["rogue.low_depth"]["stages"]})
         self.assertNotIn("examples/treasure-stage.toml", str(manifest.get("modules", [])))
         items = tomllib.loads((PACKAGE / "catalog/items.toml").read_text(encoding="utf-8"))["items"]

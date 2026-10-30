@@ -55,6 +55,23 @@ see [scripted model review](review-scripts/README.md).
 Offline review modes run without a server. Create the destination directory
 before using `--capture DIR`; the screenshot writer expects it to exist.
 
+Live startup presents a software-rendered splash before starting the private
+world or initializing the game's graphics device. It embeds the maintainer's
+[startup artwork](assets/startup-loading.png), so it also works when launched
+outside the checkout. Its progress bar counts completed startup milestones:
+connection setup, graphics initialization, the first dungeon view, and entry
+into play. Status text and a camera-control tip accompany the bar; it does not
+invent an estimated time or count unfinished creature models as a startup block.
+The game window opens after its first scene frames are prepared. You can then
+move while remaining creatures use their egg stand-ins. Escape or closing the
+splash cancels startup and cleans up its owned processes. Small and high-DPI
+displays retain the artwork's aspect ratio within the monitor bounds.
+
+With live `--capture DIR`, `DIR/startup/` contains the software splash's actual
+presented milestone images. `startup_splash` JSON diagnostics identify those
+software presentations separately from the game's GPU screenshot evidence.
+Offline reviews and model-workload benchmarks retain their existing startup.
+
 With no `--connect`, the client starts a private `tor-server` (default scenario
 `scenarios/rogue-exploration`) with a fresh save under `.local/client-3d/saves/`
 and stops it on exit. Other options:
@@ -158,20 +175,36 @@ and stops it on exit. Other options:
 - `scenarios/menagerie` (in this crate) is a lit hall holding its supported
   creature recipes, wandering at peace except an emu and a snake that fight, with
   items on the floor: `--scenario crates/client-3d/scenarios/menagerie`
-- `scenarios/crowd` (in this crate) is the rendering benchmark: 24 creatures
-  wander one compact lit chamber at peace, all in view of the character, so
-  25 are drawn at once. Its creatures and palette are the menagerie's:
-  `--scenario crates/client-3d/scenarios/crowd`
+- `scenarios/crowd` (in this crate) is the smaller rendering diagnostic: 24
+  creatures and the player, using the menagerie's palette. Use
+  `--scenario crates/client-3d/scenarios/crowd --distance 16` to frame all 25.
+  The default distance only framed 15 in the local camera-count check.
+- `scenarios/crowd-hundred` repeats the same creature mix with 100 NPCs and the
+  player in a spaced layout. Use
+  `--scenario crates/client-3d/scenarios/crowd-hundred --distance 34` for the
+  target of 100+ visible creatures at 60 FPS (16.7 ms/frame). Its placement respects the server's Manhattan
+  sight limit, including ground beneath the bodies. Local native acceptance
+  verified 101 body-bearing actors in the camera throughout the measured window;
+  this establishes the workload, not a frame-rate guarantee. The current
+  standalone release measurements remain below the 60 FPS target.
 - `--frame-stats SECS` (1 to 600) times live play. Once the world appears it
   waits until five seconds pass without a frame over 250 ms, noting the longest
   frame meanwhile (`worst_settling_ms`, where creature construction stalls show),
   then times every frame for SECS with presentation unsynchronized, prints one
   `3d_frame_stats` JSON line and exits. The report gives the mean, nearest-rank
-  p50/p95/p99 and maximum frame times; what was drawn (creatures, mesh entities,
-  skinned meshes, point and shadowed lights, posed rigs); per-frame animation work
+  p50/p95/p99 and maximum frame times; instantiated creatures, mesh entities,
+  skinned meshes, point and shadowed lights, posed rigs; per-frame animation work
   on the main thread (pose, robes, drapes, hair) and hair's own stages; and each
   render pass's recent GPU and CPU time where the device can time passes.
-  For example, `--scenario crates/client-3d/scenarios/crowd --seed 7 --frame-stats 10`.
+  `frustum_creatures` reports the minimum/maximum distinct actors with generated
+  body geometry in the sole active 3D camera over all timed frames. It excludes
+  held props, decorations and deliberately oversized hair/cloth culling bounds.
+  `sampled_frames` must equal `frames`; missing or ambiguous camera data increments
+  `unavailable_frames` and makes both extrema null. Counts run after current-frame
+  culling. The original `creatures` field still counts instantiated actors.
+  Frustum presence does not prove unoccluded pixels; inspect a captured view
+  separately. Avoid screenshot readbacks during performance measurements.
+  For example, `--scenario crates/client-3d/scenarios/crowd-hundred --distance 34 --seed 7 --frame-stats 10`.
 - In live play, fitting loose hair against the body runs on background threads:
   each wearer's hair keeps its last fitted shape between solves, and free workers
   go to the wearers that have waited longest, sooner the nearer they are to the
@@ -314,8 +347,8 @@ server and client binaries from the same checkout.
 
 WASD, arrows or numpad move relative to the camera (two keys make a diagonal;
 holding repeats). Q/E turn the camera in 45-degree steps, the mouse wheel zooms.
-Space waits, R/F (or `<`/`>`, PageUp/PageDown) climb and descend, M shows or
-hides the mini-map, Tab takes control, Esc closes
+Space waits, R/F (or `<`/`>`, PageUp/PageDown) climb and descend, M opens
+the map and journal, Tab takes control, Esc closes
 the pack or quits. Stepping into
 a hostile creature attacks it, as in the ASCII client.
 
@@ -340,6 +373,30 @@ Objects:
   Read, Zap and Drop, and items within reach offer Take. Choices come from the
   server's disclosed interactions through `tor_client_common::items`, as in the
   ASCII client.
+- The normal inventory has an icon grid and a separate Within reach section.
+  Click an item to inspect its description, quantity, equipped state and actions.
+  All, Gear and Usable filter carried items; Usable follows disclosed use
+  capabilities. Arrows select items locally. Ctrl+F or the search field captures
+  typing for a name search of at most 64 Unicode characters. Enter or the first
+  Esc leaves search; another Esc closes inventory. WASD still moves while browsing
+  outside search. The wheel scrolls inventory under the pointer without zooming the
+  world. Number-key item actions retain their original plan order through filters.
+- F6 opens Equipment. Its slots come from the server's disclosed anatomy, with
+  repeated slot kinds kept separate. Select carried gear to compare remembered
+  properties with an equipped item; click a matching slot to choose the comparison.
+  Unknown bonuses stay unknown. Remove and Equip use the same item actions as the
+  pack; a full set of matching slots requires removing an item first.
+  Item actions appear directly below the compact item header, before property
+  text and descriptions, so long inspection details do not push them out of the
+  opening comparison view.
+  A large live character preview appears beside the equipment panel. Use its
+  Turn left, Front and Turn right buttons, or `[` / `]`, to inspect the current
+  appearance. Turning the preview consumes no turn and preserves the actor and
+  exploration camera. It follows the live model, including its loading stand-in,
+  and closes with Equipment. Narrow windows keep equipment usable and hide the
+  preview when there is insufficient room.
+  Tab switches Inventory/Equipment while the panel is open; outside the panel it
+  retains actor-control transfer. Switching pages clears search and resets scrolling.
 - A device zapped along a direction waits for one: the next movement key aims
   it, relative to the camera like a step, and Esc stops aiming. A device aimed
   at yourself is zapped at once. A device that allows either offers Zap, which
@@ -362,30 +419,100 @@ Objects:
   with Previous, Next and Cancel. Once a delivery is chosen, the next movement
   key fires it. The session binds every query to its own reply and drops the
   choice when the state it was made from changes.
-- F10 opens the owner's advancement screen with the server's overview. Type
-  any [advancement command](../../docs/play/advancement.md) and press Enter;
-  Esc or F10 closes the screen. While it is open, typing never moves the
-  character or turns the camera.
+- F10 opens a right-side character sheet with disclosed attributes and the
+  server's advancement pages. The shared live portrait appears beside it;
+  Home / End turns the portrait when the command line is empty. Brackets remain
+  available for typed commands. On narrow windows the sheet expands and the
+  portrait hides when there is insufficient room. Buttons browse Overview, Point pools, Skills,
+  Talents, Expertises, Intellect thresholds and Ledger; Tab cycles those sections.
+  Page Up / Page Down request the previous / next server page. Scroll the
+  page to read long content; the command line stays visible below it.
+  Point pools and skill/talent/expertise catalogs have graphical choice cards,
+  including each disclosed talent form. Up/Down selects a card; Enter chooses a
+  funding pool or requests a purchase preview. A separate fixed-footer button
+  (F7) names and confirms the exact retained proposal, even while browsing other
+  pages; empty Enter never commits it. Preview cards show disclosed health,
+  resources, injury and consequences, with an explicit warning if the result
+  would leave the character dead. Balance/refund details remain available
+  for review. Stale, unowned or
+  unsynchronized pages cannot dispatch choices, and confirmation also requires
+  current action readiness. Navigation and controls preserve nonempty drafts.
+  Type any [advancement command](../../docs/play/advancement.md) for replacement,
+  growth, Intellect expertise or exact supplies; supply pages keep their own
+  visible content over retained catalogs. Esc or F10 closes; typing never moves
+  the character or turns the camera. Attributes remain read-only disclosed facts;
+  no allocation budget or undisclosed prerequisite tree is invented.
 - C opens the read-only detection charts (monsters, food, magic, mapping) the
   character has acquired. A number key opens one; Page Up and Page Down page
   it; Tab returns to the list. The connection fetches and checks every page,
   and browsing never takes game time.
-- F2 shows the latest retained history, oldest first.
-- F4 writes a note on the current state. It starts private; Tab makes it
-  visible to everyone who observes the actor. Enter saves it.
+- M or the Map dock button opens a combined map and journal. The large north-up
+  map fits the disclosed current-level terrain: bright cells are visible, dim
+  cells remembered, and dark areas unexplored. The exploration mini-map remains.
+  Places, History and Write note tabs share this screen; Page Up / Down and the
+  mouse wheel scroll the journal. Narrow windows stack the two panes.
+  Click a known tile or use Up/Down to select a destination; Enter or the
+  Travel button submits its exact disclosed key. Selection is local, and stale
+  views or unavailable action readiness cannot submit a journey. Closed doors,
+  known traps, occupied tiles and other levels are excluded. The server chooses
+  the route and interruption policy.
+- F2 shows the latest retained history, oldest first, beside the map.
+- F4 opens a note anchored to the current issued snapshot. It starts private; Tab makes it
+  visible to everyone who observes the actor. Enter saves it. F4 also opens
+  note editing from Places or History. M stays part of a note or rename draft.
 - F5 lists the places the character knows and where each name came from. A
   number key picks one, then type its new name and press Enter.
 - F8 resumes and F9 cancels paused or ongoing work, when the server offers
   either; the status line says when it does.
 - Number keys 1 to 9, then 0, take the pack's first ten actions in order.
-  Each button shows its key, so the pack can be played without the mouse.
+  Action buttons show available numeric shortcuts; filters do not change that
+  mapping, so the pack can be played without the mouse.
 
 Compared with the [ASCII client](../../docs/play/ascii.md), the 3D client
 does not yet have the personal stats screen, the victory or death summary,
 the message log, help, releasing control, running, or paging back past the
 latest 40 history entries.
 
+## Live interface
+
+The live interface uses dark stone panels, brass borders and a persistent bottom
+dock. A red health globe shows only the server's disclosed health, with the exact
+value printed over it; unavailable health reads `— / —`. Other resource pools,
+conditions, attributes and objectives retain the shared authoritative status rows.
+The top badge distinguishes Ready, Waiting, Working, Observing, Fallen and
+Disconnected. The four most recent messages sit above the dock.
+
+The dock opens Inventory, Character (the existing advancement pages), Map, Places
+and Journal (retained history). Wait submits the existing wait action only when
+the controlled actor can act. Inventory-specific bindings are listed under
+[Controls](#controls). Framed UI consumes
+pointer input, including the spaces between buttons, so interacting with the dock
+does not also move or attack in the world. The north-up map sits at the top right.
+Opening inventory eases the camera toward the clear area beside it, keeping the
+player visible; closing it returns the usual framing. This neither moves the
+actor nor consumes a turn. The message panel stays hidden until there is a message.
+
+Inventory selections follow disclosed item identities and are cleared when an
+item disappears, becomes unreachable, is hidden by the filter, or the observation
+switches actor, branch or stream. Filtering and selection do not send game actions.
+Identification and projectile choices keep their priority prompt and original
+number-key actions. Item symbols and framed stone/brass textures share bounded
+procedural atlases, using disclosed models when available and category symbols
+for unknown models. The bundled serif font has its [credits and license](assets/ui/NOTICE.txt).
+
+The supplied six UI concepts guide further work. The combined map/journal and
+graphical advancement choices are implemented; a full progression-tree design,
+richer resource presentation and pause/accessibility settings remain unfinished.
+
 ## How it works
+
+- `portrait.rs` renders the existing displayed actor into one adaptive texture,
+  capped at 768 by 1024 pixels. It shares mesh handles and animation, restores
+  original render layers on close or actor changes, and includes newly prepared
+  meshes without requiring another observation. The offscreen camera is inactive
+  when closed. Exploration picking, following, cave cutaway, hair scheduling and
+  frustum diagnostics exclude this camera. Camera fitting uses shaped bounds;
+  loose hair/cloth culling envelopes remain rendered but do not shrink the figure.
 
 - `net.rs` owns `tor_client_common::Connection` on a worker thread and builds
   requests exactly as the ASCII client does, sending the window a plain `View`
@@ -394,7 +521,10 @@ latest 40 history entries.
   attributes, hit dice, place and objective, then health, resource pools,
   gold, hunger, time, holds and combat state, including Dead and Victorious.
   Projectile choices and advancement pages also come from the worker, which
-  binds each query to its reply.
+  binds each query to its reply. `model::advancement` projects bounded typed pages
+  and the exact confirmation record; `progression.rs` builds graphical choices
+  from those records without parsing prose. The shared reducer remains the final
+  admission boundary for every preview and confirmation.
 - Observations are in an observer frame that moves with the character. The
   window matches cell keys that appear once in consecutive views to recover the
   shift, so the world stays still and the camera glides after the player.
@@ -466,9 +596,53 @@ latest 40 history entries.
   The Ranger recipe supplies its own pouch across wearer families.
   Sequential outfit replacements preserve body identity and reuse unchanged
   head/hair assets; selecting Native restores the original clothing and key.
+  Shared tubes sample their cubic paths by model-space error and radius,
+  preserving authored knots and paint spacing instead of applying eight
+  subdivisions to every smoothed segment. Tiny rings avoid unnecessary side
+  doubling while keeping the authored minimum and existing maximum.
+  Closed organic arms and legs use radius-aware surface-net sampling with
+  constrained projection and bounded conforming refinement. Fitted shells and
+  painted cut edges retain their authored sampling. Rounded cloth gathers share
+  their source field with fitting, including the sleeve's underside mass.
+  Limb bounds include offset muscles and smooth-union growth before padding.
+  Upper-arm recipes resolve their narrower clavicle and elbow features on a
+  finer initial grid. A 0.75 mm local field-error allowance is checked against
+  independent one-millimeter physical-distance and silhouette requirements.
+  Scalar field queries and analytic value/gradient queries share primitive
+  expressions and ordered field composition. Projection and refinement normally
+  obtain both values in one traversal; scalar-only queries omit derivative work.
+  A rejected projected surface gets one symmetric-difference retry on the same
+  grid before falling back to fine sampling, preserving the density at hard seams.
+  Sculpted vertex normals retain their existing normal calculation.
+  Live creature and found-corpse recipes prepare on a background worker,
+  including fitting, loose hair and the articulated rig. A shared egg-shaped
+  stand-in remains visible and selectable while preparation runs; movement,
+  input and disclosed state continue updating. Completed results replace only
+  the stand-in, preserving the actor's current animation and position. Obsolete
+  results are discarded after disappearance or appearance replacement. Each
+  ready figure replaces its egg on the next update, without waiting for the
+  remaining queue. One job runs at a time; the worker and render caches each
+  retain the existing idle bounds and collect dropped assets. A failed job
+  retains its egg and reports an error. Offline art reviews and the model
+  workload retain synchronous construction for deterministic evidence. Frame
+  timing waits for all live models to finish and settle; eggs and failed jobs
+  cannot qualify a finished-model crowd measurement.
+  Independent shape, silhouette, topology and volume checks cover the sampler;
+  its conservative fine-grid fallback remains available for unresolved curvature.
+  Cached contact and hair sources retain CPU coordinates once; warm fitting
+  reads them without publishing spurious mesh modifications to the renderer.
+  A resolved head component names headwear, neck adornments, earrings and neck
+  coverage. The same values drive its cache identity and mesh construction, so
+  a new outfit cannot inherit an earlier outfit's choker or collar.
   Mage and RedMage join the swappable humanoids. Replacement outfits remove
   native robes, sash knots and sleeve bells; Native restores them. Casting
   identity remains independent of the worn outfit.
+  Bipeds and centaur riders share organic upper-arm, sleeve and forearm
+  surfaces. Rider build changes arm volume and shoulder spacing while preserving
+  reach; shoulder caps move with the arm instead of remaining on the torso.
+  Yeti body masses use a shared surface-coat component: continuous underfur
+  with staggered, closed clumps combed along the body curve. Torso, hip and limb
+  recipes supply dimensions and flow; shins carry fur instead of generic boot shafts.
   Shared shoulder armor uses a hollow faceted crown and an overlapping lower
   plate, fitted over the resolved arm rather than scaled from build alone.
   Modeling follows the [Bold Storybook definition](../../docs/art/3d-art-direction.md#proportions-bold-storybook):
@@ -637,9 +811,13 @@ latest 40 history entries.
 
 ## Not done
 
-Advancement, abilities, history, notes and the other screens; choosing a
-quantity when taking or dropping part of a stack (the whole stack moves).
-The independent verification gate covers the retained prototype scope.
+The implemented advancement, ability, retained-history and note interfaces do
+not yet provide full ASCII-client parity; see the remaining screen/action limits
+under [Controls](#controls). Choosing a quantity when taking or dropping part of
+a stack also remains unfinished (the whole stack moves). The interface polish
+and pause/accessibility work described above remain separate from those current
+capabilities. The independent verification gate covers the retained prototype
+scope, not a completed redesign or performance target.
 
 The scene draws one representative rig per disclosed actor target. Repeated
 body cells and portal images do not create additional rigs. Mouse selection

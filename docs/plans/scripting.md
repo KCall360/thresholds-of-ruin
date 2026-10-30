@@ -160,7 +160,7 @@ script runs every tick.
 Procedural world authoring starts with declarative recipes. Consider generation
 script extensions only where reusable stages cannot express the requirement
 clearly. Generation and runtime scripting are separate decisions; neither a VM
-nor event hooks are prerequisites for the exploration-only Rogue scenario.
+nor event hooks are prerequisites for the live Rogue scenario.
 See the [procedural requirements](requirements.md).
 
 ## Language selection (deferred)

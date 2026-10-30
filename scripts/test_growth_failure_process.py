@@ -180,7 +180,7 @@ class GrowthFailureProcesses(ProcessTestCase):
             self.assertNotIn(private_detail, refused["message"])
             self.assertNotIn(private_detail, told)
         pending = self.request(observer, {"type": "snapshot"})
-        self.assertEqual(pending["state"], before["state"])
+        self.assertDisclosedStateEqual(pending["state"], before["state"])
         self.assertEqual(checkpoint(self, observer), saved,
                          "Text refusal must not change time, RNG, HP, growth, or carried loot")
         queued = [row for row in pending["intentions"] if row["phase"] == "queued"]
@@ -196,7 +196,7 @@ class GrowthFailureProcesses(ProcessTestCase):
         self.assertEqual([row["type"] for row in replies], ["ack", "error", "ack"])
         cancelled = self.request(observer, {"type": "snapshot"})
         self.assertEqual(cancelled["intentions"], [])
-        self.assertEqual(cancelled["state"], before["state"])
+        self.assertDisclosedStateEqual(cancelled["state"], before["state"])
         self.assertEqual(checkpoint(self, observer), saved)
         final_records = self.saved_records(observer)
         self.assertEqual(final_records[:-1], records)
@@ -231,7 +231,7 @@ class GrowthFailureProcesses(ProcessTestCase):
         self.assertIsNone(admitted["error"])
         refused = self.execution_refusal(player, start)
         pending = self.request(player, {"type": "snapshot"})
-        self.assertEqual(pending["state"], before["state"])
+        self.assertDisclosedStateEqual(pending["state"], before["state"])
         self.assertEqual(checkpoint(self, player), saved,
                          "failed growth rolls back damage, death, XP, HD, loot, time and RNG")
         queued = [row for row in pending["intentions"] if row["phase"] == "queued"]
@@ -248,7 +248,7 @@ class GrowthFailureProcesses(ProcessTestCase):
         self.assertFalse(package.exists())
         server = self.server("--checkpoint-interval", 1, scenario=unrelated_fallback(self), seed=None)
         player, restored = self.client()
-        self.assertEqual(restored["state"], before["state"])
+        self.assertDisclosedStateEqual(restored["state"], before["state"])
         self.assertEqual(restored["intentions"], [dict(queued[0], phase="suspended")])
         self.assertEqual(checkpoint(self, player), saved)
         suspended_records = self.saved_records(player)
@@ -267,7 +267,7 @@ class GrowthFailureProcesses(ProcessTestCase):
         self.assertEqual(retried["code"], refused["code"])
         self.assertEqual(retried["message"], refused["message"])
         after_retry = self.request(player, {"type": "snapshot"})
-        self.assertEqual(after_retry["state"], before["state"])
+        self.assertDisclosedStateEqual(after_retry["state"], before["state"])
         self.assertEqual(after_retry["intentions"], pending["intentions"])
         self.assertEqual(after_retry["history"], resumed["history"])
         self.assertEqual(checkpoint(self, player), saved)
@@ -283,7 +283,7 @@ class GrowthFailureProcesses(ProcessTestCase):
         cancelled = self.command(player, {"type": "cancel_intention"})
         self.assertIsNone(cancelled["error"])
         self.assertEqual(cancelled["intentions"], [])
-        self.assertEqual(cancelled["state"], before["state"])
+        self.assertDisclosedStateEqual(cancelled["state"], before["state"])
         self.assertEqual(checkpoint(self, player), saved)
         cancelled_records = self.saved_records(player)
         self.assertEqual(cancelled_records[:-1], retried_records)

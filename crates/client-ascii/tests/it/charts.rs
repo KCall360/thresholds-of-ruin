@@ -40,6 +40,7 @@ fn app() -> App {
             tick: 0,
         },
         state: Arc::new(StateView {
+            snapshot: tor_protocol::SnapshotId("fixture-snapshot".into()),
             wizard_game: false,
             revision: 0,
             observation,
@@ -86,10 +87,10 @@ fn chart_modal_draws_complete_disclosure_but_never_offers_map_actions_and_escape
     ));
     let mut app = app();
     assert_eq!(
-        app.state.as_ref().unwrap().snapshot(),
-        ordinary.state.as_ref().unwrap().snapshot()
+        app.state.as_ref().unwrap().reset_snapshot().unwrap(),
+        ordinary.state.as_ref().unwrap().reset_snapshot().unwrap()
     );
-    let before = app.state.as_ref().unwrap().snapshot();
+    let before = app.state.as_ref().unwrap().session().clone();
     let map = tor_client_ascii::render::map_tiles(app.state.as_ref().unwrap(), &app.palette);
     assert_eq!(key(&mut app, Key::Charts), Effect::None);
     assert!(app.charts_open);
@@ -105,7 +106,7 @@ fn chart_modal_draws_complete_disclosure_but_never_offers_map_actions_and_escape
     let page = ChartPage {
         context: query.context.clone(),
         branch: query.branch.clone(),
-        base: query.base,
+        base: query.base.clone(),
         chart: query.chart.clone(),
         kind: ChartKind::Monsters,
         mode: ChartMode::Live,
@@ -129,7 +130,7 @@ fn chart_modal_draws_complete_disclosure_but_never_offers_map_actions_and_escape
             }),
         ],
     };
-    let context = state.snapshot().reply_context();
+    let context = state.reply_context();
     let message = ServerMessage::ChartPage {
         context: context.clone(),
         request_id: "chart-test".into(),
@@ -164,7 +165,7 @@ fn chart_modal_draws_complete_disclosure_but_never_offers_map_actions_and_escape
         assert_eq!(key(&mut app, pressed), Effect::None);
     }
     assert_eq!(app.input(Input::Click { x: 600, y: 400 }), Effect::None);
-    assert_eq!(app.state.as_ref().unwrap().snapshot(), before);
+    assert_eq!(app.state.as_ref().unwrap().session().clone(), before);
     assert_eq!(
         tor_client_ascii::render::map_tiles(app.state.as_ref().unwrap(), &app.palette),
         map
@@ -201,7 +202,7 @@ fn chart_modal_draws_complete_disclosure_but_never_offers_map_actions_and_escape
 #[test]
 fn spectators_can_select_charts_and_a_new_observation_withholds_old_live_rows() {
     let mut app = app();
-    let mut snapshot = app.state.as_ref().unwrap().snapshot();
+    let mut snapshot = app.state.as_ref().unwrap().reset_snapshot().unwrap();
     snapshot.has_control = false;
     snapshot.readiness.admission = false;
     app.role = AccessRole::Spectator;
@@ -216,6 +217,7 @@ fn spectators_can_select_charts_and_a_new_observation_withholds_old_live_rows() 
     assert!(matches!(*request, Request::Chart { .. }));
     let mut next = app.state.as_ref().unwrap().state().clone();
     next.revision += 1;
+    next.snapshot = tor_protocol::SnapshotId(format!("fixture-display-{}", next.revision));
     next.observation.charts[0].status = ChartStatus::Inactive;
     next.observation.charts[0].chart = None;
     next.observation.charts[0].acquired_at = None;
@@ -245,11 +247,14 @@ fn successful_snapshot_recovery_cancels_chart_selection_but_invalid_replacement_
     assert!(matches!(key(&mut app, Key::Enter), Effect::Request(_)));
     assert_eq!(app.charts.selected(), Some(ChartKind::Monsters));
     assert!(app.charts.loading());
-    let original = app.state.as_ref().unwrap().snapshot();
+    let original = app.state.as_ref().unwrap().reset_snapshot().unwrap();
 
     // An old epoch is invalid; neither the world nor the pending selection changes.
     assert!(app.replace_snapshot(original.clone()).is_err());
-    assert_eq!(app.state.as_ref().unwrap().snapshot(), original);
+    assert_eq!(
+        app.state.as_ref().unwrap().reset_snapshot().unwrap(),
+        original
+    );
     assert_eq!(app.charts.selected(), Some(ChartKind::Monsters));
     assert!(app.charts.loading());
 
@@ -276,7 +281,8 @@ fn replacing_transport_owner_returns_to_chart_catalog_instead_of_reusing_pending
     assert_eq!(key(&mut app, Key::Charts), Effect::None);
     assert!(matches!(key(&mut app, Key::Enter), Effect::Request(_)));
     assert!(app.charts.loading());
-    let replacement = ClientState::from_snapshot(app.state.as_ref().unwrap().snapshot()).unwrap();
+    let replacement =
+        ClientState::from_snapshot(app.state.as_ref().unwrap().reset_snapshot().unwrap()).unwrap();
     app.set_state(replacement);
     assert_eq!(app.charts.selected(), None);
     assert!(!app.charts.loading());
@@ -293,7 +299,7 @@ fn chart_timeout_returns_to_catalog_without_actions_and_old_view_timeout_is_igno
     let Request::Chart { query } = *request else {
         panic!("pure chart query")
     };
-    let before = app.state.as_ref().unwrap().snapshot();
+    let before = app.state.as_ref().unwrap().session().clone();
     let mut stale = query.clone();
     stale.context.epoch += 1;
     app.chart_cancelled(&stale);
@@ -304,7 +310,7 @@ fn chart_timeout_returns_to_catalog_without_actions_and_old_view_timeout_is_igno
     assert!(!app.charts.loading());
     assert_eq!(app.charts.selected(), None);
     assert!(app.status.contains("timed out"));
-    assert_eq!(app.state.as_ref().unwrap().snapshot(), before);
+    assert_eq!(app.state.as_ref().unwrap().session().clone(), before);
     assert!(
         matches!(key(&mut app, Key::Enter), Effect::Request(request) if matches!(*request, Request::Chart { .. }))
     );
@@ -314,7 +320,7 @@ fn chart_timeout_returns_to_catalog_without_actions_and_old_view_timeout_is_igno
 fn mapping_modal_renders_sparse_historical_stairs_and_wall_normal_without_map_or_operation_authority(
 ) {
     let mut app = app();
-    let mut snapshot = app.state.as_ref().unwrap().snapshot();
+    let mut snapshot = app.state.as_ref().unwrap().reset_snapshot().unwrap();
     let observation = &mut Arc::make_mut(&mut snapshot.state).observation;
     observation.visible_cells.clear();
     observation.charts[0].kind = ChartKind::Mapping;
@@ -335,7 +341,7 @@ fn mapping_modal_renders_sparse_historical_stairs_and_wall_normal_without_map_or
     let page = ChartPage {
         context: query.context.clone(),
         branch: query.branch.clone(),
-        base: query.base,
+        base: query.base.clone(),
         chart: query.chart.clone(),
         kind: ChartKind::Mapping,
         mode: ChartMode::Historical,
@@ -374,7 +380,7 @@ fn mapping_modal_renders_sparse_historical_stairs_and_wall_normal_without_map_or
             }),
         ],
     };
-    let context = state.snapshot().reply_context();
+    let context = state.reply_context();
     let message = ServerMessage::ChartPage {
         context: context.clone(),
         request_id: "mapping".into(),
@@ -413,7 +419,10 @@ fn mapping_modal_renders_sparse_historical_stairs_and_wall_normal_without_map_or
     ] {
         assert_eq!(key(&mut app, pressed), Effect::None);
     }
-    assert_eq!(app.state.as_ref().unwrap().snapshot(), snapshot);
+    assert_eq!(
+        app.state.as_ref().unwrap().reset_snapshot().unwrap(),
+        snapshot
+    );
     assert_eq!(
         tor_client_ascii::render::map_tiles(app.state.as_ref().unwrap(), &app.palette),
         tiles

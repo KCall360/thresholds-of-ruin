@@ -35,6 +35,7 @@ fn reply(
     ChartPageReply {
         message_type: ChartReplyType::ChartPage,
         context: crate::ReplyContext {
+            snapshot: crate::SnapshotId("chart-fixture".into()),
             input: crate::InputContext {
                 stream: StreamContext {
                     stream: crate::StreamId("attachment-1".into()),
@@ -58,6 +59,7 @@ fn reply(
             },
             branch: BranchId("branch-1".into()),
             base: ObservationBase {
+                snapshot: crate::SnapshotId("chart-fixture".into()),
                 cursor: crate::StreamCursor {
                     sequence: 3,
                     tick: 4,
@@ -80,7 +82,7 @@ fn query(reply: &ChartPageReply) -> ChartQuery {
     ChartQuery {
         context: reply.page.context.clone(),
         branch: reply.page.branch.clone(),
-        base: reply.page.base,
+        base: reply.page.base.clone(),
         chart: reply.page.chart.clone(),
         cursor: (reply.page.start != 0).then_some(reply.page.start),
     }
@@ -409,6 +411,9 @@ fn exact_context_base_token_mode_and_request_correlation_cannot_be_rebound_mid_s
     }
     // General publication/readiness advances are not an observation-base change.
     let mut later_publication = last.clone();
+    later_publication.context.snapshot = crate::SnapshotId("newer-chart-view".into());
+    later_publication.context.revision += 1;
+    later_publication.context.cursor.tick += 1;
     later_publication.context.cursor.sequence += 1;
     later_publication.context.input.readiness_revision += 1;
     stream
@@ -585,6 +590,8 @@ fn conservative_envelope_and_records_cover_actual_serde_at_all_scalar_extremes()
         u64::MAX,
         ChartKind::Monsters,
     );
+    value.context.snapshot = crate::SnapshotId("\\".repeat(128));
+    value.page.base.snapshot = crate::SnapshotId("\\".repeat(128));
     value.request_id = "\\".repeat(128);
     value.page.context.stream.0 = "\"".repeat(128);
     value.page.context.epoch = u64::MAX;
@@ -621,20 +628,20 @@ fn conservative_envelope_and_records_cover_actual_serde_at_all_scalar_extremes()
     ] {
         assert!(serde_json::to_vec(&record).unwrap().len() <= record.encoded_size_bound().unwrap());
     }
-    // Independent envelope shape: six empty identifiers already include quotes;
+    // Independent envelope shape: eight empty identifiers already include quotes;
     // all fifteen u64 values are maximal canonical strings, enum strings longest.
     let max = u64::MAX.to_string();
-    let skeleton = json!({"type":"chart_page","context":{
+    let skeleton = json!({"type":"chart_page","context":{"snapshot":"",
         "input":{"stream":{"stream":"","epoch":max},"readiness_revision":max},
         "actor":max,"branch":"","cursor":{"sequence":max,"tick":max},"revision":max},
         "request_id":"","page":{
         "context":{"stream":"","epoch":max},"branch":"",
-        "base":{"cursor":{"sequence":max,"tick":max},"revision":max},
+        "base":{"snapshot":"","cursor":{"sequence":max,"tick":max},"revision":max},
         "chart":"","kind":"monsters","mode":"historical","acquired_at":max,
         "total_components":max,"total_records":max,"start":max,"records":[],"next":max}});
-    assert_eq!(serde_json::to_vec(&skeleton).unwrap().len(), 744);
-    assert_eq!(744 + 5 * (6 * 128) + 128, 4712);
-    const { assert!(4712 <= CHART_ENVELOPE_BYTES) };
+    assert_eq!(serde_json::to_vec(&skeleton).unwrap().len(), 772);
+    assert_eq!(772 + 7 * (6 * 128) + 128, 6276);
+    const { assert!(6276 <= CHART_ENVELOPE_BYTES) };
     let keys: Vec<_> = serde_json::to_value(&value).unwrap()["page"]
         .as_object()
         .unwrap()
@@ -686,7 +693,7 @@ fn live_message_dispatch_uses_standard_reply_context_and_complete_page_byte_caps
     invalid["unexpected"] = json!(null);
     assert!(crate::decode_response(&invalid.to_string()).is_err());
     invalid.as_object_mut().unwrap().remove("unexpected");
-    invalid["context"]["cursor"]["tick"] = json!("5");
+    invalid["context"]["cursor"]["tick"] = json!("3");
     assert!(crate::decode_response(&invalid.to_string()).is_err());
     for text in [
         encoded.text.clone(),
@@ -732,6 +739,7 @@ fn inactive(kind: ChartKind) -> ChartSummary {
 }
 fn state() -> crate::StateView {
     crate::StateView {
+        snapshot: crate::SnapshotId("chart-fixture-state".into()),
         wizard_game: false,
         revision: 10,
         observation: crate::Observation {

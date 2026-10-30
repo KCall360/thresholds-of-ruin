@@ -21,6 +21,7 @@ use std::{collections::HashMap, f32::consts::TAU, sync::Arc};
 #[cfg(test)]
 #[path = "props_art_tests.rs"]
 mod art_contract_tests;
+mod tube_path;
 
 // The shared palette.
 const WOOD: Vec3 = Vec3::new(0.45, 0.29, 0.16);
@@ -83,6 +84,7 @@ impl Accent {
 /// Surface families shared by props and the entire creature cast.
 /// Keep broad diffuse colour on cloth, hide and feathers; reserve the tighter
 /// highlights for leather and metal so material reads survive gameplay distance.
+#[derive(Clone)]
 pub struct PropMaterials {
     matte: Handle<StandardMaterial>,
     /// Leather and other surfaces with a soft sheen.
@@ -516,6 +518,85 @@ pub(crate) fn profile_builds() -> bool {
 }
 
 impl PropLibrary {
+    /// Transfer only cached parts referenced by a prepared rig. Worker-local
+    /// asset IDs never become IDs in the render world's asset collections.
+    pub(crate) fn prepared_models(
+        &self,
+        used: &std::collections::HashSet<bevy::asset::AssetId<Mesh>>,
+    ) -> Vec<(String, Model)> {
+        self.cache
+            .iter()
+            .filter(|(_, entry)| entry.model.0.iter().any(|(h, _)| used.contains(&h.id())))
+            .map(|(key, entry)| (key.clone(), entry.model.clone()))
+            .collect()
+    }
+
+    pub(crate) fn import_prepared(
+        &mut self,
+        meshes: &mut Assets<Mesh>,
+        models: Vec<(String, Model)>,
+        payloads: Vec<(bevy::asset::AssetId<Mesh>, Mesh)>,
+    ) -> HashMap<bevy::asset::AssetId<Mesh>, Handle<Mesh>> {
+        let mut mapped = HashMap::new();
+        for (key, model) in &models {
+            if let Some(cached) = self.cache.get_mut(key) {
+                self.clock += 1;
+                cached.last_used = self.clock;
+                assert_eq!(model.0.len(), cached.model.0.len());
+                for ((source, _), (target, _)) in model.0.iter().zip(&cached.model.0) {
+                    mapped.insert(source.id(), target.clone());
+                }
+            }
+        }
+        for (id, mesh) in payloads {
+            mapped.entry(id).or_insert_with(|| meshes.add(mesh));
+        }
+        for (key, mut model) in models {
+            if self.cache.contains_key(&key) {
+                continue;
+            }
+            for (mesh, _) in &mut model.0 {
+                *mesh = mapped[&mesh.id()].clone();
+            }
+            let payload_bytes = model
+                .0
+                .iter()
+                .map(|(h, _)| {
+                    let mesh = meshes.get(h).expect("imported model mesh");
+                    mesh.get_vertex_buffer_size()
+                        + mesh.get_index_buffer_bytes().map_or(0, <[u8]>::len)
+                })
+                .sum();
+            self.clock += 1;
+            self.payload_bytes += payload_bytes;
+            self.cache.insert(
+                key,
+                CachedModel {
+                    model,
+                    payload_bytes,
+                    last_used: self.clock,
+                },
+            );
+        }
+        self.trim();
+        mapped
+    }
+
+    /// Workers have no AssetServer to collect dropped handles. Keep only the
+    /// bounded source cache; instance-owned payloads have already been exported.
+    pub(crate) fn collect_worker_meshes(&mut self, meshes: &mut Assets<Mesh>) {
+        self.trim();
+        let retained: std::collections::HashSet<_> = self
+            .cache
+            .values()
+            .flat_map(|entry| entry.model.0.iter().map(|(h, _)| h.id()))
+            .collect();
+        let obsolete: Vec<_> = meshes.ids().filter(|id| !retained.contains(id)).collect();
+        for id in obsolete {
+            meshes.remove(id);
+        }
+    }
+
     pub fn new(materials: PropMaterials) -> Self {
         Self {
             materials,
@@ -2346,39 +2427,14 @@ impl Builder {
         if path.len() < 2 {
             return;
         }
-        // Resample as a Catmull-Rom spline so curves are smooth and painted
-        // patterns have rings enough to show.
-        let sub = if self.smooth { 8 } else { 1 };
-        let at = |i: isize| path[i.clamp(0, path.len() as isize - 1) as usize];
-        let mut fine_path = Vec::new();
-        let mut fine_radii = Vec::new();
-        for i in 0..path.len() - 1 {
-            for k in 0..sub {
-                let t = k as f32 / sub as f32;
-                let (p0, p1, p2, p3) = (
-                    at(i as isize - 1),
-                    at(i as isize),
-                    at(i as isize + 1),
-                    at(i as isize + 2),
-                );
-                let t2 = t * t;
-                let t3 = t2 * t;
-                fine_path.push(
-                    0.5 * ((2.0 * p1)
-                        + (p2 - p0) * t
-                        + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2
-                        + (3.0 * p1 - p0 - 3.0 * p2 + p3) * t3),
-                );
-                fine_radii.push(radii[i].lerp(radii[i + 1], t));
-            }
-        }
-        fine_path.push(*path.last().unwrap());
-        fine_radii.push(*radii.last().unwrap());
-        let (path, radii) = (&fine_path[..], &fine_radii[..]);
-        let n = path.len();
-        let sides = (sides * self.sides_mul).min(32);
-        let tangent =
-            |i: usize| (path[(i + 1).min(n - 1)] - path[i.saturating_sub(1)]).normalize_or(Vec3::Y);
+        let sampled = tube_path::sample(path, radii, self.smooth);
+        let n = sampled.len();
+        let radius = radii
+            .iter()
+            .map(|r| r.max_element())
+            .fold(0.0_f32, f32::max);
+        let sides = tube_path::sides(sides, self.sides_mul, radius, self.smooth);
+        let tangent = |i: usize| sampled[i].tangent;
         // Frames carried along the path so the rings never twist.
         let mut frames = Vec::with_capacity(n);
         let t0 = tangent(0);
@@ -2392,10 +2448,10 @@ impl Builder {
             e1 = (e1 - t * e1.dot(t)).normalize_or(basis(t).0);
             frames.push((e1, t.cross(e1)));
         }
-        let length: Vec<f32> = path
+        let length: Vec<f32> = sampled
             .windows(2)
             .scan(0.0, |acc, w| {
-                *acc += (w[1] - w[0]).length();
+                *acc += (w[1].center - w[0].center).length();
                 Some(*acc)
             })
             .collect();
@@ -2408,14 +2464,16 @@ impl Builder {
                     .map(|k| {
                         let ang = k as f32 * TAU / sides as f32;
                         let dir = a * ang.cos() + b * ang.sin();
-                        let at = path[i] + a * ang.cos() * radii[i].x + b * ang.sin() * radii[i].y;
+                        let at = sampled[i].center
+                            + a * ang.cos() * sampled[i].radius.x
+                            + b * ang.sin() * sampled[i].radius.y;
                         (at, dir)
                     })
                     .collect()
             })
             .collect();
         for i in 0..n - 1 {
-            let inside = (path[i] + path[i + 1]) * 0.5;
+            let inside = (sampled[i].center + sampled[i + 1].center) * 0.5;
             for k in 0..sides {
                 let m = (k + 1) % sides;
                 let quad = [(i, k), (i + 1, k), (i + 1, m), (i, m)];
@@ -2433,10 +2491,10 @@ impl Builder {
         }
         // Close the ends.
         for (i, outward) in [(0, -tangent(0)), (n - 1, tangent(n - 1))] {
-            if radii[i].x <= 0.0 {
+            if sampled[i].radius.x <= 0.0 {
                 continue;
             }
-            let center = path[i];
+            let center = sampled[i].center;
             let color = paint(outward, center, along(i));
             for k in 0..sides {
                 let m = (k + 1) % sides;

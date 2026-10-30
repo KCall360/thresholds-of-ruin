@@ -5,14 +5,14 @@
   "ruleset_dependencies": {
     "interactions-v56": "6c4c3eb331a1567c50e1fed30fa59fd37f69f6d2413d829be49a0253748b5f80"
   },
-  "content_hash": "a7c720736a008c880f0ac5db8cd1e2f7d41420d51cca359d265299d3419fb25b",
+  "content_hash": "7903dc1ba779cd2cc2109d9cf2719b377bf351c7f927e9212f79881b13e1adb5",
   "files": {
     "catalog/actors.toml": "32912d0c1bf75035165a73aea3ed22411bbb098f74242be5874233548ca429c6",
     "catalog/bodies.toml": "c70ca7dc03c2cfea53b8f9f4f9430da104246c4745f0f5f002cd456806e5f005",
     "catalog/creatures.toml": "0dd1b7c8f32e727eef9b2a955cb16d16e1cc261274599fd1c7cede0cc2cab215",
-    "catalog/items.toml": "02253ff0cbd16d2d9b73f1029bdb2d1e6d470982185fd7d77650296f1dfeb322",
+    "catalog/items.toml": "780f5ed34f4f9d35a3bb5cf1be814322488cc6343ffaff6a6986b264ce53b63b",
     "index.json": "9bcdcd8e7340350480abf05c4edbe9b8a8ef04e77258d462167b598589354902",
-    "rules.toml": "1d73509d942ece5b5c0b6597cdcf9426050fb393c48439c052d72b6ff9fc2f31",
+    "rules.toml": "708fed87ee069dd3648e8daf1d8da8b1c9c578890cadddf457b40f778939a923",
     "scenario.toml": "c1dd9958ea44178e8dc829792fc877f05505829fdc73999ff99ff0ccfb387471"
   },
   "regions": 0,

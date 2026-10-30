@@ -38,7 +38,7 @@ const TO_HALL_4: usize = 68;
 /// Step, returning the builds and reads the preloader had ready, and all
 /// the builds and reads the step needed.
 fn step(engine: &mut Engine, direction: Direction, sequence: &mut usize) -> (usize, usize) {
-    let revision = engine.revision(ActorId(1)).unwrap();
+    let revision = engine.causal_boundary(ActorId(1)).unwrap();
     let (_, profile) = engine
         .command_profiled(
             "player",
@@ -47,7 +47,7 @@ fn step(engine: &mut Engine, direction: Direction, sequence: &mut usize) -> (usi
             &format!("step-{sequence}"),
             &engine.branch().clone(),
             Command::Act {
-                expected_revision: revision,
+                expected_boundary: revision,
                 action: Action::Move { direction },
             },
         )

@@ -110,7 +110,7 @@ impl MapHydration {
                 query: MapQuery {
                     context: boundary.context.clone(),
                     branch: boundary.branch.clone(),
-                    base: boundary.base,
+                    base: boundary.base.clone(),
                     window,
                     cursor: None,
                 },
@@ -201,9 +201,9 @@ impl MapHydration {
         if context.input.stream != boundary.context
             || context.actor != boundary.actor
             || context.branch != boundary.branch
-            || context.revision != boundary.base.revision
+            || context.revision < boundary.base.revision
+            || context.cursor.tick < boundary.base.cursor.tick
             || context.cursor.sequence < boundary.base.cursor.sequence
-            || context.cursor.tick != boundary.base.cursor.tick
             || page.actor != boundary.actor
             || page.branch != boundary.branch
             || page.base != boundary.base

@@ -6,7 +6,7 @@ use crate::content_ids::AbilityId;
 use crate::perception::ActorReferenceKind;
 use crate::{ActorId, Game, GameError, Observation};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use tor_world::Shared;
 
 type Reference = Option<ActorReferenceKind>;
@@ -133,6 +133,30 @@ impl PartialEq for EventObservation {
     }
 }
 impl Eq for EventObservation {}
+
+/// Opaque event-time authority captured for one committed observer boundary.
+/// This transient product is not serialized and grants no authority after mutation.
+#[derive(Clone, Debug)]
+pub struct CommitEventFacts {
+    observer: ActorId,
+    tick: u64,
+    scene: std::sync::Arc<Vec<tor_world::SightCell>>,
+    proof: EventObservation,
+}
+impl CommitEventFacts {
+    pub fn observer(&self) -> ActorId {
+        self.observer
+    }
+    pub fn tick(&self) -> u64 {
+        self.tick
+    }
+    pub fn scene(&self) -> &std::sync::Arc<Vec<tor_world::SightCell>> {
+        &self.scene
+    }
+    pub fn proof(&self) -> &EventObservation {
+        &self.proof
+    }
+}
 
 /// At most the two actual participants' reference ceilings, captured before the
 /// first mutation. Contact plans only narrow the source's target reference.
@@ -341,6 +365,12 @@ fn read_observers<'de, D: serde::Deserializer<'de>>(
 }
 
 impl Game {
+    /// Backend-only causal event-log identity, independent of visual snapshots.
+    /// Generation distinguishes equal-length event batches at the same tick.
+    pub fn event_history_boundary(&self) -> (u64, usize) {
+        (self.event_receipts.generation, self.event_log.len())
+    }
+
     pub fn event_observation_witness(&self) -> EventObservationWitness {
         EventObservationWitness {
             generation: self.event_receipts.generation,
@@ -753,17 +783,48 @@ impl Game {
         &self,
         observer: ActorId,
     ) -> Result<(Observation, Vec<tor_world::SightCell>, EventObservation), GameError> {
-        let (observation, scene) = self.observe_scene(observer)?;
+        let (observation, scene, proof) = self.observe_event_shared_scene(observer)?;
+        crate::diagnostics::scene_cells_copied(scene.len());
+        Ok((observation, (*scene).clone(), proof))
+    }
+
+    /// Fresh ordinary disclosure and event-time proof, sharing only immutable geometry.
+    pub fn observe_event_shared_scene(
+        &self,
+        observer: ActorId,
+    ) -> Result<
+        (
+            Observation,
+            std::sync::Arc<Vec<tor_world::SightCell>>,
+            EventObservation,
+        ),
+        GameError,
+    > {
+        let (observation, snapshot) = self.observe_cached_scene(observer)?;
+        let proof = self.capture_event_proof_in_scene(observer, &snapshot, |subject| {
+            observation
+                .visible_actors
+                .binary_search_by_key(&subject, |actor| actor.id)
+                .ok()
+                .and_then(|index| observation.visible_actors[index].disclosure.reference())
+        })?;
+        Ok((observation, snapshot.shared_cells(), proof))
+    }
+
+    /// Canonical event-time identity rule shared by full and reference-only reads.
+    /// The classifier supplies ordinary projected authority, never caller fields.
+    fn capture_event_proof_in_scene(
+        &self,
+        observer: ActorId,
+        snapshot: &crate::observation::CachedScene,
+        classified: impl Fn(ActorId) -> Reference,
+    ) -> Result<EventObservation, GameError> {
         let mut proof = EventObservation::default();
         if self.event_origins.open {
             let witness = self.event_observation_witness();
-            let locations: BTreeSet<_> = scene.iter().map(|cell| cell.location).collect();
+            let locations = snapshot.projection_cells();
             let reference = |subject| {
-                let classified = observation
-                    .visible_actors
-                    .binary_search_by_key(&subject, |actor| actor.id)
-                    .ok()
-                    .and_then(|index| observation.visible_actors[index].disclosure.reference());
+                let classified = classified(subject);
                 self.event_reference_in_scene(observer, subject, classified, |at| {
                     locations.contains(&at)
                 })
@@ -821,7 +882,74 @@ impl Game {
             proof.observer = Some(observer);
             proof.witness = Some(witness);
         }
-        Ok((observation, scene, proof))
+        Ok(proof)
+    }
+
+    /// Map-only projection must preserve the full event projection's capacity
+    /// failure without acquiring or retaining new historical authority. A suffix
+    /// this small cannot overflow: canonical capture adds at most one receipt
+    /// per event. Larger suffixes require exact disclosure qualification.
+    pub(crate) fn validate_event_observation_capacity(
+        &self,
+        observer: ActorId,
+    ) -> Result<(), GameError> {
+        if !self.event_origins.open
+            || self
+                .event_log
+                .len()
+                .saturating_sub(self.event_origins.extension_start)
+                <= crate::limits::EVENT_RECEIPTS
+        {
+            return Ok(());
+        }
+        self.capture_commit_event_facts(observer).map(|_| ())
+    }
+
+    /// Ordinary immutable scene from a sealed boundary. Unexpected open event
+    /// extension retains canonical event-proof validation before returning geometry.
+    pub fn capture_observation_scene_shared(
+        &self,
+        observer: ActorId,
+    ) -> Result<std::sync::Arc<Vec<tor_world::SightCell>>, GameError> {
+        if self.event_origins.open {
+            return self
+                .capture_commit_event_facts(observer)
+                .map(|facts| facts.scene);
+        }
+        self.scene_snapshot_shared(observer)
+            .map(|scene| scene.shared_cells())
+    }
+
+    /// Pure capture; only record_commit_event_facts can extend historical receipts.
+    pub fn capture_commit_event_facts(
+        &self,
+        observer: ActorId,
+    ) -> Result<CommitEventFacts, GameError> {
+        let snapshot = self.scene_snapshot_shared(observer)?;
+        let projection = snapshot.classified_actors(self, observer)?;
+        let proof = self.capture_event_proof_in_scene(observer, &snapshot, |subject| {
+            self.projected_actor_reference(
+                observer,
+                subject,
+                snapshot.projection_cells(),
+                &projection,
+            )
+        })?;
+        Ok(CommitEventFacts {
+            observer,
+            tick: self.tick,
+            scene: snapshot.shared_cells(),
+            proof,
+        })
+    }
+
+    /// Persist only internally captured authority at its original candidate boundary.
+    pub fn record_commit_event_facts(
+        &mut self,
+        witness: &EventObservationWitness,
+        facts: &CommitEventFacts,
+    ) -> Result<(), GameError> {
+        self.record_event_proof(witness, &facts.proof, facts.observer, facts.tick)
     }
 
     pub fn event_observation_pending(&self, proof: &EventObservation) -> bool {
@@ -855,15 +983,32 @@ impl Game {
         if !self.event_origins.open {
             return Ok(());
         }
+        let observer = observation.actor;
+        self.record_event_proof(witness, proof, observer, observation.tick)?;
+        if let Some(combat) = observation.combat.as_mut() {
+            combat.events = self.disclosed_event_history(observer);
+        }
+        Ok(())
+    }
+
+    fn record_event_proof(
+        &mut self,
+        witness: &EventObservationWitness,
+        proof: &EventObservation,
+        observer: ActorId,
+        tick: u64,
+    ) -> Result<(), GameError> {
+        if !self.event_origins.open {
+            return Ok(());
+        }
         if *witness != self.event_observation_witness()
             || proof.witness.as_ref() != Some(witness)
-            || proof.observer != Some(observation.actor)
-            || observation.tick != self.tick
-            || !self.has_actor(observation.actor)
+            || proof.observer != Some(observer)
+            || tick != self.tick
+            || !self.has_actor(observer)
         {
             return Err(invalid());
         }
-        let observer = observation.actor;
         let row = self.event_receipts.observers.get(&observer);
         let additions = proof
             .entries
@@ -881,9 +1026,6 @@ impl Game {
             .cloned()
             .collect();
         self.add_event_receipts(observer, additions, self.event_log.len())?;
-        if let Some(combat) = observation.combat.as_mut() {
-            combat.events = self.disclosed_event_history(observer);
-        }
         Ok(())
     }
 

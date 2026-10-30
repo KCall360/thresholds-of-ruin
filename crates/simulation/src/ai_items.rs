@@ -602,7 +602,7 @@ impl Game {
 }
 
 pub(crate) fn required_nutrition(view: &Observation) -> Option<crate::nutrition::Hunger> {
-    match view.combat.as_ref()?.own_stats.as_ref()?.nutrition {
+    match view.combat.as_ref()?.own_stats.as_ref()?.nutrition() {
         crate::nutrition::NutritionView::Required { hunger, .. } => Some(hunger),
         crate::nutrition::NutritionView::Exempt => None,
     }

@@ -139,6 +139,7 @@ pub(super) const FOOT_SCALE: Vec3 = Vec3::new(1.22, 1.0, 1.22);
 /// ratios describe one existing build choice, not independent random knobs.
 #[derive(Clone, Copy)]
 pub(super) struct BuildProfile {
+    pub width: f32,
     pub shoulders: f32,
     pub waist: f32,
     pub hips: f32,
@@ -154,6 +155,7 @@ impl BuildProfile {
             build as usize
         };
         Self {
+            width: [0.94, 1.0, 1.07][build as usize],
             shoulders: [0.94, 1.0, 1.08][i],
             waist: [0.92, 1.0, 1.04][i],
             hips: [0.96, 1.0, 1.07][i],
@@ -222,6 +224,8 @@ pub(super) struct LimbShape {
 }
 
 impl LimbShape {
+    pub const BELLY_BLEND: f32 = 0.03;
+
     pub fn new(length: f32, radius_top: f32, radius_bottom: f32, belly: f32, forward: f32) -> Self {
         Self {
             length,
@@ -274,11 +278,27 @@ impl LimbShape {
             }
             (low, high)
         } else {
-            let radius = self.radius_top.max(self.radius_bottom).max(self.belly.x) + padding;
-            (
-                Vec3::new(-radius, -self.length - radius, -radius),
-                Vec3::splat(radius),
-            )
+            // The belly is offset and need not be circular. A radius around the
+            // limb axis can clip its back even when the old voxel phase hides
+            // that clipping. Bound both component fields before adding padding.
+            let blend = if self.belly.x > 0.0 {
+                Self::BELLY_BLEND * 0.25
+            } else {
+                0.0
+            };
+            let top = Vec3::splat(self.radius_top + blend);
+            let bottom = Vec3::splat(self.radius_bottom + blend);
+            let end = Vec3::NEG_Y * self.length;
+            let mut low = (-top).min(end - bottom);
+            let mut high = top.max(end + bottom);
+            if self.belly.x > 0.0 {
+                // Smooth min can grow the union by blend. Scaling the
+                // ellipsoid by its smallest radius conservatively encloses it.
+                let radii = self.belly * (1.0 + blend / self.belly.min_element());
+                low = low.min(self.belly_center - radii);
+                high = high.max(self.belly_center + radii);
+            }
+            (low - Vec3::splat(padding), high + Vec3::splat(padding))
         }
     }
 }
@@ -367,6 +387,26 @@ impl BootShape {
             cuff_thickness: 0.016,
             sample_radius_top: 0.078 * build,
             sample_radius_bottom: 0.067 * build,
+        }
+    }
+}
+
+/// Humanoid arms on an equine rider retain their joint reach while sharing
+/// the same correlated width and muscle profile as other organic bodies.
+#[derive(Clone, Copy)]
+pub(super) struct RiderArms {
+    pub width: f32,
+    pub muscle: f32,
+    pub reach: f32,
+}
+
+impl RiderArms {
+    pub fn resolve(look: &Look) -> Self {
+        let profile = BuildProfile::resolve(look.style, look.v.build);
+        Self {
+            width: profile.width * if look.v.woman { 0.9 } else { 1.0 },
+            muscle: profile.muscle,
+            reach: if look.v.woman { 0.215 } else { 0.24 } * profile.shoulders,
         }
     }
 }
@@ -645,6 +685,7 @@ pub(super) fn centaur_bust(look: &Look) -> Option<Bust> {
 
 impl HumanoidBody {
     pub fn resolve(look: &Look) -> Self {
+        let profile = BuildProfile::resolve(look.style, look.v.build);
         let build = match look.style {
             Style::Guardian => 1.4,
             Style::Yeti => 1.45,
@@ -657,7 +698,7 @@ impl HumanoidBody {
             Style::Leprechaun | Style::Nymph | Style::Medusa => 0.95,
             Style::Phantom | Style::Wraith => 0.9,
             _ => 1.0,
-        } * [0.94, 1.0, 1.07][look.v.build as usize];
+        } * profile.width;
         let (shoulders, waist, hips_width): (f32, f32, f32) = if look.v.woman {
             // Her own figure narrows the waist against fuller hips, or not.
             // Her kind leans the roll toward its typical figure.
@@ -675,7 +716,6 @@ impl HumanoidBody {
         } else {
             (1.04, 0.94, 1.0)
         };
-        let profile = BuildProfile::resolve(look.style, look.v.build);
         // Pelvic breadth places the femurs; it does not multiply muscle volume.
         // Lean, sturdy and muscular thighs follow their own build profile so a
         // feminine pelvis does not inflate the whole upper leg.

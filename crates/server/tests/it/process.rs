@@ -1,3 +1,4 @@
+use super::websocket::assert_picture_payload;
 use crate::wire_client::WireClient;
 use futures_util::{SinkExt, StreamExt};
 use std::io::{BufRead, BufReader};
@@ -83,7 +84,7 @@ async fn actual_server_connection_remains_usable_after_local_request_byte_reject
     let before = client.state.state().clone();
     let request = client.state.command_request(Command::Annotate {
         anchor: Anchor::State {
-            revision: before.revision,
+            snapshot: before.snapshot.clone(),
         },
         text: "\\".repeat(MAX_REQUEST_BYTES),
         source: ClientSource::User,
@@ -110,7 +111,7 @@ async fn actual_server_connection_remains_usable_after_local_request_byte_reject
             }
         }
     }
-    assert_eq!(client.state.state(), &before);
+    assert_picture_payload(client.state.state(), &before);
     assert!(client.state.history().is_empty());
     client.close().await.unwrap();
 }
@@ -130,7 +131,7 @@ async fn actual_server_rejects_new_work_while_recovered_queue_disables_admission
                 "original",
                 &engine.branch().clone(),
                 tor_server::journal::Command::AdmitIntention {
-                    expected_revision: 0,
+                    expected_boundary: 0,
                     action: tor_server::journal::Action::Wait,
                 },
             )
@@ -181,7 +182,6 @@ async fn actual_server_rejects_new_work_while_recovered_queue_disables_admission
                 context: client.input_context(),
                 branch: controlled.branch.clone(),
                 command: Command::Act {
-                    expected_revision: controlled.state.revision,
                     action: Action::Wait,
                 },
             },
@@ -209,7 +209,7 @@ async fn actual_server_rejects_new_work_while_recovered_queue_disables_admission
             break snapshot;
         }
     };
-    assert_eq!(after.state, before.state);
+    assert_picture_payload(&after.state, &before.state);
     assert_eq!(after.intentions, controlled.intentions);
     assert_eq!(after.cursor.tick, controlled.cursor.tick);
     assert_eq!(after.branch, controlled.branch);
@@ -253,20 +253,22 @@ async fn actual_server_process_persists_an_action_and_annotation_across_restart(
     let ServerMessage::Snapshot { snapshot, .. } = message else {
         panic!("snapshot required")
     };
+    let original_anchor = snapshot.state.snapshot.clone();
     let branch = snapshot.branch;
     let commands = [
         ("acquire", None),
         (
             "wait",
             Some(Command::Act {
-                expected_revision: 0,
                 action: Action::Wait,
             }),
         ),
         (
             "note",
             Some(Command::Annotate {
-                anchor: Anchor::State { revision: 1 },
+                anchor: Anchor::State {
+                    snapshot: snapshot.state.snapshot.clone(),
+                },
                 text: "Remember this after restarting.".into(),
                 source: ClientSource::User,
                 audience: Audience::Private,
@@ -387,7 +389,10 @@ async fn actual_server_process_persists_an_action_and_annotation_across_restart(
     };
     assert_eq!(snapshot.branch, branch);
     assert_eq!(snapshot.state.observation.tick, 100);
-    assert_eq!(snapshot.state.revision, 1);
+    assert_eq!(
+        snapshot.state.revision, 1,
+        "first picture on a new attachment"
+    );
     assert_eq!(snapshot.history.entries.len(), 2);
     assert!(
         matches!(&snapshot.history.entries[1].content, HistoryContent::Annotation { text, .. } if text == "Remember this after restarting.")
@@ -401,7 +406,6 @@ async fn actual_server_process_persists_an_action_and_annotation_across_restart(
             context: wait_context.unwrap(),
             branch,
             command: Command::Act {
-                expected_revision: 0,
                 action: Action::Wait,
             },
         }),
@@ -435,7 +439,9 @@ async fn actual_server_process_persists_an_action_and_annotation_across_restart(
                     context: note_context.unwrap(),
                     branch: snapshot.branch.clone(),
                     command: Command::Annotate {
-                        anchor: Anchor::State { revision: 1 },
+                        anchor: Anchor::State {
+                            snapshot: original_anchor,
+                        },
                         text: "Remember this after restarting.".into(),
                         source: ClientSource::User,
                         audience: Audience::Private,
@@ -473,7 +479,7 @@ async fn actual_server_process_persists_an_action_and_annotation_across_restart(
     else {
         panic!("snapshot required")
     };
-    assert_eq!(after.state, snapshot.state);
+    assert_picture_payload(&after.state, &snapshot.state);
     assert_eq!(after.history, snapshot.history);
     assert_eq!(after.cursor, snapshot.cursor);
 }
@@ -561,7 +567,6 @@ async fn actual_server_recovers_a_client_gap_without_repeating_an_admitted_actio
             context: client.state.input_context(),
             branch: client.state.branch().clone(),
             command: Command::Act {
-                expected_revision: client.state.state().revision,
                 action: Action::Wait,
             },
         })
@@ -632,7 +637,7 @@ async fn actual_server_recovers_a_client_gap_without_repeating_an_admitted_actio
     )
     .await
     .unwrap();
-    assert_eq!(restored.state.state(), &expected);
+    assert_picture_payload(restored.state.state(), &expected);
     assert_eq!(
         restored
             .state
@@ -770,7 +775,7 @@ async fn actual_server_malformed_requests_do_not_publish_or_persist_actions() {
                 }
             }
         }
-        assert_eq!(healthy.state.state(), &before, "{case}");
+        assert_picture_payload(healthy.state.state(), &before);
         assert!(healthy.state.history().is_empty(), "{case}");
         assert!(healthy.is_synchronized());
     }
@@ -785,5 +790,5 @@ async fn actual_server_malformed_requests_do_not_publish_or_persist_actions() {
     healthy.close().await.unwrap();
     drop(child);
     let reopened = tor_server::Engine::open(&path, tor_server::Scenario::two_room(42)).unwrap();
-    assert_eq!(reopened.state(ActorId(1)).unwrap(), before);
+    assert_picture_payload(&reopened.state(ActorId(1)).unwrap(), &before);
 }

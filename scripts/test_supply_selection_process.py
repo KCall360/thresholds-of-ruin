@@ -57,7 +57,7 @@ class SupplySelectionProcesses(ProcessTestCase):
                 self.assertGreater(int(ability["cooldown_remaining"]), 0)
                 shown = self.say(text, "stats") if adventure else text.command("stats")
                 self.assertIn(f"cooldown: {ability['cooldown_remaining']} active ticks", shown)
-                self.assertEqual(self.request(observer, {"type": "snapshot"})["state"], current["state"])
+                self.assertDisclosedStateEqual(self.request(observer, {"type": "snapshot"})["state"], current["state"])
                 text.stop(); observer.stop(); server.stop()
 
 
@@ -73,9 +73,15 @@ class SupplySelectionNativeProcesses(ProcessTestCase):
         native = self.native_keys(window)
 
         def press(name, reported):
+            if name == "Z":
+                native("Shift_L", True)
+                try:
+                    return self.native_press(window, native, "z", reported)
+                finally:
+                    native("Shift_L", False)
             return self.native_press(window, native, name, reported)
 
-        menu = press("z", "abilities")
+        menu = press("Z", "abilities")
         self.assertEqual([row["id"] for row in menu["ability_choices"]], ["bind_wounds"])
         press("Return", "enter")
         press("Up", "up")
@@ -93,8 +99,8 @@ class SupplySelectionNativeProcesses(ProcessTestCase):
         self.assertTrue(current["window_open"])
         self.assertFalse(current["state"]["wizard_game"])
         self.assertIsNone(bandage(current))
-        self.assertEqual(self.request(observer, {"type": "snapshot"})["state"], current["state"])
-        press("z", "abilities"); press("Return", "enter"); press("Up", "up")
+        self.assertDisclosedStateEqual(self.request(observer, {"type": "snapshot"})["state"], current["state"])
+        press("Z", "abilities"); press("Return", "enter"); press("Up", "up")
         shown = press("Return", "enter")
         self.assertIn("active ticks", " ".join(shown["supply_rows"]))
         self.assertEqual(shown["supply_selection"]["candidates"], [])

@@ -391,6 +391,7 @@ impl Regions {
     /// too, not just the reference points' radii. Work is bounded by the
     /// loaded regions, never the world.
     pub(crate) fn preload_jobs(&self, game: &Game) -> PreloadWork {
+        let _span = tor_simulation::diagnostics::spans::span("speculative_preload_planning");
         let mut work = PreloadWork::default();
         // Regions a wizard added aren't in the package; pins still follow
         // their links.
@@ -450,7 +451,10 @@ impl Regions {
     pub(crate) fn preload(&self, game: &Game) -> Option<PreloadWork> {
         let preload = self.preload.as_ref()?;
         let work = self.preload_jobs(game);
-        preload.want(&work.jobs);
+        {
+            let _span = tor_simulation::diagnostics::spans::span("speculative_preload_submission");
+            preload.want(&work.jobs);
+        }
         Some(work)
     }
 

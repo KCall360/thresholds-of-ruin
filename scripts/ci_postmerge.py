@@ -27,7 +27,8 @@ MAX_BYTES = 2 * 1024 * 1024
 MAX_AGE = 24 * 60 * 60
 PROFILE_ROLES = tuple(f'{system}_{profile}_{partition}' for system in ('linux', 'windows')
                       for profile in ('debug', 'release') for partition in ('rust', 'python')
-                      if not (system == 'windows' and partition == 'python'))
+                      if partition != 'python' or (system == 'linux' and profile == 'release')) + (
+                          'linux_debug_python_shard_1', 'linux_debug_python_shard_2')
 TOOLCHAIN_ROLES = (*PROFILE_ROLES, 'producer_debug', 'producer_release', 'consumer')
 FULL_GROUPS = {'scope', 'tooling', 'dependencies', 'profiles', 'windows_binaries', 'windows_python',
                'selected_consumer', 'check'}
@@ -107,6 +108,10 @@ def seal(context_value, event, needs):
                          ('selected_consumer', ('consumer',))):
         outputs = needs[group]['outputs']
         expected = {'toolchain_' + role for role in roles}
+        if group == 'profiles':
+            from ci_python_shards import linux_debug_cohort
+            linux_debug_cohort(needs[group], context_value['attempt'])
+            expected |= {'linux_debug_shard_1', 'linux_debug_shard_2'}
         if group == 'windows_binaries':
             expected |= {'producer_debug', 'producer_release'}
         require(set(outputs) == expected, 'missing or unexpected tested compiler role')
@@ -193,10 +198,11 @@ def job_roles():
     for system in ('ubuntu-latest', 'windows-latest'):
         for profile in ('debug', 'release'):
             success.add(f'Rust ({system}, {profile}, rust)')
-            if system == 'ubuntu-latest':
+            if system == 'ubuntu-latest' and profile == 'release':
                 success.add(f'Rust ({system}, {profile}, python)')
             else:
-                success.add(f'Full applications ({system}, {profile})')
+                if system == 'windows-latest':
+                    success.add(f'Full applications ({system}, {profile})')
                 for shard in (1, 2):
                     success.add(f'Rust ({system}, {profile}, python shard {shard})')
     skipped = {'Selected (${{ needs.scope.outputs.build_lane }})', 'Selected (${{ needs.scope.outputs.linux_lane }})', 'Selected (${{ needs.scope.outputs.windows_lane }})',

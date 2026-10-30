@@ -11,6 +11,55 @@ Wire ordering, limits, target references and delta formats belong to
 [protocol](../reference/protocol.md). This page describes client responsibilities
 and the presentation invariants needed when extending them.
 
+## Gameplay input and display versions
+
+Clients construct `Act`, `ResumeIntention` and `CancelIntention` with the current
+branch and `InputContext`, without `expected_revision`. Observation revisions
+still identify displayed state and delta bases; they are not gameplay admission
+versions. A display-only update must not cause a local rejection or a retry of an
+otherwise unchanged request. Queries, previews, inspection, travel and wizard
+operations keep their applicable display-revision checks.
+
+The public input-context shape remains stream, epoch and `readiness_revision`.
+The server folds private registered-actor operand, disclosed-intention and control
+generations into that readiness counter. An origin change followed by a return,
+or loss followed by reacquisition of control, cannot make an old input current
+again. Clients capture the context once when constructing the request and never
+restamp queued input or retries. An authorized exact retry resolves its original
+receipt before fresh-input checks; it does not admit the action twice.
+
+The server still validates the current target, cost, permissions and execution
+conditions. Already admitted work was not automatically cancelled by display
+updates and remains subject to its existing lifecycle safeguards. Its frozen
+operands prevent silent substitution of a different target or interaction.
+Display progress used to settle a turn is distinct from authority to submit the
+next command: consume the ordered readiness boundary before building that command.
+
+## Private advancement page lifecycle
+
+The shared `AdvancementPages` reducer separates a pending query from a displayed
+page. A pending query remains valid if actor, branch, input context (including
+stream/reset/readiness), picture snapshot and picture revision are unchanged,
+and the reply cursor either matches exactly or has a strictly larger sequence
+with a nondecreasing tick. An ordered outcome can therefore precede the reply
+without replacing the query's picture. Request ID, query, revision, page basis,
+section totals and frame bounds still have to match.
+
+This does not relax `Connection`'s requirement that the reply describe its complete
+**current** context. Nor does it keep an already displayed page fresh after cursor
+progress: displayed-page freshness still requires exact `ReplyContext` equality
+and no explicit invalidation. A valid correlated reply installs the page at the
+new current context. Losing control clears private pages; changed picture or
+input authority cancels incompatible pending work. A current page is not itself
+permission to admit a paid action.
+
+The exact-supply chooser overlays a retained page rather than replacing it.
+`shows_supplies` distinguishes that display mode so a renderer cannot accidentally
+expose the underlying catalog as the active supply choices. See the
+[wire integration sequence](../reference/protocol-lifecycle.md#in-flight-advancement-replies),
+[shared reducer](../../crates/client-common/src/advancement.rs) and
+[advancement controls](../play/advancement.md).
+
 ## Independently maintained 3D prototype
 
 The optional [3D client](../../crates/client-3d/README.md) also consumes
@@ -19,8 +68,14 @@ keep Bevy outside the core workspace. The renderer-free `tor-client-3d-model`
 crate projects disclosed state and validates input policy; the window crate owns
 procedural meshes, animation, camera, UI and process/connection lifetime.
 
-The client retains prototype gameplay scope. It does not promise the Text or
-ASCII clients' full set of screens and actions. A private launch owns one server,
+The client retains prototype gameplay scope, but already has a framed status HUD,
+filtered inventory, anatomy-driven equipment view, shared live portrait,
+character/advancement choices, and a combined map/journal with places and notes.
+It does not promise the Text or ASCII clients' complete screen/action set or a
+finished interface redesign. The [3D controls and limits](../../crates/client-3d/README.md#controls)
+remain canonical rather than duplicating their bindings here.
+
+A private launch owns one server,
 uses fresh independent owner/spectator credentials and reserves a new save
 directory. External connections retain external server ownership. Clean exit
 waits for the shared connection's save barrier, and failures remain observable.
@@ -29,6 +84,36 @@ Inputs retain the reply context of the displayed view. Bounded ordered queues
 admit one command at a time, while stream/branch changes clear local intentions
 and transient scene state. An aligned render chart derives only from disclosed
 cell keys; it resets when those keys cannot establish a consistent translation.
+The network worker sends a typed `AdvancementView` containing bounded pages,
+confirmation and supply-display mode. Graphical options derive from those records,
+not parsed prose. Choosing a card requests a preview; a separate confirmation
+rechecks exact page/proposal and current action readiness through the shared
+reducer. Stale, unowned or unsynchronized pages cannot dispatch choices.
+Inventory filtering, equipment comparison and portrait rotation remain local.
+Map selection likewise remains local until explicit confirmation sends the exact
+disclosed destination key under its unchanged context; the server still owns
+routing and interruption policy.
+
+Live startup uses a separate software-rendered splash before private-server launch
+and graphics initialization, handing off after the first prepared scene frames. Progress
+counts completed milestones, not estimated time or every unfinished model.
+Live creature and found-corpse geometry prepares asynchronously with one active
+job at a time. A selectable egg-shaped stand-in keeps the scene interactive;
+completed rigs replace only the matching current stand-in without waiting for
+another observation. Results for disappeared/replaced appearances are discarded.
+Failures retain the stand-in and report an error. Offline review/model workloads
+retain synchronous construction for deterministic evidence. Frame timing waits
+for finished models and settling; pending or failed models do not qualify a
+finished-model crowd measurement. None of these mechanisms establishes a frame-rate
+target by itself.
+
+The live portrait shares the current actor's rig/mesh handles, including model
+replacement, through a bounded offscreen target. Its camera is inactive when
+closed and separate from exploration picking, follow/cutaway and frame-count
+camera authority. See [3D implementation](../../crates/client-3d/README.md#how-it-works),
+[model loading](../../crates/client-3d/src/creatures/loading.rs),
+[typed advancement](../../crates/client-3d/model/src/advancement.rs) and
+[map dispatch](../../crates/client-3d/model/src/map.rs).
 
 Mesh recipes resolve palette-approved dotted assets through supported parents.
 Unknown creatures use a visible neutral marker; items fall back to their disclosed
@@ -225,10 +310,12 @@ The async `Link` boundary wraps the real common connection; tests provide script
 links whose observations pass through the real client state. Acknowledgement
 means admission, not execution. The turn reader associates the receipt with
 intention failures/cancellations and consumes readiness permissions as well as
-observations. An ordinary action settles only after acknowledgement, a newer
-observation revision, character readiness, its stopped execution lifecycle and
-that lifecycle's later permission envelope (or terminal run). Permissions that
-allow admission during timed preparation do not settle a later ready observation.
+observations. An ordinary action settles after acknowledgement, character
+readiness, its stopped execution lifecycle and that lifecycle's later permission
+envelope (or terminal run). It does not require a newer picture revision: ordered
+outcomes carry current owner status, and a same-tick action can complete without
+another picture. Permissions allowing admission during timed preparation do not
+by themselves settle the still-running intention.
 The settled execution boundary remains valid if recovery becomes ready afterward
 without changing permissions. A journey also requires its own terminal travel phase. This
 prevents a prompt from authorizing the next request between an observation and
@@ -391,13 +478,15 @@ keys, never private region coordinates. See
 
 ## Narration and stream recovery
 
-Shared narration derives prose from consecutive validated observations and
-explicit action/combat results. The server sends facts rather than sentences.
-Repeated portal views count once; self-sight is not discovery. A figure leaving
-perception is not assumed dead/moved. A door change is announced only if the door
-was perceived in both views and never names an unseen cause. Hidden actions and
-unchanged views produce no invented prose. Snapshot/reset clears comparison
-baselines without replaying old notices. Narration is not durable history.
+Shared narration consumes the server's ordered causal outcome facts, not diffs
+between independently requested pictures. The server captures authorized
+before/after semantic and event-time evidence and sends facts rather than
+sentences. Outcomes also carry current nullable owner status. Repeated portal
+views count once; self-sight is not discovery. A figure leaving perception is not
+assumed dead/moved. Door-change facts never name an unseen cause. Hidden-only
+boundaries can be suppressed; repeated or skipped pictures must neither repeat
+narration nor erase issued outcomes. Snapshot/reset establishes a new state base
+without replaying old notices. Narration is not durable history.
 
 Ordered-strike presentation uses only the attached actor's disclosed `sequence`
 progress and each perceived ability event's actual primary ordinal. It describes

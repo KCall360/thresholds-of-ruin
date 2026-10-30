@@ -29,17 +29,20 @@ fn history_pages_and_entry_anchors_survive_checkpoint_and_tail_replay() {
     )
     .unwrap();
     let branch = engine.branch().clone();
+    let issued = engine.presentation_boundary();
     let mut private = None;
     for n in 0..11 {
         let result = engine
-            .command(
+            .command_at_presentation(
                 "alice",
                 "text",
                 ActorId(1),
                 &format!("note-{n}"),
                 &branch,
                 note(
-                    Anchor::State { revision: 0 },
+                    Anchor::State {
+                        snapshot: SnapshotId("issued-initial".into()),
+                    },
                     &format!("Note {n}"),
                     if n % 3 == 0 {
                         Audience::Actor
@@ -47,6 +50,7 @@ fn history_pages_and_entry_anchors_survive_checkpoint_and_tail_replay() {
                         Audience::Private
                     },
                 ),
+                &issued,
             )
             .unwrap();
         if n == 1 {
@@ -97,7 +101,7 @@ fn history_pages_and_entry_anchors_survive_checkpoint_and_tail_replay() {
     );
     assert_eq!(
         resumed
-            .command(
+            .command_at_presentation(
                 "observer",
                 "text",
                 ActorId(1),
@@ -109,14 +113,15 @@ fn history_pages_and_entry_anchors_survive_checkpoint_and_tail_replay() {
                     },
                     "No access",
                     Audience::Private
-                )
+                ),
+                &issued
             )
             .unwrap_err()
             .code,
         ErrorCode::InvalidAnchor
     );
     resumed
-        .command(
+        .command_at_presentation(
             "alice",
             "text",
             ActorId(1),
@@ -127,47 +132,53 @@ fn history_pages_and_entry_anchors_survive_checkpoint_and_tail_replay() {
                 "Still accessible",
                 Audience::Private,
             ),
+            &issued,
         )
         .unwrap();
 }
 
 #[test]
-fn notes_preserve_state_and_pending_action_revision_and_survive_restart() {
+fn notes_preserve_observation_and_commit_private_causality_across_restart() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("game.json");
     let mut engine = Engine::open(&path, Scenario::two_room(42)).unwrap();
     let branch = engine.branch().clone();
+    let issued = engine.presentation_boundary();
     let before = engine.observation(ActorId(1)).unwrap();
     let annotation = engine
-        .command(
+        .command_at_presentation(
             "alice",
             "text",
             ActorId(1),
             "note-1",
             &branch,
             note(
-                Anchor::State { revision: 0 },
+                Anchor::State {
+                    snapshot: SnapshotId("issued-initial".into()),
+                },
                 "Remember this doorway.",
                 Audience::Private,
             ),
+            &issued,
         )
         .unwrap();
     assert_eq!(engine.observation(ActorId(1)).unwrap(), before);
-    assert_eq!(engine.revision(ActorId(1)).unwrap(), 0);
+    assert_eq!(engine.causal_boundary(ActorId(1)).unwrap(), 1);
     assert_eq!(annotation.entry.tick, 0);
     engine
-        .command(
+        .command_at_presentation(
             "alice",
             "ascii",
             ActorId(1),
             "move-1",
             &branch,
             Command::Act {
-                expected_revision: 0,
+                expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
                 action: Action::Move {
                     direction: Direction::East,
                 },
             },
+            &issued,
         )
         .unwrap();
     let expected_observation = engine.observation(ActorId(1)).unwrap();
@@ -191,41 +202,54 @@ fn duplicate_commands_return_original_receipts_even_after_restart() {
     let path = dir.path().join("game.json");
     let mut engine = Engine::open(&path, Scenario::two_room(0)).unwrap();
     let branch = engine.branch().clone();
+    let issued = engine.presentation_boundary();
     let command = Command::Act {
-        expected_revision: 0,
+        expected_boundary: 0,
         action: Action::Wait,
     };
     let first = engine
-        .command(
+        .command_at_presentation(
             "alice",
             "text",
             ActorId(1),
             "request-1",
             &branch,
             command.clone(),
+            &issued,
         )
         .unwrap();
     drop(engine);
     let mut resumed = Engine::open(&path, Scenario::two_room(0)).unwrap();
     let retry = resumed
-        .command("alice", "ascii", ActorId(1), "request-1", &branch, command)
+        .command_at_presentation(
+            "alice",
+            "ascii",
+            ActorId(1),
+            "request-1",
+            &branch,
+            command,
+            &issued,
+        )
         .unwrap();
     assert!(retry.duplicate);
     assert_eq!(first.entry, retry.entry);
     assert_eq!(resumed.observation(ActorId(1)).unwrap().tick, 100);
     assert_eq!(
         resumed
-            .command(
+            .command_at_presentation(
                 "alice",
                 "text",
                 ActorId(1),
                 "request-1",
                 &branch,
                 note(
-                    Anchor::State { revision: 1 },
+                    Anchor::State {
+                        snapshot: SnapshotId("unissued".into())
+                    },
                     "different request",
                     Audience::Private
-                )
+                ),
+                &issued
             )
             .unwrap_err()
             .code,
@@ -237,18 +261,22 @@ fn duplicate_commands_return_original_receipts_even_after_restart() {
 fn private_notes_and_private_anchors_are_not_exposed_to_other_users() {
     let mut engine = Engine::memory(Scenario::two_room(0)).unwrap();
     let branch = engine.branch().clone();
+    let issued = engine.presentation_boundary();
     let private = engine
-        .command(
+        .command_at_presentation(
             "alice",
             "text",
             ActorId(1),
             "private",
             &branch,
             note(
-                Anchor::State { revision: 0 },
+                Anchor::State {
+                    snapshot: SnapshotId("issued-initial".into()),
+                },
                 "My private plan",
                 Audience::Private,
             ),
+            &issued,
         )
         .unwrap();
     assert!(engine
@@ -258,7 +286,7 @@ fn private_notes_and_private_anchors_are_not_exposed_to_other_users() {
         .is_empty());
     assert_eq!(
         engine
-            .command(
+            .command_at_presentation(
                 "bob",
                 "ascii",
                 ActorId(1),
@@ -270,7 +298,8 @@ fn private_notes_and_private_anchors_are_not_exposed_to_other_users() {
                     },
                     "Guess",
                     Audience::Private
-                )
+                ),
+                &issued
             )
             .unwrap_err()
             .code,
@@ -278,7 +307,7 @@ fn private_notes_and_private_anchors_are_not_exposed_to_other_users() {
     );
     assert_eq!(
         engine
-            .command(
+            .command_at_presentation(
                 "alice",
                 "text",
                 ActorId(1),
@@ -290,24 +319,28 @@ fn private_notes_and_private_anchors_are_not_exposed_to_other_users() {
                     },
                     "Shared reference",
                     Audience::Actor
-                )
+                ),
+                &issued
             )
             .unwrap_err()
             .code,
         ErrorCode::InvalidAnchor
     );
     engine
-        .command(
+        .command_at_presentation(
             "alice",
             "text",
             ActorId(1),
             "shared",
             &branch,
             note(
-                Anchor::State { revision: 0 },
+                Anchor::State {
+                    snapshot: SnapshotId("issued-initial".into()),
+                },
                 "Shared plan",
                 Audience::Actor,
             ),
+            &issued,
         )
         .unwrap();
     let bob = engine.history(ActorId(1), "bob", None, 100).unwrap();
@@ -324,8 +357,11 @@ fn private_notes_and_private_anchors_are_not_exposed_to_other_users() {
 fn provenance_is_stamped_and_notes_cannot_execute_actions() {
     let mut engine = Engine::memory(Scenario::two_room(0)).unwrap();
     let branch = engine.branch().clone();
+    let issued = engine.presentation_boundary();
     let mut command = note(
-        Anchor::State { revision: 0 },
+        Anchor::State {
+            snapshot: SnapshotId("issued-initial".into()),
+        },
         "move east; take token",
         Audience::Actor,
     );
@@ -333,7 +369,15 @@ fn provenance_is_stamped_and_notes_cannot_execute_actions() {
         *source = ClientSource::Frontend;
     }
     let result = engine
-        .command("alice", "ascii", ActorId(1), "frontend", &branch, command)
+        .command_at_presentation(
+            "alice",
+            "ascii",
+            ActorId(1),
+            "frontend",
+            &branch,
+            command,
+            &issued,
+        )
         .unwrap();
     assert_eq!(
         result.entry.author,
@@ -346,7 +390,9 @@ fn provenance_is_stamped_and_notes_cannot_execute_actions() {
         .annotate_backend(
             ActorId(1),
             "simulation",
-            Anchor::State { revision: 0 },
+            Anchor::State {
+                snapshot: SnapshotId("issued-initial".into()),
+            },
             AnnotationCategory::Explanation,
             "This is a test explanation.",
         )
@@ -358,7 +404,7 @@ fn provenance_is_stamped_and_notes_cannot_execute_actions() {
         }
     );
     assert_eq!(engine.observation(ActorId(1)).unwrap().tick, 0);
-    assert_eq!(engine.revision(ActorId(1)).unwrap(), 0);
+    assert_eq!(engine.causal_boundary(ActorId(1)).unwrap(), 2);
 }
 
 #[test]
@@ -382,32 +428,50 @@ fn failed_background_save_keeps_accepted_state_and_retries_the_same_record() {
     let blocker = rusqlite::Connection::open(&path).unwrap();
     blocker.execute_batch("BEGIN EXCLUSIVE").unwrap();
     let branch = engine.branch().clone();
+    let issued = engine.presentation_boundary();
     let command = Command::Act {
-        expected_revision: 0,
+        expected_boundary: 0,
         action: Action::Wait,
     };
     let accepted = engine
-        .command("alice", "text", ActorId(1), "one", &branch, command.clone())
+        .command_at_presentation(
+            "alice",
+            "text",
+            ActorId(1),
+            "one",
+            &branch,
+            command.clone(),
+            &issued,
+        )
         .unwrap();
     assert_eq!(engine.observation(ActorId(1)).unwrap().tick, 100);
     assert!(engine.flush().is_err());
     assert!(engine.save_status().error.is_some());
     assert!(engine
-        .command(
+        .command_at_presentation(
             "alice",
             "text",
             ActorId(1),
             "two",
             &branch,
             Command::Act {
-                expected_revision: 1,
+                expected_boundary: 1,
                 action: Action::Wait
-            }
+            },
+            &issued
         )
         .is_err());
     assert!(
         engine
-            .command("alice", "text", ActorId(1), "one", &branch, command.clone())
+            .command_at_presentation(
+                "alice",
+                "text",
+                ActorId(1),
+                "one",
+                &branch,
+                command.clone(),
+                &issued
+            )
             .unwrap()
             .duplicate
     );
@@ -417,7 +481,15 @@ fn failed_background_save_keeps_accepted_state_and_retries_the_same_record() {
     drop(engine);
     let mut resumed = Engine::open(&path, Scenario::two_room(0)).unwrap();
     let retry = resumed
-        .command("alice", "text", ActorId(1), "one", &branch, command)
+        .command_at_presentation(
+            "alice",
+            "text",
+            ActorId(1),
+            "one",
+            &branch,
+            command,
+            &issued,
+        )
         .unwrap();
     assert!(retry.duplicate);
     assert_eq!(retry.entry.id, accepted.entry.id);
@@ -427,6 +499,7 @@ fn failed_background_save_keeps_accepted_state_and_retries_the_same_record() {
 fn annotation_validation_and_filtered_history_pagination() {
     let mut engine = Engine::memory(Scenario::two_room(0)).unwrap();
     let branch = engine.branch().clone();
+    let issued = engine.presentation_boundary();
     for (id, text) in [
         ("blank", " ".to_owned()),
         ("long", "x".repeat(MAX_NOTE_BYTES + 1)),
@@ -434,13 +507,20 @@ fn annotation_validation_and_filtered_history_pagination() {
     ] {
         assert_eq!(
             engine
-                .command(
+                .command_at_presentation(
                     "alice",
                     "text",
                     ActorId(1),
                     id,
                     &branch,
-                    note(Anchor::State { revision: 0 }, &text, Audience::Private)
+                    note(
+                        Anchor::State {
+                            snapshot: SnapshotId("issued-initial".into())
+                        },
+                        &text,
+                        Audience::Private
+                    ),
+                    &issued
                 )
                 .unwrap_err()
                 .code,
@@ -455,22 +535,54 @@ fn annotation_validation_and_filtered_history_pagination() {
                 ActorId(1),
                 "future",
                 &branch,
-                note(Anchor::State { revision: 1 }, "Not yet", Audience::Private)
+                note(
+                    Anchor::State {
+                        snapshot: SnapshotId("unissued".into())
+                    },
+                    "Not yet",
+                    Audience::Private
+                )
             )
             .unwrap_err()
             .code,
         ErrorCode::InvalidAnchor
     );
+    // A trusted immutable handle from another branch is an invalid anchor.
     assert_eq!(
         engine
-            .command(
+            .command_at_presentation(
                 "alice",
                 "text",
                 ActorId(1),
                 "branch",
                 &BranchId("wrong".into()),
                 note(
-                    Anchor::State { revision: 0 },
+                    Anchor::State {
+                        snapshot: SnapshotId("issued-initial".into())
+                    },
+                    "Wrong branch",
+                    Audience::Private
+                ),
+                &issued
+            )
+            .unwrap_err()
+            .code,
+        ErrorCode::InvalidAnchor
+    );
+    // Ordinary backend requests still reject branch metadata before resolving
+    // even an unissued state anchor; preserve that error-order witness separately.
+    assert_eq!(
+        engine
+            .command(
+                "alice",
+                "text",
+                ActorId(1),
+                "branch-before-anchor",
+                &BranchId("wrong".into()),
+                note(
+                    Anchor::State {
+                        snapshot: SnapshotId("issued-initial".into())
+                    },
                     "Wrong branch",
                     Audience::Private
                 )
@@ -481,14 +593,16 @@ fn annotation_validation_and_filtered_history_pagination() {
     );
     for i in 0..5 {
         engine
-            .command(
+            .command_at_presentation(
                 "alice",
                 "text",
                 ActorId(1),
                 &format!("note-{i}"),
                 &branch,
                 note(
-                    Anchor::State { revision: 0 },
+                    Anchor::State {
+                        snapshot: SnapshotId("issued-initial".into()),
+                    },
                     &format!("Note {i}"),
                     if i % 2 == 0 {
                         Audience::Actor
@@ -496,6 +610,7 @@ fn annotation_validation_and_filtered_history_pagination() {
                         Audience::Private
                     },
                 ),
+                &issued,
             )
             .unwrap();
     }
@@ -522,30 +637,33 @@ fn replay_preserves_all_origins_and_action_anchors_without_executing_notes() {
     let path = dir.path().join("game.json");
     let mut engine = Engine::open(&path, Scenario::two_room(0)).unwrap();
     let branch = engine.branch().clone();
+    let issued = engine.presentation_boundary();
     let action = engine
-        .command(
+        .command_at_presentation(
             "alice",
             "text",
             ActorId(1),
             "action",
             &branch,
             Command::Act {
-                expected_revision: 0,
+                expected_boundary: 0,
                 action: Action::Wait,
             },
+            &issued,
         )
         .unwrap();
     let anchor = Anchor::Entry {
         id: action.entry.id,
     };
     engine
-        .command(
+        .command_at_presentation(
             "alice",
             "text",
             ActorId(1),
             "user",
             &branch,
             note(anchor.clone(), "A user note", Audience::Private),
+            &issued,
         )
         .unwrap();
     let mut frontend = note(anchor.clone(), "A frontend note", Audience::Actor);
@@ -553,7 +671,15 @@ fn replay_preserves_all_origins_and_action_anchors_without_executing_notes() {
         *source = ClientSource::Frontend;
     }
     engine
-        .command("alice", "text", ActorId(1), "frontend", &branch, frontend)
+        .command_at_presentation(
+            "alice",
+            "text",
+            ActorId(1),
+            "frontend",
+            &branch,
+            frontend,
+            &issued,
+        )
         .unwrap();
     engine
         .annotate_backend(
@@ -565,6 +691,7 @@ fn replay_preserves_all_origins_and_action_anchors_without_executing_notes() {
         )
         .unwrap();
     let expected = engine.history(ActorId(1), "alice", None, 100).unwrap();
+    let causal_boundary = engine.causal_boundary(ActorId(1)).unwrap();
     drop(engine);
     let replayed = Engine::open(&path, Scenario::two_room(99)).unwrap();
     assert_eq!(
@@ -572,7 +699,10 @@ fn replay_preserves_all_origins_and_action_anchors_without_executing_notes() {
         expected
     );
     assert_eq!(replayed.observation(ActorId(1)).unwrap().tick, 100);
-    assert_eq!(replayed.revision(ActorId(1)).unwrap(), 1);
+    assert_eq!(
+        replayed.causal_boundary(ActorId(1)).unwrap(),
+        causal_boundary
+    );
 }
 
 #[test]
@@ -610,17 +740,19 @@ fn incompatible_or_inconsistent_archives_are_rejected_without_overwrite() {
     let path = dir.path().join("game.json");
     let mut engine = Engine::open(&path, Scenario::two_room(0)).unwrap();
     let branch = engine.branch().clone();
+    let issued = engine.presentation_boundary();
     engine
-        .command(
+        .command_at_presentation(
             "alice",
             "text",
             ActorId(1),
             "action",
             &branch,
             Command::Act {
-                expected_revision: 0,
+                expected_boundary: 0,
                 action: Action::Wait,
             },
+            &issued,
         )
         .unwrap();
     drop(engine);

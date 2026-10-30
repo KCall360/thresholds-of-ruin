@@ -1,9 +1,11 @@
 # Items and character knowledge
 
 Items support quantity-aware pickup/drop, compatible stacking, character-owned
-identity knowledge, anatomy-based equipment, timed consumption with explicit edibility,
-readable scrolls, charged directional devices, and ordinary currency/theft transfers.
-Capacity and containers remain deferred. NetHack informs the interaction style;
+identity knowledge, [anatomy-based equipment](equipment.md), timed consumption
+with explicit edibility, [readable scrolls and charged devices](magic-items.md),
+and ordinary currency/theft transfers.
+Inventory carrying-weight limits and containers remain deferred; authored
+[shared equipment capacity](equipment.md#shared-equipment-capacity) is implemented. NetHack informs the interaction style;
 these are this project's explicit rules, not a claim of exact NetHack behavior.
 
 ## Ordinary play
@@ -21,8 +23,8 @@ the noun) transfers the entire selected stack. Numeric quantities must be positi
 and fit an unsigned 64-bit integer. Ambiguous names require selection; a requested
 quantity stays attached through adventure clarification and walking to an item.
 
-ASCII uses G for pickup and D for drop; stairs use `<` and `>`. A single one-unit
-item transfers immediately. Otherwise Up/Down selects a stack, typed digits set
+ASCII uses `,` for pickup and `d` for drop; stairs use `<` and `>`. A single
+reachable stack is picked up immediately. Otherwise Up/Down selects a stack, typed digits set
 the quantity, Backspace edits it, Enter confirms, and Escape cancels. Blank means
 the entire stack. Inventory and ground lists show counts. Inspection is free.
 
@@ -70,649 +72,65 @@ beyond the abandoned future. New stacks cannot reuse IDs from that future; see
 
 ### Independent projectile definitions
 
-The development schema gives ammunition an independent projectile capability:
-exact launcher-family ID, the shared typed base-damage expression with a required
-primary component, and deterministic hit recovery. A launcher's effective weapon
-profile owns its family and short/long range. Payload and launcher families must
-match exactly. Both source compilation and direct placement/restoration validate
-damage descriptor references. A dual equipment/projectile definition validates
-both capabilities and remains subject to equipment nonstackability.
+See [independent projectile definitions](equipment.md#independent-projectile-definitions)
+for ammunition, launcher families, standalone thrown payloads and recovery policy.
 
-Ammunition supports homogeneous birth, curse and signed hit/damage enchantments;
-plain ammunition cannot acquire armor penalties, armor enchantment, corrosion or
-protection. Ordinary Launch and Throw use the shared physical-projectile kernel. The Rogue
-arrow consumes one unit on a successful hit and permits miss recovery. A weapon
-profile may separately author `thrown_payload = { damage = ..., recovery = ... }`
-without becoming ammunition or requiring a launcher. Throw replaces only the
-weapon base damage; instance enchantments and general attack bonuses apply once.
-The captured profile retains the payload through paid preparation and reopening.
-Profiles without that payload retain their melee damage and recoverable-hit
-behavior. No percentage breakage rule is implied.
 
 ### Ordinary fruit
 
-The opt-in `rogue.fruit` is ordinary named Food with a generic food appearance,
+The `rogue.fruit` item is ordinary named Food with a generic food appearance,
 not a ration reskin or a special consumable effect. It is stackable, has exactly
 the ration's 1d400+1099 nutrition, and uses the same paid one-unit Eat, reserve cap,
 debt settlement and food detection. Its `ration` supply tag deliberately means
 interchangeable food supply, not literal identity: fruit never merges with a
 ration stack. The authored `name` supplies its label through ordinary validation.
-There is no mutable global fruit preference, extra effect, taste XP, food-pool
-weight change or starter addition.
+There is no mutable global fruit preference, extra effect, taste XP or starter
+addition. Fruit can appear in supplemental floor stock and treasure rooms under
+the [provisional live policy](scenario-packages.md#live-rogue-content-policy);
+the existing ration stage and carried-supply pools are unchanged.
 
 ## Timed equipment and effects
 
-The server accepts `equip` (carried item plus anatomy slot index), `unequip`
-(carried equipped item) `drink` (carried potion) and `eat` (carried explicitly edible item) through ordinary intention
-admission. Targets are opaque observer-scoped inventory references. Text accepts
-`equip`/`wear`/`wield`, `remove`/`unequip`, `drink`/`quaff`, and `eat` with a carried
-item name or opaque target. Adventure resolves disclosed nouns with its existing
-choice rules. ASCII uses W to equip, T to remove and Q to drink and E to eat; Up/Down and Enter
-choose among items, and Escape cancels without spending a turn. These commands
-act on one item at a time and have no quantity editor. Clients choose the first free
-matching anatomy socket; replacing gear requires separate removal. Both clients
-use the shared `client-common` item checks, while the simulation validates the
-submitted action against authoritative state. Direct text offers opaque choices
-for ambiguous names; adventure uses disclosed order for indistinguishable stacks.
-Selection clears on cancellation, changed observations, control loss and disconnect.
-Completion narration belongs to the owning actor, handles noncombat equipment
-and the last consumed unit, and does not repeat stale observations.
-
-Anatomy is an ordered slot list; duplicate kinds provide distinct sockets, such
-as two rings. Archetypes and actors can declare `anatomy = { slots = [...] }`.
-Character declarations supply their own anatomy. Item archetypes optionally
-provide `equipment`, `consumable`, or a typed catalog `supply` identity; placements use `equipped_slot` with
-`carried_by` for starting gear. Invalid classes, counts, slots, conflicting gear
-and effect definitions are rejected. Multiple matching sockets may hold weapons;
-the highest equipped weapon-capable socket supplies the selected attack. Other
-equipment still contributes its modifiers. Simultaneous dual attacks are not implemented.
+See [timed equipment and effects](equipment.md#timed-equipment-and-effects) for
+commands, anatomy and weapon selection, and
+[paid item work and finite supply claims](equipment.md#paid-item-work-and-finite-supply-claims)
+for exact holds, timing, completion, interruptions and actor-owned affordances.
 
 ### Armor and corrosion
 
-Ordinary armor uses an explicit equipment capability, for example
-`armor = { physical_reduction = 2, material = "metal", rustproof = false }`.
-Its base Physical protection is additive damage reduction for Impact and Keen,
-rather than a Physical-defense bonus. A magical armor ward adds its own reduction
-to an explicit allowlist: Energy, Impact, Keen, Spirit and Vital. Psychic is a
-separate damage category and receives no armor ward. Future categories do not
-join this allowlist automatically. Explicit Psychic reductions and immunity still
-work through the ordinary damage kernel. Damage reduction does not prevent
-separate effects such as confusion, attribute loss or hit-die drain.
-
-An item definition is shared and immutable. Each actual item owns seven explicit
-condition fields: corrosion, curse, permanent protection, physical armor penalty,
-magical armor ward, signed weapon hit enchantment and signed weapon damage
-enchantment. Physical protection is `max(base - penalty - corrosion, 0)`; the
-nonnegative ward is added separately. Penalty and corrosion are each bounded by
-the original armor contribution; the total effective reduction is checked against
-the numerical limit. No negative magical ward or hidden enchantment debt exists.
-Nonmetal, intrinsically rustproof and non-armor items cannot carry corrosion.
-Runtime protection does allow existing corrosion: it prevents future loss without
-repairing it. Physical penalty and curse are independent; uncursing repairs neither
-penalty nor corrosion. Identified displays distinguish these facts rather than
-pretend they form one signed armor bonus.
-
-The exact item state survives transfer, dropping, death, recovery and re-equipping.
-Two copies of one definition can differ. Equip, restoration and actor-known
-previews use one effective-item fold. A change folds the existing permanent
-compiled sheet without walking hit-die rows. Signed weapon damage stays signed
-until final damage modifiers are combined, so negative values are not prematurely
-clamped before ordinary skill bonuses.
-
-The generic `corrode_armor` effect names an equipment-slot kind and a positive
-bounded amount. It selects the first equipped socket of that kind and reduces
-remaining rustable physical plating to zero. The magical ward remains intact.
-Empty, nonmetal, intrinsically rustproof, protected and physically exhausted armor
-are no-ops. Corrosion is an isolated effect payload: the exact item witness and
-actor sheet publish in the enclosing transaction. Later strikes see the new
-protection. No hidden inventory identity appears in its public result. CO1 uses
-one attempt per source occurrence after a successful natural contact, including
-zero-damage contacts.
-
-Generic `alter_equipment` effects freeze the selected equipped item IDs, sockets
-and condition witnesses at paid preparation. An empty selection remains empty;
-a replacement or independently changed target cannot inherit the old effect.
-Multiple alterations in one payload validate original witnesses once and then
-apply sequentially to the candidate. Weapon enchantment chooses hit or damage
-with equal probability only when an eligible weapon was selected. Armor enchantment
-adds one ward point and removes curse; weapon enchantment adds one point on its
-selected axis and removes curse. Protection prevents later rust without repair or
-uncursing. Remove-curse affects equipped items only, preserving negative weapon
-bonuses and physical armor losses. All changes, randomness, payment and knowledge
-share the enclosing rollback boundary.
-
-These four scrolls consume their unit and action even with no eligible equipment,
-and use explicit `discovery = "never"`: neither success nor a no-op learns the
-scroll type. Paid armor/weapon identification records exact-instance details;
-knowing a type does not reveal every copy's condition. Equipping armor observes
-its numeric contribution, while a paid failed cursed removal learns only that
-item's curse. Failed removal keeps the authored removal timing (three turns
-for body armor under shared rules, one for weapons), an explicit TOR adaptation
-from Rogue's shorter failed armor command. Hidden curse never changes admission
-or visible preparation timing. Facts belong to the observing actor and may become stale; hidden
-changes and transfers do not refresh them. AI cannot repeatedly attempt a removal
-it already knows is cursed or inspect hidden bonuses while comparing equipment.
-
-Authoring may omit `armor` and defaults intrinsic `rustproof` to false. Current
-owned records require explicit nullable armor, all armor and condition fields;
-unknown fields, positional aliases and impossible loss reject. There is no legacy
-condition reader.
+See [armor and corrosion](equipment.md#armor-and-corrosion) for instance condition,
+physical reduction, magical wards, corrosion, alteration and cursed removal.
 
 ### Equipment birth and the finite Rogue catalog
 
-The optional `equipment_generation` capability selects a generic birth policy;
-class, identity and scenario name never implicitly select one. A generated weapon
-can declare `{ kind = "weapon", curse_percent = 10, enchant_percent = 5,
-minimum = 1, maximum = 3 }`; armor uses the corresponding `armor` kind. The two
-percentages describe disjoint intervals of one percentage roll, not independent
-chances. Each percentage is nonnegative and their sum cannot exceed 100. The
-inclusive magnitude range must satisfy `1 <= minimum <= maximum <= 1000000`.
-Validation also checks the equipment class and capability and every possible
-result against the attack/protection limits before sampling.
+See [equipment birth and the finite Rogue catalog](equipment.md#equipment-birth-and-the-finite-rogue-catalog)
+for generated condition, weapons, ammunition, armor and starting gear.
 
-Creation samples condition once in the existing item-birth transaction. The item,
-allocator and rules RNG publish together; a failed placement leaves them unchanged.
-A checkpoint, replay, transfer or equip does not reroll existing condition or
-modify the shared equipment definition. Omitting the policy initializes ordinary
-zero condition without a random draw. Explicit `kind = "authored"` also bypasses
-the roll, with checked fixed `hit_enchantment` and `damage_enchantment` operands.
-These operands default to zero only in authoring; canonical runtime and stored
-policy records require both fields, and item definitions require an explicit
-nullable policy field.
-
-Rogue's generated weapons have a 10% curse chance with −1 to −3 hit, the next 5%
-have +1 to +3 hit, and the remaining 85% are ordinary. Birth generation does not
-change weapon damage. Armor has a 20% curse chance with a 1–3 physical penalty,
-the next 8% receive a 1–3 magical ward, and the remaining 72% are ordinary.
-These probabilities and ranges follow the pinned
-[Rogue generation branch](https://github.com/phs/rogue/blob/c7c119f893bd2f8255f2ad78d58a32664ddb9a97/things.c#L250-L269).
-TOR clamps a generated armor penalty to its base physical reduction; the curse
-remains even when that clamp produces zero. Favorable armor rolls add a nonnegative
-five-category ward, rather than changing Rogue's AC statistic.
-
-The production finite catalog contains these five nonlauncher melee weapons,
-using the [pinned weapon dice](https://github.com/phs/rogue/blob/c7c119f893bd2f8255f2ad78d58a32664ddb9a97/weapons.c):
-mace 2d4, long sword 3d4, dagger 1d6, two handed sword 4d4 and spear 2d3.
-All currently use 60 wind-up / 40 recovery ticks. This common timing and the TOR
-skill/damage-category mapping are conservative provisional tuning, not Rogue
-attack-speed claims. The dagger's typed profile adds Thrown 20/60 feet and
-Offhand only while Knife expertise is active; its existing LightWeaponry 1d6 Keen
-melee math and 60/40 timing are unchanged. A thrown dagger remains recoverable
-on a successful hit. The spear likewise gains expert-only Throw after an ordinary
-Spear expertise purchase: its explicit thrown payload is 1d6 Keen, while melee
-remains HeavyWeaponry 2d3 Keen. Its 20/60-foot range, 60/40 timing and recoverable
-hit policy are TOR handling choices. It is a singleton weapon, not ammunition or
-a stack; existing exact-item holds, curse restrictions and landing rules apply.
-Neither spear availability nor starting expertise is changed.
-
-The opt-in `rogue.dart` and `rogue.shuriken` are standalone stackable weapons,
-not ammunition. Dart melee is fixed 1 Keen (not an invalid one-sided die) and its
-throw is 1d3 Keen; shuriken melee is 1d2 Keen and its throw is 2d4 Keen. Both use
-ordinary Knife expertise to enable Throw, 20/60-foot ranges and 60/40 timing.
-These handling choices and damage categories are TOR adaptations; expertise is
-not free. A successful hit consumes the thrown unit. Misses use ordinary bounded
-floor recovery, including loss when no legal landing exists. Birth conditions,
-exact-unit holds, condition-aware splitting/merging and conservative owner
-knowledge use the same inventory mechanisms as other instance-sensitive stacks.
-Neither weapon changes live stock, starter kits, existing weapons or generation
-frequencies. The authored quantity remains explicit; no source birth-stack range
-is silently adopted.
-
-The shortbow uses LightWeaponry, a base TwoHanded requirement and expert-only
-Quickdraw. Its launcher range is 80/320 feet; incidental melee deals fixed
-1 Impact, without a damage die. The separate stackable arrow supplies 2d3 Keen
-from the pinned Rogue launched payload, replacing the bow's incidental melee
-base damage. Arrows have no equipment socket and begin mundane without a new
-birth-condition roll. One arrow is consumed on a successful hit; misses use the
-shared recoverable-landing policy, which may lose a unit when no legal landing
-exists. Shortbow birth conditions use the ordinary generated-weapon policy.
-
-Traits and short/long ranges follow the selected
-[Plotweaver Open Alpha v0.3](https://drive.google.com/file/d/11v0ujMTuXNdwkHEPAcPZqY29I3ZdmlJn/view)
-and [Stormlight Starter Rules](https://www.cosmererpg.com/s/SL015_Stormlight_StarterRules_Digital.pdf)
-mapping. Shared 60/40 timing, TOR checks, damage-category mapping and the
-combination with Rogue damage remain explicit adaptations, not source RAW.
-Discreet is unsupported because no noncombat consumer exists; no item authors it
-as a functional trait.
-
-Knife and Shortbow are equipment expertise choices. Either can use the ordinary
-HD advancement point or an earned permanent-Intellect entitlement; neither is
-freely granted to the player, a species or an NPC. Existing NPC purchases remain
-explicit and contain no new expertise choices. Their combat-benefit assessment
-is 10 points each, provisional TOR tuning over the shared zero expertise baseline.
-No pure-grant talent is added or counted twice.
-
-Rogue defaults grant actual Throw and Launch abilities, tagged Attack and Ranged,
-with exact projectile delivery and selected-weapon timing. Both are non-basic
-attacks and add no base resource or supply cost. The shared secondary-weapon
-Focus cost still applies when selecting that socket. Ordinary item ownership,
-profile eligibility, expertise and available capacity still determine whether a
-particular action can be prepared.
-
-The eight armor identities are leather armor, ring mail, studded leather armor,
-scale mail, chain mail, splint mail, banded mail and plate mail. Their base physical
-reductions are respectively 1, 2, 2, 3, 4, 5, 5 and 6. This small monotone ladder
-preserves the [source armor ordering and ties](../research/rogue-5.4.4/content.md#armor-8)
-and the existing ring-mail value while limiting the initial spread of additive DR;
-it is provisional TOR balance, not an equivalence between AC and damage reduction.
-Only leather is nonmetal; the other seven are rustable metal absent protection.
-
-Both starting kits use explicit authored policies. The mace's original +1 hit
-and +1 damage now live on that exact instance; its immutable neutral 2d4 definition
-and identity match the generated mace. Effective starter attack values and 60/40
-timing are unchanged, and ring mail retains 2 base physical DR with zero condition.
-Starting equipment consumes no birth randomness. Starting and generated archetypes
-may share an identity while differing in birth policy; their underlying equipment
-behavior must still agree exactly.
-
-Production keeps `rogue.equipment` and `rogue.equipment_scrolls` after the eight
-preceding population stages, then appends `rogue.ammunition` and the finite
-`rogue.rings` stage, for twelve stages.
-Each makes one placement attempt per first-entered floor from depth 1, with no
-replenishment or retry after a recorded skip. Equipment and scroll attempts have
-quantity one; ammunition attempts place one finite six-arrow stack. The gear
-stage has fourteen equally weighted choices including shortbow; the scroll stage
-has enchant armor, protect armor, enchant weapon, remove curse, identify weapon
-and identify armor, also equally weighted.
-These finite rates and equal subtype weights are provisional TOR tuning, not
-Rogue's complete item probability table. Shortbow changes the existing equipment
-pool's choices and its resulting outcomes; it is not a guaranteed bow per floor.
-Earlier stage IDs, order and choices remain unchanged, preserving their
-independent generation streams. The four alteration scrolls use `discovery = "never"`; the two class-identification scrolls use
-`discovery = "on_use"` and no direct effects.
-
-One unit of a supply stack provides one unit of its named supply. Supply identity
-participates in physical stack equality, cloning and saved item definitions.
-Equipment cannot also be supply content, and unknown supply references reject
-at package compilation and item validation. Authoring may omit `supply`; owned
-item records require the field with explicit null when it is absent.
-
-Finite ability costs, drinking and eating use the same item-owned authority. Successful
-preparation holds exact item IDs under its original issued intention. A stack's
-physical quantity is authoritative; preparations retain references, not a second
-quantity balance. The bounds are 8 distinct cost rows, 32 selected fragments per
-action and 64 holds per stack. Ordinary transfer can move only unheld units.
-Forced physical movement, lost access, invalidated work and death retire the
-whole unpaid claim. A valid first resolution spends once even when the effect
-misses, is immune or would heal an already-full target. Paid strike tails keep
-their historical selection without requiring deleted sources to remain loaded.
-
-Selection defaults to known carried supplies. An explicit selection may instead
-name disclosed ground stacks within body contact when the authored cost permits
-it. It cannot reach another inventory or substitute a different same-kind item.
-Views expose known supply identity and physical quantity, never holds, free-unit
-counts, claimant identities or private preparation state. Ground supply contact
-is separate from pickup reach. Frozen/detached records retain reciprocal
-actor/item claims; incomplete or contradictory restored relationships reject.
-
-Under the shared default rules, body armor changes take three actor turns;
-other equipment changes, drinking, eating, reading and zapping take one. Equip/remove multipliers belong
-to each rules-defined slot, and consume timing is a ruleset constant; validated
-scenario overrides can change these defaults. Effects apply only on completion. Equipped armor protects during
-removal, occupied slots require removal before replacement, and equipped items
-cannot be dropped. Damage or a newly visible hostile pauses work, preserving
-progress and the original intention identity. A resume accepts the current threat baseline.
-Waiting preserves progress; a different successful action can discard it. Explicit
-cancellation of item preparation is rejected. Death clears equipment and drops each
-remaining carried stack once alongside the corpse.
-
-Consumables contain a sequence of the same `heal`, typed `damage`, restorable
-attribute/maximum-Health loss or restoration, condition
-application and resource-restoration effects used by abilities. Definitions are validated before mutation. Healing caps at maximum
-health; damage uses effective reductions and immunities. A lethal effect ends the
-sequence. Exactly one unit is consumed on completion. Observable health effects
-teach identity to the actor, even when the consumed stack disappears; an
-unobservable effect does not identify it.
-
-The optional observation `interactions` contains the controlled actor's slots,
-preparation and carried-item affordances, independently of combat attributes.
-Equipment statistics are disclosed only for known identities. Item effects and
-other actors' inventory are absent. This state reconstructs exactly through full
-observations, deltas, checkpoints and replay. The validated
-`scenarios/tests/interactions` package and `test_interactions_process.py` cover
-starting gear, timing, disclosure, consumption and checkpoint restart.
 
 ## Worn magic and the finite Rogue ring catalog
 
-Wearable effects use shared source modifiers, not item-name dispatch. Equipment
-may author `potency_modifiers`: checked numeric templates multiplied by its
-signed instance potency, alongside ordinary unscaled `modifiers`. The
-`signed_potency` birth policy samples one value uniformly from its negative and
-positive ranges. Rogue's numeric rings have equally likely −1, +1 and +2;
-negative instances are cursed. Equipping does not identify the type, potency or
-curse. Existing exact-instance knowledge and cursed-removal rules apply to both
-PCs and NPCs; identified values are private to the entitled actor.
-
-| Ring | Worn effect | Food surcharge in thirtieths |
-| --- | --- | --- |
-| Protection | Signed reduction against all six damage categories, including Psychic | 30 |
-| Add strength | Signed Strength bonus, excluded from Physical Defense | 30 |
-| Sustain strength | Prevents new restorable Strength loss; does not restore existing loss | 30 |
-| See invisible | Source-owned see-invisible capability | 6 |
-| Adornment | No mechanical benefit | 0 |
-| Dexterity | Signed Speed bonus for checks and timing, excluded from Physical Defense | 10 |
-| Increase damage | Signed bonus to every actual attack damage roll | 10 |
-| Regeneration | Doubles Health recovery rate; multiple rings do not stack the benefit | 60 |
-| Slow digestion | Reduces ordinary positive-reserve digestion | −15 |
-| Maintain armor | Prevents corrosion while worn; does not repair or permanently protect armor | 30 |
-| Searching | One free active Perception Search per 100 eligible actor-active ticks; multiple sources do not add scans | 10 |
-| Teleportation | Each exact worn source independently attempts same-floor relocation with probability 1/50 every 100 actor-active ticks | 0 |
-| Stealth | Continual opposed Stealth/Perception at awareness events, with one advantage; does not hide physically visible bodies | 30 |
-| Aggravation | Periodic snapshot-location alerts and one Stealth disadvantage; generated cursed | 0 |
-
-Protection is separate from the five-category magical armor ward. Signed
-reductions compose with ordinary reduction and the strongest applicable talent
-before the final zero floor; negative potency never creates vulnerability.
-Add strength and dexterity exclude only their own attribute contributions from
-Physical Defense at source folding, preserving other Strength/Speed modifiers,
-initial attributes and losses. Their other attribute effects remain ordinary.
-
-The attack bonus is captured at preparation and applies once to each canonical
-rolled damage pool, including natural, melee, ranged, spell, device and damaging
-attack-rider pools. It is not a per-die bonus and does not affect fixed damage,
-hazards, healing, restoration, attribute-loss or resource-cost rolls. Homogeneous
-merged components receive one bonus; distinct typed pools each receive it.
-
-Regeneration halves the otherwise-derived Health period, rounded up with a
-one-tick minimum, and retains quiet recovery and damage-reset behavior. It does
-not accelerate Focus or Breath recovery. Each worn ring still adds its own food
-cost. Digestion uses a baseline of 30 thirtieths per ordinary unit interval
-(100 active ticks in Rogue), plus the summed worn surcharges, floored at zero.
-Fractions persist across equipment changes, freezes and source-free restart.
-Two slow-digestion rings stop ordinary digestion while reserves remain positive;
-empty-reserve starvation and nutrition spent by actual recovery are unchanged.
-
-Searching accrues only while its source is active and the actor is awake and able
-to see. Unequipping, sleep, freezing and re-equipping do not grant an immediate
-scan or accrue suppressed time; the earned fraction survives. Each scan uses the
-shared active Search check without spending next-check benefits or interrupting
-paid work. See [discovery](../architecture/perception.md).
-
-Stealth and Aggravation capabilities do not stack. Aggravation's authored pulse
-trial is 1-in-3 every 500 wearer-active ticks. This cadence and Stealth's one
-advantage are provisional TOR tuning, not exact classic Rogue probabilities.
-See [awareness](../play/rogue.md#living-dungeon-pressure-and-awareness) for the
-event, sensory-contact and active-time boundaries. Manual Sneak remains deferred.
-
-The finite `rogue.rings` birth stage chooses one ring with weights
-9/9/5/10/1/8/8/4/9/5/5/5/7/10 in the table's order, without reordering other stage streams.
-Fourteen concealed appearances are shared by the catalog. The paid identify-ring-or-wand
-scroll permits either class through one server-owned choice, without exposing
-unidentified potency or curse state.
+See [worn magic and the finite rogue ring catalog](magic-items.md#worn-magic-and-the-finite-rogue-ring-catalog) for the current contract.
 
 ## Magical wand and staff forms
 
-At the start of each run, every one of the fourteen Rogue device-effect identities
-is assigned either a wand or a staff, following the
-[pinned per-effect form choice](https://github.com/phs/rogue/blob/c7c119f893bd2f8255f2ad78d58a32664ddb9a97/init.c#L319-L355). Every later instance of that effect keeps the
-same form and concealed appearance in that run. Wand labels are shuffled metals;
-staff labels are shuffled woods. A new seed can change both assignments. Existing
-live effect weights, charge ranges, discovery policies and magical effect numbers
-are unchanged; opt-in effects remain opt-in.
-
-Both forms can be wielded as one-grip weapons with ordinary HeavyWeaponry melee,
-60 wind-up / 40 recovery ticks: a wand deals fixed **1 Impact** and a staff **2d3
-Impact**. These physical attacks neither Zap nor spend charges, and remain usable
-when empty. Physical skill, damage category, grip and timing are explicit TOR
-adaptations; the [pinned melee values](https://github.com/phs/rogue/blob/c7c119f893bd2f8255f2ad78d58a32664ddb9a97/sticks.c#L25-L31)
-distinguish staff 2d3 and wand 1d1. Neither form has a
-Throw profile in this batch. Existing exact-item holds and cursed-equipment
-restrictions apply. They start with neutral physical condition, rather than a new
-random weapon-enchantment roll; the ordinary weapon-enchantment scroll still
-selects the `weapon` class, not these magical implements.
-
-The existing serialized `wand` class now means the shared **wands and staves**
-identification category. Both retain the `/` glyph and shared device asset; this
-change does not add a bespoke 3D staff mesh. The current worn-equipment projection
-and 3D held model display only the `weapon` and `armor` classes, so wielded magical
-implements are not yet rendered there; their class is not relabeled to bypass
-that disclosure contract. Inventory, equipment, melee and Zap still work normally.
-The identify-ring-or-wand scroll can identify either form without a new action or
-wire category. Names and noun
-matching describe the disclosed form, never its hidden effect.
+See [magical wand and staff forms](magic-items.md#magical-wand-and-staff-forms) for the current contract.
 
 ## Reading, identification and charged devices
 
-Read and Zap are explicit item capabilities, independent of an item's name or
-physical class. `read <carried name or #id>` spends one scroll unit at completion.
-`zap <carried name or #id> <direction>` reserves the exact nonstackable device and
-spends one charge on resolution. Devices keep quantity one; each instance owns
-its charge balance, sampled once on creation. Empty devices retain the same
-unknown affordance and take the same time, but launch nothing and cannot underflow.
-No target, a successful dodge or immunity still spends a charged launch. Pausing,
-resuming, dropping, death, checkpoint restoration and transaction rollback reuse
-the existing exact-item hold and preparation rules.
-
-An unknown identify scroll is consumed before its permitted class set appears.
-Its owner gets one persisted choice among at most 64 current carried items in that
-class set. `identify <name or #id>` resolves it; `identify cancel` declines without
-refund. Both require the original opaque choice token. A stale, wrong-class or
-other actor's target rejects atomically. Another Read cannot bank another choice;
-death clears it. Declining is an explicit TOR usability adaptation: pinned Rogue
-insists on an eligible selection. Reading while blind is permitted, as in that
-source. ASCII uses F6 to Read and F12 to select a device and direction. Escape
-before submission cancels freely; Escape in the paid choice declines the spent
-scroll. R still releases control and Z still opens abilities.
-
-Type identity and exact-instance charge knowledge are separate actor-owned facts.
-Identifying one device learns its type for matching instances, but only that
-selected device's charges. A charged elemental launch recognizes its type even
-without a target, but does not reveal its remaining charges. A known owner observes
-their own charge payment. Ownership transfer does not give the recipient another
-actor's knowledge, and another actor's hidden use cannot refresh an old charge
-fact. Spectator responses omit charge balances and identification choices. Queries
-and client selection never identify anything.
-
-Rogue's fire, cold and lightning devices use Intellect + Lore against each
-recipient's Speed + Agility, using the existing opposed-ray executor. Rank zero
-is usable. Activation has no separate check or Mana cost, and owning or using the
-device never grants an ability to the actor. Definitions currently author six
-clear-cell visits, 6d6 typed Energy damage and 3–7 initial charges. These are
-explicit TOR check/timing adaptations on the pinned Rogue content; geometry,
-reflection and repeat-check disadvantage remain the shared ray rules.
-
-The generic effects also support independent per-HD healing dice (the compiled
-HD count is frozen at preparation), rolled actor-turn condition durations,
-condition removal, and additive duration extension. A turn is converted through
-the prepared actor's turn-tick value. Repeatable potion confusion has a separate
-condition from the gaze's expiry-protected condition. Ordinary Rogue healing uses strict overflow: when its independent HDd4 sum
-exceeds the prior injury, one point improves the earliest active owned HD with
-acquisition-time headroom. Exact fill does not improve a roll. The original seed,
-source, acquisition type/die and template witness stay fixed; the first HD is
-already maximized. At the cap the potion simply heals. This bounded owned-roll
-policy is an explicit TOR adaptation of Rogue's uncapped permanent maximum-HP
-increase, not a loose permanent Health modifier.
-
-Extra healing rolls independent HDd8 instead of HDd4 and also cures blindness.
-It identifies on use. Strict positive overflow selects one improvement; overflow
-greater than the frozen active-HD count plus one selects two. The improvements
-follow the earliest eligible acquisition records, possibly using two points of
-one row's headroom, and each stays bounded by that row's original die maximum.
-If fewer credits remain, only that eligible prefix is applied. Exact fill or no
-eligible headroom never invents an unbounded maximum-Health bonus. This preserves
-the pinned source's one/two threshold while adapting permanent gains to TOR's
-owned-HD ledger. It also removes exactly `rogue.hallucinating`, including while blind.
-
-Improvement credit survives level drain only for that exact owned HD. Restoring
-the same source/ordinal/seed restores its original credit; choosing a different
-replacement retires that dormant row and cannot transfer or later resurrect its
-credit. A smaller current form die or explicit Health override can temporarily
-mask the benefit, but cannot enlarge the acquisition cap. Credit becomes effective
-again when the masking form or override ends. Eligibility comes from compiled
-permanent facts; ordinary healing does not scan the HD ledger, and permanent
-recompilation occurs only when an owned record actually changes. Resolved
-improvement claims also bind the current build epoch, so a later replacement
-that repeats the same source and seed cannot reuse an old claim. The `scenarios/tests/magic-items` package and bounded process
-witness exercise the ordinary drink/read/identify/zap path and source-free reopen.
-
-Rogue poison identifies on use. Its descriptor-owned Athletics resistance can
-negate the exposure; only failed resistance rolls `1d3` ordinary restorable
-Strength loss. Poison immunity prevents both resistance and loss rolls.
-The existing deficit bounds still apply; a restore-strength dose removes the loss.
-See-invisible grants the shared perception capability for `1d85 + 807` source-base
-turns (808–892), converted through the prepared actor's turn ticks. It also removes
-`rogue.blindness`; repeated doses extend the same actor-active condition, which
-expires without protection. Even a successful blindness cure or invisible-creature
-reveal leaves the potion unidentified. Sight still needs the shared illuminated,
-unobstructed eye witness; this does not grant monster detection or pierce a guise.
-These bindings follow the pinned [potion cases](https://github.com/phs/rogue/blob/c7c119f893bd2f8255f2ad78d58a32664ddb9a97/potions.c)
-and the actual [spread expression](https://github.com/phs/rogue/blob/c7c119f893bd2f8255f2ad78d58a32664ddb9a97/misc.c).
-Sustain-strength uses the shared worn attribute-loss protection above. Poison does
-not cure Hallucination in this accepted adaptation. The opt-in Hallucination potion
-identifies on use, including blind and repeated use, and applies `1d85 + 807` base
-turns of one pure actor-active condition. Its saved presentation phase shifts once
-per captured base turn; extending the same generation preserves that cadence.
-Extra Healing cures it; ordinary healing and see-invisible do not. Cosmetic names,
-assets and glyph categories never replace actual action targets or physical item
-classes. Only genuine visual disclosure is changed; ordinary Awareness remains
-factual. Acquired map/public-plan appearances remain historical after cure.
-All concealed potion identities have distinct catalog appearances. The existing finite magic-potion stage chooses equally
-among healing, confusion, blindness, poison, see-invisible and extra healing for one unit;
-restore-strength retains its separate stage. These are provisional TOR availability
-weights, not the source distribution. Stage IDs, order and attempt bounds are unchanged.
-
-The opt-in Cancellation and Magic Missile wands use first-body
-UntilObstruction delivery, not the bounded Sight profile of the existing utility
-wands. Both start with 3–7 charges and remain directional when identified.
-Cancellation has no save or random roll and never discovers its own type;
-Magic Missile discovers on charged use and has one Agility/Lore save with
-1d4+1 Energy damage on failure through ordinary bonus/reduction rules. See
-[the player behavior](../play/rogue.md#opt-in-cancellation-and-magic-missile) and
-[the source contract](creature-rules.md#shared-ability-rules).
-
-Invisibility, haste-monster and slow-monster wands use a directional contact ray:
-the first physically encountered creature gets one Agility-versus-Lore dodge,
-and that contact ends the ray on either outcome. These rays never reflect and
-never reach a second creature behind the contact. Six-cell reach, 100/100 base
-prepare/recovery ticks and the opposed check are explicit TOR adaptations of the
-[source's utility branches](https://github.com/phs/rogue/blob/c7c119f893bd2f8255f2ad78d58a32664ddb9a97/sticks.c),
-which have no equivalent save. They have 3–7 initial charges, pay exactly one
-charge through ordinary Zap, and never identify on use or reveal an unknown
-instance's remaining charges. Unknown sources also stay unnamed in combat
-history, observed-ability knowledge, previews and ordinary spectator views.
-Visible changes still produce neutral feedback and source-neutral status identities;
-no event reveals a hidden first contact to the caster. Identification after a use
-cannot rename its frozen history. Known sources and charged `on_use` devices may
-name their ability only to their initiator; authoritative diagnostics remain wizard-only.
-Haste/slow are hostile interactions; invisibility
-is non-hostile, without adding pursuit solely for concealment.
-
-All three utility conditions persist until explicitly removed and repeated use
-keeps one application. Haste against persistent slow removes slow and leaves neutral;
-slow against persistent haste removes haste and leaves neutral. A later application can
-then establish its own effect. Haste halves ordinary action durations with upward
-rounding and a one-tick minimum; slow doubles them. Neither changes Speed,
-checks, defenses, cooldowns, regeneration or condition clocks. Invisibility uses
-the shared perception capability. Existing linked-hold cleanup remains authoritative;
-the source's incidental grouped-branch Flytrap release is not copied. Personal
-status displays “until removed”, and saved conditions retain that lifetime.
-The unchanged one-unit device stage now chooses equally among the three elemental
-and five utility wands, with eight distinct concealed appearances. These weights
-remain provisional TOR availability.
+See [reading, identification and charged devices](magic-items.md#reading-identification-and-charged-devices) for the current contract.
 
 ## Monster-control scrolls
 
-Readable capabilities may carry exactly one `control` payload instead of immediate
-self-effects or identification. The paid plan retains that payload and validates
-it against the exact consumed item; retries and recovery cannot substitute a
-more powerful scroll. Each completed read consumes one unit even if no target or
-placement is available. The Rogue control-scroll stage makes one finite placement
-attempt per first-entered floor; its five equal weights are provisional tuning.
-
-| Scroll | Completed effect |
-| --- | --- |
-| Aggravate monster | One shared location-alert pulse. The position is a snapshot, not a disclosed identity or continuously tracked actor. |
-| Create monster | One depth-appropriate prepared creature in a legal adjacent horizontal cell, without birth loot. Failed placement still consumes the scroll. Created creatures neither consume wandering slots nor obey the eight-live-wanderer cap. |
-| Hold monster | Intellect + Lore against each engaged, disclosed hostile's Spiritual Defense within two horizontal cells and unobstructed sight. An ordinary actor-active condition denies voluntary actions and pauses preparations; a committed hostile attack attempt releases it whether the attempt hits or misses. |
-| Monster confusion | Arms one next-successful-physical-hit charge. Misses retain it; the first successful natural, selected-melee or projectile primary consumes it, including when the mental application is resisted. Another read replaces rather than banks a charge. Delivery uses Intellect + Lore against Spiritual Defense and the same ordinary Confused movement condition as the PC's confusion potion. |
-| Scare monster | Reading wastes one unit. Its useful capability belongs to an occupied ground scroll, described below. |
-
-Authored spells, rays and gaze attacks are not physical-hit delivery. Multi-strike
-sequences test each committed primary in order; riders do not spend another charge.
-Confusion does not choose targets, change allegiance or invent random attacks.
-The authored 2,000-active-tick confusion and 1,000-active-tick Hold/Scare durations
-are provisional TOR balance settings, not exact classic Rogue durations.
-
-An occupied ground Scare scroll automatically applies a finite AI Flee objective
-to an approaching hostile AI creature within one horizontal square, including
-diagonals. Walls and closed doors block the contact. There is **no resistance
-roll**; ordinary mind-affecting immunity remains effective. The objective retains
-the scroll location, not its occupant's identity. It neither cancels magical sleep
-nor activates an intact stationary Xeroc ambush, and it does not lock player input.
-The ordinary Flee policy prefers retreat but can defend when cornered.
-
-An exact scroll/recipient approach triggers at most once. Remaining adjacent,
-changing occupants, querying, reconnecting or restoring cannot reroll or refresh
-it. Genuine departure and return rearms the approach. Removing the scroll or
-moving its occupant does not cancel an already earned finite objective, and
-inactive-floor time does not spend its condition timer.
-
-Picking up non-cursed Scare units transfers those units and curses them. Picking
-up already cursed units crumbles them instead of adding them to inventory. Curse
-is homogeneous per-unit stack state: splitting, merging, dropping and save/restore
-preserve it. Ordinary remove-curse can clear carried Scare curse, after which the
-next ground pickup curses those units again. This is the selected adaptation's
-explicit pickup rule, not a claim that every NetHack edition behaves identically.
-
-The eight new living-dungeon actual-process contracts have passed, including
-source-free recovery. Complete required verification and final cross-platform CI
-remain pending; these focused results do not establish balance or complete-run
-qualification.
+See [monster-control scrolls](magic-items.md#monster-control-scrolls) for the current contract.
 
 ## Trap avoidance and exposure resistance
 
-Deliberate movement onto a trap already known privately to that actor can make
-one Agility check against its separate authored avoidance DC. Newly discovering
-the plate during entry is too late; forced movement, falling, standing still and
-queries do not grant attempts. Success preserves contact identity without
-triggering the payload, so remaining on the plate does not repeatedly roll.
-An already-open trapdoor is a physical hole, not an avoidable trigger.
-
-Payload descriptors may author one shared skill resistance policy. This belongs
-to the explicitly tagged payload, not a condition name or an individual damage
-component; a poisoned physical attack authors a separate delivered rider. Rogue poison
-uses Athletics against DC 12, including venom riders, poison potions, poison
-darts and explicitly poison-classified sleeping gas. Immunity prevents the
-exposure without a resistance roll. A delivered exposure rolls once, with exact
-available outgoing check-token ownership; a successful resistance cancels only
-that payload. It does not erase the primary bite/dart hit or physical damage.
-A missed delivery does not roll resistance. Magical sleep is not implicitly
-classified as poison. Avoidance, resistance and concealed-feature discovery DCs
-are independent authored values, even where provisional tuning is 12.
+See [trap avoidance and exposure resistance](magic-items.md#trap-avoidance-and-exposure-resistance) for the current contract.
 
 ## Levitation and relocation
 
-Levitation potions use ordinary paid Drink and exact-unit consumption. At successful
-completion they grant 29–31 base turns (1d3 + 28), measured using the prepared
-actor's base turn ticks rather than haste-scaled action duration. The sampled
-actor-active duration extends on repeat use and pauses in frozen time. Overflow
-rejects the enclosing transaction without partial consumption. The same completion
-arrests descent; an actor must actually finish drinking before impact for rescue.
-See [locomotion](creature-rules.md#locomotion-capabilities).
+See [levitation and relocation](magic-items.md#levitation-and-relocation) for the current contract.
 
-Teleport scrolls use paid Read. Random relocation enumerates eligible supported
-cells on the current floor and draws once; temporary hover does not admit holes.
-Standalone authored regions have a 65,536-cell candidate budget; larger unsupported
-candidate domains fail cleanly rather than sampling a biased prefix. A blocked or
-empty destination still consumes the completed scroll/charge, but does not
-manufacture a displacement or identify a scroll from one.
-
-Teleport-away and teleport-to wands use the ordinary six-clear-cell first-contact
-utility ray, the shared device timing of 100 preparation ticks with no additional
-recovery, and 3–7 initial charges. Recipient
-Speed + Agility opposes frozen caster Intellect + Lore; ties dodge, and contact
-ends the ray on hit or dodge. Away uses same-floor random relocation. To uses
-exactly the adjacent endpoint from the **frozen launch placement/direction**,
-with live target body/frame and current geometry/occupancy; there is no nearby
-fallback. Forced caster displacement interrupts unfinished launch work.
-
-The teleport ring is generated cursed. Each exact worn item owns its partial
-100-active-tick interval, including sleep but excluding frozen time. Duplicate
-rings have independent 1/50 trials, in stable item order; both can trigger.
-Detached/re-equipped sources retain their fraction. This is not the nonstacking
-regeneration/searching policy. Successful forced relocation releases spatial
-holds and retires unfinished preparation without refunding already-paid costs.
-Destination contact runs once through ordinary trap/lifecycle authority.
 
 ## Quantity expressions
 
@@ -785,9 +203,9 @@ an item. Stolen gold and magic items become ordinary finite inventory and drop
 through normal death cleanup. There is no kill-time loot creation or restitution
 ledger. The unique objective's independent entry-relocation helper is unchanged.
 
-These contracts add no new command, client field, theft menu or 3D feature. See
-[status](../status.md) for the theft/gold batch's outstanding validation; existing
-item tests below do not by themselves qualify this new behavior.
+These contracts add no new command, client field, theft menu or 3D feature.
+[Status](../status.md) owns current qualification and outstanding work; the
+coverage entry points below are not a claim of a fresh test run or full-run balance.
 
 ## AI item decisions
 
@@ -898,7 +316,7 @@ The privileged `wizard identify <actor> <item>` command exercises knowledge
 updates through the ordinary journal and rewind path. It requires existing wizard
 authorization and marks the lineage through the existing wizard rules. Drinking
 can teach identity through an observable self effect. Ordinary identification is
-a single paid scroll continuation, described above; it is not a free identify endpoint. Rogue's concealed restore-strength potion
+a [single paid scroll continuation](magic-items.md#identification-and-private-knowledge); it is not a free identify endpoint. Rogue's concealed restore-strength potion
 uses this same path: positive actual deficit removal teaches identity; a no-deficit
 dose is consumed without learning. Its sole effect is bounded Strength restoration,
 with no extra healing or resource refill; see [Rogue restoration](../play/rogue.md#strength-loss-and-ordinary-restoration).

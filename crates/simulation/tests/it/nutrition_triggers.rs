@@ -640,7 +640,8 @@ fn personal_status_projection_hides_causers_tokens_and_foreign_conditions() {
         .combat
         .unwrap()
         .own_stats
-        .unwrap();
+        .unwrap()
+        .into_owned();
     assert_eq!(subject.conditions.len(), 1);
     assert_eq!(subject.conditions[0].condition.as_str(), "fixture_ice");
     assert_eq!(
@@ -653,7 +654,8 @@ fn personal_status_projection_hides_causers_tokens_and_foreign_conditions() {
         .combat
         .unwrap()
         .own_stats
-        .unwrap();
+        .unwrap()
+        .into_owned();
     assert!(other.conditions.is_empty());
     until(&mut game, 200);
     let subject = game
@@ -662,7 +664,8 @@ fn personal_status_projection_hides_causers_tokens_and_foreign_conditions() {
         .combat
         .unwrap()
         .own_stats
-        .unwrap();
+        .unwrap()
+        .into_owned();
     assert!(subject
         .conditions
         .iter()

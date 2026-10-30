@@ -129,7 +129,7 @@ Specify authority, observer/region scope, ordering, once/repeat semantics,
 permitted mutation, resource budgets, failure atomicity and persistent state
 before choosing a language. Hooks must use the same candidate-state, action and
 save boundaries as ordinary gameplay. See [script extension design](scripting.md).
-These decisions do not block using the existing exploration-only dungeon.
+These decisions do not block using the existing live dungeon.
 
 ## Recovery, history and distribution
 

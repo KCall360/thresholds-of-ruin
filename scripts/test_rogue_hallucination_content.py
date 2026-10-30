@@ -53,9 +53,9 @@ class RogueHallucinationContent(unittest.TestCase):
                       if item.get("appearance_pool") == "rogue.potions"]
         self.assertEqual(len(identities), 14)
 
-    def test_live_stock_and_starter_kits_remain_unchanged(self):
+    def test_supplement_preserves_existing_potion_stock_and_starter_kits(self):
         manifest = source("scenario.toml")
-        self.assertNotIn("rogue.hallucination", repr(manifest["floor_activation"]))
+        self.assertIn("rogue.hallucination", repr(manifest["floor_activation"]))
         potion = next(stage for stage in manifest["floor_activation"]["profiles"]["rogue.low_depth"]["stages"]
                       if stage["id"] == "rogue.magic_potions")
         self.assertEqual(potion["bands"], [{"depth": {"kind": "open", "minimum": 1}, "choices": [

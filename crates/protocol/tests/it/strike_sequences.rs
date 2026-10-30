@@ -13,7 +13,7 @@ fn combat(sequence: Value) -> Value {
 }
 
 fn state(combat: Value) -> StateView {
-    serde_json::from_value(json!({"wizard_game":false,"revision":"1","observation":{
+    serde_json::from_value(json!({"snapshot":"fixture", "wizard_game":false,"revision":"1","observation":{
         "charts":[],"linked_holds":[],"actor":"1","self_target":ActorTarget::from_digest([1;32]),"tick":"15",
         "position":{"x":0,"y":0,"z":0},"visible_cells":[],"ground_items":[],
         "inventory":[],"visible_actors":[],"places":[],"ready":false,
@@ -143,14 +143,13 @@ fn ordered_strikes_events_disclose_only_actual_bounded_primary_ordinals() {
 #[test]
 fn ordered_strikes_cancel_requires_explicit_step_and_preserves_identity() {
     for step in [Value::Null, json!("north_east"), json!("down")] {
-        let value = json!({"type":"cancel_intention","expected_revision":"9007199254740993",
+        let value = json!({"type":"cancel_intention",
             "intention":"original-admission","step":step});
         let command: Command = serde_json::from_value(value.clone()).unwrap();
         assert_eq!(serde_json::to_value(command).unwrap(), value);
     }
     for extra in [Value::Null, json!("sideways"), json!({"x":1,"y":0,"z":0})] {
-        let mut value =
-            json!({"type":"cancel_intention","expected_revision":"1","intention":"same"});
+        let mut value = json!({"type":"cancel_intention","intention":"same"});
         if !extra.is_null() {
             value["step"] = extra;
         }

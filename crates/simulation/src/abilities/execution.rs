@@ -8,6 +8,40 @@ struct BatchExecutionFacts<'a> {
     disclosure_origin: &'a mut Option<crate::event_history::EventOrigin>,
 }
 
+/// One immutable validation scope owns at most one projected owner creature.
+/// Construction is lazy: invalid payment/progress or weapon checks retain their
+/// original short-circuit behavior. This value never survives a game mutation.
+struct PreparationOwner<'a> {
+    game: &'a Game,
+    actor: crate::ActorId,
+    creature: std::cell::OnceCell<Option<std::borrow::Cow<'a, crate::creatures::CreatureState>>>,
+}
+
+impl<'a> PreparationOwner<'a> {
+    fn new(game: &'a Game, actor: crate::ActorId) -> Self {
+        Self {
+            game,
+            actor,
+            creature: std::cell::OnceCell::new(),
+        }
+    }
+
+    fn creature(&self) -> Option<&crate::creatures::CreatureState> {
+        crate::diagnostics::preparation_owner_projection_request();
+        self.creature
+            .get_or_init(|| {
+                let _span = crate::diagnostics::spans::span("preparation_owner_projection");
+                let creature = self.game.creature(self.actor);
+                crate::diagnostics::preparation_owner_projection(matches!(
+                    creature,
+                    Some(std::borrow::Cow::Owned(_))
+                ));
+                creature
+            })
+            .as_deref()
+    }
+}
+
 impl Game {
     /// Consume exactly the available outgoing sources captured by a performed
     /// resistance check, never recompute selection after primary publication.
@@ -33,6 +67,110 @@ impl Game {
         Ok(())
     }
     pub(crate) fn plan_actor_available(&self, plan: &Plan) -> bool {
+        self.plan_actor_available_with_owner(plan, &PreparationOwner::new(self, plan.actor()))
+    }
+    fn plan_actor_available_with_owner(&self, plan: &Plan, owner: &PreparationOwner<'_>) -> bool {
+        (match plan {
+            Plan::Projectile(plan) => plan.source.available(self, plan.actor),
+            Plan::Equip {
+                actor,
+                item,
+                slot,
+                allocation,
+                ..
+            } => self.frozen_equip_available(*actor, *item, *slot, allocation),
+            _ => true,
+        }) && plan
+            .as_ability()
+            .is_none_or(|ability| self.frozen_weapon_available(ability.actor, &ability.weapon))
+            && self
+                .actors
+                .get(&plan.actor())
+                .is_some_and(|actor| actor.alive())
+            && owner.creature().map_or_else(
+                || {
+                    matches!(
+                        plan,
+                        Plan::Equip { .. }
+                            | Plan::Unequip { .. }
+                            | Plan::Ignite { .. }
+                            | Plan::Extinguish { .. }
+                    ) || matches!(plan, Plan::Drink { effects, .. } if effects.is_empty())
+                },
+                |creature| {
+                    !creature.health().dead()
+                        && match plan {
+                            Plan::Respec(plan) => plan.basis.build_epoch == creature.build_epoch(),
+                            _ => true,
+                        }
+                        && plan
+                            .ability_id()
+                            .is_none_or(|ability| creature.derived().abilities.contains(ability))
+                },
+            )
+    }
+    fn plan_available_with_owner(
+        &self,
+        plan: &Plan,
+        sight: Option<&[tor_world::SightCell]>,
+        owner: &PreparationOwner<'_>,
+    ) -> bool {
+        self.plan_actor_available_with_owner(plan, owner)
+            && match plan {
+                Plan::Escape(plan) => self.escape_plan_available(plan),
+                Plan::Respec(plan) => self.respec_environment_safe(plan.basis.actor),
+                Plan::Ray(_) | Plan::Projectile(_) => true,
+                Plan::Ability(ability) => self.target_in_reach_snapshot(
+                    ability.actor,
+                    ability.target,
+                    &ability.reach,
+                    sight,
+                ),
+                Plan::Equip { .. }
+                | Plan::Unequip { .. }
+                | Plan::Ignite { .. }
+                | Plan::Extinguish { .. }
+                | Plan::Read { .. }
+                | Plan::Zap { .. }
+                | Plan::Drink { .. }
+                | Plan::Eat { .. } => {
+                    self.item_work_available(plan.actor(), &plan.work())
+                        && (plan.on_success().is_empty()
+                            || self.target_in_reach_snapshot(
+                                plan.actor(),
+                                plan.actor(),
+                                &crate::rules::Reach::SelfOnly,
+                                sight,
+                            ))
+                }
+            }
+    }
+    /// A paid prefix owns its frozen tail even if its old target has left reach.
+    /// Funding is progress-aware: the first strike settles the only cost hold.
+    pub(crate) fn preparation_still_available(
+        &self,
+        preparation: &crate::combat::Preparation,
+        sight: Option<&[tor_world::SightCell]>,
+    ) -> bool {
+        let owner = PreparationOwner::new(self, preparation.plan.actor());
+        preparation.progress_valid()
+            && self.preparation_items_valid_after_shape(preparation, false)
+            && (preparation.has_prefix()
+                || preparation.plan.cost().is_none_or(|cost| {
+                    preparation.hold.is_some_and(|hold| {
+                        owner
+                            .creature()
+                            .is_some_and(|creature| creature.validate_cost(hold, cost).is_ok())
+                    })
+                }))
+            && if preparation.has_prefix() {
+                self.plan_actor_available_with_owner(&preparation.plan, &owner)
+            } else {
+                self.plan_available_with_owner(&preparation.plan, sight, &owner)
+            }
+    }
+    #[cfg(test)]
+    fn cold_plan_actor_available(&self, plan: &Plan) -> bool {
         (match plan {
             Plan::Projectile(plan) => plan.source.available(self, plan.actor),
             Plan::Equip {
@@ -72,8 +210,9 @@ impl Game {
                 },
             )
     }
-    fn plan_available(&self, plan: &Plan, sight: Option<&[tor_world::SightCell]>) -> bool {
-        self.plan_actor_available(plan)
+    #[cfg(test)]
+    fn cold_plan_available(&self, plan: &Plan, sight: Option<&[tor_world::SightCell]>) -> bool {
+        self.cold_plan_actor_available(plan)
             && match plan {
                 Plan::Escape(plan) => self.escape_plan_available(plan),
                 Plan::Respec(plan) => self.respec_environment_safe(plan.basis.actor),
@@ -105,7 +244,8 @@ impl Game {
     }
     /// A paid prefix owns its frozen tail even if its old target has left reach.
     /// Funding is progress-aware: the first strike settles the only cost hold.
-    pub(crate) fn preparation_still_available(
+    #[cfg(test)]
+    fn cold_preparation_still_available(
         &self,
         preparation: &crate::combat::Preparation,
         sight: Option<&[tor_world::SightCell]>,
@@ -120,9 +260,9 @@ impl Game {
                     })
                 }))
             && if preparation.has_prefix() {
-                self.plan_actor_available(&preparation.plan)
+                self.cold_plan_actor_available(&preparation.plan)
             } else {
-                self.plan_available(&preparation.plan, sight)
+                self.cold_plan_available(&preparation.plan, sight)
             }
     }
     /// Resolve one due strike and its ordered riders with one residual damage budget.
@@ -863,5 +1003,136 @@ impl Game {
         let outcome = self.published_resolution(receipt)?.clone();
         self.record_survival(plan.target(), &flow);
         crate::detection_lifecycle::ItemCompletion::new(outcome, receipt.chart_completion())
+    }
+}
+
+#[cfg(test)]
+mod preparation_fact_tests {
+    use crate::{ActorId, Game};
+
+    fn game() -> Game {
+        let (mut game, _) =
+            super::super::strike_tests::sequence_game_custom(&[0, 10], |_| {}, |_, _| {});
+        game.preparation_facts = Default::default();
+        game
+    }
+    fn funded_game() -> Game {
+        super::super::strike_tests::sequence_game_custom(
+            &[0, 10],
+            |ability| {
+                ability.cost = Some(crate::rules::Cost {
+                    resource: crate::resources::Resource::Stamina,
+                    start: 1,
+                    resolution: 1,
+                });
+            },
+            |_, _| {},
+        )
+        .0
+    }
+
+    #[test]
+    fn preparation_owner_context_matches_cold_validation_and_preserves_state() {
+        let owner = ActorId(1);
+        for variant in 0..6 {
+            let mut game = funded_game();
+            match variant {
+                1 => {
+                    game.tick = 1;
+                }
+                2 => {
+                    game.pause_preparation(owner).unwrap();
+                }
+                3 => {
+                    game.tick = 10;
+                    game.resolve_preparations().unwrap();
+                    assert!(game.preparation(owner).unwrap().has_prefix());
+                }
+                _ => {}
+            }
+            let mut preparation = game.preparation(owner).unwrap().clone();
+            match variant {
+                4 => preparation.remaining = u64::MAX,
+                5 => {
+                    game.actors.remove(&owner);
+                }
+                _ => {}
+            }
+            let before = game.clone();
+            assert_eq!(
+                game.preparation_still_available(&preparation, None),
+                game.cold_preparation_still_available(&preparation, None),
+                "live validation agrees with original cold checks: variant {variant}"
+            );
+            assert_eq!(
+                game, before,
+                "validation must not settle, publish, or draw RNG"
+            );
+        }
+    }
+
+    #[test]
+    fn preparation_owner_context_is_lazy_and_shared_by_funding_and_eligibility() {
+        let mut game = funded_game();
+        game.tick = 1;
+        let pending = game.preparation(ActorId(1)).unwrap();
+        assert!(pending.hold.is_some());
+        let projected_owned = matches!(game.creature(ActorId(1)), Some(std::borrow::Cow::Owned(_)));
+        assert!(
+            projected_owned,
+            "spent Stamina at tick one must exercise owned time projection"
+        );
+        let counts = crate::diagnostics::work_counts();
+        assert!(game.preparation_still_available(pending, None));
+        let after = crate::diagnostics::work_counts();
+        assert_eq!(
+            after.preparation_owner_projection_requests
+                - counts.preparation_owner_projection_requests,
+            2
+        );
+        assert_eq!(
+            after.preparation_owner_projections - counts.preparation_owner_projections,
+            1,
+            "funding and eligibility must share one owner projection"
+        );
+        assert_eq!(
+            after.preparation_owner_owned_projections - counts.preparation_owner_owned_projections,
+            usize::from(projected_owned),
+            "owned projections match canonical creature-time projection"
+        );
+        let mut invalid = pending.clone();
+        invalid.remaining = u64::MAX;
+        assert!(!game.preparation_still_available(&invalid, None));
+        let rejected = crate::diagnostics::work_counts();
+        assert_eq!(
+            rejected.preparation_owner_projection_requests,
+            after.preparation_owner_projection_requests,
+            "invalid progress must reject before requesting an owner projection"
+        );
+    }
+
+    #[test]
+    fn preparation_residency_descriptor_skips_only_proven_empty_policy() {
+        let mut game = game();
+        let owner = ActorId(1);
+        let count = crate::diagnostics::work_counts().preparation_residency_proof_hits;
+        game.ensure_preparation_residency(owner).unwrap();
+        assert_eq!(
+            crate::diagnostics::work_counts().preparation_residency_proof_hits,
+            count + 1
+        );
+        let mut actor = game.actors.get_mut(&owner).unwrap();
+        let crate::abilities::Plan::Ability(plan) = &mut actor.pending.as_mut().unwrap().plan
+        else {
+            panic!("ability")
+        };
+        plan.strikes[0]
+            .on_success
+            .push(crate::abilities::PlannedEffect::RoomLight);
+        drop(actor);
+        assert!(
+            !game.preparation_has_no_supplemental_regions(owner),
+            "new dynamic effect invalidates the descriptor"
+        );
     }
 }

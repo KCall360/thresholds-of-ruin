@@ -394,8 +394,8 @@ op = "add"
 path = ["conditions", "rogue.detecting_monsters"]
 value = { id = "rogue.detecting_monsters", family = "rogue.detecting_monsters", lifecycle = "timed", name = "Monster detection", detecting_monsters = true, modifiers = [], stacking = { kind = "refresh" }, source_scoped = false, descriptors = [], capacity = "reject", timing = { kind = "actor_active", on_expiry = { kind = "remove" } }, restrictions = [], preparation = "preserve" }
 
-# Baleful-only opt-in review roster. Timing/charges follow existing wand fixtures;
-# this is not approval of a live pool, power band, or temporary-form duration.
+# Baleful-only three-form roster, unchanged by supplemental live activation.
+# Timing/charges remain provisional; no broader roster or temporary forms.
 [[overrides]]
 op = "add"
 path = ["abilities", "rogue.wand_polymorph"]

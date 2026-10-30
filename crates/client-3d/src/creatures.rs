@@ -10,6 +10,25 @@ use bevy::{math::Affine3A, prelude::*};
 use std::f32::consts::{FRAC_PI_2, PI, TAU};
 use tor_client_3d_model::CreatureModel;
 
+/// Keep source coordinates available for fitting after renderer extraction.
+/// Mutable asset access publishes a modification even when no bits change, so
+/// warmed library meshes must take the immutable path.
+fn retained_mesh<'a>(meshes: &'a mut Assets<Mesh>, handle: &Handle<Mesh>) -> &'a Mesh {
+    use bevy::asset::RenderAssetUsages;
+    if !meshes
+        .get(handle)
+        .expect("cached model mesh")
+        .asset_usage
+        .contains(RenderAssetUsages::MAIN_WORLD)
+    {
+        meshes
+            .get_mut(handle)
+            .expect("cached model mesh")
+            .asset_usage |= RenderAssetUsages::MAIN_WORLD;
+    }
+    meshes.get(handle).expect("retained model mesh")
+}
+
 /// The body plans.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Plan {
@@ -1080,6 +1099,11 @@ enum LimbRole {
     Grasp,
 }
 
+/// Generated body geometry, excluding held props and presentation decorations.
+/// Loose deformation bounds are excluded separately by camera measurements.
+#[derive(Component)]
+pub(crate) struct BodySurface;
+
 #[derive(Component)]
 pub struct Rig {
     pub plan: Plan,
@@ -1130,6 +1154,33 @@ pub(crate) enum Drape {
 }
 
 impl Rig {
+    fn map_render_references(
+        &mut self,
+        entity: impl Fn(Entity) -> Entity,
+        mut mesh: impl FnMut(&Handle<Mesh>) -> Handle<Mesh>,
+    ) {
+        for joint in self.joints.iter_mut().flatten() {
+            *joint = entity(*joint);
+        }
+        for segment in &mut self.segments {
+            *segment = entity(*segment);
+        }
+        for (drape, _) in &mut self.drapes {
+            *drape = entity(*drape);
+        }
+        for layer in &mut self.skirt_layers {
+            *layer = entity(*layer);
+        }
+        if let Some(robe) = &mut self.robe {
+            robe.map_mesh(&mut mesh);
+        }
+        for cloak in &mut self.cloaks {
+            cloak.map_references(&entity, &mut mesh);
+        }
+        if let Some(hair) = &mut self.hair {
+            hair.map_references(&entity, &mut mesh);
+        }
+    }
     /// Re-enter a preloaded review scene without retaining prior cloth/contact caches.
     pub(crate) fn reset_presentation(&mut self) {
         if let Some(hair) = &mut self.hair {
@@ -1446,7 +1497,7 @@ mod art_contract_tests;
 mod cloak;
 #[cfg(test)]
 mod cloak_tests;
-mod corpse;
+pub(crate) mod corpse;
 mod deformation;
 mod effects;
 mod geometry;
@@ -1468,6 +1519,7 @@ pub(crate) use animation::{refresh_pose, PoseRefresh};
 pub use corpse::{snuff, spawn_corpse, Snuffed};
 pub use effects::{effects, stage, Bolt, Fade};
 pub use geometry::spawn;
+pub(crate) mod loading;
 pub(crate) use hair_budget::HairSolving;
 pub(crate) use outfit::Equipment;
 pub use outfit::Wardrobe;

@@ -166,6 +166,18 @@ def correlate_native(directory, result):
                 if row['request_kind'] == 'non_action':
                     continue
             candidates.append(row)
+    # Classified producers identify one Act per sequential workload sample.
+    # Presentation generations are independent and may be coalesced.
+    starts = [row for row in client if row['event'] == 'client_request']
+    classified = bool(starts) and all('request_kind' in row for row in starts)
+    action_requests = [row for row in starts if row.get('request_kind') == 'act']
+    if classified:
+        if len(action_requests) != len(result['samples']):
+            raise ValueError('Ambiguous native action count')
+        if [sample['index'] for sample in result['samples']] != list(range(len(result['samples']))):
+            raise ValueError('Invalid native action sample order')
+        if any('presented_frame' not in sample for sample in result['samples']):
+            raise ValueError('Missing selected native frame for classified action')
     acknowledgements = {r['request_id']:r for r in client if r['event']=='client_ack'}
     sends = {r['request_id']:r for r in client if r['event']=='client_request_sent'}
     write_cost = diagnostic_write_costs(client)
@@ -197,9 +209,10 @@ def correlate_native(directory, result):
                 action_frames.setdefault(int(frame['state']['revision'])-1, []).append(frame['frame'])
     output = []
     for sample in result['samples']:
-        # The complete single-actor traversal advances exactly one revision per
-        # ordinary action. Modal door selection sends no request.
-        candidates = requests[sample['index']]
+        # Legacy unclassified captures retain their strict revision binding.
+        # Never infer which unclassified request was an action.
+        candidates = ([action_requests[sample['index']]] if classified
+                      else requests[sample['index']])
         if len(candidates) != 1:
             raise ValueError(f'Ambiguous native request revision {sample["index"]!r}')
         request = candidates[0]

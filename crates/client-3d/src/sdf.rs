@@ -5,7 +5,9 @@
 //! the eye sockets, the nose grows out of the face.
 
 mod contact_field;
+mod differential;
 mod partition;
+mod refinement;
 use crate::props::Builder;
 use bevy::prelude::*;
 pub(crate) use contact_field::ContactField;
@@ -17,6 +19,8 @@ pub enum Shape {
     Ellipsoid(Vec3, Vec3),
     /// A capsule from a to b with radii at each end.
     Capsule(Vec3, Vec3, f32, f32),
+    /// A horizontal rounded ring: center, major/minor radii and Z stretch.
+    Torus(Vec3, Vec2, f32),
     /// Everything beyond a plane: points whose distance along the unit
     /// normal exceeds the offset. Carving one trims a shape flat.
     Beyond(Vec3, f32),
@@ -24,25 +28,7 @@ pub enum Shape {
 
 impl Shape {
     pub(crate) fn distance(self, p: Vec3) -> f32 {
-        match self {
-            Shape::Ellipsoid(c, r) => {
-                // A good approximation of the distance to an ellipsoid.
-                let q = (p - c) / r;
-                let k0 = q.length();
-                let k1 = ((p - c) / (r * r)).length();
-                if k1 < 1e-6 {
-                    -r.min_element()
-                } else {
-                    k0 * (k0 - 1.0) / k1
-                }
-            }
-            Shape::Capsule(a, b, ra, rb) => {
-                let ab = b - a;
-                let t = ((p - a).dot(ab) / ab.length_squared()).clamp(0.0, 1.0);
-                p.distance(a + ab * t) - (ra + (rb - ra) * t)
-            }
-            Shape::Beyond(n, o) => o - p.dot(n),
-        }
+        self.evaluate::<false>(p).distance
     }
 
     /// The range this shape's distance can take anywhere within `radius` of
@@ -55,6 +41,7 @@ impl Shape {
             Shape::Capsule(a, b, ra, rb) => 1.0 + (rb - ra).abs() / a.distance(b).max(1e-6),
             Shape::Beyond(..) => 1.0,
             Shape::Ellipsoid(_, r) => r.max_element() / r.min_element().max(1e-6),
+            Shape::Torus(_, _, depth) => 1.0f32.max(1.0 / depth),
         };
         let d = self.distance(center);
         Some((d - slope * radius, d + slope * radius))
@@ -71,10 +58,6 @@ pub enum Step {
     Inflate(f32),
     /// Join a complete layer, preserving its own order of growth and cuts.
     Union(Sculpt, f32),
-}
-
-fn smooth_min(a: f32, b: f32, k: f32) -> f32 {
-    smooth_min_with_weight(a, b, k).0
 }
 
 /// Distance and derivative weight of the existing (left) source. Surface
@@ -94,15 +77,28 @@ pub(crate) fn smooth_min_with_weight(a: f32, b: f32, k: f32) -> (f32, f32) {
     (b + (a - b) * h - k * h * (1.0 - h), h)
 }
 
-fn smooth_max(a: f32, b: f32, k: f32) -> f32 {
-    -smooth_min(-a, -b, k)
-}
-
 /// A sculpture: an ordered list of additions and carvings.
 #[derive(Default, Clone)]
 pub struct Sculpt {
     pub steps: Vec<Step>,
 }
+
+#[derive(Clone, Copy)]
+struct Sampling {
+    step: f32,
+    placement: VertexPlacement,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum VertexPlacement {
+    Average,
+    Analytic,
+    Symmetric,
+}
+
+// Keep a quarter of the one-millimeter physical error allowance for the
+// nonlinear difference between the local field estimate and actual distance.
+const PROJECTED_ERROR: f32 = 0.00075;
 
 impl Sculpt {
     pub fn add(&mut self, shape: Shape, k: f32) -> &mut Self {
@@ -136,29 +132,7 @@ impl Sculpt {
     /// The field at `p` from these steps, in order: all of them, or only
     /// those that can shape the field near `p`.
     fn distance_among<'a>(&self, p: Vec3, steps: impl Iterator<Item = &'a Step>) -> f32 {
-        let mut d = f32::MAX;
-        for step in steps {
-            match *step {
-                Step::Add(s, k) => {
-                    d = if d == f32::MAX {
-                        s.distance(p)
-                    } else {
-                        smooth_min(d, s.distance(p), k)
-                    }
-                }
-                Step::Carve(s, k) => d = smooth_max(d, -s.distance(p), k),
-                Step::Inflate(amount) => d -= amount,
-                Step::Union(ref other, k) => {
-                    let child = other.distance(p);
-                    d = if d == f32::MAX {
-                        child
-                    } else {
-                        smooth_min(d, child, k)
-                    };
-                }
-            }
-        }
-        d
+        self.evaluate_among::<false>(p, steps).distance
     }
 
     /// The steps that can shape the field anywhere within `radius` of
@@ -322,6 +296,64 @@ impl Sculpt {
         field
     }
 
+    fn project_in_cell(
+        &self,
+        mut p: Vec3,
+        low: Vec3,
+        step: f32,
+        near: &[usize],
+        placement: VertexPlacement,
+    ) -> Vec3 {
+        let distance = |q| self.distance_among(q, near.iter().map(|&i| &self.steps[i]));
+        let high = low + Vec3::splat(step);
+        for _ in 0..8 {
+            let steps = near.iter().map(|&i| &self.steps[i]);
+            let sample = match placement {
+                VertexPlacement::Analytic => self.sample_among(p, steps),
+                VertexPlacement::Symmetric => {
+                    self.sample_symmetric_among(p, 0.001f32.min(step * 0.25), steps)
+                }
+                VertexPlacement::Average => unreachable!("cell averages do not project"),
+            };
+            let gap = sample.distance;
+            if !gap.is_finite() || gap.abs() < 1e-6 {
+                break;
+            }
+            let mut gradient = sample.gradient;
+            // Once a cell face blocks an axis, solve along the remaining
+            // axes instead of repeatedly pushing into that same constraint.
+            for axis in 0..3 {
+                let movement = -gap * gradient[axis];
+                if (p[axis] <= low[axis] && movement < 0.0)
+                    || (p[axis] >= high[axis] && movement > 0.0)
+                {
+                    gradient[axis] = 0.0;
+                }
+            }
+            let norm = gradient.length_squared();
+            if !norm.is_finite() || norm < 1e-12 {
+                break;
+            }
+            let correction = (gradient * (gap / norm)).clamp_length_max(step * 1.75);
+            let mut fraction = 1.0;
+            let mut improved = false;
+            for _ in 0..6 {
+                let candidate = (p - correction * fraction).clamp(low, high);
+                let next_gap = distance(candidate);
+                if candidate.is_finite() && next_gap.is_finite() && next_gap.abs() < gap.abs() {
+                    p = candidate;
+                    improved = true;
+                    break;
+                }
+                fraction *= 0.5;
+            }
+            if !improved {
+                break;
+            }
+        }
+        p
+    }
+
     pub fn mesh(
         &self,
         b: &mut Builder,
@@ -344,6 +376,106 @@ impl Sculpt {
         paint: &dyn Fn(Vec3, Vec3) -> Vec3,
         coverage: Option<&dyn Fn(Vec3) -> bool>,
     ) {
+        self.mesh_sampled(
+            b,
+            min,
+            max,
+            Sampling {
+                step,
+                placement: VertexPlacement::Average,
+            },
+            paint,
+            coverage,
+        );
+    }
+
+    /// Closed masses can use a wider grid when crossing averages are projected
+    /// toward the exact surface. Constrained placement starts in each cell,
+    /// with a small bounded correction for stalled vertices. Fitted shells
+    /// and hard painted cut edges retain their authored mesher.
+    pub fn mesh_projected(
+        &self,
+        b: &mut Builder,
+        min: Vec3,
+        max: Vec3,
+        step: f32,
+        paint: &dyn Fn(Vec3, Vec3) -> Vec3,
+    ) {
+        self.mesh_sampled(
+            b,
+            min,
+            max,
+            Sampling {
+                step,
+                placement: VertexPlacement::Analytic,
+            },
+            paint,
+            None,
+        );
+    }
+
+    /// A flattened mass declares a narrow crest at its center plane. Put that
+    /// plane on the sampling grid so a coarse cell cannot step over the crest.
+    /// The grid only expands the supplied bounds; legacy sampling is unchanged.
+    fn feature_sampling(&self, mut min: Vec3, requested: f32) -> (Vec3, f32) {
+        fn visit(sculpt: &Sculpt, anchors: &mut [Option<(f32, f32)>; 3], curvature: &mut f32) {
+            for shape in &sculpt.steps {
+                match shape {
+                    Step::Add(Shape::Ellipsoid(center, radii), _) => {
+                        for axis in 0..3 {
+                            let ratio =
+                                radii[axis] / radii[(axis + 1) % 3].min(radii[(axis + 2) % 3]);
+                            if ratio < 1.0 / 3.0 {
+                                // A flat ellipsoid's rim curvature is much
+                                // tighter than its minor radius suggests.
+                                *curvature =
+                                    curvature.min(radii[axis].powi(2) / radii.max_element());
+                                if anchors[axis].is_none_or(|(best, _)| ratio < best) {
+                                    anchors[axis] = Some((ratio, center[axis]));
+                                }
+                            }
+                        }
+                    }
+                    Step::Add(Shape::Torus(center, radii, _), _) => {
+                        let ratio = radii.y / (radii.x + radii.y);
+                        if anchors[1].is_none_or(|(best, _)| ratio < best) {
+                            anchors[1] = Some((ratio, center.y));
+                        }
+                    }
+                    Step::Union(child, _) => visit(child, anchors, curvature),
+                    _ => {}
+                }
+            }
+        }
+        let mut anchors = [None; 3];
+        let mut curvature = f32::INFINITY;
+        visit(self, &mut anchors, &mut curvature);
+        let step = requested.min((0.0024 * curvature).sqrt());
+        for (axis, anchor) in anchors.into_iter().enumerate() {
+            if let Some((_, center)) = anchor {
+                min[axis] = (center + ((min[axis] - center) / step).floor() * step).min(min[axis]);
+            }
+        }
+        (min, step)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn mesh_sampled(
+        &self,
+        b: &mut Builder,
+        min: Vec3,
+        max: Vec3,
+        sampling: Sampling,
+        paint: &dyn Fn(Vec3, Vec3) -> Vec3,
+        coverage: Option<&dyn Fn(Vec3) -> bool>,
+    ) {
+        // Align once. A symmetric retry reuses the exact same grid rather than
+        // rounding its already aligned bounds a second time.
+        let (min, step) = if sampling.placement == VertexPlacement::Analytic {
+            self.feature_sampling(min, sampling.step)
+        } else {
+            (min, sampling.step)
+        };
         let profile_started = crate::props::profile_builds().then(std::time::Instant::now);
         let size = ((max - min) / step).ceil().as_uvec3() + UVec3::ONE;
         let (nx, ny, nz) = (size.x as usize, size.y as usize, size.z as usize);
@@ -441,6 +573,17 @@ impl Sculpt {
                             self.steps_near(center, reach + REACH, &mut wide);
                             (close, wide)
                         });
+                    let position = if sampling.placement != VertexPlacement::Average {
+                        self.project_in_cell(
+                            position,
+                            at(i, j, k),
+                            step,
+                            &steps.0,
+                            sampling.placement,
+                        )
+                    } else {
+                        position
+                    };
                     let normal = self.normal(position, &steps.0);
                     let pigment = paint(position, normal);
                     let shade = self.occlusion(position, normal, &steps.1);
@@ -458,44 +601,20 @@ impl Sculpt {
         let surface_done = profile_started.map(|time| time.elapsed());
         // A quad across every grid edge that crosses the surface, joining the
         // four cells around it.
+        let mut faces = Vec::new();
         let mut quad = |cs: [(usize, usize, usize); 4], flip: bool| {
             let indices = cs.map(|(i, j, k)| grid_vertex[cell(i, j, k)]);
             if indices.contains(&usize::MAX) {
                 return;
             }
-            let mut vs = indices.map(|index| vertex[index]);
+            let mut indices = indices;
             if flip {
-                vs.reverse();
+                indices.reverse();
             }
-            for tri in [[vs[0], vs[1], vs[2]], [vs[0], vs[2], vs[3]]] {
-                if let Some(region) = coverage {
-                    let input = tri.map(|v| partition::Vertex {
-                        position: v.position,
-                        sample: v.position,
-                        normal: v.normal,
-                        shade: v.shade,
-                    });
-                    if let Some(pieces) = partition::split(input, region) {
-                        for face in pieces {
-                            b.tri_smooth_shaded(
-                                face.map(|v| v.position),
-                                face.map(|v| v.normal),
-                                face.map(|v| paint(v.sample, v.normal)),
-                                face.map(|v| v.shade),
-                            );
-                        }
-                        continue;
-                    }
-                }
-                // Preserve the existing triangle order and winding. Pigment
-                // remains sRGB and occlusion remains linear until upload.
-                b.tri_smooth_shaded(
-                    tri.map(|v| v.position),
-                    tri.map(|v| v.normal),
-                    tri.map(|v| v.pigment),
-                    tri.map(|v| v.shade),
-                );
-            }
+            faces.extend([
+                [indices[0], indices[1], indices[2]],
+                [indices[0], indices[2], indices[3]],
+            ]);
         };
         for k in 1..cells.2 {
             for j in 1..cells.1 {
@@ -537,6 +656,146 @@ impl Sculpt {
                 }
             }
         }
+        if sampling.placement != VertexPlacement::Average {
+            let mut points: Vec<_> = vertex.iter().map(|v| v.position).collect();
+            let all: Vec<_> = (0..self.steps.len()).collect();
+            let error = |p: Vec3| {
+                let sample = match sampling.placement {
+                    VertexPlacement::Analytic => self.sample(p),
+                    VertexPlacement::Symmetric => {
+                        self.sample_symmetric_among(p, 0.001, self.steps.iter())
+                    }
+                    VertexPlacement::Average => unreachable!("cell averages do not refine"),
+                };
+                let gap = sample.distance.abs();
+                if !gap.is_finite() {
+                    return f32::INFINITY;
+                }
+                if gap <= 1e-6 {
+                    return 0.0;
+                }
+                let norm = sample.gradient.length();
+                if !norm.is_finite() || norm < 1e-6 {
+                    f32::INFINITY
+                } else {
+                    gap / norm
+                }
+            };
+            // A flat crest can stall against a cell face. Correct only inaccurate
+            // representatives, within a quarter-cell neighbourhood.
+            for point in &mut points {
+                if error(*point) > PROJECTED_ERROR {
+                    let margin = step * 0.25;
+                    let candidate = self.project_in_cell(
+                        *point,
+                        *point - Vec3::splat(margin),
+                        margin * 2.0,
+                        &all,
+                        sampling.placement,
+                    );
+                    if error(candidate) < error(*point) {
+                        *point = candidate;
+                    }
+                }
+            }
+            refinement::repair_quad_diagonals(&points, &mut faces, |p| self.normal(p, &all));
+            let mut converged =
+                refinement::refine(&mut points, &mut faces, PROJECTED_ERROR, error, |p| {
+                    self.project_in_cell(
+                        p,
+                        p - Vec3::splat(step),
+                        step * 2.0,
+                        &all,
+                        sampling.placement,
+                    )
+                });
+            let outward = faces.iter().all(|face| {
+                let [a, b, c] = face.map(|index| points[index]);
+                let outward = (b - a).cross(c - a);
+                outward.is_finite() && outward.dot(self.normal((a + b + c) / 3.0, &all)) > 0.0
+            });
+            if !outward && crate::props::profile_builds() {
+                eprintln!("3d_sdf_refinement_failed reason=face_orientation");
+            }
+            converged &= outward;
+            if !converged {
+                if sampling.placement == VertexPlacement::Analytic {
+                    if crate::props::profile_builds() {
+                        eprintln!("3d_sdf_symmetric_retry step={step:.5} bounds={min:?}..{max:?}");
+                    }
+                    // A numerical slope can resolve a hard seam that makes
+                    // analytic placement fold a face. Try the same grid once.
+                    self.mesh_sampled(
+                        b,
+                        min,
+                        max,
+                        Sampling {
+                            step,
+                            placement: VertexPlacement::Symmetric,
+                        },
+                        paint,
+                        coverage,
+                    );
+                } else {
+                    if crate::props::profile_builds() {
+                        eprintln!(
+                            "3d_sdf_refinement_fallback step={step:.5} bounds={min:?}..{max:?}"
+                        );
+                    }
+                    // Two projected attempts at most, then a nonprojected fine
+                    // mesh. Failed attempts never emit partial geometry.
+                    self.mesh_partitioned(b, min, max, step * 0.25, paint, coverage);
+                }
+                return;
+            }
+            for (index, &position) in points.iter().enumerate() {
+                if index < vertex.len() && position == vertex[index].position {
+                    continue;
+                }
+                let normal = self.normal(position, &all);
+                let sampled = SurfaceVertex {
+                    position,
+                    normal,
+                    pigment: paint(position, normal),
+                    shade: self.occlusion(position, normal, &all),
+                };
+                if index < vertex.len() {
+                    vertex[index] = sampled;
+                } else {
+                    vertex.push(sampled);
+                }
+            }
+        }
+        for indices in faces {
+            let tri = indices.map(|index| vertex[index]);
+            if let Some(region) = coverage {
+                let input = tri.map(|v| partition::Vertex {
+                    position: v.position,
+                    sample: v.position,
+                    normal: v.normal,
+                    shade: v.shade,
+                });
+                if let Some(pieces) = partition::split(input, region) {
+                    for face in pieces {
+                        b.tri_smooth_shaded(
+                            face.map(|v| v.position),
+                            face.map(|v| v.normal),
+                            face.map(|v| paint(v.sample, v.normal)),
+                            face.map(|v| v.shade),
+                        );
+                    }
+                    continue;
+                }
+            }
+            // Preserve the existing triangle order and winding. Pigment
+            // remains sRGB and occlusion remains linear until upload.
+            b.tri_smooth_shaded(
+                tri.map(|v| v.position),
+                tri.map(|v| v.normal),
+                tri.map(|v| v.pigment),
+                tri.map(|v| v.shade),
+            );
+        }
         if let (Some(started), Some(field_done), Some(surface_done)) =
             (profile_started, field_done, surface_done)
         {
@@ -558,6 +817,41 @@ impl Sculpt {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rounded_ring_fields_preserve_extents_and_conservative_bounds() {
+        let center = Vec3::new(0.11, 0.2, -0.03);
+        for depth in [0.75, 1.0, 1.04] {
+            let ring = Shape::Torus(center, Vec2::new(0.08, 0.013), depth);
+            for p in [
+                Vec3::X * 0.093,
+                Vec3::X * 0.067,
+                Vec3::new(0.08, 0.013, 0.0),
+                Vec3::Z * (0.093 * depth),
+            ] {
+                assert!(ring.distance(center + p).abs() < 1e-6);
+            }
+            assert!((ring.distance(center + Vec3::X * 0.08) + 0.013).abs() < 1e-6);
+            assert!(
+                ring.distance(center) > 0.0,
+                "the ring retains its central opening"
+            );
+            let at = center + Vec3::new(0.04, 0.02, -0.03);
+            let (low, high) = ring.bounds(at, 0.017).unwrap();
+            for direction in [
+                Vec3::X,
+                -Vec3::X,
+                Vec3::Y,
+                -Vec3::Y,
+                Vec3::Z,
+                -Vec3::Z,
+                Vec3::ONE.normalize(),
+            ] {
+                let distance = ring.distance(at + direction * 0.017);
+                assert!(distance >= low - 1e-6 && distance <= high + 1e-6);
+            }
+        }
+    }
 
     #[test]
     fn complete_layers_keep_their_clipping_local_to_the_child() {

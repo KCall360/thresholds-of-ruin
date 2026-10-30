@@ -40,7 +40,7 @@ class RestorableHitDieProcesses(HitDieHelpers, ProcessTestCase):
                 shutil.rmtree(path) if path.is_dir() else path.unlink()
         self.server("--checkpoint-interval", 1, seed=None)
         player, restored = self.client()
-        self.assertEqual(restored["state"], changed["state"])
+        self.assertDisclosedStateEqual(restored["state"], changed["state"])
         self.assertEqual(checkpoint(self, player), saved)
         self.assertIsNone(self.act(player, {"type": "drink", "item": self.restoration_item(restored)})["error"])
         final = self.finish(player)
@@ -70,7 +70,7 @@ class RestorableHitDieProcesses(HitDieHelpers, ProcessTestCase):
         self.assertIn("Select a growth/restoration source", overview)
         self.assertIn("Future growth: racial", text.command("advancement source racial"))
         self.assertNotIn("Server error", text.command("advancement confirm"))
-        self.assertIn("ItemStarted", text.command("drink fixture restoration"))
+        self.assertIn("You begin to drink the fixture restoration.", text.command("drink fixture restoration"))
         self.assertNotIn("Restorable losses:", text.command("stats"))
 
 
@@ -85,11 +85,11 @@ class RestorableHitDieNativeProcesses(HitDieHelpers, ProcessTestCase):
         window = self.launch("tor-client-ascii", ["--connect", self.address, "--report-frames"])
         self.ascii_frame(window, lambda frame: frame["has_control"] and not frame["busy"])
         native = self.native_keys(window)
-        native("Shift_L", True)
+        native("Control_L", True)
         try:
-            shown = self.native_press(window, native, "2", "stats")
+            shown = self.native_press(window, native, "x", "stats")
         finally:
-            native("Shift_L", False)
+            native("Control_L", False)
         self.assertIn("Restorable losses: Hit Dice 1", "\n".join(shown["stats_rows"]))
         self.native_press(window, native, "Escape", "escape")
         self.native_press(window, native, "q", "drink")

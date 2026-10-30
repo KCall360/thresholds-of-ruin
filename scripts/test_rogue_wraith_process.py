@@ -13,7 +13,8 @@ import unittest
 
 from process_harness import ProcessTestCase, ROOT, settle_rogue_action, underfoot
 from process_work_budget import ProcessBudgetExceeded, ProcessWorkBudget
-from rogue_test_support import cardinal_melee_candidate, disclosed_actor_candidates, disclosed_contact_step
+from rogue_test_support import (cardinal_melee_candidate, disclosed_actor_candidates,
+                                disclosed_contact_step, disclosed_frames, ordered_combat_events)
 from rogue_wraith_package import disclosed_corridor_step, drain_interval, recovery_package
 from scalar_wire import u64
 from status_condition_package import actor_creature, checkpoint, combat, observation
@@ -52,20 +53,8 @@ def lore(frame):
     return next(row["rank"] for row in stats(frame)["skills"] if row["skill"]["id"] == "lore")
 
 
-def events_since(player, start, revision):
-    seen, result = set(), []
-    for line in player.transcript[start:]:
-        if not line.startswith("{"):
-            continue
-        frame = json.loads(line)
-        if frame.get("state") is None or int(frame["state"]["revision"]) <= int(revision):
-            continue
-        for event in combat(frame)["events"]:
-            key = (frame["state"]["revision"], json.dumps(event, sort_keys=True))
-            if key not in seen:
-                seen.add(key)
-                result.append(event)
-    return result
+def events_since(player, start):
+    return list(ordered_combat_events(disclosed_frames(player, start)))
 
 
 class RogueWraithProcesses(ProcessTestCase):
@@ -115,6 +104,9 @@ class RogueWraithProcesses(ProcessTestCase):
 
     def client(self, *args, **kwargs):
         kwargs["omit_memory"] = True  # No assertion uses accumulated map memory.
+        # Keep every wire message and gameplay boundary; omit only duplicate
+        # derived pictures on map/palette/waiting transport frames.
+        kwargs["compact_background"] = True
         client, frame = super().client(*args, **kwargs)
         self.work_budget.track(client, frame)
         self.work_budget.check()
@@ -202,11 +194,11 @@ class RogueWraithProcesses(ProcessTestCase):
         return saved
 
     def action(self, player, current, action):
-        start, revision = len(player.transcript), current["state"]["revision"]
+        start = len(player.transcript)
         current = self.execute(player, action, survive=False)
         self.assertFalse(combat(current)["dead"], "Bounded unchanged-kit attempt died; do not repair it")
         self.assertFalse(combat(current)["terminal"])
-        events = events_since(player, start, revision)
+        events = events_since(player, start)
         self.audit(player, current, events)
         return current, events
 
@@ -379,7 +371,7 @@ class RogueWraithProcesses(ProcessTestCase):
             current = self.recover(player, current)
         self.sample["phase"] = "passive_wraith"
         current, self.wraith = self.approach(player, current, "wraith")
-        start, revision = len(player.transcript), current["state"]["revision"]
+        start = len(player.transcript)
         passive = self.saved
         for _ in range(2):
             current, _ = self.action(player, current, {"type": "wait"})
@@ -398,7 +390,7 @@ class RogueWraithProcesses(ProcessTestCase):
             current, _ = self.step(player, current, here)
         self.assertEqual(actor_creature(self.saved)["build"], actor_creature(passive)["build"])
         self.assertFalse(any(event["type"] == "ability" and event["caster"] == self.wraith
-            for event in events_since(player, start, revision)), "Passive W cannot attack before provocation")
+            for event in events_since(player, start)), "Passive W cannot attack before provocation")
         current = self.fight(player, current, self.wraith, "wraith")
         self.assertIsNotNone(self.drained, "W died without a survived successful drain; not an accepted witness")
         self.assert_progress(self.saved, 160, 0, 2)
@@ -415,7 +407,7 @@ class RogueWraithProcesses(ProcessTestCase):
         self.sample["phase"] = "source_free_restart"
         server = self.server("--checkpoint-interval", 1, scenario=ROOT / "scenarios/two-room", seed=None)
         player, reopened = self.client(actor=1)
-        self.assertEqual(reopened["state"], current["state"])
+        self.assertDisclosedStateEqual(reopened["state"], current["state"])
         self.assertEqual(checkpoint(self, player), before)
         self.assert_progress(before, 160, 0, 2)
         self.assertEqual(lore(reopened), 0)

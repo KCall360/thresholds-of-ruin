@@ -1,3 +1,6 @@
+mod outcomes;
+pub(crate) use outcomes::outcome_observation;
+
 use tor_protocol as p;
 use tor_simulation as s;
 use tor_world as w;
@@ -666,9 +669,9 @@ pub(crate) fn object_presentation(
     }
 }
 
-pub fn observation(
+pub(crate) fn observation(
     view: s::Observation,
-    scene: Vec<w::SightCell>,
+    scene: &[w::SightCell],
     salt: &str,
     ready: bool,
     terrain: Terrain,
@@ -683,7 +686,7 @@ pub fn observation(
         .combat
         .as_ref()
         .and_then(|combat| combat.own_stats.as_ref())
-        .map(|stats| stats.rules.clone());
+        .map(|stats| stats.rules().clone());
     let mut visible_cells = Vec::new();
     let mut ground_items = Vec::new();
     let mut visible_actors = Vec::new();
@@ -967,7 +970,9 @@ pub fn observation(
                 .public_plan
                 .as_deref()
                 .map(|record| crate::public_plan_view::view(record, salt, view.actor)),
-            own_stats: c.own_stats.map(crate::creature_view::own_stats),
+            own_stats: c
+                .own_stats
+                .map(|facts| crate::creature_view::own_stats(facts.into_owned())),
             hp: c.hp,
             max_hp: c.max_hp,
             preparation_remaining: c.preparation_remaining,
@@ -1156,11 +1161,149 @@ pub fn cell_key(salt: &str, actor: u64, location: w::Location) -> String {
         digest.update(coordinate.to_le_bytes());
     }
     digest.update(salt.as_bytes());
-    digest
-        .finalize()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    cell_key_hex(digest.finalize().into())
+}
+
+fn cell_key_hex(digest: [u8; 20]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut encoded = [0_u8; 40];
+    for (index, byte) in digest.iter().copied().enumerate() {
+        encoded[index * 2] = HEX[usize::from(byte >> 4)];
+        encoded[index * 2 + 1] = HEX[usize::from(byte & 15)];
+    }
+    std::str::from_utf8(&encoded)
+        .expect("ASCII cell key encoding")
+        .to_owned()
+}
+
+#[cfg(test)]
+mod cell_key_tests {
+    use super::*;
+
+    #[test]
+    fn cell_key_preserves_salted_sha1_derivation_and_lowercase_encoding() {
+        // Independent SHA1 goldens from Python hashlib over literal preimages:
+        // UTF-8 salt || little-endian u64 actor, u64 region, i32 x/y/z || salt.
+        // Keep literals: calculating expectations through cell_key would hide
+        // changes to input order, widths, signedness, salt placement, or case.
+        let cases = [
+            (
+                "",
+                0,
+                0,
+                0,
+                0,
+                0,
+                "40bf0c6cf2807a6e3c7a97fbd25244690e752b26",
+            ),
+            (
+                "cell-salt",
+                1,
+                2,
+                3,
+                4,
+                5,
+                "1e0d8f587feafd247f49acdeea92ee2237bfa1fe",
+            ),
+            (
+                "other-salt",
+                1,
+                2,
+                3,
+                4,
+                5,
+                "ff6352e7ad7b7c9d942eb092ba68de3c662f30c5",
+            ),
+            (
+                "cell-salt",
+                2,
+                2,
+                3,
+                4,
+                5,
+                "78f3d58bd2fbda1bbc8ccb829c9f0ed3b5e7a837",
+            ),
+            (
+                "cell-salt",
+                1,
+                3,
+                3,
+                4,
+                5,
+                "83411d236d101f4df6befa926438c3e0ed9b72e1",
+            ),
+            (
+                "cell-salt",
+                1,
+                2,
+                -3,
+                4,
+                5,
+                "06051691fa62e9ecfe2d7f9f665b15616d817317",
+            ),
+            (
+                "cell-salt",
+                1,
+                2,
+                3,
+                -4,
+                5,
+                "4401fccf6b7067aebd8fe844fd150c8ccfc6999c",
+            ),
+            (
+                "cell-salt",
+                1,
+                2,
+                3,
+                4,
+                -5,
+                "0ac22f5e8ebec36d2f94ada59321a961656d874f",
+            ),
+            (
+                "salt\0雪",
+                0x0123_4567_89ab_cdef,
+                0xfedc_ba98_7654_3210,
+                i32::MIN,
+                -1,
+                i32::MAX,
+                "64d8861c647fbe5c83178a4805e46dea3f5cb07c",
+            ),
+            (
+                "",
+                u64::MAX,
+                u64::MAX,
+                i32::MAX,
+                i32::MIN,
+                0,
+                "c2aabc2125a3722321444b722a299db4214d7813",
+            ),
+        ];
+        for (salt, actor, region, x, y, z, expected) in cases {
+            let location = w::Location {
+                region: w::RegionId(region),
+                position: w::Position { x, y, z },
+            };
+            assert_eq!(
+                cell_key(salt, actor, location),
+                expected,
+                "{salt:?}, {actor}, {location:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn cell_key_hex_matches_reference_format_for_every_byte_at_every_position() {
+        for first in 0..=u8::MAX {
+            let mut next = first;
+            let digest = std::array::from_fn(|_| {
+                let byte = next;
+                next = next.wrapping_add(1);
+                byte
+            });
+            let expected: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
+            assert_eq!(cell_key_hex(digest), expected, "digest starting at {first}");
+        }
+    }
 }
 
 fn currency_kind(currency: s::CurrencyKind) -> p::CurrencyKind {

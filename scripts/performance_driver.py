@@ -20,6 +20,34 @@ ROOT = Path(__file__).resolve().parents[1]
 SPEC = ROOT / "crates/server/fixtures/performance-v1.json"
 
 
+def same_disclosed_state(actual, expected):
+    """Compare every payload field, excluding attachment-local picture identity."""
+    if not isinstance(actual, dict) or not isinstance(expected, dict):
+        return False
+    def payload(state):
+        return {key: value for key, value in state.items()
+                if key not in ("snapshot", "revision")}
+    return payload(actual) == payload(expected)
+
+
+def presented_action(frame, expected, action):
+    """Pictures verify visual actions; causal-only Wait is shown by ordered history."""
+    actual = frame.get("state")
+    if action["type"] != "wait":
+        return same_disclosed_state(actual, expected["state"])
+    if (not isinstance(actual, dict) or not frame.get("history")
+            or frame["history"][-1] != expected["history"][-1]):
+        return False
+    # A Wait receipt advances causal time without requiring another picture.
+    # Require every other disclosed field exactly; do not hide a visual change.
+    old = actual["observation"]
+    new = expected["state"]["observation"]
+    if int(old["tick"]) > int(new["tick"]):
+        return False
+    comparable = {**actual, "observation": {**old, "tick": new["tick"]}}
+    return same_disclosed_state(comparable, expected["state"])
+
+
 @functools.lru_cache(maxsize=1)
 def _host_clock_offset():
     """Calibrate once; no DLL lookup or wall-clock call on each output line."""
@@ -231,6 +259,15 @@ class JsonProcess:
                 self.action_timing["request_to_context_ms"] = (received-started)*1000
         return frame, started, acknowledgement, received
 
+    def observe(self):
+        """Demand a fresh picture without resetting stream or action timing evidence."""
+        self.child.stdin.write(json.dumps({"type":"request", "request":{"type":"observe"}}) + "\n")
+        self.child.stdin.flush()
+        frame, received = self.until(lambda value: value.get("type") == "ready")
+        if frame.get("error"):
+            raise RuntimeError(frame["error"])
+        return frame, received
+
     def snapshot(self):
         frame, *_ = self.send({"type":"request", "request":{"type":"snapshot"}})
         if frame["error"]:
@@ -362,7 +399,7 @@ def run_demo(bin_dir, output, *, regions=256, actors=1, cycles=3, pace=0.25, sta
                 # Disclosed progress text appears in ASCII's history panel. These
                 # demo-only annotations are outside the measured action boundary.
                 progress = {"type":"command","context": before["input_context"], "branch":before["branch"],"command":{"type":"annotate",
-                    "anchor":{"type":"state","revision":before["state"]["revision"]},
+                    "anchor":{"type":"state","snapshot":before["state"]["snapshot"]},
                     "text":f"Phase A | cycle {cycle+1}/{cycles} | step {index+1}: {step['label']}",
                     "source":"frontend","audience":"actor","category":"note"}}
                 annotated, *_ = clients[actor].send({"type":"request","request":progress})
@@ -370,15 +407,24 @@ def run_demo(bin_dir, output, *, regions=256, actors=1, cycles=3, pace=0.25, sta
                 before = annotated
             input_unix_ns = wall_time_ns()
             after, start, ack, received = clients[actor].send({"type":"act","action":action})
+            # Preserve the causal Ready/ack measurement; visual verification is
+            # a distinct explicit demand and never another simulation action.
+            ready_reader_work_ms = clients[actor].last_reader_work_ms
+            ready_queue_delay_ms = clients[actor].last_queue_delay_ms
+            observed = None
+            if step["expected"] != "blocked":
+                after, observed = clients[actor].observe()
             verify(step,action,before,after)
             sample = {"cycle":cycle,"step":index,"actor":actor,"label":step["label"],"expected":step["expected"],"action":action,
                 "request_to_ack_ms":None if ack is None else (ack-start)*1000,
                 "request_to_ack_line_ms":None if clients[actor].ack_line_received is None else (clients[actor].ack_line_received-start)*1000,
                 "request_to_ready_ms":(received-start)*1000,"request_to_presentation_ms":None}
+            if observed is not None:
+                sample["request_to_observation_ms"] = (observed-start)*1000
             if step["expected"] != "blocked":
                 assert ack is not None, "Accepted action missing acknowledgement"
                 if actor == 1:
-                    frame, shown = spectator.until(lambda f:f.get("state") == after["state"])
+                    frame, shown = spectator.until(lambda f:presented_action(f, after, action))
                     assert frame["role"] == "spectator" and not frame["has_control"]
                     sample["request_to_presentation_ms"] = (shown-start)*1000
                     if "profile" in frame:
@@ -389,8 +435,8 @@ def run_demo(bin_dir, output, *, regions=256, actors=1, cycles=3, pace=0.25, sta
                 sample["request_id"] = clients[actor].ack_request_id
                 sample["input_unix_ns"] = input_unix_ns
                 sample["ack_line_unix_ns"] = clients[actor].ack_line_unix_ns
-                sample["ready_reader_work_ms"] = clients[actor].last_reader_work_ms
-                sample["ready_queue_delay_ms"] = clients[actor].last_queue_delay_ms
+                sample["ready_reader_work_ms"] = ready_reader_work_ms
+                sample["ready_queue_delay_ms"] = ready_queue_delay_ms
             result["samples"].append(sample)
             with (output/"samples.jsonl").open("a",encoding="utf-8") as stream:
                 stream.write(json.dumps(sample)+"\n")

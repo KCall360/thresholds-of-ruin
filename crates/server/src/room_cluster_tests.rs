@@ -291,7 +291,7 @@ fn expired_abandoned_cluster_still_binds_selected_room_area_and_full_footprint()
                 &uuid::Uuid::new_v4().to_string(),
                 &engine.branch().clone(),
                 Command::Act {
-                    expected_revision: engine.revision(ActorId(1)).unwrap(),
+                    expected_boundary: engine.causal_boundary(ActorId(1)).unwrap(),
                     action: Action::Wait,
                 },
             )
@@ -445,18 +445,15 @@ fn room_cluster_item_actor_and_carried_roots_require_spatial_scope() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/rogue-exploration");
     let scenario = crate::scenario_package::load(&root, 7, None, true).unwrap();
     let original = scenario.package.as_ref().unwrap();
+    let mut manifest = original.manifest.clone();
+    crate::scenario_package::unroot_live_rogue_supplement(&mut manifest);
     // An otherwise ordinary unused authored region makes enabled source closure
     // observable through the existing crate-visible admission boundary.
     let unscoped = serde_json::from_value(json!({
         "id":10000000,"name":"unscoped source witness","size":[7,5,2]
     }))
     .unwrap();
-    let mut base = Package::from_parts(
-        original.manifest.clone(),
-        vec![unscoped],
-        &original.rules_source,
-    )
-    .unwrap();
+    let mut base = Package::from_parts(manifest, vec![unscoped], &original.rules_source).unwrap();
     let mut document = base.rules().unwrap().document().clone();
     let mut light = document
         .abilities

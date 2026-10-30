@@ -102,7 +102,17 @@ enum Goal {
 #[derive(Resource, Default)]
 pub struct Panel {
     pub open: bool,
+    pub(crate) page: crate::equipment::Page,
+    pub(crate) equipment_slot: Option<u16>,
+    pub(crate) browser: tor_client_3d_model::InventoryBrowser,
+    pub(crate) scope: Option<crate::inventory::Scope>,
+    pub(crate) search_focused: bool,
+    pub(crate) keyboard_captured: bool,
+    pub(crate) dirty: bool,
+    pub(crate) reset_scroll: bool,
+    pub(crate) scroll: f32,
     built_for: u64,
+    reconciled_for: u64,
     /// Whether the panel was opened for the identification choice now waiting.
     prompted: bool,
     /// The projectile prompt it was last built with.
@@ -148,14 +158,7 @@ pub(crate) enum PanelButton {
     ProjectileCancel,
 }
 
-const PANEL_WIDTH: f32 = 380.0;
-const INK: Color = Color::srgb(0.9, 0.88, 0.8);
-const MUTED: Color = Color::srgb(0.55, 0.6, 0.62);
-const TEAL: Color = Color::srgb(0.45, 0.95, 0.85);
-const SLATE: Color = Color::srgba(0.03, 0.035, 0.05, 0.9);
-const EDGE: Color = Color::srgba(0.3, 0.75, 0.68, 0.55);
-const BUTTON: Color = Color::srgb(0.1, 0.13, 0.16);
-const BUTTON_HOT: Color = Color::srgb(0.16, 0.3, 0.3);
+use crate::chrome::{BUTTON, GOLD, HOT, INK, MUTED, STONE};
 
 pub fn setup(
     mut commands: Commands,
@@ -180,8 +183,8 @@ pub fn setup(
                 row_gap: Val::Px(3.0),
                 ..default()
             },
-            BackgroundColor(SLATE),
-            BorderColor(EDGE),
+            BackgroundColor(STONE),
+            BorderColor(GOLD),
             BorderRadius::all(Val::Px(4.0)),
             Visibility::Hidden,
             GlobalZIndex(10),
@@ -191,6 +194,7 @@ pub fn setup(
                 TooltipLine::Title,
                 Text::new(""),
                 TextFont {
+                    font: crate::chrome::FONT,
                     font_size: 16.0,
                     ..default()
                 },
@@ -200,15 +204,17 @@ pub fn setup(
                 TooltipLine::Hint,
                 Text::new(""),
                 TextFont {
+                    font: crate::chrome::FONT,
                     font_size: 13.0,
                     ..default()
                 },
-                TextColor(TEAL),
+                TextColor(GOLD),
             ));
             tip.spawn((
                 TooltipLine::Body,
                 Text::new(""),
                 TextFont {
+                    font: crate::chrome::FONT,
                     font_size: 13.0,
                     ..default()
                 },
@@ -217,20 +223,26 @@ pub fn setup(
         });
     commands.spawn((
         PanelRoot,
+        crate::chrome::BlockWorld,
+        crate::chrome::FrameSkin,
+        GlobalZIndex(5),
         Interaction::default(),
         Node {
             position_type: PositionType::Absolute,
             right: Val::Px(16.0),
             top: Val::Px(16.0),
-            width: Val::Px(PANEL_WIDTH),
+            bottom: Val::Px(184.0),
+            width: Val::Percent(54.0),
+            min_width: Val::Px(320.0),
+            max_width: Val::Percent(94.0),
             flex_direction: FlexDirection::Column,
             padding: UiRect::all(Val::Px(12.0)),
             border: UiRect::all(Val::Px(1.0)),
             row_gap: Val::Px(6.0),
             ..default()
         },
-        BackgroundColor(SLATE),
-        BorderColor(EDGE),
+        BackgroundColor(STONE),
+        BorderColor(GOLD),
         BorderRadius::all(Val::Px(6.0)),
         Visibility::Hidden,
     ));
@@ -239,18 +251,14 @@ pub fn setup(
 /// Find the floor cell under the mouse and read what is there.
 pub fn hover(
     window: Query<&Window, With<PrimaryWindow>>,
-    camera: Query<(&Camera, &GlobalTransform)>,
-    panel_root: Query<&Interaction, With<PanelRoot>>,
-    buttons: Query<&Interaction, With<Button>>,
+    camera: Query<(&Camera, &GlobalTransform), crate::portrait::ExplorationCamera>,
+    ui: crate::chrome::UiPointer,
     game: Res<Game>,
     mut hover: ResMut<Hover>,
     models: crate::picking::Models,
 ) {
     *hover = Hover::default();
-    hover.over_ui = panel_root
-        .iter()
-        .chain(&buttons)
-        .any(|i| *i != Interaction::None);
+    hover.over_ui = ui.over();
     let (Ok(window), Ok((camera, eye)), Some(view)) =
         (window.single(), camera.single(), &game.view)
     else {
@@ -533,6 +541,25 @@ pub fn keys(
     mut panel: ResMut<Panel>,
     mut exit: EventWriter<AppExit>,
 ) {
+    panel.keyboard_captured = false;
+    if panel.open
+        && crate::inventory::grid(&game)
+        && keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight])
+        && keys.just_pressed(KeyCode::KeyF)
+    {
+        panel.search_focused = true;
+        panel.keyboard_captured = true;
+        panel.dirty = true;
+        return;
+    }
+    if panel.open && panel.search_focused {
+        panel.keyboard_captured = true;
+        if keys.just_pressed(KeyCode::Escape) {
+            panel.search_focused = false;
+            panel.dirty = true;
+        }
+        return;
+    }
     // A full screen takes the keyboard for its typed line.
     use crate::screen::{toggle, Screen};
     if keys.just_pressed(KeyCode::F10) {
@@ -544,16 +571,20 @@ pub fn keys(
         return;
     }
     if keys.just_pressed(KeyCode::F4) {
-        let revision = game.view.as_ref().map(|view| view.revision);
-        if let Some(revision) = revision.filter(|_| {
-            game.screen
-                .is_none_or(|open| matches!(open, Screen::Note { .. }))
+        let snapshot = game.view.as_ref().map(|view| view.shown.snapshot.clone());
+        if let Some(snapshot) = snapshot.filter(|_| {
+            game.screen.as_ref().is_none_or(|open| {
+                matches!(
+                    open,
+                    Screen::Note { .. } | Screen::Places { .. } | Screen::History
+                )
+            })
         }) {
             toggle(
                 &net,
                 &mut game,
                 Screen::Note {
-                    revision,
+                    snapshot,
                     private: true,
                 },
             );
@@ -564,11 +595,16 @@ pub fn keys(
         toggle(&net, &mut game, Screen::Places { renaming: None });
         return;
     }
-    if keys.just_pressed(KeyCode::KeyC) && game.screen.is_none_or(|open| open == Screen::Charts) {
+    if keys.just_pressed(KeyCode::KeyC)
+        && game
+            .screen
+            .as_ref()
+            .is_none_or(|open| *open == Screen::Charts)
+    {
         toggle(&net, &mut game, Screen::Charts);
         return;
     }
-    if let Some(open) = game.screen {
+    if let Some(open) = game.screen.clone() {
         if keys.just_pressed(KeyCode::Escape) {
             toggle(&net, &mut game, open);
         }
@@ -592,7 +628,20 @@ pub fn keys(
         return;
     }
     if keys.any_just_pressed([KeyCode::KeyI, KeyCode::KeyZ]) {
-        panel.open = !panel.open;
+        panel.toggle_page(crate::equipment::Page::Inventory);
+    }
+    if keys.just_pressed(KeyCode::F6) {
+        panel.toggle_page(crate::equipment::Page::Equipment);
+    }
+    if panel.open && crate::inventory::grid(&game) && keys.just_pressed(KeyCode::Tab) {
+        let next = if panel.page == crate::equipment::Page::Inventory {
+            crate::equipment::Page::Equipment
+        } else {
+            crate::equipment::Page::Inventory
+        };
+        panel.set_page(next);
+        panel.keyboard_captured = true;
+        return;
     }
     // Paused or ongoing work, as the ASCII client's F8 and F9.
     if keys.just_pressed(KeyCode::F8) {
@@ -669,6 +718,7 @@ pub fn panel(
     mut panel: ResMut<Panel>,
     game: Res<Game>,
     mut root: Query<(Entity, &mut Visibility), With<PanelRoot>>,
+    scroll: Query<&ScrollPosition, With<crate::inventory::Scroll>>,
 ) {
     let Ok((root, mut visibility)) = root.single_mut() else {
         return;
@@ -681,16 +731,52 @@ pub fn panel(
         panel.built_for = u64::MAX;
     }
     panel.prompted = waiting;
-    *visibility = if panel.open {
+    if let Some(view) = &game.view {
+        if panel
+            .scope
+            .as_ref()
+            .is_none_or(|scope| !scope.matches(view))
+        {
+            panel.browser = default();
+            if panel.page == crate::equipment::Page::Equipment {
+                panel
+                    .browser
+                    .set_filter(tor_client_3d_model::InventoryFilter::Gear);
+            }
+            panel.equipment_slot = None;
+            panel.scope = Some(crate::inventory::Scope::of(view));
+            panel.search_focused = false;
+            panel.reset_scroll = true;
+            panel.dirty = true;
+        }
+        if panel.reconciled_for != game.view_serial || panel.dirty {
+            panel.browser.reconcile(view);
+            panel.reconciled_for = game.view_serial;
+        }
+    }
+    if !panel.open || !crate::inventory::grid(&game) {
+        panel.search_focused = false;
+    }
+    let wanted = if panel.open && game.screen.is_none() {
         Visibility::Visible
     } else {
         Visibility::Hidden
     };
+    visibility.set_if_neq(wanted);
     if !panel.open
-        || (panel.built_for == game.view_serial && panel.shown_projectile == game.projectile)
+        || (!panel.dirty
+            && panel.built_for == game.view_serial
+            && panel.shown_projectile == game.projectile)
     {
         return;
     }
+    if panel.reset_scroll || panel.shown_projectile != game.projectile {
+        panel.scroll = 0.0;
+    } else if let Ok(scroll) = scroll.single() {
+        panel.scroll = scroll.offset_y;
+    }
+    panel.dirty = false;
+    panel.reset_scroll = false;
     panel.shown_projectile.clone_from(&game.projectile);
     panel.built_for = game.view_serial;
     commands.entity(root).despawn_related::<Children>();
@@ -699,46 +785,72 @@ pub fn panel(
     };
     let lines = crate::pack::plan(view, game.projectile.as_ref());
     panel.actions = crate::pack::actions(&lines);
-    let mut position = 0;
     commands.entity(root).with_children(|ui| {
-        for line in &lines {
-            match line {
-                crate::pack::Line::Heading(text) => heading(ui, text),
-                crate::pack::Line::Note(text) => note(ui, text),
-                crate::pack::Line::Row {
-                    label,
-                    detail,
-                    actions,
-                } => {
-                    let labelled: Vec<(String, PanelButton)> = actions
-                        .iter()
-                        .map(|(text, button)| {
-                            let key = crate::pack::hotkey(position);
-                            position += 1;
-                            (
-                                key.map_or_else(
-                                    || (*text).to_string(),
-                                    |key| format!("{key} {text}"),
-                                ),
-                                *button,
-                            )
-                        })
-                        .collect();
-                    row(ui, label, detail.as_deref(), &labelled);
-                }
+        if crate::inventory::grid(&game) {
+            if panel.page == crate::equipment::Page::Equipment {
+                crate::equipment::draw(ui, view, &panel);
+            } else {
+                crate::inventory::draw(ui, view, &panel, &lines);
             }
+        } else {
+            ui.spawn((
+                crate::chrome::ScrollArea,
+                crate::inventory::Scroll,
+                ScrollPosition {
+                    offset_y: panel.scroll,
+                    ..default()
+                },
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    overflow: Overflow::scroll_y(),
+                    flex_grow: 1.0,
+                    min_height: Val::Px(0.0),
+                    row_gap: Val::Px(6.0),
+                    ..default()
+                },
+            ))
+            .with_children(|body| draw_lines(body, &lines));
         }
     });
+}
+
+pub(crate) fn draw_lines(ui: &mut ChildSpawnerCommands, lines: &[crate::pack::Line]) {
+    let mut position = 0;
+    for line in lines {
+        match line {
+            crate::pack::Line::Heading(text) => heading(ui, text),
+            crate::pack::Line::Note(text) => note(ui, text),
+            crate::pack::Line::Row {
+                label,
+                detail,
+                actions,
+            } => {
+                let labelled: Vec<(String, PanelButton)> = actions
+                    .iter()
+                    .map(|(text, button)| {
+                        let key = crate::pack::hotkey(position);
+                        position += 1;
+                        (
+                            key.map_or_else(|| (*text).to_string(), |key| format!("{key} {text}")),
+                            *button,
+                        )
+                    })
+                    .collect();
+                row(ui, label, detail.as_deref(), &labelled);
+            }
+        }
+    }
 }
 
 fn heading(ui: &mut ChildSpawnerCommands, text: &str) {
     ui.spawn((
         Text::new(text),
         TextFont {
+            font: crate::chrome::FONT,
             font_size: 17.0,
             ..default()
         },
-        TextColor(TEAL),
+        TextColor(GOLD),
     ));
 }
 
@@ -746,6 +858,7 @@ fn note(ui: &mut ChildSpawnerCommands, text: &str) {
     ui.spawn((
         Text::new(text),
         TextFont {
+            font: crate::chrome::FONT,
             font_size: 12.0,
             ..default()
         },
@@ -753,7 +866,7 @@ fn note(ui: &mut ChildSpawnerCommands, text: &str) {
     ));
 }
 
-fn row(
+pub(crate) fn row(
     ui: &mut ChildSpawnerCommands,
     label: &str,
     detail: Option<&str>,
@@ -764,6 +877,7 @@ fn row(
         justify_content: JustifyContent::SpaceBetween,
         align_items: AlignItems::Center,
         column_gap: Val::Px(6.0),
+        flex_shrink: 0.0,
         ..default()
     })
     .with_children(|line| {
@@ -776,6 +890,7 @@ fn row(
             names.spawn((
                 Text::new(label),
                 TextFont {
+                    font: crate::chrome::FONT,
                     font_size: 15.0,
                     ..default()
                 },
@@ -785,6 +900,7 @@ fn row(
                 names.spawn((
                     Text::new(detail),
                     TextFont {
+                        font: crate::chrome::FONT,
                         font_size: 12.0,
                         ..default()
                     },
@@ -794,6 +910,9 @@ fn row(
         });
         line.spawn(Node {
             flex_direction: FlexDirection::Row,
+            flex_wrap: FlexWrap::Wrap,
+            flex_shrink: 1.0,
+            max_width: Val::Percent(100.0),
             column_gap: Val::Px(4.0),
             ..default()
         })
@@ -809,12 +928,13 @@ fn row(
                             ..default()
                         },
                         BackgroundColor(BUTTON),
-                        BorderColor(EDGE),
+                        BorderColor(GOLD),
                         BorderRadius::all(Val::Px(3.0)),
                     ))
                     .with_child((
                         Text::new(text.as_str()),
                         TextFont {
+                            font: crate::chrome::FONT,
                             font_size: 13.0,
                             ..default()
                         },
@@ -837,7 +957,7 @@ pub fn panel_buttons(
     for (interaction, action, mut background) in &mut buttons {
         match interaction {
             Interaction::Pressed => activate(*action, &net, &mut panel, &mut game),
-            Interaction::Hovered => background.0 = BUTTON_HOT,
+            Interaction::Hovered => background.0 = HOT,
             Interaction::None => background.0 = BUTTON,
         }
     }

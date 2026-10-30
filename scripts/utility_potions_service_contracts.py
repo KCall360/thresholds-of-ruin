@@ -64,7 +64,7 @@ class UtilityServiceHarness(unittest.TestCase):
     def command(frame, action):
         return {"type": "command", "context": {"stream": frame["context"],
             "readiness_revision": frame["readiness"]["revision"]}, "branch": frame["branch"],
-            "command": {"type": "act", "expected_revision": frame["state"]["revision"], "action": action}}
+            "command": {"type": "act", "action": action}}
 
     def act(self, actor, action):
         current = self.snapshot(actor)

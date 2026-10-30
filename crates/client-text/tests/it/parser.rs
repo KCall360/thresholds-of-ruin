@@ -12,7 +12,7 @@ use tor_protocol::*;
 
 fn sample_state() -> StateView {
     serde_json::from_value(serde_json::json!({
-        "wizard_game": false,
+        "snapshot":"fixture-snapshot","wizard_game": false,
         "revision": "1",
         "observation": {
             "actor": "1",

@@ -97,7 +97,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         probe, initial = self.client(observe=True)
         text, _ = self.text_client()
         for ground in observation(initial)["ground_items"]:
-            self.assertIn("Taken", text.command("take #" + ground["item"]["id"]))
+            self.assertIn("You pick up ", text.command("take #" + ground["item"]["id"]))
         carried = self.snapshot(probe)
         potion, = items(carried, "potion")
         scroll, = items(carried, "scroll")
@@ -149,7 +149,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
 
         text, relay = text_through_relay()
         for ground in observation(initial)["ground_items"]:
-            self.assertIn("Taken", text.command("take #" + ground["item"]["id"]))
+            self.assertIn("You pick up ", text.command("take #" + ground["item"]["id"]))
         carried = self.snapshot(probe)
         wand, = items(carried, "wand")
         scroll, = items(carried, "scroll")
@@ -238,6 +238,8 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         after = self.advance(owner, [])
         self.assertGreater(int(observation(after)["tick"]), int(before))
         self.assertEqual(actor_creature(checkpoint(self, owner))["build"]["body_build"]["active"]["id"], polymorph.FORM)
+        # A new inspection requests a current picture; continuation pages stay frozen.
+        self.snapshot(wizard)
         queried = self.command(wizard, {"type": "wizard", "command": "combat inspect"})
         self.assertIsNone(queried["error"])
         messages = [json.loads(line).get("message") for line in wizard.transcript if line.startswith("{")]
@@ -467,7 +469,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         before = checkpoint(self, probe)
         born = actor_creature(before)
         self.assertEqual(born["build"]["body_build"]["active"]["id"], polymorph.BASE)
-        menu = self.native_press(window, native, "F12", "zap")
+        menu = self.native_press(window, native, "z", "zap")
         self.assertEqual(len(menu["item_rows"]), 1)
         self.assertIn("charges: 3", menu["item_rows"][0])
         aimed = self.native_press(window, native, "Return", "enter")
@@ -478,7 +480,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         self.assertEqual(cancelled["state"], shown["state"])
         self.assertEqual(charges(cancelled, wand["id"]), 3)
         self.assertEqual(checkpoint(self, probe), before, "Escape spends no time, charge or form draw")
-        self.native_press(window, native, "F12", "zap")
+        self.native_press(window, native, "z", "zap")
         aimed = self.native_press(window, native, "Return", "enter")
         self.assertEqual(aimed["zap_item"], wand["id"])
         # Unshifted period is the real native Wait key; in dual aim it selects
@@ -524,9 +526,10 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         native = self.native_keys(window)
         if shown["messages"]["more"]:
             self.native_press(window, native, "Escape", "escape")
-        opened = self.native_press(window, native, "F6", "read")
+        opened = self.native_press(window, native, "r", "read")
         self.assertEqual(len(opened["item_rows"]), 1)
-        self.assertEqual(opened["state"], carried["state"], "opening Read spends no turn")
+        self.assertEqual(opened["state"], shown["state"], "opening Read preserves the exact native picture")
+        self.assertDisclosedStateEqual(opened["state"], carried["state"])
         choice = self.native_press(window, native, "Return", "enter", wait_for_ready=True)
         self.assertEqual(choice["identification"]["classes"], ["wand"])
         self.assertEqual(len(choice["identification_rows"]), 2)
@@ -535,7 +538,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         self.assertIsNone(aborted["identification"])
         self.assertEqual(items(aborted, "scroll")[0]["quantity"], "2", "paid cancellation cannot refund a scroll")
         self.assertEqual(observation(aborted)["tick"], observation(choice)["tick"], "answering a paid choice costs no second turn")
-        self.native_press(window, native, "F6", "read")
+        self.native_press(window, native, "r", "read")
         choice = self.native_press(window, native, "Return", "enter", wait_for_ready=True)
         choice_token = choice["identification"]["choice"]
         self.assertEqual(items(choice, "scroll")[0]["quantity"], "1")
@@ -558,7 +561,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         window = self.launch("tor-client-ascii", ["--connect", self.address, "--report-frames"])
         restored = self.ascii_frame(window, lambda frame: frame["has_control"] and not frame["busy"])
         self.assertEqual(restored["identification"], choice["identification"])
-        self.assertEqual(restored["state"], choice["state"])
+        self.assertDisclosedStateEqual(restored["state"], choice["state"])
         native = self.native_keys(window)
         self.native_press(window, native, "Down", "down")
         identified = self.native_press(window, native, "Return", "enter", wait_for_ready=True)
@@ -568,7 +571,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         self.assertIsNone(charges(identified, first["id"]))
         self.assertTrue(first["identified"] and second["identified"])
         self.assertEqual(restored["identification"]["choice"], choice_token)
-        menu = self.native_press(window, native, "F12", "zap")
+        menu = self.native_press(window, native, "z", "zap")
         self.assertEqual(len(menu["item_rows"]), 2)
         self.assertNotIn("charges", menu["item_rows"][0])
         self.assertIn("charges: 3", menu["item_rows"][1])
@@ -578,7 +581,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         cancelled = self.native_press(window, native, "Escape", "escape")
         self.assertEqual(cancelled["state"], identified["state"], "aim cancellation is free")
         self.assertIsNone(cancelled["zap_item"])
-        self.native_press(window, native, "F12", "zap")
+        self.native_press(window, native, "z", "zap")
         self.native_press(window, native, "Down", "down")
         self.native_press(window, native, "Return", "enter")
         fired = self.native_press(window, native, "Right", "right", wait_for_ready=True)
@@ -636,7 +639,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         probe, initial = self.client(observe=True)
         text, _ = self.text_client()
         for ground in observation(initial)["ground_items"]:
-            self.assertIn("Taken", text.command("take #" + ground["item"]["id"]))
+            self.assertIn("You pick up ", text.command("take #" + ground["item"]["id"]))
         carried = self.snapshot(probe)
         first, second = items(carried, "wand")
         scroll, = items(carried, "scroll")
@@ -718,7 +721,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         probe, initial = self.client(observe=True)
         text, _ = self.text_client()
         for ground in observation(initial)["ground_items"]:
-            self.assertIn("Taken", text.command("take #" + ground["item"]["id"]))
+            self.assertIn("You pick up ", text.command("take #" + ground["item"]["id"]))
         carried = self.snapshot(probe)
         self.assertEqual(observation(carried)["combat"]["own_stats"]["attributes"]["speed"], 0,
                          "effective compiled speed must preserve exact base-turn timing")
@@ -780,7 +783,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         text, _ = self.text_client()
         self.assertEqual(len(observation(initial)["ground_items"]), 1)
         wand = observation(initial)["ground_items"][0]["item"]["id"]
-        self.assertIn("Taken", text.command("take #" + wand))
+        self.assertIn("You pick up ", text.command("take #" + wand))
         carried = self.snapshot(probe)
         self.assertEqual(observation(carried)["combat"]["own_stats"]["attributes"]["speed"], 0)
         self.assertFalse(items(carried, "wand")[0]["identified"])
@@ -860,7 +863,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         probe, initial = self.client(observe=True)
         text, _ = self.text_client()
         for ground in observation(initial)["ground_items"]:
-            self.assertIn("Taken", text.command("take #" + ground["item"]["id"]))
+            self.assertIn("You pick up ", text.command("take #" + ground["item"]["id"]))
         carried = self.snapshot(probe)
         self.assertEqual(observation(carried)["combat"]["own_stats"]["attributes"]["speed"], 0,
                          "effective compiled speed must preserve exact base-turn timing")
@@ -1156,6 +1159,8 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         self.assertTrue(actor_creature(after, 2)["cancelled"])
         self.assertEqual(after["rules_rng"], before["rules_rng"])
         self.assertFalse(items(completed, "wand")[0]["identified"])
+        # A new inspection requests a current picture; continuation pages stay frozen.
+        self.snapshot(wizard)
         queried = self.command(wizard, {"type": "wizard", "command": "combat inspect"})
         self.assertFalse(queried.get("error"), queried.get("error"))
         effect_sample = message(wizard, "combat_diagnostics")
@@ -1286,6 +1291,8 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
             saved = checkpoint(self, owner)
             self.assertEqual(saved["rules_rng"], baseline["rules_rng"])
             self.assertEqual(actor_creature(saved)["build"]["hd"], actor_creature(baseline)["build"]["hd"])
+            # A new inspection requests a current picture; continuation pages stay frozen.
+            self.snapshot(wizard)
             queried = self.command(wizard, {"type": "wizard", "command": "combat inspect"})
             self.assertFalse(queried.get("error"), queried.get("error"))
             sample = message(wizard)
@@ -1308,7 +1315,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         self.addCleanup(relay.close)
         upstream, self.address = self.address, relay.address
         try:
-            client, frame = self.client(*(() if token is None else (token,)), observe=observe, actor=1)
+            client, frame = self.client(*(() if token is None else (token,)), observe=observe, actor=1, compact_background=True)
         finally:
             self.address = upstream
         if not hasattr(self, "detection_relays"):
@@ -1375,6 +1382,10 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
                 for key in ("complete", "failed", "limited")))
         self.assertTrue(frame["map_hydration"]["complete"], frame["map_hydration"])
         self.assertFalse(frame["map_hydration"]["failed"] or frame["map_hydration"]["limited"])
+        if frame.get("state_omitted", False):
+            # Local Inspect exposes already-hydrated memory without resetting it.
+            frame = self.command(client, {"type": "inspect"})
+            self.assertIsNone(frame["error"])
         return sorted(json.dumps({key: value for key, value in cell.items()
                                   if key not in ("last_seen_tick", "last_seen_revision")}, sort_keys=True)
                       for cell in frame["memory"])
@@ -1721,7 +1732,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         self.assertNotIn("actual visible peer", seen.lower())
         self.assertNotIn("gold coin", seen.lower())
         for _ in range(3):
-            self.assertEqual(self.snapshot(probe)["state"], first["state"])
+            self.assertDisclosedStateEqual(self.snapshot(probe)["state"], first["state"])
             self.assertEqual(checkpoint(self, probe), saved_first)
         first = self.snapshot(probe)
         self.hallucination_samples = {"visual": self.hallucination_snapshot_sample(probe, first)}
@@ -1922,6 +1933,8 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
             after = self.advance(owner, [])
             self.assertGreater(int(observation(after)["tick"]), int(observation(before)["tick"]))
             self.assertEqual(items(after, "potion"), items(carried, "potion"), "ability capture never impersonates potion consumption")
+            # A new inspection requests a current picture; continuation pages stay frozen.
+            self.snapshot(wizard)
             queried = self.command(wizard, {"type": "wizard", "command": "combat inspect"})
             self.assertFalse(queried.get("error"), queried.get("error"))
             sample = message(wizard, "combat_diagnostics")
@@ -2037,7 +2050,7 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
         native = self.native_keys(window)
         def press(name, action, **completion):
             return self.native_press(window, native, name, action, **completion)
-        press("g", "pickup")
+        press("comma", "pickup")
         carried = press("Return", "enter", wait_for_ready=True, wait_for_admission=True)
         torch, = observation(carried)["inventory"]
         def light(frame):
@@ -2045,27 +2058,35 @@ actors = [{ id = 2, at = [1, 3, 0], turn_ticks = 100, controller = "external", c
                         if row["item"] == torch["id"])["portable_light"]
         self.assertFalse(light(carried)["lit"])
         self.assertFalse(light(carried)["ignitable"])
-        press("w", "equip")
+        # Tools are equipped through the generic extended command, not weapon-only w.
+        native("Shift_L", True)
+        try:
+            press("3", "commands")
+        finally:
+            native("Shift_L", False)
+        self.native_text(window, "equip")
+        self.ascii_frame(window, lambda frame: frame.get("command_line") == "equip")
+        press("Return", "enter")
         held = press("Return", "enter", wait_for_ready=True, wait_for_admission=True)
         self.assertFalse(light(held)["lit"])
         self.assertTrue(light(held)["ignitable"])
-        asking = press("x", "ignite")
+        asking = press("a", "apply")
         self.assertEqual(observation(asking), observation(held), "opening chooser is free")
         cancelled = press("Escape", "escape")
         self.assertEqual(observation(cancelled), observation(held))
-        press("x", "ignite")
+        press("a", "apply")
         lit = press("Return", "enter", wait_for_ready=True, wait_for_admission=True)
         self.assertTrue(light(lit)["lit"])
         self.assertTrue(light(lit)["extinguishable"])
         self.assertEqual(int(observation(lit)["tick"]), int(observation(held)["tick"]) + 100)
         self.assertTrue(any(cell["position"] == {"x": 3, "y": 0, "z": 0} and cell["lit"]
                             for cell in observation(lit)["visible_cells"]))
-        self.assertIn("You finish igniting the torch.", lit["narration"])
-        press("v", "extinguish")
+        self.assertEqual(lit["messages"]["turn"].count("You finish igniting the torch."), 1)
+        press("a", "apply")
         off = press("Return", "enter", wait_for_ready=True, wait_for_admission=True)
         self.assertFalse(light(off)["lit"])
         self.assertEqual(int(light(off)["remaining"]), 99900)
-        self.assertIn("You finish extinguishing the torch.", off["narration"])
+        self.assertEqual(off["messages"]["turn"].count("You finish extinguishing the torch."), 1)
         pixels = read_capture(capture).split(b"\n", 3)[3]
         self.assertEqual(len(pixels), 1200 * 800 * 3)
         self.assertGreater(len(set(pixels)), 8)

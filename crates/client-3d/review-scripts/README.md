@@ -126,6 +126,22 @@ It advances fixed simulation ticks and holds the pose for screenshot readback;
 use live playback when judging animation pacing.
 
 
+## Yeti surface coat
+
+`yeti-coat.json` captures front, side and rear views at refreshed rest, walking
+and a heavy action. It reviews body-coat overlap and silhouette through the
+same posed sequence. Native acceptance checks presented bodies and held-camera
+poses; emitted-mesh tests own closed topology, embedded roots, surface flow,
+mesh budgets and warm-cache reuse. Visual review remains necessary for art quality.
+
+## Centaur rider builds
+
+`centaur-builds.json` captures both sexes across slender, average and sturdy
+builds at refreshed rest and during walking. It reviews the shared organic arm
+surfaces, moving shoulder caps and spear grip with fixed cameras. Native
+acceptance checks presentation, motion, build-dependent shoulder spacing and
+preserved reach; mesh tests own arm volume and bent-joint coverage.
+
 ## Equipment conflicts and bounded sampling
 
 `equipment-conflicts.json` reviews four fixed conflicts in one native process:

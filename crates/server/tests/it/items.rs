@@ -19,7 +19,7 @@ fn act(engine: &mut Engine, action: Action) {
 }
 fn wizard(engine: &mut Engine, operation: WizardOperation) {
     let actor = ActorId(1);
-    let revision = engine.revision(actor).unwrap();
+    let revision = engine.causal_boundary(actor).unwrap();
     engine
         .command(
             "wizard",
@@ -28,7 +28,8 @@ fn wizard(engine: &mut Engine, operation: WizardOperation) {
             &format!("wizard-{revision}"),
             &engine.branch().clone(),
             Command::Wizard {
-                expected_revision: revision,
+                display_basis: None,
+                expected_boundary: revision,
                 operation,
             },
         )
@@ -274,7 +275,7 @@ fn projectile_take_drop_merges_publish_fresh_disclosed_identity_and_survive_retr
             };
             // Keep the exact decoded action and request identity for retry checks.
             let command = Command::Act {
-                expected_revision: engine.revision(actor).unwrap(),
+                expected_boundary: engine.causal_boundary(actor).unwrap(),
                 action: engine.decode_action(actor, &action).unwrap(),
             };
             let branch = engine.branch().clone();
@@ -598,8 +599,9 @@ fn queued_take_retry_keeps_original_quantity_after_consumption_and_recovery() {
         let actor = ActorId(1);
         let branch = engine.branch().clone();
         let before = engine.state(actor).unwrap();
+        let before_boundary = engine.causal_boundary(actor).unwrap();
         let command = Command::AdmitIntention {
-            expected_revision: before.revision,
+            expected_boundary: before_boundary,
             action: Action::Take {
                 item: 10,
                 quantity: None,
@@ -646,7 +648,7 @@ fn queued_take_retry_keeps_original_quantity_after_consumption_and_recovery() {
         assert_eq!(engine.state(actor).unwrap(), after);
         // An explicit count producing the same effect is a different request.
         let conflict = Command::AdmitIntention {
-            expected_revision: before.revision,
+            expected_boundary: before_boundary,
             action: Action::Take {
                 item: 10,
                 quantity: Some(10),

@@ -5,17 +5,17 @@
   "ruleset_dependencies": {
     "interactions-v56": "6c4c3eb331a1567c50e1fed30fa59fd37f69f6d2413d829be49a0253748b5f80"
   },
-  "content_hash": "0e38f8031a1b9e24666acd3b19f0c5b61dc78f6620caa4542591508a121ca7e2",
+  "content_hash": "e8e80e9a9ee4b5b0f730b004520d766603737765f0634d27dd09a88aabe1ea1e",
   "files": {
     "catalog/actors.toml": "25cdbb1b0810e8252644051cafe9d275eba0b2e27ad4f30c89097e4fcbc35c61",
     "catalog/bodies.toml": "bbe18281cf810fcc7bf158de7ca07f153114c980c166cada9a4c83e108f8a16f",
     "catalog/creatures.toml": "9f5bd274a631b2982d05ab80c24279fb560798a0e678084d722b99e051b9b46e",
-    "catalog/items.toml": "02253ff0cbd16d2d9b73f1029bdb2d1e6d470982185fd7d77650296f1dfeb322",
+    "catalog/items.toml": "780f5ed34f4f9d35a3bb5cf1be814322488cc6343ffaff6a6986b264ce53b63b",
     "index.json": "9bcdcd8e7340350480abf05c4edbe9b8a8ef04e77258d462167b598589354902",
-    "rules.toml": "81872826f8aa328bd6c3beade0c74ee08c33f08382cad52e5b7b2d3ca341278a",
-    "scenario.toml": "ae76decde8c9cc86ff95e952fc2211145736565b0e675b8c281a34b00ec32d5f"
+    "rules.toml": "7dba3c906cd5d67bee502433325a32d3c70f5bd0f7020f32877ebe721ab64853",
+    "scenario.toml": "b79e21a15e28ec93e498a424740e6882cd1bc223cb6e4cc5a0e7342282ad4e8e"
   },
   "regions": 0,
-  "model_hash": "8ff1c1300d45677b3896f34e6afdb978b92da0650b282bbce8b90aab57d6395a",
+  "model_hash": "52138f64eb741f02bd78112925c24e4cd4a5f59a578f032a39383ce32f8af823",
   "coverage": "all authored regions and character starts; descriptor structural bounds; deterministic sampled groups at seeds 0, 1, 42 under explicit work budget; no all-seed or winnability proof"
 }

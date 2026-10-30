@@ -1,0 +1,55 @@
+format = 36
+id = "crowd-hundred"
+version = "1.0"
+ruleset = "rules.toml"
+modules = ["catalog/creatures.toml", "catalog/actors.toml", "catalog/items.toml"]
+themes = ["dungeon"]
+# Larger rendering benchmark: one hundred NPCs plus the controlled character.
+# Repeat the existing crowd palette in a spaced diamond; use --distance 34.
+# Keep Manhattan distance at most 14, leaving sight range for the floor below.
+# Camera visibility is measured by the client, not inferred from this layout.
+default_character = 1
+factions = { delvers = ["sparring"], sparring = ["delvers"], dungeon_foes = [] }
+ai_profiles = { wander = { care = false, equipment = false, loot = false, flee_percent = 0 } }
+
+[[characters]]
+id = 1
+anchor = "1/start"
+asset = "creature.humanoid.human"
+turn_ticks = 100
+unselected = "omit"
+body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 80 }
+known_identities = ["rogue.mace", "rogue.ring_mail", "rogue.clean_bandage", "rogue.ration"]
+loadout = [
+  { archetype = "rogue.mace", quantity = 1, equipped_slot = 0 },
+  { archetype = "rogue.ring_mail", quantity = 1, equipped_slot = 2 },
+]
+[characters.creature]
+species = "rogue.human"
+name = "Warrior"
+faction = "delvers"
+binding = "intellect"
+starting_skills = ["heavy_weaponry", "discipline"]
+restoration = "choose_again"
+nutrition = { kind = "required" }
+future_growth = { kind = "selected", source = { kind = "class", class = "warrior" } }
+hit_dice = [{ source = "warrior", purchases = [] }]
+
+[assets]
+dungeon = [
+  "creature.ape.yeti",
+  "creature.bird.emu",
+  "creature.centaur",
+  "creature.elemental.ice",
+  "creature.equine.quagga",
+  "creature.equine.unicorn.black",
+  "creature.goblin.hobgoblin",
+  "creature.humanoid.human",
+  "creature.serpent.snake",
+  "creature.undead.vampire",
+  "creature.undead.zombie",
+  "item.armor.mail",
+  "item.bandage",
+  "item.food.ration",
+  "item.weapon.mace",
+]

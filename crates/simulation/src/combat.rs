@@ -168,7 +168,7 @@ pub struct PreparationTiming {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CombatView {
     /// Exact creature information belongs only to the observer's own actor.
-    pub own_stats: Option<crate::creatures::OwnStats>,
+    pub own_stats: Option<crate::creatures::OwnStatsFacts>,
     /// The observer's immutable paid record, never a current subject lookup.
     pub public_plan: Option<tor_world::Shared<crate::public_plan::PublicPlanObservation>>,
     pub hp: u64,
@@ -562,7 +562,7 @@ impl Game {
             .collect();
         let events = self.disclosed_event_history(id);
         Some(CombatView {
-            own_stats: Some(creature.own_stats()),
+            own_stats: Some(creature.own_stats_facts()),
             public_plan: a.public_plan.clone(),
             hp: creature.health().current(),
             max_hp: creature.health().maximum(),
@@ -843,10 +843,27 @@ impl Game {
     }
 
     pub fn attack_available(&self, actor: ActorId, target: ActorId) -> bool {
-        let Ok(scene) = self.scene(actor) else {
+        // These gates stay live even when geometry is retained. In particular,
+        // a non-combat actor is "alive" for other systems but cannot make contact.
+        if actor == target
+            || [actor, target].into_iter().any(|id| {
+                self.actors
+                    .get(&id)
+                    .and_then(|state| state.combat.as_ref())
+                    .is_none_or(|combat| combat.hp() == 0)
+            })
+        {
+            return false;
+        }
+        let Ok(snapshot) = self.scene_snapshot_shared(actor) else {
             return false;
         };
-        self.attack_available_in_scene(actor, target, &scene)
+        let target = &self.actors[&target];
+        let Some(body) = self.body_cells(target.location, target.orientation, &target.body) else {
+            return false;
+        };
+        let endpoints = snapshot.contact_locations(self, actor);
+        body.iter().any(|(at, _)| endpoints.contains(at))
     }
     pub(crate) fn attack_available_in_scene(
         &self,
@@ -966,6 +983,7 @@ mod tests {
                 configure_subject(&mut game, actor, 0, 60);
             }
             let old = game.clone();
+            let before = crate::diagnostics::work_counts();
             assert_eq!(
                 game.apply_damage(
                     ActorId(1),
@@ -981,7 +999,12 @@ mod tests {
                 ),
                 Ok(1)
             );
-            let copied = crate::diagnostics::work_counts().actor_table_copies;
+            let copied = crate::diagnostics::work_counts();
+            assert_eq!(copied.actor_table_copies - before.actor_table_copies, 1);
+            assert_eq!(
+                copied.actor_table_entries_copied - before.actor_table_entries_copied,
+                count as usize
+            );
             game.apply_damage(
                 ActorId(2),
                 &crate::damage::DamageSpec::new(
@@ -996,10 +1019,17 @@ mod tests {
             )
             .unwrap();
             assert_eq!(
-                crate::diagnostics::work_counts().actor_table_copies,
-                copied,
+                crate::diagnostics::work_counts().actor_table_entries_copied,
+                copied.actor_table_entries_copied,
                 "a second injury in the same transaction must not clone the actor table again"
             );
+            assert_eq!(
+                crate::diagnostics::work_counts().actor_table_copies - copied.actor_table_copies,
+                1,
+                "the second distinct shared actor payload is copied, not every actor"
+            );
+            assert_eq!(old.health(ActorId(2)), Some((30, 30)));
+            assert_eq!(game.health(ActorId(2)), Some((29, 30)));
             assert_eq!(old.health(ActorId(1)), Some((30, 30)));
             assert_eq!(game.health(ActorId(1)), Some((29, 30)));
             assert_eq!(

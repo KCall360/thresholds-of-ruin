@@ -332,7 +332,8 @@ pub fn encode_response(
     }
 
     let delta = base.and_then(|(base, previous)| {
-        if previous.revision != base.revision
+        if previous.snapshot != base.snapshot
+            || previous.revision != base.revision
             || previous.observation.tick != base.cursor.tick
             || previous.observation.actor != state.observation.actor
             || update.actor != state.observation.actor
@@ -428,7 +429,7 @@ mod tests {
         let samples: serde_json::Value = serde_json::from_str(
             &std::fs::read_to_string(concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/tests/fixtures/wire-v65.json"
+                "/tests/fixtures/wire-v67.json"
             ))
             .expect("regenerate current wire samples"),
         )
@@ -579,7 +580,7 @@ mod tests {
         let samples: serde_json::Value = serde_json::from_str(
             &std::fs::read_to_string(concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/tests/fixtures/wire-v65.json"
+                "/tests/fixtures/wire-v67.json"
             ))
             .expect("regenerate current wire samples"),
         )

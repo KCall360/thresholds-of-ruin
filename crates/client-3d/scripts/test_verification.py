@@ -18,6 +18,28 @@ ROOT = HERE.parents[2]
 
 
 class IndependentVerification(unittest.TestCase):
+    def test_windows_native_suite_has_bounded_headroom_for_the_expanded_selection(self):
+        spec = importlib.util.spec_from_file_location("client_3d_verify_budget", HERE / "verify.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        # Hosted debug completed 35 of 57 selected methods in 3000 seconds,
+        # with 21 passes, 14 skips and no assertion failures. Leave room for
+        # the remaining methods without changing any individual frame wait.
+        self.assertGreaterEqual(module.process_timeout("win32"), 90 * 60)
+        self.assertLessEqual(module.process_timeout("win32"), 100 * 60)
+        self.assertEqual(module.process_timeout("linux"), 50 * 60)
+
+    def test_windows_native_job_reserves_build_and_artifact_headroom(self):
+        workflow = (ROOT / ".github/workflows/client-3d.yml").read_text(encoding="utf-8")
+        self.assertIn("timeout-minutes: ${{ matrix.os == 'windows-latest' && 150 || 120 }}", workflow)
+        # Forty minutes of measured compilation, ninety for native processes,
+        # and fifteen for setup/artifact cleanup fit the bounded Windows job.
+        minutes = int(re.search(r"timeout-minutes: .*&& (\d+) ", workflow)[1])
+        spec = importlib.util.spec_from_file_location("client_3d_verify_job_budget", HERE / "verify.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        self.assertGreaterEqual(minutes * 60, module.process_timeout("win32") + (40 + 15) * 60)
+
     def test_failed_native_child_retains_evidence_inside_its_verification_logs(self):
         spec = importlib.util.spec_from_file_location("client_3d_verify_artifacts", HERE / "verify.py")
         module = importlib.util.module_from_spec(spec)
@@ -168,9 +190,11 @@ class IndependentVerification(unittest.TestCase):
 
 class FakeX11Desktop:
     """Model X11 coordinates and the observed xdotool relative-sync behavior."""
-    def __init__(self, *, reported_position=None, reported_window=71):
-        self.origin = (200, 100)
-        self.size = (800, 600)
+    def __init__(self, *, reported_position=None, reported_window=71,
+                 origin=(200, 100), size=(800, 600), root_size=None):
+        self.origin = origin
+        self.size = size
+        self.root_size = root_size
         self.pointer = (600, 400)
         self.reported_position = reported_position
         self.reported_window = reported_window
@@ -184,6 +208,8 @@ class FakeX11Desktop:
         # A relative no-op can therefore wait for a movement that never happens.
         if '--sync' in command and self.pointer == target and self.pointer != (x, y):
             raise subprocess.TimeoutExpired(command, 10)
+        if self.root_size:
+            target = tuple(max(0, min(value, limit - 1)) for value, limit in zip(target, self.root_size))
         self.pointer = target
 
     def run(self, command, **_options):
@@ -198,7 +224,8 @@ class FakeX11Desktop:
 
     def output(self, command, **_options):
         if command[1] == 'getwindowgeometry':
-            return 'WINDOW=71\nX=200\nY=100\nWIDTH=800\nHEIGHT=600\nSCREEN=0\n'
+            return (f'WINDOW=71\nX={self.origin[0]}\nY={self.origin[1]}\n'
+                    f'WIDTH={self.size[0]}\nHEIGHT={self.size[1]}\nSCREEN=0\n')
         if command[1] == 'mousemove':
             self.move(command)
         elif command[1] != 'getmouselocation':
@@ -240,6 +267,167 @@ class NativeMouseContract(unittest.TestCase):
                     with self.assertRaises(AssertionError):
                         mouse((0.5, 0.5), True)
                     self.assertEqual(desktop.buttons, [])
+
+
+    def test_hud_background_target_remains_reachable_on_the_default_xvfb_desktop(self):
+        spec = importlib.util.spec_from_file_location('client_3d_hud_fixture', HERE / 'test_client_process.py')
+        native = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(native)
+        actor = native.Native3DProcesses('test_framed_hud_dock_opens_inventory_without_a_world_action')
+        actions = ['Inventory', 'Equipment', 'Character', 'Map', 'Places', 'Journal', 'Wait']
+        buttons = [{'action': action, 'screen': [0.2 + i * 0.08, 0.9], 'size': [80, 54]}
+                   for i, action in enumerate(actions)]
+        initial = {'has_control': True, 'busy': False, 'revision': '7', 'world_feet': [2, 3, 0],
+                   'hud': {'readiness': 'READY', 'buttons': buttons}, 'screen': None,
+                   'panel_open': False, 'mouse': []}
+        closed = dict(initial)
+        frames = iter([initial, dict(initial, panel_open=True, panel_actions=['Drop']),
+                       dict(initial, mouse=['Left']), closed, dict(initial, screen='History')])
+        def captured(_window, predicate):
+            frame = next(frames)
+            self.assertTrue(predicate(frame), 'positive frame fixture must match the requested state')
+            return frame
+        def tap(_window, _native, _key, predicate):
+            self.assertTrue(predicate(closed))
+            return closed
+        actor.suffix = ""  # The isolated fixture bypasses process-class setup.
+        actor.address = "127.0.0.1:1"
+        actor.directory = Path("fixture")
+        actor.server = mock.Mock()
+        actor.fallback_package = mock.Mock(return_value=Path('fixture'))
+        actor.launch = mock.Mock(return_value=SimpleNamespace(child=mock.Mock()))
+        actor.launch.return_value.child.poll.return_value = None
+        actor.launch.return_value.child.wait.return_value = 0
+        actor.captured = captured
+        actor.tap = tap
+        actor.native_keys = mock.Mock(return_value=mock.Mock())
+        desktop = FakeX11Desktop(origin=(0, 0), size=(1440, 900), root_size=(1280, 1024))
+        with self.linux_mouse(desktop) as mouse:
+            actor.native_mouse = lambda _window: mouse
+            actor.test_framed_hud_dock_opens_inventory_without_a_world_action()
+        background = [point for action, point in desktop.buttons if action == 'mousedown' and point[1] > 870]
+        self.assertEqual(len(background), 1, 'retain the independent empty-background click witness')
+        self.assertLess(background[0][0], 1280)
+        self.assertGreater(background[0][1], max(button['screen'][1] * 900 + button['size'][1] / 2
+                                               for button in buttons))
+
+    def test_map_screen_wait_ignores_transitional_frames_before_the_requested_screen(self):
+        spec = importlib.util.spec_from_file_location('client_3d_screen_fixture', HERE / 'test_client_process.py')
+        native = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(native)
+        actor = native.Native3DProcesses('test_map_journal_shares_the_disclosed_map_and_preserves_note_typing')
+        actor.suffix = ""  # The isolated fixture bypasses process-class setup.
+        actor.address = "127.0.0.1:1"
+        actor.directory = Path("fixture")
+        actor.server = mock.Mock()
+        actor.launch = mock.Mock()
+        actor.captured = mock.Mock(return_value={'has_control': True, 'busy': False})
+        actor.native_keys = mock.Mock()
+        class ObservedPredicate(Exception):
+            pass
+        def tap(_window, _native, key, predicate):
+            self.assertEqual(key, 'm')
+            self.assertFalse(predicate({'screen': None, 'map_journal': {'visible': False}}))
+            self.assertFalse(predicate({'screen': 'History', 'map_journal': {'visible': True}}))
+            self.assertTrue(predicate({'screen': 'Places { renaming: None }', 'map_journal': {'visible': True}}))
+            raise ObservedPredicate()
+        actor.tap = tap
+        with self.assertRaises(ObservedPredicate):
+            actor.test_map_journal_shares_the_disclosed_map_and_preserves_note_typing()
+
+
+class NativeDisplayContracts(unittest.TestCase):
+    def module(self):
+        spec = importlib.util.spec_from_file_location('client_3d_display_contract', HERE / 'native_display.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_windows_mode_abi_matches_the_public_utf16_structure(self):
+        import ctypes
+        mode = self.module().DisplayMode
+        self.assertEqual(ctypes.sizeof(mode), 220)
+        self.assertEqual((mode.dmPelsWidth.offset, mode.dmPelsHeight.offset), (172, 176))
+
+    def test_ci_display_must_fit_the_client_before_physical_mouse_tests(self):
+        display = mock.Mock()
+        display.size.side_effect = [(1024, 768), (1920, 1080)]
+        display.modes.return_value = [(1024, 768), (1280, 1024), (1920, 1080), (2560, 1440)]
+        self.assertEqual(self.module().configure(display), (1920, 1080))
+        display.change.assert_called_once_with((1920, 1080))
+
+    def test_larger_existing_desktop_is_preserved(self):
+        display = mock.Mock()
+        display.size.return_value = (2560, 1440)
+        self.assertEqual(self.module().configure(display), (2560, 1440))
+        display.change.assert_not_called()
+        display.modes.assert_not_called()
+
+    def test_unsupported_or_unchanged_small_desktop_fails_setup(self):
+        for modes, error in (([(1024, 768)], None), ([(1920, 1080)], None),
+                             ([(1920, 1080)], RuntimeError('driver rejected mode'))):
+            with self.subTest(modes=modes, error=error):
+                display = mock.Mock()
+                display.size.return_value = (1024, 768)
+                display.modes.return_value = modes
+                display.change.side_effect = error
+                with self.assertRaises(RuntimeError):
+                    self.module().configure(display)
+
+    def test_workflow_configures_the_physical_desktop_before_native_verification(self):
+        workflow = (ROOT / '.github/workflows/client-3d.yml').read_text(encoding='utf-8')
+        setup = 'run: python crates/client-3d/scripts/native_display.py'
+        self.assertIn(setup, workflow)
+        self.assertLess(workflow.index(setup), workflow.index('run: python crates/client-3d/scripts/verify.py'))
+        self.assertIn('--server-args="-screen 0 1920x1080x24"', workflow)
+
+    def test_windows_driver_change_requires_success_and_uses_a_temporary_mode(self):
+        for code in (0, -2):
+            with self.subTest(driver_result=code):
+                module = self.module()
+                driver = SimpleNamespace(EnumDisplaySettingsW=mock.Mock(),
+                                         ChangeDisplaySettingsExW=mock.Mock(return_value=code))
+                with mock.patch.object(module.ctypes, 'WinDLL', return_value=driver, create=True):
+                    display = module.WindowsDisplay()
+                    if code:
+                        with self.assertRaisesRegex(RuntimeError, 'failed: -2'):
+                            display.change((1920, 1080))
+                    else:
+                        display.change((1920, 1080))
+                device, pointer, window, flags, extra = driver.ChangeDisplaySettingsExW.call_args.args
+                mode = pointer._obj
+                self.assertEqual((mode.dmSize, mode.dmBitsPerPel, mode.dmPelsWidth, mode.dmPelsHeight),
+                                 (220, 32, 1920, 1080))
+                self.assertEqual(mode.dmFields, 0x1C0000)
+                self.assertEqual((device, window, flags, extra), (None, None, 0, None))
+
+    def test_entrypoint_rejects_local_desktop_changes_before_constructing_a_driver(self):
+        module = self.module()
+        for platform, environment in (('posix', {'GITHUB_ACTIONS': 'true'}), ('nt', {})):
+            with self.subTest(platform=platform), \
+                    mock.patch.object(module, 'os', SimpleNamespace(name=platform, environ=environment)), \
+                    mock.patch.object(module, 'WindowsDisplay') as driver:
+                with self.assertRaises(RuntimeError):
+                    module.main()
+                driver.assert_not_called()
+
+    def test_advancement_fixture_remains_owned_until_its_explicit_exit(self):
+        spec = importlib.util.spec_from_file_location('client_3d_advancement_lifetime', HERE / 'test_client_process.py')
+        native = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(native)
+        actor = native.Native3DProcesses('test_graphical_advancement_selects_a_pool_previews_and_explicitly_confirms')
+        actor.suffix = ''
+        actor.address = '127.0.0.1:1'
+        actor.directory = Path('fixture')
+        actor.server = mock.Mock()
+        class ObservedLaunch(Exception):
+            pass
+        def launch(_name, args, **_options):
+            self.assertNotIn('--quit-after', args, 'software rendering must not terminate a valid in-progress test')
+            raise ObservedLaunch()
+        actor.launch = launch
+        with self.assertRaises(ObservedLaunch):
+            actor.test_graphical_advancement_selects_a_pool_previews_and_explicitly_confirms()
 
 
 class LocalGraphicalWaiverContracts(unittest.TestCase):
@@ -326,7 +514,7 @@ class LocalGraphicalWaiverContracts(unittest.TestCase):
                 self.assertIn("test_runner.py", command[1])
                 self.assertEqual(command[-1], "-v")
                 self.assertNotIn("--waive-local-graphical", command)
-                self.assertEqual(kwargs["timeout"], module.PROCESS_TIMEOUT)
+                self.assertEqual(kwargs["timeout"], module.process_timeout(module.sys.platform))
                 Path(kwargs["env"]["TOR_TEST_TIMINGS"]).write_text("\n".join(json.dumps(row) for row in rows) + "\n")
                 raise module.subprocess.TimeoutExpired(command, kwargs["timeout"])
             printed = io.StringIO()

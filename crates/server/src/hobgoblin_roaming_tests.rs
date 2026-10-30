@@ -255,13 +255,13 @@ fn roaming_decision_work_records_growing_personal_history_without_extra_route_se
             ));
             let after = tor_simulation::diagnostics::work_counts();
             assert_eq!(after.route_searches - before.route_searches, 0);
-            assert_eq!(after.scenes - before.scenes, 1);
+            assert_eq!(after.scenes - before.scenes, 0);
             // This fixture stays in one region: the chosen visit update copies
             // that region's bucket, not every loaded actor's history. Structural
             // cross-region sharing is covered by simulation ai::idle_tests.
             let copied = after.ai_visit_entries_copied - before.ai_visit_entries_copied;
             assert_eq!(copied, history);
-            println!("roaming decisions={decisions} copied_current_region_entries={copied} route_searches=0 scenes=1");
+            println!("roaming decisions={decisions} copied_current_region_entries={copied} route_searches=0 scenes=0");
         }
         if decisions < 16 {
             assert!(matches!(commit_ai(&mut game), SimAction::Move(_)));

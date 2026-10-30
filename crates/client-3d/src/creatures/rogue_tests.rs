@@ -43,6 +43,29 @@ fn rogue_models() -> Vec<(String, CreatureModel)> {
 }
 
 #[test]
+fn every_rogue_model_has_generated_body_meshes_for_camera_visibility() {
+    let models = rogue_models();
+    assert_eq!(models.len(), 26);
+    for (asset, model) in models {
+        let (mut world, _, _, _) = spawn_one(&Look::of(model, 7));
+        let count = world
+            .query_filtered::<Entity, With<BodySurface>>()
+            .iter(&world)
+            .count();
+        assert!(count > 0, "{asset} has no countable body surface");
+        for entity in world
+            .query_filtered::<Entity, With<BodySurface>>()
+            .iter(&world)
+        {
+            assert!(
+                world.get::<Mesh3d>(entity).is_some(),
+                "{asset} tags a non-mesh frame"
+            );
+        }
+    }
+}
+
+#[test]
 fn every_rogue_monster_is_drawn_with_its_own_recipe() {
     let models = rogue_models();
     assert_eq!(models.len(), 26);
@@ -78,6 +101,109 @@ pub(super) fn spawn_one(look: &Look) -> (World, Rig, PropLibrary, Assets<Mesh>) 
     );
     queue.apply(&mut world);
     (world, rig, library, meshes)
+}
+
+#[test]
+fn yeti_forearm_coat_keeps_volume_toward_the_resolved_wrist() {
+    for woman in [false, true] {
+        for build in 0..3 {
+            let look = Look::with_choice(
+                CreatureModel::Yeti,
+                17,
+                Some(Variant {
+                    woman,
+                    build,
+                    ..default()
+                }),
+            );
+            let body = anatomy::HumanoidBody::resolve(&look);
+            let reach = body.hand.length();
+            for joint in [J::ForeL, J::ForeR] {
+                let scale = anatomy::storybook_part(Plan::Biped, joint);
+                let points: Vec<_> = joint_surface_samples(&look, joint)
+                    .into_iter()
+                    .map(|(point, _)| point / scale)
+                    .collect();
+                let width = |near: f32, far: f32| {
+                    let section: Vec<_> = points
+                        .iter()
+                        .filter(|p| p.y <= -reach * near && p.y >= -reach * far)
+                        .collect();
+                    assert!(
+                        !section.is_empty(),
+                        "actual forearm section must be present"
+                    );
+                    section
+                        .iter()
+                        .map(|p| p.x)
+                        .fold(f32::NEG_INFINITY, f32::max)
+                        - section.iter().map(|p| p.x).fold(f32::INFINITY, f32::min)
+                };
+                assert!(
+                    width(0.15, 0.45) > 0.13 * body.build,
+                    "positive witness: upper forearm carries a substantial fur coat"
+                );
+                let distal = width(0.65, 0.90);
+                assert!(distal > 0.13 * body.build,
+                    "fur volume must reach toward the wrist instead of ending in a short elbow cuff: {woman}/{build}/{joint:?} width={distal}");
+            }
+        }
+    }
+}
+
+#[test]
+fn yeti_surface_coat_keeps_a_bounded_mesh_and_reuses_warm_geometry() {
+    for woman in [false, true] {
+        for build in 0..3 {
+            let look = Look::with_choice(
+                CreatureModel::Yeti,
+                17,
+                Some(Variant {
+                    woman,
+                    build,
+                    ..default()
+                }),
+            );
+            let (mut world, _, mut library, mut meshes) = spawn_one(&look);
+            let vertices: usize = meshes.iter().map(|(_, mesh)| mesh.count_vertices()).sum();
+            assert!(
+                vertices > 1_000 && vertices <= 35_000,
+                "bounded complete Yeti geometry: woman={woman} build={build} vertices={vertices}"
+            );
+            let triangles: usize = meshes
+                .iter()
+                .map(|(_, mesh)| {
+                    mesh.indices()
+                        .map_or(mesh.count_vertices() / 3, |indices| indices.len() / 3)
+                })
+                .sum();
+            assert!(
+                triangles <= 42_000,
+                "complete Yeti triangle budget: woman={woman} build={build} triangles={triangles}"
+            );
+            let count = meshes.len();
+            let parent = world.spawn(Transform::default()).id();
+            let mut queue = bevy::ecs::world::CommandQueue::default();
+            let rig = spawn(
+                &mut Commands::new(&mut queue, &world),
+                &mut library,
+                &mut meshes,
+                parent,
+                &look,
+            );
+            queue.apply(&mut world);
+            assert!(rig.joint(J::Torso).is_some() && rig.joint(J::FootR).is_some());
+            assert_eq!(meshes.len(), count, "warm furred bodies reuse every mesh");
+            assert_eq!(
+                meshes
+                    .iter()
+                    .map(|(_, mesh)| mesh.count_vertices())
+                    .sum::<usize>(),
+                vertices
+            );
+            println!("Yeti woman={woman} build={build}: {vertices} vertices, {triangles} triangles, {count} meshes; warm allocations=0");
+        }
+    }
 }
 
 #[test]
@@ -1811,6 +1937,85 @@ fn explicit_recipe_changes_do_not_alias_in_a_shared_model_cache() {
 }
 
 #[test]
+fn warm_spawn_does_not_publish_modifications_to_existing_meshes() {
+    use bevy::asset::{AssetEvent, AssetPlugin};
+    let look = Look::with_choice(
+        CreatureModel::Nymph,
+        2,
+        Some(Variant {
+            woman: true,
+            ..default()
+        }),
+    )
+    .dressed(Wardrobe::RoyalPrincess);
+    let (_, cold_rig, mut library, meshes) = spawn_one(&look);
+    assert!(cold_rig.hair.is_some(), "exercise fitting of hanging hair");
+    let existing: std::collections::HashSet<_> = meshes.iter().map(|(id, _)| id).collect();
+    let mut app = App::new();
+    app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+        .init_asset::<Mesh>();
+    app.insert_resource(meshes);
+    app.update();
+    app.world_mut()
+        .resource_mut::<Events<AssetEvent<Mesh>>>()
+        .clear();
+    // Positive witness: the observer must detect a real mesh mutation.
+    let handle = app
+        .world_mut()
+        .resource_mut::<Assets<Mesh>>()
+        .add(Mesh::from(Cuboid::default()));
+    app.update();
+    app.world_mut()
+        .resource_mut::<Events<AssetEvent<Mesh>>>()
+        .clear();
+    app.world_mut()
+        .resource_mut::<Assets<Mesh>>()
+        .get_mut(&handle)
+        .unwrap()
+        .insert_attribute(Mesh::ATTRIBUTE_POSITION, vec![[0.0_f32, 0.0, 0.0]]);
+    app.update();
+    assert!(app
+        .world_mut()
+        .resource_mut::<Events<AssetEvent<Mesh>>>()
+        .drain()
+        .any(|e| matches!(e, AssetEvent::Modified { id } if id == handle.id())));
+    let parent = app.world_mut().spawn(Transform::default()).id();
+    let mut queue = bevy::ecs::world::CommandQueue::default();
+    app.world_mut()
+        .resource_scope(|world, mut meshes: Mut<Assets<Mesh>>| {
+            let rig = spawn(
+                &mut Commands::new(&mut queue, world),
+                &mut library,
+                &mut meshes,
+                parent,
+                &look,
+            );
+            assert!(rig.hair.is_some());
+        });
+    queue.apply(app.world_mut());
+    app.update();
+    let events: Vec<_> = app
+        .world_mut()
+        .resource_mut::<Events<AssetEvent<Mesh>>>()
+        .drain()
+        .collect();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, AssetEvent::Added { id } if !existing.contains(id))),
+        "deforming instances still allocate their private meshes"
+    );
+    let modified: Vec<_> = events
+        .iter()
+        .filter(|e| matches!(e, AssetEvent::Modified { id } if existing.contains(id)))
+        .collect();
+    assert!(
+        modified.is_empty(),
+        "warm composition must not trigger render re-extraction of existing meshes: {modified:?}"
+    );
+}
+
+#[test]
 fn redressing_reuses_the_head_and_hair_the_outfit_leaves_alone() {
     // Changing clothes rebuilds only what they shape: outfits that leave
     // the head bare share its face and hair, and a helm gets its own head.
@@ -2106,8 +2311,18 @@ fn joint_surface_samples_with_drapes(
     joint: J,
     include_drapes: bool,
 ) -> Vec<(Vec3, Vec3)> {
-    use bevy::render::mesh::VertexAttributeValues;
     let (world, rig, _, meshes) = spawn_one(look);
+    joint_surface_samples_in(&world, &rig, &meshes, joint, include_drapes)
+}
+
+fn joint_surface_samples_in(
+    world: &World,
+    rig: &Rig,
+    meshes: &Assets<Mesh>,
+    joint: J,
+    include_drapes: bool,
+) -> Vec<(Vec3, Vec3)> {
+    use bevy::render::mesh::VertexAttributeValues;
     let mut samples = Vec::new();
     for child in world
         .get::<Children>(rig.joint(joint).unwrap())
@@ -3513,5 +3728,59 @@ fn every_culling_sized_box_is_marked_loose_and_no_body_box_is() {
             loose > 0,
             "{name}: its drape's culling box is marked ({tight} tight boxes)"
         );
+    }
+}
+
+#[test]
+fn shared_head_cache_matches_fresh_components_in_both_outfit_orders() {
+    for model in [
+        CreatureModel::Human,
+        CreatureModel::Nymph,
+        CreatureModel::Phantom,
+    ] {
+        let base = Look::with_choice(
+            model,
+            17,
+            Some(Variant {
+                woman: true,
+                hair: 2,
+                ..default()
+            }),
+        );
+        let plain = base.clone().dressed(Wardrobe::Commoner);
+        let banded = base.dressed(Wardrobe::Princess);
+        let expected = [&plain, &banded]
+            .map(|look| surface_signature(joint_surface_samples_with_drapes(look, J::Head, false)));
+        assert!(
+            expected[0] != expected[1],
+            "{model:?}: the choker must change actual head geometry"
+        );
+        for order in [[0, 1, 0, 1], [1, 0, 1, 0]] {
+            let mut materials = Assets::<StandardMaterial>::default();
+            let mut library = PropLibrary::new(crate::props::PropMaterials::new(&mut materials));
+            let mut meshes = Assets::<Mesh>::default();
+            let mut world = World::new();
+            for index in order {
+                let look = [&plain, &banded][index];
+                let parent = world.spawn(Transform::default()).id();
+                let mut queue = bevy::ecs::world::CommandQueue::default();
+                let rig = spawn(
+                    &mut Commands::new(&mut queue, &world),
+                    &mut library,
+                    &mut meshes,
+                    parent,
+                    look,
+                );
+                queue.apply(&mut world);
+                let actual = surface_signature(joint_surface_samples_in(
+                    &world,
+                    &rig,
+                    &meshes,
+                    J::Head,
+                    false,
+                ));
+                assert!(actual == expected[index], "{model:?}: head composition must not depend on cache history, order={order:?}, outfit={index}");
+            }
+        }
     }
 }

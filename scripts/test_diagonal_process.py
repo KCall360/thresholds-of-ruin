@@ -31,7 +31,7 @@ class DiagonalProcesses(ProcessTestCase):
         self.frame(window, lambda f: f.get("note") is None)
         key("Escape", False)
         watched = self.request(observer, {"type":"snapshot"})
-        self.assertEqual(watched["state"], current["state"])
+        self.assertDisclosedStateEqual(watched["state"], current["state"])
         self.flush_save()
         before = self.save.read_bytes()
         denied = self.act(observer, {"type":"move","direction":"north_east"})
@@ -40,7 +40,7 @@ class DiagonalProcesses(ProcessTestCase):
         window.stop(); observer.stop(); server.stop()
         self.server()
         _, resumed = self.client(SPECTATOR_TOKEN)
-        self.assertEqual(resumed["state"],current["state"])
+        self.assertDisclosedStateEqual(resumed["state"],current["state"])
         self.assertEqual(inspect_save(self.save)["ruleset"],"interactions-v56")
 
     def test_diagonal_doors_corner_travel_and_rewind(self):
@@ -73,7 +73,7 @@ class DiagonalProcesses(ProcessTestCase):
         self.assertIsNone(self.request(wizard, {"type": "acquire_control"})["error"])
         before = self.request(observer,{"type":"snapshot"})
         self.assertIsNotNone(self.act(wizard, {"type": "move", "direction": "north_east"})["error"])
-        self.assertEqual(self.request(observer,{"type":"snapshot"})["state"],before["state"])
+        self.assertDisclosedStateEqual(self.request(observer,{"type":"snapshot"})["state"],before["state"])
         self.wizard_command(wizard, "rewind initial")
         rewound = self.request(observer,{"type":"snapshot"})
         self.assertNotEqual(rewound["branch"],initial["branch"])

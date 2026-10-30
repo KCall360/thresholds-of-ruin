@@ -32,17 +32,25 @@ impl InputCallback for TextInput {
     }
 }
 
-/// NetHack's bindings: Shift with a direction runs, Ctrl-P recalls messages.
+/// Supported non-numpad defaults from NetHack's official Commands section:
+/// https://nethack.org/v500/Guidebook.html (also present in the 3.6.7 guide).
+/// TOR-only commands live in `#`; unsupported NetHack letters never fall back
+/// to an unrelated lowercase action.
 fn native_key_with_modifiers(key: NativeKey, shift: bool, ctrl: bool) -> Option<Key> {
     if ctrl {
-        return (key == NativeKey::P).then_some(Key::MessageLog);
+        return match key {
+            NativeKey::P => Some(Key::MessageLog),
+            NativeKey::X => Some(Key::Stats),
+            NativeKey::O => Some(Key::Places),
+            _ => None,
+        };
     }
     if shift {
         return match key {
             NativeKey::Comma => Some(Key::Ascend),
             NativeKey::Period => Some(Key::Descend),
             NativeKey::Slash => Some(Key::Help),
-            NativeKey::Key2 => Some(Key::Stats),
+            NativeKey::Key3 => Some(Key::Commands),
             NativeKey::Up | NativeKey::K => Some(Key::RunUp),
             NativeKey::Down | NativeKey::J => Some(Key::RunDown),
             NativeKey::Left | NativeKey::H => Some(Key::RunLeft),
@@ -51,10 +59,58 @@ fn native_key_with_modifiers(key: NativeKey, shift: bool, ctrl: bool) -> Option<
             NativeKey::U => Some(Key::RunNorthEast),
             NativeKey::B => Some(Key::RunSouthWest),
             NativeKey::N => Some(Key::RunSouthEast),
-            _ => native_key(key),
+            NativeKey::G => Some(Key::RunPrefix),
+            NativeKey::P => Some(Key::PutOn),
+            NativeKey::R => Some(Key::RemoveAccessory),
+            NativeKey::S => Some(Key::SaveQuit),
+            NativeKey::T => Some(Key::TakeOff),
+            NativeKey::W => Some(Key::Wear),
+            NativeKey::Z => Some(Key::Abilities),
+            // Modifiers do not change these non-character controls.
+            NativeKey::Space
+            | NativeKey::Enter
+            | NativeKey::Escape
+            | NativeKey::Backspace
+            | NativeKey::Tab
+            | NativeKey::PageUp
+            | NativeKey::PageDown
+            | NativeKey::F2
+            | NativeKey::F3
+            | NativeKey::F4
+            | NativeKey::F5
+            | NativeKey::F6
+            | NativeKey::F7
+            | NativeKey::F8
+            | NativeKey::F9
+            | NativeKey::F10
+            | NativeKey::F11
+            | NativeKey::F12 => native_key(key),
+            _ => None,
         };
     }
     native_key(key)
+}
+
+/// Brackets retain their existing private-report pagination meaning, not a
+/// global pace shortcut. Unsupported Meta/Alt commands must not act as letters.
+fn native_input_key(
+    key: NativeKey,
+    shift: bool,
+    ctrl: bool,
+    alt: bool,
+    strike_detail: bool,
+) -> Option<Key> {
+    if alt {
+        return None;
+    }
+    if strike_detail && !shift && !ctrl {
+        match key {
+            NativeKey::LeftBracket => return Some(Key::Slower),
+            NativeKey::RightBracket => return Some(Key::Faster),
+            _ => {}
+        }
+    }
+    native_key_with_modifiers(key, shift, ctrl)
 }
 
 fn is_letter(key: NativeKey) -> bool {
@@ -89,10 +145,30 @@ fn is_letter(key: NativeKey) -> bool {
     )
 }
 
+/// Typed command characters arrive through TextInput. Their gameplay aliases
+/// (especially j/k navigation and shifted #) must not also edit the menu.
+fn command_editor_key(key: NativeKey) -> bool {
+    matches!(
+        key,
+        NativeKey::Up
+            | NativeKey::Down
+            | NativeKey::Enter
+            | NativeKey::Escape
+            | NativeKey::Backspace
+    )
+}
+
 fn native_key(key: NativeKey) -> Option<Key> {
     Some(match key {
-        NativeKey::A => Key::Attack,
-        NativeKey::Z => Key::Abilities,
+        NativeKey::A => Key::Apply,
+        NativeKey::F => Key::Fire,
+        NativeKey::G => Key::RunPrefix,
+        NativeKey::M => Key::MoveOnlyPrefix,
+        NativeKey::R => Key::Read,
+        NativeKey::S => Key::Search,
+        NativeKey::T => Key::Throw,
+        NativeKey::W => Key::Wield,
+        NativeKey::Z => Key::Zap,
         NativeKey::Up | NativeKey::K => Key::Up,
         NativeKey::Down | NativeKey::J => Key::Down,
         NativeKey::Left | NativeKey::H => Key::Left,
@@ -102,19 +178,14 @@ fn native_key(key: NativeKey) -> Option<Key> {
         NativeKey::B => Key::SouthWest,
         NativeKey::N => Key::SouthEast,
         NativeKey::Space | NativeKey::Period => Key::Wait,
-        NativeKey::G | NativeKey::Comma => Key::Pickup,
+        NativeKey::Comma => Key::Pickup,
         NativeKey::I => Key::Inventory,
-        NativeKey::M => Key::Charts,
-        NativeKey::Semicolon => Key::Look,
+        NativeKey::Semicolon | NativeKey::Slash => Key::Look,
         NativeKey::D => Key::Drop,
-        NativeKey::W => Key::Equip,
-        NativeKey::T => Key::Unequip,
         NativeKey::Q => Key::Drink,
         NativeKey::E => Key::Eat,
         NativeKey::F6 => Key::Read,
         NativeKey::F12 => Key::Zap,
-        NativeKey::X => Key::Ignite,
-        NativeKey::V => Key::Extinguish,
         NativeKey::O => Key::OpenDoor,
         NativeKey::C => Key::CloseDoor,
         NativeKey::F3 => Key::Control,
@@ -122,7 +193,6 @@ fn native_key(key: NativeKey) -> Option<Key> {
         NativeKey::F9 => Key::CancelIntention,
         NativeKey::F10 => Key::Advancement,
         NativeKey::F11 => Key::EscapeHold,
-        NativeKey::R => Key::Release,
         NativeKey::F4 => Key::Note,
         NativeKey::F7 => Key::Wizard,
         NativeKey::F5 => Key::Places,
@@ -133,8 +203,6 @@ fn native_key(key: NativeKey) -> Option<Key> {
         NativeKey::F2 => Key::History,
         NativeKey::PageUp => Key::OlderHistory,
         NativeKey::PageDown => Key::RecentHistory,
-        NativeKey::LeftBracket => Key::Slower,
-        NativeKey::RightBracket => Key::Faster,
         _ => return None,
     })
 }
@@ -166,9 +234,11 @@ fn run() -> Result<(), Error> {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--help" | "-h" => {
-                println!("z: choose a granted ability, then a visible target (Up/Down selects, Enter confirms, Esc cancels).");
-                println!("@: inspect personal creature stats (Up/Down scroll, PgUp/PgDn page, Esc closes).");
-                println!("tor-client-ascii [--connect 127.0.0.1:4000] [--actor 1] [--observe] [--pace 75]\nSet TOR_SERVER_TOKEN to the server token. A native graphical display is required.\nA: select attack target; --bump-attacks hostile|any|off (default hostile).\nArrows/hjklyubn: move (Shift runs); </>: up/down; Space or .: wait; g or ,: pick up; d: drop; w: equip; t: remove; q: drink; i: inventory; ;: look; ?: help; Ctrl-P: earlier messages; o/c then direction: open/close adjacent door; _: select travel destination (< > jump to stairs); left click: travel; F3/R: acquire/release control. F8/F9: resume/cancel queued work. Move after a completed strike to cancel the sequence and step; outstanding recovery is still owed.\nF7: wizard command editor (wizard accounts); F5: remembered places (Up/Down select, Enter rename); F4: note (Tab audience, Enter save, Esc cancel); F2: history (Up/Down scroll, PgUp older, PgDn live).\n[/]: show journey steps more slowly/quickly (--pace <ms>, default 75); any key during a journey shows the rest at once.\nEsc: cancel a selection, close modal, or quit. Relaunch to reconnect after a disconnect.\nProcess tests only: --automation reads JSON input events on stdin and reports presented frames.\n--report-frames reports frames while retaining native keyboard input.\n--capture <file.ppm> with either diagnostic option saves the last presented framebuffer.");
+                println!("Z: choose a granted ability (Up/Down selects, Enter confirms, Esc cancels); z: zap a carried device.");
+                println!(
+                    "Ctrl-X: personal creature stats (Up/Down scroll, PgUp/PgDn page, Esc closes)."
+                );
+                println!("tor-client-ascii [--connect 127.0.0.1:4000] [--actor 1] [--observe] [--pace 75]\nSet TOR_SERVER_TOKEN to the server token. A native graphical display is required.\nNetHack-style non-numpad keys are case-sensitive. # opens TOR's extended commands, including attack, charts, control/release and journey pace.\nArrows/hjklyubn: move (Shift runs); g/G then direction: run with TOR stop rules; m then direction: move without bump attacking; </>: up/down; Space or .: wait; ,: pick up; d: drop; w/W/P: wield/wear/put on; T/R: take off/remove accessory; q: drink; e: eat; r: read; z: zap; a: apply portable light; s: search; t/f: throw/fire if granted.\ni: inventory; ; or /: look; ?: help; Ctrl-P: earlier messages; o/c then direction: open/close adjacent door; _: select travel destination (< > jump to stairs); left click: travel; F3: acquire control; #release: release control. F8/F9: resume/cancel queued work. Move after a completed strike to cancel the sequence and step; outstanding recovery is still owed.\nF7: wizard command editor (wizard accounts); F5/Ctrl-O: remembered places (Up/Down select, Enter rename); F4: note (Tab audience, Enter save, Esc cancel); F2: history (Up/Down scroll, PgUp older, PgDn live); F6/F12: read/zap; F10: advancement; F11: escape a hold.\n#slower/#faster: show journey steps more slowly/quickly (--pace <ms>, default 75); any key during a journey shows the rest at once. [/]: previous/next page only inside strike details.\nEsc: cancel or close, never quit. S: save and close through the normal flush-on-close path. Relaunch to reconnect after a disconnect.\nUnsupported NetHack commands (such as force-fight, weapon swap, two-weapon mode, autopickup and counts) are not implemented.\nProcess tests only: --automation reads JSON input events on stdin and reports presented frames.\n--report-frames reports frames while retaining native keyboard input.\n--capture <file.ppm> with either diagnostic option saves the last presented framebuffer.");
                 return Ok(());
             }
             "--connect" => address = args.next().ok_or("Missing --connect address")?.parse()?,
@@ -342,6 +412,11 @@ fn window_loop(
                             }
                         }
                         Event::StrikeQuerySent(id) => app.bind_strike_request(&id),
+                        Event::OverviewPrepared(revision) => {
+                            if let Err(error) = app.prepare_overview(revision) {
+                                app.refused(error);
+                            }
+                        }
                         Event::AdvancementQuerySent(id) => {
                             if let Err(error) = app.bind_advancement_request(&id) {
                                 app.refused(error);
@@ -403,6 +478,7 @@ fn window_loop(
             if (app.note.is_some()
                 || (app.advancement_open && app.supply_selection.is_none())
                 || app.wizard_command.is_some()
+                || app.command_line.is_some()
                 || app.place_name.is_some()
                 || !app.pickup.is_empty()
                 || app.identification_choice().is_some())
@@ -415,6 +491,7 @@ fn window_loop(
             if app.note.is_none()
                 && !app.advancement_open
                 && app.wizard_command.is_none()
+                && app.command_line.is_none()
                 && !app.places_open
                 && typed.contains('_')
             {
@@ -438,6 +515,7 @@ fn window_loop(
                     .get_keys_pressed(KeyRepeat::No)
                     .into_iter()
                     .filter(|key| !(menu && is_letter(*key)))
+                    .filter(|key| app.command_line.is_none() || command_editor_key(*key))
                     .filter(|key| {
                         !app.advancement_open
                             || matches!(
@@ -456,12 +534,15 @@ fn window_loop(
                             || (app.supply_selection.is_some() && *key == NativeKey::Space)
                     })
                     .filter_map(|key| {
-                        let mapped = native_key_with_modifiers(
+                        let mapped = native_input_key(
                             key,
                             window.is_key_down(NativeKey::LeftShift)
                                 || window.is_key_down(NativeKey::RightShift),
                             window.is_key_down(NativeKey::LeftCtrl)
                                 || window.is_key_down(NativeKey::RightCtrl),
+                            window.is_key_down(NativeKey::LeftAlt)
+                                || window.is_key_down(NativeKey::RightAlt),
+                            app.strike_detail_open(),
                         );
                         if report && mapped.is_some() {
                             pending_native_input = native_reports.pressed(key);
@@ -523,6 +604,16 @@ fn window_loop(
                     let _ = network
                         .commands
                         .try_send(Command::Pace(Duration::from_millis(ms)));
+                }
+                Effect::OpenOverview(plan) => {
+                    if network
+                        .commands
+                        .try_send(Command::OpenOverview(plan))
+                        .is_err()
+                    {
+                        app.disconnect("Network command queue unavailable.".into());
+                        failed = true;
+                    }
                 }
                 Effect::Request(request) => {
                     let context = app
@@ -594,7 +685,7 @@ fn window_loop(
                 "map_tiles":state.map(|s|tor_client_ascii::render::map_tiles(s, &app.palette)),
                 "palette":{"revision":app.palette.revision(),"stale":app.palette.stale()},
                 "role":app.role,"travel":state.and_then(|s|s.travel()),"travel_cursor":app.travel_cursor,"door_direction":app.door_direction,
-                "has_control":state.is_some_and(|s|s.has_control()),"can_admit_intention":state.is_some_and(|s|s.can_admit_intention()),"connected":app.connected,"busy":app.busy,
+                "has_control":state.is_some_and(|s|s.has_control()),"can_admit_intention":state.is_some_and(|s|s.can_admit_intention()),"connected":app.connected,"busy":app.busy,"observation_current":state.map(|s|s.observation_current()),"character_ready":state.map(|s|s.character_ready()),
                 "intentions":state.map(|s|s.intentions()),"action_hint":app.intention_hint(),
                 "places_open":app.places_open,"place_selected":app.place_selected,"place_name":app.place_name,
                 "narration":state.map(|s|s.narration())});
@@ -616,7 +707,8 @@ fn window_loop(
                 "status_lines":state.map(|s|tor_client_ascii::status_lines(&app,s)),
                 "rendered_status_lines":state.map(|s|tor_client_ascii::status_lines_at_width(&app,s,(tor_client_ascii::render::WIDTH-48)/16)),
                 "status":app.status,"input_done":done,"native_input_sequence":native_input_sequence,
-                "wizard_command":app.wizard_command,"note":app.note.as_ref().map(|d|&d.text)});
+                "wizard_command":app.wizard_command,"command_line":app.command_line,
+                "command_rows":app.command_rows(),"note":app.note.as_ref().map(|d|&d.text)});
             let serde_json::Value::Object(screen_fields) = screen_report else {
                 unreachable!("the screen report is an object literal");
             };
@@ -660,89 +752,272 @@ fn window_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn command_editor_suppresses_typed_character_aliases_but_keeps_physical_navigation() {
+        for native in [
+            NativeKey::J,
+            NativeKey::K,
+            NativeKey::S,
+            NativeKey::Z,
+            NativeKey::Key3,
+            NativeKey::Slash,
+            NativeKey::Semicolon,
+            NativeKey::Space,
+            NativeKey::Period,
+            NativeKey::Comma,
+        ] {
+            assert!(
+                !command_editor_key(native),
+                "typed {native:?} must be Text only"
+            );
+        }
+        let character_events: Vec<_> = [NativeKey::K, NativeKey::J, NativeKey::Key3]
+            .into_iter()
+            .filter(|key| command_editor_key(*key))
+            .filter_map(|key| native_key_with_modifiers(key, false, false))
+            .collect();
+        assert!(
+            character_events.is_empty(),
+            "typing #k must not select a menu row"
+        );
+        for native in [
+            NativeKey::Up,
+            NativeKey::Down,
+            NativeKey::Enter,
+            NativeKey::Escape,
+            NativeKey::Backspace,
+        ] {
+            assert!(command_editor_key(native));
+        }
+
+        // minifb reports a printable key both as text and as a pressed key.
+        // Reproduce that combined route: `#k<Enter>` is ambiguous, not #attack.
+        let mut app = App::new();
+        app.command_line = Some(String::new());
+        assert_eq!(app.input(Input::Text { text: "k".into() }), Effect::None);
+        for native in [NativeKey::K, NativeKey::Enter] {
+            if app.command_line.is_none() || command_editor_key(native) {
+                if let Some(key) = native_input_key(native, false, false, false, false) {
+                    assert_eq!(app.input(Input::Key { key }), Effect::None);
+                }
+            }
+        }
+        assert_eq!(app.command_line.as_deref(), Some("k"));
+        assert!(app.status.contains("ambiguous"));
+    }
+
     #[test]
     fn native_navigation_and_modal_keys_map_to_tested_inputs() {
-        assert_eq!(native_key(NativeKey::Right), Some(Key::Right));
-        assert_eq!(native_key(NativeKey::L), Some(Key::Right));
-        assert_eq!(native_key(NativeKey::O), Some(Key::OpenDoor));
-        assert_eq!(native_key(NativeKey::C), Some(Key::CloseDoor));
-        assert_eq!(native_key(NativeKey::F3), Some(Key::Control));
-        assert_eq!(native_key(NativeKey::F8), Some(Key::ResumeIntention));
-        assert_eq!(native_key(NativeKey::F10), Some(Key::Advancement));
-        assert_eq!(native_key(NativeKey::F11), Some(Key::EscapeHold));
-        assert_eq!(native_key(NativeKey::F9), Some(Key::CancelIntention));
-        assert_eq!(native_key(NativeKey::P), None);
-        assert_eq!(native_key(NativeKey::F6), Some(Key::Read));
-        assert_eq!(native_key(NativeKey::F12), Some(Key::Zap));
-        assert_eq!(native_key(NativeKey::X), Some(Key::Ignite));
-        assert_eq!(native_key(NativeKey::V), Some(Key::Extinguish));
-        assert_eq!(native_key(NativeKey::R), Some(Key::Release));
-        assert_eq!(native_key(NativeKey::Z), Some(Key::Abilities));
-        assert_eq!(native_key(NativeKey::F7), Some(Key::Wizard));
-        assert_eq!(native_key(NativeKey::I), Some(Key::Inventory));
-        assert_eq!(native_key(NativeKey::M), Some(Key::Charts));
-        assert_eq!(native_key(NativeKey::Semicolon), Some(Key::Look));
-        assert_eq!(native_key(NativeKey::Comma), Some(Key::Pickup));
-        assert_eq!(native_key(NativeKey::G), Some(Key::Pickup));
-        assert_eq!(native_key(NativeKey::W), Some(Key::Equip));
-        assert_eq!(native_key(NativeKey::T), Some(Key::Unequip));
-        assert_eq!(native_key(NativeKey::Q), Some(Key::Drink));
-        assert_eq!(native_key(NativeKey::E), Some(Key::Eat));
-        assert_eq!(native_key(NativeKey::N), Some(Key::SouthEast));
-        assert_eq!(native_key(NativeKey::F4), Some(Key::Note));
-        assert_eq!(native_key(NativeKey::F5), Some(Key::Places));
-        assert_eq!(native_key(NativeKey::Escape), Some(Key::Escape));
-        assert_eq!(native_key(NativeKey::F2), Some(Key::History));
-        assert_eq!(native_key(NativeKey::LeftShift), None);
-        assert_eq!(native_key(NativeKey::Y), Some(Key::NorthWest));
-        assert_eq!(native_key(NativeKey::U), Some(Key::NorthEast));
-        assert_eq!(native_key(NativeKey::B), Some(Key::SouthWest));
-        assert_eq!(
-            native_key_with_modifiers(NativeKey::Comma, true, false),
-            Some(Key::Ascend)
-        );
-        assert_eq!(
-            native_key_with_modifiers(NativeKey::Period, true, false),
-            Some(Key::Descend)
-        );
-        assert_eq!(
-            native_key_with_modifiers(NativeKey::Period, false, false),
-            Some(Key::Wait)
-        );
-        for (key, run) in [
-            (NativeKey::K, Key::RunUp),
-            (NativeKey::J, Key::RunDown),
-            (NativeKey::H, Key::RunLeft),
-            (NativeKey::L, Key::RunRight),
-            (NativeKey::Y, Key::RunNorthWest),
-            (NativeKey::U, Key::RunNorthEast),
-            (NativeKey::B, Key::RunSouthWest),
-            (NativeKey::N, Key::RunSouthEast),
-            (NativeKey::Right, Key::RunRight),
+        for (native, expected) in [
+            (NativeKey::A, Key::Apply),
+            (NativeKey::B, Key::SouthWest),
+            (NativeKey::C, Key::CloseDoor),
+            (NativeKey::D, Key::Drop),
+            (NativeKey::E, Key::Eat),
+            (NativeKey::F, Key::Fire),
+            (NativeKey::G, Key::RunPrefix),
+            (NativeKey::H, Key::Left),
+            (NativeKey::I, Key::Inventory),
+            (NativeKey::J, Key::Down),
+            (NativeKey::K, Key::Up),
+            (NativeKey::L, Key::Right),
+            (NativeKey::M, Key::MoveOnlyPrefix),
+            (NativeKey::N, Key::SouthEast),
+            (NativeKey::O, Key::OpenDoor),
+            (NativeKey::Q, Key::Drink),
+            (NativeKey::R, Key::Read),
+            (NativeKey::S, Key::Search),
+            (NativeKey::T, Key::Throw),
+            (NativeKey::U, Key::NorthEast),
+            (NativeKey::W, Key::Wield),
+            (NativeKey::Y, Key::NorthWest),
+            (NativeKey::Z, Key::Zap),
+            (NativeKey::Up, Key::Up),
+            (NativeKey::Down, Key::Down),
+            (NativeKey::Left, Key::Left),
+            (NativeKey::Right, Key::Right),
+            (NativeKey::Period, Key::Wait),
+            (NativeKey::Space, Key::Wait),
+            (NativeKey::Comma, Key::Pickup),
+            (NativeKey::Semicolon, Key::Look),
+            (NativeKey::Slash, Key::Look),
         ] {
-            assert_eq!(native_key_with_modifiers(key, true, false), Some(run));
+            assert_eq!(
+                native_key_with_modifiers(native, false, false),
+                Some(expected),
+                "{native:?}"
+            );
         }
-        assert_eq!(
-            native_key_with_modifiers(NativeKey::Slash, true, false),
-            Some(Key::Help)
-        );
-        assert_eq!(
-            native_key_with_modifiers(NativeKey::P, false, true),
-            Some(Key::MessageLog)
-        );
-        assert_eq!(native_key_with_modifiers(NativeKey::K, false, true), None);
+        for (native, expected) in [
+            (NativeKey::F2, Key::History),
+            (NativeKey::F3, Key::Control),
+            (NativeKey::F4, Key::Note),
+            (NativeKey::F5, Key::Places),
+            (NativeKey::F6, Key::Read),
+            (NativeKey::F7, Key::Wizard),
+            (NativeKey::F8, Key::ResumeIntention),
+            (NativeKey::F9, Key::CancelIntention),
+            (NativeKey::F10, Key::Advancement),
+            (NativeKey::F11, Key::EscapeHold),
+            (NativeKey::F12, Key::Zap),
+            (NativeKey::Enter, Key::Enter),
+            (NativeKey::Escape, Key::Escape),
+            (NativeKey::Backspace, Key::Backspace),
+            (NativeKey::Tab, Key::Tab),
+            (NativeKey::PageUp, Key::OlderHistory),
+            (NativeKey::PageDown, Key::RecentHistory),
+        ] {
+            for shift in [false, true] {
+                assert_eq!(
+                    native_key_with_modifiers(native, shift, false),
+                    Some(expected),
+                    "{native:?}, shift={shift}"
+                );
+            }
+        }
         assert!(is_letter(NativeKey::J) && !is_letter(NativeKey::Enter));
-        assert_eq!(
-            native_key_with_modifiers(NativeKey::Z, false, false),
-            Some(Key::Abilities)
-        );
-        assert_eq!(
-            native_key_with_modifiers(NativeKey::Key2, true, false),
-            Some(Key::Stats)
-        );
-        assert_eq!(
-            native_key_with_modifiers(NativeKey::Key2, false, false),
-            None
-        );
+    }
+
+    #[test]
+    fn native_shifted_commands_are_distinct_and_never_alias_lowercase_actions() {
+        for (native, expected) in [
+            (NativeKey::B, Key::RunSouthWest),
+            (NativeKey::G, Key::RunPrefix),
+            (NativeKey::H, Key::RunLeft),
+            (NativeKey::J, Key::RunDown),
+            (NativeKey::K, Key::RunUp),
+            (NativeKey::L, Key::RunRight),
+            (NativeKey::N, Key::RunSouthEast),
+            (NativeKey::P, Key::PutOn),
+            (NativeKey::R, Key::RemoveAccessory),
+            (NativeKey::S, Key::SaveQuit),
+            (NativeKey::T, Key::TakeOff),
+            (NativeKey::U, Key::RunNorthEast),
+            (NativeKey::W, Key::Wear),
+            (NativeKey::Y, Key::RunNorthWest),
+            (NativeKey::Z, Key::Abilities),
+            (NativeKey::Up, Key::RunUp),
+            (NativeKey::Down, Key::RunDown),
+            (NativeKey::Left, Key::RunLeft),
+            (NativeKey::Right, Key::RunRight),
+            (NativeKey::Comma, Key::Ascend),
+            (NativeKey::Period, Key::Descend),
+            (NativeKey::Slash, Key::Help),
+            (NativeKey::Key3, Key::Commands),
+        ] {
+            assert_eq!(
+                native_key_with_modifiers(native, true, false),
+                Some(expected),
+                "{native:?}"
+            );
+        }
+        // Unsupported NetHack commands must not perform their former TOR action.
+        for native in [
+            NativeKey::A,
+            NativeKey::C,
+            NativeKey::D,
+            NativeKey::E,
+            NativeKey::F,
+            NativeKey::I,
+            NativeKey::M,
+            NativeKey::O,
+            NativeKey::Q,
+            NativeKey::V,
+            NativeKey::X,
+            NativeKey::Key2,
+            NativeKey::Semicolon,
+            NativeKey::LeftBracket,
+            NativeKey::RightBracket,
+        ] {
+            assert_eq!(
+                native_key_with_modifiers(native, true, false),
+                None,
+                "{native:?}"
+            );
+        }
+        for native in [
+            NativeKey::P,
+            NativeKey::V,
+            NativeKey::X,
+            NativeKey::Key2,
+            NativeKey::Key3,
+            NativeKey::LeftBracket,
+            NativeKey::RightBracket,
+            NativeKey::LeftShift,
+            NativeKey::RightShift,
+        ] {
+            assert_eq!(
+                native_key_with_modifiers(native, false, false),
+                None,
+                "{native:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn native_control_commands_and_unsupported_alt_never_trigger_plain_actions() {
+        for (native, expected) in [
+            (NativeKey::P, Key::MessageLog),
+            (NativeKey::X, Key::Stats),
+            (NativeKey::O, Key::Places),
+        ] {
+            for shift in [false, true] {
+                assert_eq!(
+                    native_key_with_modifiers(native, shift, true),
+                    Some(expected)
+                );
+            }
+        }
+        for native in [
+            NativeKey::A,
+            NativeKey::K,
+            NativeKey::Q,
+            NativeKey::S,
+            NativeKey::T,
+            NativeKey::Z,
+            NativeKey::Comma,
+            NativeKey::F6,
+        ] {
+            assert_eq!(
+                native_key_with_modifiers(native, false, true),
+                None,
+                "{native:?}"
+            );
+        }
+        for native in [
+            NativeKey::Q,
+            NativeKey::A,
+            NativeKey::S,
+            NativeKey::X,
+            NativeKey::F6,
+            NativeKey::LeftBracket,
+        ] {
+            for shift in [false, true] {
+                for ctrl in [false, true] {
+                    assert_eq!(
+                        native_input_key(native, shift, ctrl, true, true),
+                        None,
+                        "{native:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn native_brackets_page_only_an_open_strike_detail() {
+        for (native, expected) in [
+            (NativeKey::LeftBracket, Key::Slower),
+            (NativeKey::RightBracket, Key::Faster),
+        ] {
+            assert_eq!(
+                native_input_key(native, false, false, false, true),
+                Some(expected)
+            );
+            assert_eq!(native_input_key(native, false, false, false, false), None);
+            assert_eq!(native_input_key(native, true, false, false, true), None);
+            assert_eq!(native_input_key(native, false, true, false, true), None);
+        }
     }
 }

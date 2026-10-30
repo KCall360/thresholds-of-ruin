@@ -4,6 +4,7 @@ use tor_protocol::*;
 
 fn base() -> ObservationBase {
     ObservationBase {
+        snapshot: SnapshotId("map-fixture".into()),
         cursor: StreamCursor {
             sequence: 5,
             tick: 12,
@@ -63,6 +64,7 @@ fn page() -> MapPage {
 fn response(page: MapPage) -> ServerMessage {
     ServerMessage::MapPage {
         context: ReplyContext {
+            snapshot: SnapshotId("map-fixture".into()),
             input: InputContext {
                 stream: query().context,
                 readiness_revision: 9,
@@ -380,12 +382,12 @@ fn empty_complete_and_limited_pages_are_explicit_terminal_results() {
 }
 
 #[test]
-fn map_reply_cross_checks_actor_branch_revision_and_nonretrograde_context() {
+fn map_reply_cross_checks_actor_branch_and_nonretrograde_context() {
     let value = serde_json::to_value(response(page())).unwrap();
     for (path, invalid) in [
         ("/context/actor", json!("2")),
         ("/context/branch", json!("other")),
-        ("/context/revision", json!("8")),
+        ("/context/revision", json!("6")),
         ("/context/cursor/sequence", json!("4")),
         ("/context/cursor/tick", json!("11")),
         ("/context/input/stream/stream", json!("")),
@@ -396,6 +398,24 @@ fn map_reply_cross_checks_actor_branch_revision_and_nonretrograde_context() {
         *bad.pointer_mut(path).unwrap() = invalid;
         assert!(decode_response(&bad.to_string()).is_err(), "invalid {path}");
     }
+}
+
+#[test]
+fn map_reply_may_describe_an_older_issued_snapshot() {
+    let mut message = response(page());
+    let ServerMessage::MapPage { context, page, .. } = &mut message else {
+        unreachable!()
+    };
+    let old_base = page.base.clone();
+    context.snapshot = SnapshotId("newer-current-visual".into());
+    context.revision += 1;
+    context.cursor.sequence += 2;
+    context.cursor.tick += 10;
+    let decoded = decode_response(&serde_json::to_string(&message).unwrap()).unwrap();
+    let ServerMessage::MapPage { page, .. } = decoded else {
+        unreachable!()
+    };
+    assert_eq!(page.base, old_base);
 }
 
 #[test]
@@ -421,7 +441,7 @@ fn map_records_reject_positional_missing_duplicate_and_unknown_fields_recursivel
                 "next",
             ],
         ),
-        ("/page/base", vec!["cursor", "revision"]),
+        ("/page/base", vec!["snapshot", "cursor", "revision"]),
         ("/page/base/cursor", vec!["sequence", "tick"]),
         ("/page/window", vec!["min", "max"]),
         ("/page/window/min", vec!["x", "y", "z"]),
@@ -463,7 +483,7 @@ fn map_records_reject_positional_missing_duplicate_and_unknown_fields_recursivel
         ),
         (
             "/context",
-            vec!["input", "actor", "branch", "cursor", "revision"],
+            vec!["snapshot", "input", "actor", "branch", "cursor", "revision"],
         ),
         ("/context/input", vec!["stream", "readiness_revision"]),
         ("/context/input/stream", vec!["stream", "epoch"]),

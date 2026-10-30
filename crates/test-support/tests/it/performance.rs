@@ -4,7 +4,7 @@ use tor_test_support::performance::{Step, Trace, TraceAction};
 
 fn view() -> StateView {
     let value: StateView = serde_json::from_value(serde_json::json!({
-        "wizard_game":false,"revision":"4","observation":{
+        "wizard_game":false,"snapshot":"trace-fixture","revision":"4","observation":{
             "charts":[],"linked_holds":[],"actor":"1","self_target":tor_protocol::ActorTarget::from_digest([1;32]),
             "tick":"5","position":{"x":0,"y":0,"z":0},"places":[],
             "visible_cells":[
@@ -33,6 +33,9 @@ fn shared_trace_fixture_has_required_current_presentation_and_chart_fields() {
         serde_json::from_value::<StateView>(encoded.clone()).unwrap(),
         valid
     );
+    let mut missing_snapshot = encoded.clone();
+    missing_snapshot.as_object_mut().unwrap().remove("snapshot");
+    assert!(serde_json::from_value::<StateView>(missing_snapshot).is_err());
     let mut missing_charts = encoded.clone();
     missing_charts["observation"]
         .as_object_mut()
@@ -74,7 +77,12 @@ fn door_step() -> Step {
 #[test]
 #[should_panic(expected = "unexpectedly accepted")]
 fn blocked_trace_rejects_an_accepted_action() {
-    step(TraceAction::Wait, "blocked").verify(&view(), &view(), true);
+    let before = view();
+    let mut after = before.clone();
+    // An accepted action has publication progress; isolate the forbidden
+    // acceptance rather than failing the independent revision guard first.
+    after.revision += 1;
+    step(TraceAction::Wait, "blocked").verify(&before, &after, true);
 }
 #[test]
 #[should_panic(expected = "advanced state")]

@@ -25,9 +25,9 @@ class RogueMappingContent(unittest.TestCase):
             "scroll titled LOR NEV", "scroll titled MIR VEL"])
         self.assertEqual(sum(item.get("appearance_pool") == "rogue.scrolls" for item in catalog["items"].values()), 18)
 
-    def test_live_stock_and_starter_kit_are_unchanged(self):
+    def test_mapping_supplement_preserves_starter_kit(self):
         manifest = source("scenario.toml")
-        self.assertNotIn("rogue.magic_mapping", repr(manifest["floor_activation"]))
+        self.assertIn("rogue.magic_mapping", repr(manifest["floor_activation"]))
         for character in manifest["characters"]:
             self.assertNotIn("rogue.magic_mapping", character["known_identities"])
             self.assertNotIn("rogue.magic_mapping", [row["archetype"] for row in character["loadout"]])

@@ -1,0 +1,12 @@
+Crimson Pro
+Copyright 2018 The Crimson Pro Project Authors
+https://github.com/Fonthausen/CrimsonPro
+
+The unmodified font CrimsonPro.ttf is distributed under the SIL Open Font
+License 1.1. See CrimsonPro-OFL.txt in this directory.
+
+Source: google/fonts commit 7380f7cebbf2250460c23fd301b51bcbab162edf
+https://github.com/google/fonts/tree/7380f7cebbf2250460c23fd301b51bcbab162edf/ofl/crimsonpro
+Font SHA-256: 16aa9fb7300a93637da51fac03a071b2ff08b6bbf65f99c794c25f040b58af6a
+
+Panel textures and item symbols are original procedural artwork in src/chrome/art.rs.

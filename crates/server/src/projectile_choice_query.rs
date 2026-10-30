@@ -1,5 +1,5 @@
 //! Read-only structural owner menus, bounded in scanned inventory rows.
-use super::{ActorId, BranchId, Engine, Failure};
+use super::{ActorId, Engine, Failure};
 use tor_protocol as p;
 use tor_simulation::{self as s, abilities as a};
 
@@ -44,19 +44,15 @@ fn unavailable() -> Failure {
     )
 }
 impl Engine {
-    pub(crate) fn projectile_choices(
+    pub(crate) fn projectile_choices_at(
         &self,
+        boundary: &super::PresentationBoundary,
         actor: ActorId,
-        branch: &BranchId,
-        revision: u64,
+        _display_revision: u64,
         query: &p::ProjectileChoiceQuery,
         budget: &PageBudget<'_>,
     ) -> Result<p::ProjectileChoicePage, Failure> {
-        self.check_metadata(
-            actor,
-            branch,
-            Some((revision, "Refresh the observation before choosing")),
-        )?;
+        let game = self.presentation_game(boundary)?;
         if !query.is_valid() {
             return Err(Failure::new(
                 p::ErrorCode::InvalidRequest,
@@ -64,7 +60,7 @@ impl Engine {
             ));
         }
         let ability = s::content_ids::AbilityId::new(&query.ability).map_err(|_| unavailable())?;
-        let view = self.revision_view(actor)?;
+        let view = super::revision_view(game, actor)?;
         let observation = &view.observation;
         let inventory = &observation.inventory;
         // The wire cursor never truncates a host collection length or wraps.
@@ -84,12 +80,11 @@ impl Engine {
         let owner = s::ActorId(actor.0);
         let domain = match query.phase {
             p::ProjectileChoicePhase::Sources {} => {
-                let creature = self.game.creature(owner).ok_or_else(unavailable)?;
+                let creature = game.creature(owner).ok_or_else(unavailable)?;
                 if !creature.derived().abilities.contains(&ability) {
                     return Err(unavailable());
                 }
-                let definition = self
-                    .game
+                let definition = game
                     .content()
                     .rules()
                     .ability(&ability)
@@ -126,7 +121,7 @@ impl Engine {
                     item: item.id,
                     socket: s::EquipmentSlotId(launcher.socket),
                 };
-                if self.game.projectile_choice_for_item(
+                if game.projectile_choice_for_item(
                     owner,
                     &ability,
                     a::ProjectileChoiceQuery::Launchers,
@@ -143,8 +138,7 @@ impl Engine {
             if !item.identified {
                 return None;
             }
-            self.game
-                .projectile_choice_for_item(owner, &ability, domain, item.id)
+            game.projectile_choice_for_item(owner, &ability, domain, item.id)
                 .map(|choice| match choice {
                     a::ProjectileChoice::Throw { source } => p::ProjectileChoice::Throw {
                         source: match source {
@@ -232,7 +226,7 @@ mod tests {
     use super::*;
     use std::cell::Cell;
     fn context() -> p::ReplyContext {
-        serde_json::from_value(serde_json::json!({"input":{"stream":{"stream":"attachment","epoch":"0"},"readiness_revision":"0"},"actor":"1","branch":"main","cursor":{"sequence":"0","tick":"0"},"revision":"0"})).unwrap()
+        serde_json::from_value(serde_json::json!({"snapshot":"fixture", "input":{"stream":{"stream":"attachment","epoch":"0"},"readiness_revision":"0"},"actor":"1","branch":"main","cursor":{"sequence":"0","tick":"0"},"revision":"0"})).unwrap()
     }
     fn query(offset: u32) -> p::ProjectileChoiceQuery {
         p::ProjectileChoiceQuery {

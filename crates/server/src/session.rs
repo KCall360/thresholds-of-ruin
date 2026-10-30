@@ -9,6 +9,9 @@ use tor_protocol::*;
 mod chart_pages;
 #[path = "map_page_session.rs"]
 mod map_pages;
+#[path = "presentation_history.rs"]
+mod presentation_history;
+use presentation_history::{IssuedPresentation, PresentationHistory};
 
 #[cfg(feature = "service-contract-host")]
 #[path = "service_contract_host.rs"]
@@ -57,6 +60,42 @@ fn restrict_item_disclosure(state: &mut StateView, role: AccessRole) {
     }
 }
 
+fn semantic_item_facts(
+    capture: &crate::engine::SemanticObservation,
+    role: AccessRole,
+) -> std::borrow::Cow<'_, OutcomeObservation> {
+    let mut facts = std::borrow::Cow::Borrowed(&capture.facts);
+    if role == AccessRole::Spectator
+        && facts
+            .interactions
+            .as_ref()
+            .is_some_and(|view| !view.curse_blocked.is_empty())
+    {
+        facts
+            .to_mut()
+            .interactions
+            .as_mut()
+            .expect("restricted interaction")
+            .curse_blocked
+            .clear();
+    }
+    facts
+}
+
+/// Ephemeral semantic capture shared by all attachments watching each actor.
+/// Receipt provenance is private and never encoded into an outcome or snapshot.
+struct SemanticStates {
+    views: BTreeMap<ActorId, Arc<crate::engine::SemanticObservation>>,
+    events: EventProvenance,
+}
+
+/// Canonical fallback ownership belongs to the observer, not each connection.
+/// These two pictures live only through one action's publication.
+struct SemanticPicturePair {
+    before: Arc<StateView>,
+    after: Arc<StateView>,
+}
+
 struct DisclosedObservation {
     branch: BranchId,
     base: ObservationBase,
@@ -66,6 +105,9 @@ struct DisclosedObservation {
 /// Ownership is part of the generation even when permission vectors stay empty.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct DisclosedReadiness {
+    // Private monotonic facts contribute to the already public authority revision.
+    engine_input_generation: u64,
+    control_generation: u64,
     has_control: bool,
     permissions: Readiness,
 }
@@ -181,6 +223,7 @@ struct Client {
     observation_tick: u64,
     /// Last full state disclosed on this stream; the base for the next delta.
     last_observation: Option<DisclosedObservation>,
+    presentations: PresentationHistory,
     /// The palette last sent and its revision: the base for the next delta.
     palette: Option<(u64, BTreeSet<String>)>,
     /// The region that palette was forecast from.
@@ -283,6 +326,7 @@ pub struct Service {
     reported_execution_failure: Option<(u64, StreamContext, BranchId, EntryId, ErrorCode)>,
     clients: BTreeMap<u64, Client>,
     controllers: BTreeMap<ActorId, u64>,
+    control_generations: BTreeMap<ActorId, Option<u64>>,
     next_client: u64,
 }
 
@@ -340,6 +384,7 @@ impl Service {
             reported_execution_failure: None,
             clients: BTreeMap::new(),
             controllers: BTreeMap::new(),
+            control_generations: BTreeMap::new(),
             next_client: 1,
         })
     }
@@ -410,6 +455,7 @@ impl Service {
                 sequence: 0,
                 observation_tick: 0,
                 last_observation: None,
+                presentations: PresentationHistory::default(),
                 palette: None,
                 palette_region: None,
                 messages,
@@ -540,6 +586,8 @@ impl Service {
                     "Actor is unavailable",
                 ));
             }
+            self.engine.register_input_observer(actor)?;
+            let client = self.clients.get_mut(&id).expect("connected client");
             client.actor = Some(actor);
             client.context = Some(StreamContext {
                 stream: StreamId(uuid::Uuid::new_v4().to_string()),
@@ -620,7 +668,7 @@ impl Service {
                     }
                     Some(_) => {}
                     None => {
-                        self.controllers.insert(actor, id);
+                        self.set_controller(actor, Some(id));
                         self.control_update(actor);
                     }
                 }
@@ -641,7 +689,7 @@ impl Service {
                     ));
                 }
                 self.stop_travel(actor, TravelPhase::ControlLost);
-                if self.controllers.remove(&actor).is_some() {
+                if self.set_controller(actor, None) {
                     self.pending_pauses.insert(actor);
                     if !self.engine.unattended_arena() {
                         self.autonomous_enabled = false;
@@ -653,6 +701,7 @@ impl Service {
                     .map(|receipt| ProcessedRequest::Reply(RequestReply::Receipt(receipt)))
                     .unwrap_or(ProcessedRequest::Published))
             }
+            Request::Observe => self.observe(id).map(|()| ProcessedRequest::Published),
             Request::Snapshot => self
                 .snapshot(id, request_id)
                 .map(|()| ProcessedRequest::Published),
@@ -714,6 +763,14 @@ impl Service {
                         "Input context changed; use the current disclosed state",
                     ));
                 }
+                // Read-only private queries return before Engine::command, so
+                // they must validate the same branch after durable retry lookup.
+                if &branch != self.engine.branch() {
+                    return Err(Failure::new(
+                        ErrorCode::WrongBranch,
+                        "The game branch changed",
+                    ));
+                }
                 if command.requires_control() && self.controllers.get(&actor) != Some(&id) {
                     return Err(Failure::new(
                         ErrorCode::NotController,
@@ -748,9 +805,13 @@ impl Service {
                         request_id,
                         limit: self.outbound.capabilities().max_response_bytes as usize,
                     };
-                    let page = self.engine.projectile_choices(
+                    let boundary = self
+                        .query_presentation(id, *expected_revision)?
+                        .boundary
+                        .clone();
+                    let page = self.engine.projectile_choices_at(
+                        &boundary,
                         actor,
-                        &branch,
                         *expected_revision,
                         query,
                         &budget,
@@ -766,10 +827,13 @@ impl Service {
                     supplies,
                 } = &command
                 {
-                    let preview = self.engine.ability_weapon_preview(
+                    let boundary = self
+                        .query_presentation(id, *expected_revision)?
+                        .boundary
+                        .clone();
+                    let preview = self.engine.ability_weapon_preview_at(
+                        &boundary,
                         actor,
-                        &branch,
-                        *expected_revision,
                         ability,
                         *invocation,
                         supplies,
@@ -811,9 +875,13 @@ impl Service {
                         request_id,
                         limit: self.outbound.capabilities().max_response_bytes as usize,
                     };
-                    let page = self.engine.advancement_query(
+                    let boundary = self
+                        .query_presentation(id, *expected_revision)?
+                        .boundary
+                        .clone();
+                    let page = self.engine.advancement_query_at(
+                        &boundary,
                         actor,
-                        &branch,
                         *expected_revision,
                         query,
                         &budget,
@@ -827,34 +895,33 @@ impl Service {
                 // session policy cannot be bypassed by a correctly stamped request.
                 match &command {
                     crate::wire_adapter::DecodedCommand::Gameplay { .. }
-                    | crate::wire_adapter::DecodedCommand::Backend(
-                        crate::journal::Command::Travel { .. },
-                    ) if !current.permissions.admission => {
+                    | crate::wire_adapter::DecodedCommand::Display {
+                        operation: crate::wire_adapter::DisplayCommand::Travel { .. },
+                        ..
+                    } if !current.permissions.admission => {
                         return Err(Failure::new(
                             ErrorCode::ActorBusy,
                             "New gameplay is unavailable in the current input state",
                         ));
                     }
-                    crate::wire_adapter::DecodedCommand::Backend(
-                        crate::journal::Command::ResumeIntention { admission, .. },
-                    ) if !current
-                        .permissions
-                        .resume
-                        .iter()
-                        .any(|id| id.0 == admission.0) =>
+                    crate::wire_adapter::DecodedCommand::ResumeIntention { admission }
+                        if !current
+                            .permissions
+                            .resume
+                            .iter()
+                            .any(|id| id.0 == admission.0) =>
                     {
                         return Err(Failure::new(
                             ErrorCode::InvalidAction,
                             "Intention cannot be resumed in the current input state",
                         ));
                     }
-                    crate::wire_adapter::DecodedCommand::Backend(
-                        crate::journal::Command::CancelIntention { admission, .. },
-                    ) if !current
-                        .permissions
-                        .cancel
-                        .iter()
-                        .any(|id| id.0 == admission.0) =>
+                    crate::wire_adapter::DecodedCommand::CancelIntention { admission, .. }
+                        if !current
+                            .permissions
+                            .cancel
+                            .iter()
+                            .any(|id| id.0 == admission.0) =>
                     {
                         return Err(Failure::new(
                             ErrorCode::InvalidAction,
@@ -909,9 +976,12 @@ impl Service {
                         source: &source,
                         limit: self.outbound.capabilities().max_response_bytes as usize,
                     };
-                    let projected = self.engine.strike_page_query(
-                        actor,
-                        &branch,
+                    let boundary = self
+                        .query_presentation(id, expected_revision)?
+                        .boundary
+                        .clone();
+                    let projected = self.engine.strike_page_query_at(
+                        &boundary,
                         expected_revision,
                         (target, target_revision),
                         (&source, cursor.as_ref().map(|cursor| &cursor.position)),
@@ -968,12 +1038,13 @@ impl Service {
                     operation,
                 } = command
                 {
-                    let report = self.engine.combat_diagnostics_query(
-                        actor,
-                        &branch,
-                        expected_revision,
-                        operation,
-                    )?;
+                    let boundary = self
+                        .query_presentation(id, expected_revision)?
+                        .boundary
+                        .clone();
+                    let report = self
+                        .engine
+                        .combat_diagnostics_query_at(&boundary, operation)?;
                     return Ok(ProcessedRequest::Reply(RequestReply::CombatDiagnostics(
                         Box::new(report),
                     )));
@@ -984,10 +1055,13 @@ impl Service {
                     after,
                 } = command
                 {
-                    let page = self.engine.creature_catalog_query(
+                    let boundary = self
+                        .query_presentation(id, expected_revision)?
+                        .boundary
+                        .clone();
+                    let page = self.engine.creature_catalog_query_at(
+                        &boundary,
                         actor,
-                        &branch,
-                        expected_revision,
                         depth,
                         after.as_deref(),
                     )?;
@@ -1009,26 +1083,64 @@ impl Service {
                     target,
                 } = command
                 {
-                    let report = self.engine.inspect_creature_query(
-                        actor,
-                        &branch,
-                        expected_revision,
+                    let boundary = self
+                        .query_presentation(id, expected_revision)?
+                        .boundary
+                        .clone();
+                    let report = self.engine.inspect_creature_query_at(
+                        &boundary,
                         target,
+                        expected_revision,
                     )?;
                     return Ok(ProcessedRequest::Reply(RequestReply::CreatureInspection(
                         Box::new(report),
                     )));
                 }
-                let command = self.engine.resolve_command(actor, &branch, command)?;
-                let revisions: BTreeMap<_, _> = self
-                    .engine
-                    .actors()
-                    .into_iter()
-                    .map(|actor| Ok((actor, self.engine.revision(actor)?)))
-                    .collect::<Result<_, Failure>>()?;
-                let result = self
-                    .engine
-                    .command(&user, &frontend, actor, request_id, &branch, command)?;
+                let display_boundary = match command.display_basis() {
+                    Some(revision) => Some((
+                        self.query_presentation(id, revision)?.boundary.clone(),
+                        revision,
+                    )),
+                    None => None,
+                };
+                let command = self.engine.resolve_command_with_display(
+                    actor,
+                    &branch,
+                    command,
+                    display_boundary
+                        .as_ref()
+                        .map(|(boundary, revision)| (boundary, *revision)),
+                )?;
+                let before_states = self.semantic_states()?;
+                let normalized_annotation = match &command {
+                    crate::journal::Command::Annotate {
+                        anchor: Anchor::State { snapshot },
+                        ..
+                    } => {
+                        let issued = self.presentation_by_snapshot(id, snapshot)?;
+                        Some(crate::journal::RecordedAnchor::State {
+                            snapshot: snapshot.clone(),
+                            boundary: issued.boundary.entry().cloned(),
+                        })
+                    }
+                    _ => None,
+                };
+                let result = if let Some(anchor) = normalized_annotation {
+                    self.engine.command_with_annotation(
+                        &crate::engine::Receipt {
+                            user: user.clone(),
+                            frontend: frontend.clone(),
+                            request_id: request_id.into(),
+                            actor,
+                            branch: branch.clone(),
+                            command,
+                        },
+                        anchor,
+                    )?
+                } else {
+                    self.engine
+                        .command(&user, &frontend, actor, request_id, &branch, command)?
+                };
                 if matches!(
                     &result.entry.content,
                     crate::journal::JournalContent::Wizard {
@@ -1039,7 +1151,7 @@ impl Service {
                     self.autonomous_enabled = self.engine.arena_execution_enabled();
                     // Scheduler controls change ordinary readiness, not world
                     // topology. Preserve streams, preparations and private history.
-                    self.action_update(&revisions, None)?;
+                    self.action_update(&before_states, None)?;
                     return Ok(ProcessedRequest::Reply(RequestReply::Receipt(
                         self.engine.request_receipt(&result),
                     )));
@@ -1055,7 +1167,7 @@ impl Service {
                     ) {
                         self.autonomous_enabled = true;
                     }
-                    self.action_result_update(&revisions, &result)?;
+                    self.action_result_update(&before_states, &result)?;
                     return Ok(ProcessedRequest::Reply(RequestReply::Receipt(
                         self.engine.request_receipt(&result),
                     )));
@@ -1143,13 +1255,8 @@ impl Service {
                             if !self.clients.contains_key(&recipient) {
                                 continue;
                             }
-                            let disconnect = match self.engine.revision(observer) {
-                                Err(_) => true,
-                                Ok(revision) => {
-                                    (rewind || revisions.get(&observer) != Some(&revision))
-                                        && self.snapshot(recipient, "").is_err()
-                                }
-                            };
+                            let disconnect = self.engine.causal_boundary(observer).is_err()
+                                || self.snapshot(recipient, "").is_err();
                             if disconnect {
                                 self.disconnect(recipient);
                             }
@@ -1165,7 +1272,7 @@ impl Service {
                     }
                     HistoryContent::Annotation { .. } => self.annotation_update(&visible_entry),
                     HistoryContent::PlaceRenamed { .. } | HistoryContent::Action { .. } => {
-                        self.action_result_update(&revisions, &result)?;
+                        self.action_result_update(&before_states, &result)?;
                     }
                 }
                 Ok(ProcessedRequest::Reply(RequestReply::Receipt(
@@ -1178,11 +1285,11 @@ impl Service {
 
     fn action_result_update(
         &mut self,
-        revisions: &BTreeMap<ActorId, u64>,
+        before: &SemanticStates,
         result: &crate::CommandResult,
     ) -> Result<(), Failure> {
         let entry = self.engine.disclose_entry(&result.entry);
-        self.action_update(revisions, entry.as_ref())?;
+        self.action_update(before, entry.as_ref())?;
         self.intention_update(result);
         Ok(())
     }
@@ -1206,20 +1313,6 @@ impl Service {
         }
     }
 
-    /// Reuse only an equal disclosure for the same actor and branch. Stream
-    /// cursors and reset contexts remain owned by each connection.
-    fn share_observation(&self, state: StateView) -> Arc<StateView> {
-        self.clients
-            .values()
-            .filter(|client| client.actor == Some(state.observation.actor))
-            .filter_map(|client| client.last_observation.as_ref())
-            .find(|disclosed| {
-                &disclosed.branch == self.engine.branch() && disclosed.state.as_ref() == &state
-            })
-            .map(|disclosed| Arc::clone(&disclosed.state))
-            .unwrap_or_else(|| Arc::new(state))
-    }
-
     /// Project a role only when it has private item details to remove. Equal
     /// projections retain the same allocation and per-connection stream bases.
     fn item_observation(&self, state: Arc<StateView>, role: AccessRole) -> Arc<StateView> {
@@ -1229,82 +1322,170 @@ impl Service {
         if has_private_item_disclosure(&state) {
             let mut projected = state.as_ref().clone();
             restrict_item_disclosure(&mut projected, role);
-            self.share_observation(projected)
+            Arc::new(projected)
         } else {
             state
         }
     }
 
+    /// Capture only attached observers. These transient values are narration
+    /// inputs, not public display snapshots and not persisted revision state.
+    fn semantic_states(&self) -> Result<SemanticStates, Failure> {
+        let boundary = self.engine.presentation_boundary();
+        let events = self.engine.event_history_boundary_at(&boundary)?;
+        let views = self
+            .clients
+            .values()
+            .filter_map(|client| client.actor)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .map(|actor| {
+                self.engine
+                    .semantic_observation(actor)
+                    .map(|state| (actor, Arc::new(state)))
+            })
+            .collect::<Result<_, _>>()?;
+        Ok(SemanticStates { views, events })
+    }
+
     fn action_update(
         &mut self,
-        revisions: &BTreeMap<ActorId, u64>,
+        before: &SemanticStates,
         entry: Option<&HistoryEntry>,
     ) -> Result<(), Failure> {
         let recipients: Vec<_> = self
             .clients
             .iter()
-            .filter_map(|(&id, c)| c.actor.map(|a| (id, a)))
-            .filter(|(_, actor)| self.engine.revision(*actor).ok() != revisions.get(actor).copied())
+            .filter_map(|(&id, client)| client.actor.map(|actor| (id, actor, client.role)))
             .collect();
-        // Disclosed state belongs to an actor at this boundary, not to a
-        // connection. Keep stream bases and sequencing per client, but resolve
-        // perception only once for everyone watching the same actor.
-        let mut observed_roles = BTreeMap::new();
-        for (recipient, actor) in &recipients {
-            let spectator = self.clients[recipient].role == AccessRole::Spectator;
-            let any_spectator = observed_roles.entry(*actor).or_insert(false);
-            *any_spectator |= spectator;
-        }
-        let states: BTreeMap<_, _> = observed_roles
+        let events = match self
+            .engine
+            .event_history_boundary_at(&self.engine.presentation_boundary())
+        {
+            Ok(events) => events,
+            Err(error) => {
+                for (id, _, _) in recipients {
+                    self.disconnect_failed_projection(id, &error.to_string());
+                }
+                return Ok(());
+            }
+        };
+        let after: BTreeMap<_, _> = recipients
+            .iter()
+            .map(|(_, actor, _)| *actor)
+            .collect::<BTreeSet<_>>()
             .into_iter()
-            .map(|(actor, needs_spectator)| {
-                (
-                    actor,
-                    self.engine.state(actor).ok().map(|state| {
-                        let owner = self.share_observation(state);
-                        // One redacted projection per actor broadcast, not
-                        // one clone for every spectator connection.
-                        let spectator = if needs_spectator {
-                            self.item_observation(Arc::clone(&owner), AccessRole::Spectator)
-                        } else {
-                            Arc::clone(&owner)
-                        };
-                        (owner, spectator)
-                    }),
-                )
+            .map(|actor| (actor, self.engine.semantic_observation(actor).map(Arc::new)))
+            .collect();
+        let pictures: BTreeMap<_, _> = after
+            .iter()
+            .filter_map(|(actor, current)| {
+                let (Ok(current), Some(previous)) = (current, before.views.get(actor)) else {
+                    return None;
+                };
+                let comparison = (|| {
+                    if self.engine.semantic_picture_unchanged(previous, current)? {
+                        return Ok(None);
+                    }
+                    Ok::<_, Failure>(Some(SemanticPicturePair {
+                        before: Arc::new(self.engine.semantic_picture(previous)?),
+                        after: Arc::new(self.engine.semantic_picture(current)?),
+                    }))
+                })();
+                Some((*actor, comparison))
             })
             .collect();
-        for (recipient, observer) in recipients {
-            // Region streaming can unload an actor nobody keeps in play (an
-            // AI actor a spectator watches); its clients must reattach.
-            let Some((owner, spectator)) = states[&observer].as_ref() else {
-                self.detach_unloaded(recipient);
+        for (id, actor, role) in recipients {
+            if !self.clients.contains_key(&id) {
+                continue;
+            }
+            let state = match &after[&actor] {
+                Ok(state) => state,
+                Err(error) => {
+                    if self.engine.actors().contains(&actor) {
+                        self.disconnect_failed_projection(id, &error.to_string());
+                    } else {
+                        self.detach_unloaded(id);
+                    }
+                    continue;
+                }
+            };
+            let Some(previous) = before.views.get(&actor) else {
+                self.disconnect_failed_projection(id, "Missing pre-commit observer capture");
                 continue;
             };
-            // An earlier delivery can disconnect this captured recipient through
-            // a nested control update when its output queue is full.
-            let Some(client) = self.clients.get(&recipient) else {
-                continue;
+            let previous_facts = semantic_item_facts(previous, role);
+            let current_facts = semantic_item_facts(state, role);
+            let own_entry = entry.filter(|entry| entry.actor == actor);
+            let own_event = own_entry.and_then(|entry| match &entry.content {
+                HistoryContent::Action { event, .. } => Some(event.as_ref()),
+                _ => None,
+            });
+            let facts = OutcomeFacts::capture_compact_causal(
+                &previous_facts,
+                &current_facts,
+                own_event,
+                before.events,
+                events,
+            )
+            .and_then(|facts| {
+                facts.validate_at(current_facts.tick)?;
+                Ok(facts)
+            });
+            let facts = match facts {
+                Ok(facts) => facts,
+                Err(error) => {
+                    // The action is already committed. Close this stream rather
+                    // than skip its outcome; healthy peers still receive theirs.
+                    self.disconnect_failed_projection(id, &format!("{error:?}"));
+                    continue;
+                }
             };
-            let state = if client.role == AccessRole::Spectator {
-                spectator
-            } else {
-                owner
+            let visual_changed = match &pictures[&actor] {
+                Ok(None) => false,
+                Ok(Some(pictures)) => {
+                    let old = self.item_observation(Arc::clone(&pictures.before), role);
+                    let new = self.item_observation(Arc::clone(&pictures.after), role);
+                    OutcomeFacts::picture_changed(&old.observation, &new.observation)
+                }
+                Err(error) => {
+                    self.disconnect_failed_projection(id, &error.to_string());
+                    continue;
+                }
             };
-            if revisions.get(&observer) != Some(&state.revision) {
-                self.update(
-                    recipient,
-                    UpdateBody::Observation {
-                        state: Arc::clone(state),
-                        event: entry
-                            .filter(|entry| observer == entry.actor)
-                            .map(|entry| Box::new(entry.clone())),
+            if visual_changed || !facts.facts.is_empty() || own_entry.is_some() {
+                // Narration uses event-time appearances from both sides of a
+                // region transition. Admit new forecast keys before the event,
+                // and retire old keys only after that event has been admitted.
+                let palette = self.prepare_palette_with_retention(id, false, true);
+                self.publish_palette(id, palette);
+                if !self.clients.contains_key(&id) {
+                    continue;
+                }
+                self.update_at(
+                    id,
+                    UpdateBody::Outcome {
+                        visual_changed,
+                        facts,
+                        event: own_entry.map(|entry| Box::new(entry.clone())),
                     },
+                    Some(current_facts.tick),
                 );
             }
-            self.palette_update(recipient);
+            self.palette_update(id);
         }
         Ok(())
+    }
+
+    /// Outcome delivery failures are not persistence failures and must not
+    /// overwrite the save worker's warning/recovery state.
+    fn disconnect_failed_projection(&mut self, id: u64, reason: &str) {
+        if let Some(diagnostics) = &self.diagnostics {
+            diagnostics.warning(&format!(
+                "Committed outcome projection failed for connection {id}; disconnected: {reason}"
+            ));
+        }
+        self.disconnect(id);
     }
 
     /// Send a client its actor's palette: the whole palette when asked, or
@@ -1312,6 +1493,17 @@ impl Service {
     /// acknowledged. Scenarios that name no assets send no palettes, but a
     /// palette request still gets an (empty) answer.
     fn prepare_palette(&mut self, id: u64, full: bool) -> Option<PaletteUpdate> {
+        self.prepare_palette_with_retention(id, full, false)
+    }
+
+    /// Keep previously authorized keys through one causal Outcome. This is a
+    /// transient publication union, never an observation-derived asset registry.
+    fn prepare_palette_with_retention(
+        &mut self,
+        id: u64,
+        full: bool,
+        retain_previous: bool,
+    ) -> Option<PaletteUpdate> {
         let client = self.clients.get(&id)?;
         let actor = client.actor?;
         // A palette depends only on the actor's region: skip recomputing it
@@ -1320,11 +1512,21 @@ impl Service {
         if !full && client.palette.is_some() && client.palette_region == region {
             return None;
         }
-        let assets = match self.engine.palette(actor) {
+        let mut assets = match self.engine.palette(actor) {
             Some(assets) => assets,
             None if full => BTreeSet::new(),
             None => return None,
         };
+        let mut retained_old_keys = false;
+        if retain_previous {
+            if let Some((_, previous)) = &client.palette {
+                retained_old_keys = !previous.is_subset(&assets);
+                assets.extend(previous.iter().cloned());
+            }
+        }
+        // A retained old key requires the normal post-Outcome update to revisit
+        // this forecast and retire it; otherwise keep the usual region fast path.
+        let cached_region = if retained_old_keys { None } else { region };
         let client = self.clients.get_mut(&id).expect("connected client");
         if !full
             && client
@@ -1332,7 +1534,7 @@ impl Service {
                 .as_ref()
                 .is_some_and(|(_, previous)| *previous == assets)
         {
-            client.palette_region = region;
+            client.palette_region = cached_region;
             return None;
         }
         let body = match &client.palette {
@@ -1347,12 +1549,17 @@ impl Service {
         };
         let revision = client.palette.as_ref().map_or(1, |(r, _)| r + 1);
         client.palette = Some((revision, assets));
-        client.palette_region = region;
+        client.palette_region = cached_region;
         Some(PaletteUpdate { revision, body })
     }
 
     fn palette_update(&mut self, id: u64) {
-        if let Some(palette) = self.prepare_palette(id, false) {
+        let palette = self.prepare_palette(id, false);
+        self.publish_palette(id, palette);
+    }
+
+    fn publish_palette(&mut self, id: u64, palette: Option<PaletteUpdate>) {
+        if let Some(palette) = palette {
             if let Some(context) = self.reply_context(id) {
                 self.send(
                     id,
@@ -1422,33 +1629,38 @@ impl Service {
 
     /// Apply the pauses a released or disconnected controller left behind.
     fn apply_pending_pauses(&mut self) {
-        for actor in std::mem::take(&mut self.pending_pauses) {
-            let revisions = self
-                .engine
-                .actors()
-                .into_iter()
-                .map(|id| (id, self.engine.revision(id).unwrap()))
-                .collect();
-            match self.engine.suspend_queued_intention(actor) {
-                Ok(Some(result)) => {
-                    self.intention_update(&result);
+        // Retain ownership until both operations succeed. In particular, a
+        // fallible observer capture must not discard this actor or the rest of
+        // the batch and accidentally reopen admission/simulation.
+        let pending: Vec<_> = self.pending_pauses.iter().copied().collect();
+        for actor in pending {
+            let before = match self.semantic_states() {
+                Ok(states) => states,
+                Err(error) => {
+                    if let Some(diagnostics) = &self.diagnostics {
+                        diagnostics
+                            .warning(&format!("Pending pause observer capture failed: {error}"));
+                    }
+                    return;
                 }
+            };
+            match self.engine.suspend_queued_intention(actor) {
+                Ok(Some(result)) => self.intention_update(&result),
                 Ok(None) => {}
                 Err(error) => {
-                    self.pending_pauses.insert(actor);
                     self.save_warning = Some(error.to_string());
                     continue;
                 }
             }
             match self.engine.pause_preparation(actor) {
                 Ok(Some(result)) => {
-                    let _ = self.action_result_update(&revisions, &result);
+                    let _ = self.action_result_update(&before, &result);
+                    self.pending_pauses.remove(&actor);
                 }
-                Ok(None) => {}
-                Err(error) => {
-                    self.pending_pauses.insert(actor);
-                    self.save_warning = Some(error.to_string());
+                Ok(None) => {
+                    self.pending_pauses.remove(&actor);
                 }
+                Err(error) => self.save_warning = Some(error.to_string()),
             }
         }
     }
@@ -1551,22 +1763,17 @@ impl Service {
             self.announce_waiting();
             return Step::Blocked;
         }
-        let revisions = self
-            .engine
-            .actors()
-            .into_iter()
-            .map(|actor| Ok((actor, self.engine.revision(actor)?)))
-            .collect::<Result<BTreeMap<_, _>, Failure>>();
-        match revisions.and_then(|revisions| {
+        let before_states = self.semantic_states();
+        match before_states.and_then(|before_states| {
             self.engine
                 .execute_next_intention()
-                .map(|result| (revisions, result))
+                .map(|result| (before_states, result))
         }) {
-            Ok((revisions, Some(result))) => {
+            Ok((before_states, Some(result))) => {
                 self.reported_execution_failure = None;
                 // Account committed movement before output can disconnect its owner.
                 let travel = self.commit_travel_progress(next, &result);
-                if let Err(error) = self.action_result_update(&revisions, &result) {
+                if let Err(error) = self.action_result_update(&before_states, &result) {
                     self.save_warning = Some(error.to_string());
                 }
                 if let Some(outcome) = travel {
@@ -1823,16 +2030,17 @@ impl Service {
     }
 
     fn admit_ai(&mut self, actor: ActorId) {
-        let revisions = self
-            .engine
-            .actors()
-            .into_iter()
-            .map(|id| (id, self.engine.revision(id).unwrap()))
-            .collect();
+        let before_states = match self.semantic_states() {
+            Ok(states) => states,
+            Err(error) => {
+                self.save_warning = Some(error.to_string());
+                return;
+            }
+        };
         let result = self.engine.admit_ai(actor);
         match result {
             Ok(result) => {
-                let _ = self.action_result_update(&revisions, &result);
+                let _ = self.action_result_update(&before_states, &result);
             }
             Err(error) => {
                 self.autonomous_enabled = false;
@@ -1851,6 +2059,27 @@ impl Service {
         }
     }
 
+    fn observe(&mut self, id: u64) -> Result<(), Failure> {
+        let (boundary, state) = self.prepare_presentation(id)?;
+        let identity = state.snapshot.clone();
+        self.update(
+            id,
+            UpdateBody::Observation {
+                state: Arc::new(state),
+                event: None,
+            },
+        );
+        if self
+            .clients
+            .get(&id)
+            .and_then(|client| client.last_observation.as_ref())
+            .is_some_and(|observed| observed.state.snapshot == identity)
+        {
+            self.commit_admitted_presentation(id, boundary, false);
+        }
+        Ok(())
+    }
+
     fn snapshot(&mut self, id: u64, request_id: &str) -> Result<(), Failure> {
         let client = &self.clients[&id];
         let actor = client
@@ -1866,8 +2095,7 @@ impl Service {
                 ));
             }
         };
-        let mut state = self.engine.state(actor)?;
-        restrict_item_disclosure(&mut state, client.role);
+        let (boundary, state) = self.prepare_presentation(id)?;
         let readiness = match self.current_readiness(id) {
             Some(readiness) => readiness,
             None => {
@@ -1889,7 +2117,7 @@ impl Service {
                 sequence: client.sequence,
                 tick: state.observation.tick,
             },
-            state: self.share_observation(state),
+            state: Arc::new(state),
             has_control: readiness.has_control,
             history: self
                 .engine
@@ -1922,11 +2150,13 @@ impl Service {
         client.last_observation = Some(DisclosedObservation {
             branch: snapshot.branch,
             base: ObservationBase {
+                snapshot: snapshot.state.snapshot.clone(),
                 cursor: snapshot.cursor,
                 revision: snapshot.state.revision,
             },
             state: snapshot.state,
         });
+        self.commit_admitted_presentation(id, boundary, true);
         // Attaching sends the whole palette; a later snapshot, what changed.
         self.palette_update(id);
         Ok(())
@@ -1975,6 +2205,25 @@ impl Service {
         }
     }
 
+    /// Record every actual ownership transition, even if refresh is batched.
+    /// Exhaustion fails input closed; it never wraps or rolls simulation back.
+    fn set_controller(&mut self, actor: ActorId, owner: Option<u64>) -> bool {
+        if self.controllers.get(&actor).copied() == owner {
+            return false;
+        }
+        match owner {
+            Some(id) => {
+                self.controllers.insert(actor, id);
+            }
+            None => {
+                self.controllers.remove(&actor);
+            }
+        }
+        let generation = self.control_generations.entry(actor).or_insert(Some(0));
+        *generation = generation.and_then(|value| value.checked_add(1));
+        true
+    }
+
     fn input_context(&self, id: u64) -> Option<InputContext> {
         let client = self.clients.get(&id)?;
         Some(InputContext {
@@ -2007,7 +2256,24 @@ impl Service {
         } else if self.travels.contains_key(&actor) {
             permissions.admission = false;
         }
+        // Read-only spectators have no action authority to invalidate. Owner
+        // operand changes and control ABA must not become spectator readiness
+        // signals when their disabled permissions remain unchanged.
+        let (engine_input_generation, control_generation) = if client.role == AccessRole::Spectator
+        {
+            (0, 0)
+        } else {
+            (
+                self.engine.input_generation(actor).ok()?,
+                self.control_generations
+                    .get(&actor)
+                    .copied()
+                    .unwrap_or(Some(0))?,
+            )
+        };
         let mut readiness = DisclosedReadiness {
+            engine_input_generation,
+            control_generation,
             has_control,
             permissions,
         };
@@ -2082,7 +2348,11 @@ impl Service {
         }
     }
 
-    fn update(&mut self, id: u64, mut body: UpdateBody) {
+    fn update(&mut self, id: u64, body: UpdateBody) {
+        self.update_at(id, body, None);
+    }
+
+    fn update_at(&mut self, id: u64, mut body: UpdateBody, committed_tick: Option<u64>) {
         if let Some(client) = self.clients.get(&id) {
             if let UpdateBody::Observation { state, .. } = &mut body {
                 *state = self.item_observation(Arc::clone(state), client.role);
@@ -2100,13 +2370,13 @@ impl Service {
         // Control changes during a broadcast retain the last admitted tick.
         let tick = match &body {
             UpdateBody::Observation { state, .. } => state.observation.tick,
-            _ => client.observation_tick,
+            _ => committed_tick.unwrap_or(client.observation_tick),
         };
         let previous = client
             .last_observation
             .as_ref()
             .filter(|previous| previous.branch == branch)
-            .map(|previous| (previous.base, previous.state.as_ref()));
+            .map(|previous| (previous.base.clone(), previous.state.as_ref()));
         let message = ServerMessage::Update {
             update: Box::new(StreamUpdate {
                 context: client.context.clone().expect("attached stream context"),
@@ -2134,11 +2404,10 @@ impl Service {
             unreachable!()
         };
         if let UpdateBody::Observation { state, .. } = update.body {
-            client.map_transfer = None;
-            client.chart_transfer = None;
             client.last_observation = Some(DisclosedObservation {
                 branch,
                 base: ObservationBase {
+                    snapshot: state.snapshot.clone(),
                     cursor: StreamCursor { sequence, tick },
                     revision: state.revision,
                 },
@@ -2151,6 +2420,7 @@ impl Service {
         let client = self.clients.get(&id)?;
         let observed = client.last_observation.as_ref()?;
         Some(ReplyContext {
+            snapshot: observed.state.snapshot.clone(),
             input: self.input_context(id)?,
             actor: client.actor?,
             branch: observed.branch.clone(),
@@ -2245,7 +2515,7 @@ impl Service {
                 self.stop_travel(actor, TravelPhase::ControlLost);
             }
             if self.controllers.get(&actor) == Some(&id) {
-                self.controllers.remove(&actor);
+                self.set_controller(actor, None);
                 self.pending_pauses.insert(actor);
                 if !self.engine.unattended_arena() {
                     self.autonomous_enabled = false;
@@ -2253,6 +2523,14 @@ impl Service {
                 if !self.resetting_streams {
                     self.control_update(actor);
                 }
+            }
+            if !self
+                .clients
+                .values()
+                .any(|other| other.actor == Some(actor))
+            {
+                self.engine.unregister_input_observer(actor);
+                self.control_generations.remove(&actor);
             }
         }
     }
@@ -2420,6 +2698,276 @@ mod tests {
             save_reply(&status, 9, short, SAVE_REPLY_WAIT),
             SaveReply::Failed("disk full".into())
         );
+        status.error = None;
+        let configured = std::time::Duration::from_millis(200);
+        assert_eq!(
+            save_reply(&status, 9, configured, configured),
+            SaveReply::Behind
+        );
+        let mut service = Service::new(Engine::memory(Scenario::two_room(42)).unwrap());
+        assert!(service
+            .set_save_reply_wait(std::time::Duration::ZERO)
+            .is_err());
+        assert!(service
+            .set_save_reply_wait(std::time::Duration::from_secs(61))
+            .is_err());
+        service.set_save_reply_wait(configured).unwrap();
+        assert_eq!(service.save_reply_wait, configured);
+    }
+
+    #[test]
+    fn observer_capture_failure_retains_every_pending_pause_until_retry() {
+        let actors = [ActorId(1), ActorId(2)];
+        let mut service =
+            Service::new(Engine::memory(Scenario::performance(42, 2, 2).unwrap()).unwrap());
+        let account = Account {
+            role: AccessRole::Spectator,
+            user: "observer".into(),
+            token: "test".into(),
+            actors: actors.into_iter().collect(),
+        };
+        let mut connection = service.connect(&account, "pause-fault".into()).unwrap();
+        service.handle(
+            connection.id,
+            "attach".into(),
+            Request::Attach { actor: actors[0] },
+        );
+        while connection.messages.try_recv().is_ok() {}
+        for actor in actors {
+            service
+                .engine
+                .command(
+                    "p",
+                    "test",
+                    actor,
+                    &format!("queued-{}", actor.0),
+                    &service.engine.branch().clone(),
+                    crate::journal::Command::AdmitIntention {
+                        expected_boundary: service.engine.causal_boundary(actor).unwrap(),
+                        action: crate::journal::Action::Wait,
+                    },
+                )
+                .unwrap();
+            service.pending_pauses.insert(actor);
+        }
+        let before = service.engine.causal_boundary(actors[0]).unwrap();
+        // A failed required observer projection must not drain pause ownership.
+        service.clients.get_mut(&connection.id).unwrap().actor = Some(ActorId(u64::MAX));
+        assert!(service.semantic_states().is_err());
+        assert!(matches!(service.step_inner(), Step::Blocked));
+        assert_eq!(service.pending_pauses, actors.into_iter().collect());
+        assert_eq!(service.engine.causal_boundary(actors[0]).unwrap(), before);
+        for actor in actors {
+            assert_eq!(
+                service.engine.pending_intentions(actor)[0].phase,
+                IntentionPhase::Queued
+            );
+        }
+        service.clients.get_mut(&connection.id).unwrap().actor = Some(actors[0]);
+        service.apply_pending_pauses();
+        assert!(service.pending_pauses.is_empty());
+        for actor in actors {
+            assert_eq!(
+                service.engine.pending_intentions(actor)[0].phase,
+                IntentionPhase::Suspended
+            );
+        }
+    }
+
+    #[test]
+    fn ordered_outcomes_survive_multiple_actions_without_visual_publication() {
+        let actor = ActorId(1);
+        let mut service = Service::new(Engine::memory(Scenario::two_room(42)).unwrap());
+        let account = Account {
+            role: AccessRole::Spectator,
+            user: "observer".into(),
+            token: "test".into(),
+            actors: BTreeSet::from([actor]),
+        };
+        let mut connection = service.connect(&account, "paced".into()).unwrap();
+        service.handle(connection.id, "attach".into(), Request::Attach { actor });
+        while connection.messages.try_recv().is_ok() {}
+        let original = service.clients[&connection.id]
+            .last_observation
+            .as_ref()
+            .unwrap()
+            .state
+            .clone();
+        let mut expected = Vec::new();
+        for index in 0..2 {
+            let before = service.semantic_states().unwrap();
+            let result = service
+                .engine
+                .command(
+                    "backend",
+                    "test",
+                    actor,
+                    &format!("ordered-{index}"),
+                    &service.engine.branch().clone(),
+                    crate::journal::Command::Act {
+                        expected_boundary: service.engine.causal_boundary(actor).unwrap(),
+                        action: crate::journal::Action::Wait,
+                    },
+                )
+                .unwrap();
+            expected.push(result.entry.id.clone());
+            service.action_result_update(&before, &result).unwrap();
+        }
+        let messages: Vec<_> = std::iter::from_fn(|| connection.messages.try_recv().ok()).collect();
+        let outcomes: Vec<_> = messages
+            .iter()
+            .filter_map(|message| match message {
+                ServerMessage::Update { update } => match &update.body {
+                    UpdateBody::Outcome {
+                        event: Some(entry),
+                        facts,
+                        ..
+                    } => {
+                        assert!(facts
+                            .facts
+                            .iter()
+                            .any(|fact| matches!(fact, OutcomeFact::OwnAction { .. })));
+                        Some((update.cursor.sequence, entry.id.clone()))
+                    }
+                    UpdateBody::Observation { .. } | UpdateBody::ObservationDelta { .. } => {
+                        panic!("unsolicited picture")
+                    }
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            outcomes
+                .iter()
+                .map(|(_, id)| id.clone())
+                .collect::<Vec<_>>(),
+            expected
+        );
+        assert!(outcomes[0].0 < outcomes[1].0);
+        assert_eq!(
+            service.clients[&connection.id]
+                .last_observation
+                .as_ref()
+                .unwrap()
+                .state
+                .snapshot,
+            original.snapshot
+        );
+        service.handle(connection.id, "picture".into(), Request::Observe);
+        let current = &service.clients[&connection.id]
+            .last_observation
+            .as_ref()
+            .unwrap()
+            .state;
+        assert_ne!(current.snapshot, original.snapshot);
+        assert_eq!(current.revision, original.revision + 1);
+        assert!(current.observation.tick > original.observation.tick);
+        let visual: Vec<_> = std::iter::from_fn(|| connection.messages.try_recv().ok()).collect();
+        assert!(visual.iter().all(|message| !matches!(message, ServerMessage::Update { update } if matches!(update.body, UpdateBody::Outcome { .. }))));
+    }
+
+    #[test]
+    fn invalid_committed_outcome_closes_stream_instead_of_skipping_delivery() {
+        let actor = ActorId(1);
+        let mut service = Service::new(Engine::memory(Scenario::two_room(42)).unwrap());
+        let account = Account {
+            role: AccessRole::Spectator,
+            user: "observer".into(),
+            token: "test".into(),
+            actors: BTreeSet::from([actor]),
+        };
+        let mut connection = service.connect(&account, "bounded".into()).unwrap();
+        service.handle(connection.id, "attach".into(), Request::Attach { actor });
+        while connection.messages.try_recv().is_ok() {}
+        let mut before = service.semantic_states().unwrap();
+        let result = service
+            .engine
+            .command(
+                "backend",
+                "test",
+                actor,
+                "committed",
+                &service.engine.branch().clone(),
+                crate::journal::Command::Act {
+                    expected_boundary: service.engine.causal_boundary(actor).unwrap(),
+                    action: crate::journal::Action::Wait,
+                },
+            )
+            .unwrap();
+        before.events = service
+            .engine
+            .event_history_boundary_at(&service.engine.presentation_boundary())
+            .unwrap();
+        before.events.through += 1; // impossible provenance is rejected, never silently truncated
+        service.save_warning = Some("existing storage warning".into());
+        service.action_result_update(&before, &result).unwrap();
+        assert!(!service.clients.contains_key(&connection.id));
+        assert!(connection.close.borrow().is_some());
+        assert_eq!(
+            service.save_warning.as_deref(),
+            Some("existing storage warning")
+        );
+        assert!(
+            service.engine.causal_boundary(actor).unwrap() > 0,
+            "committed action is not rolled back by output failure"
+        );
+    }
+
+    #[test]
+    fn hidden_clock_change_does_not_publish_an_outcome_or_change_display_identity() {
+        let actor = ActorId(1);
+        let mut service = Service::new(Engine::memory(Scenario::two_room(42)).unwrap());
+        let account = Account {
+            role: AccessRole::Spectator,
+            user: "observer".into(),
+            token: "test".into(),
+            actors: BTreeSet::from([actor]),
+        };
+        let mut connection = service.connect(&account, "private".into()).unwrap();
+        service.handle(connection.id, "attach".into(), Request::Attach { actor });
+        while connection.messages.try_recv().is_ok() {}
+        let identity = service.clients[&connection.id]
+            .last_observation
+            .as_ref()
+            .unwrap()
+            .state
+            .snapshot
+            .clone();
+        let mut before = service.semantic_states().unwrap();
+        Arc::make_mut(before.views.get_mut(&actor).unwrap())
+            .facts
+            .tick += 1;
+        service.action_update(&before, None).unwrap();
+        assert!(connection.messages.try_recv().is_err());
+        assert_eq!(
+            service.clients[&connection.id]
+                .last_observation
+                .as_ref()
+                .unwrap()
+                .state
+                .snapshot,
+            identity
+        );
+        service.observe(connection.id).unwrap();
+        let first = service.clients[&connection.id]
+            .last_observation
+            .as_ref()
+            .unwrap()
+            .state
+            .clone();
+        service.observe(connection.id).unwrap();
+        let second = &service.clients[&connection.id]
+            .last_observation
+            .as_ref()
+            .unwrap()
+            .state;
+        assert_ne!(
+            first.snapshot, second.snapshot,
+            "identity follows demand, not hidden activity"
+        );
+        assert_eq!(second.revision, first.revision + 1);
+        assert_eq!(first.observation, second.observation);
     }
 
     #[test]
@@ -2487,9 +3035,10 @@ mod tests {
             .last_observation
             .as_ref()
             .unwrap();
-        let previous = disclosed.base;
+        let previous = disclosed.base.clone();
         assert_eq!(*disclosed.state, base);
         let mut next = base.clone();
+        next.snapshot = SnapshotId("next-issued-test-picture".into());
         next.revision += 1;
         next.observation.tick += 1;
         next.observation.visible_cells.truncate(1);
@@ -2498,6 +3047,8 @@ mod tests {
         // insufficient: the retained cell holds most of the full payload.
         let o = &next.observation;
         let witness = StateDelta {
+            base_snapshot: base.snapshot.clone(),
+            snapshot: next.snapshot.clone(),
             charts: o.charts.clone(),
             self_appearance: o.self_appearance.clone(),
             interactions: None,
@@ -2546,7 +3097,7 @@ mod tests {
         .unwrap()
         .len();
         let delta_bytes = serde_json::to_vec(&envelope(UpdateBody::ObservationDelta {
-            base: previous,
+            base: previous.clone(),
             state: Box::new(witness),
             event: None,
         }))
@@ -2590,11 +3141,10 @@ mod tests {
         for pause in [false, true] {
             for command in [
                 Command::Act {
-                    expected_revision: 0,
                     action: Action::Wait,
                 },
                 Command::Travel {
-                    expected_revision: 0,
+                    expected_revision: 1,
                     destination: "other-room".into(),
                 },
             ] {
@@ -2668,7 +3218,7 @@ mod tests {
                     "original",
                     &engine.branch().clone(),
                     crate::journal::Command::AdmitIntention {
-                        expected_revision: 0,
+                        expected_boundary: 0,
                         action: crate::journal::Action::Wait,
                     },
                 )
@@ -2697,14 +3247,10 @@ mod tests {
             let before = service.engine.state(actor).unwrap();
             let pending = service.engine.pending_intentions(actor);
             let command = if resume {
-                Command::ResumeIntention {
-                    expected_revision: 0,
-                    intention,
-                }
+                Command::ResumeIntention { intention }
             } else {
                 Command::CancelIntention {
                     step: None,
-                    expected_revision: 0,
                     intention,
                 }
             };
@@ -2812,7 +3358,15 @@ mod tests {
             assert_eq!(context.actor, actor);
             assert_eq!(context.branch, update.branch);
             assert_eq!(context.cursor, update.cursor);
-            assert_eq!(context.revision, before.revision);
+            assert_eq!(
+                context.revision,
+                service.clients[&client.id]
+                    .last_observation
+                    .as_ref()
+                    .unwrap()
+                    .state
+                    .revision
+            );
             assert_eq!(service.engine.state(actor).unwrap(), before);
         }
     }
@@ -2919,7 +3473,6 @@ mod tests {
                 context: service.input_context(client.id).unwrap(),
                 branch: service.engine.branch().clone(),
                 command: Command::Act {
-                    expected_revision: 0,
                     action: Action::Move {
                         direction: Direction::East,
                     },
@@ -2947,7 +3500,17 @@ mod tests {
         assert_eq!(model.readiness().revision, 5);
         assert!(model.readiness().admission);
         assert!(model.readiness().cancel.is_empty());
+        assert!(model.cursor().sequence > initial_base.cursor.sequence);
+        assert_eq!(model.observation_base(), initial_base);
+        assert!(!model.observation_current());
+        service.handle(client.id, "demand-picture".into(), Request::Observe);
+        while let Ok(message) = client.messages.try_recv() {
+            if let ServerMessage::Update { update } = message {
+                model.apply(*update).unwrap();
+            }
+        }
         assert!(model.observation_base().cursor.sequence > initial_base.cursor.sequence);
+        assert!(model.observation_current());
     }
 
     #[test]
@@ -2985,7 +3548,6 @@ mod tests {
                     context,
                     branch: service.engine.branch().clone(),
                     command: Command::Act {
-                        expected_revision: 0,
                         action: Action::Wait,
                     },
                 },
@@ -3004,7 +3566,6 @@ mod tests {
             context: current,
             branch: service.engine.branch().clone(),
             command: Command::Act {
-                expected_revision: 0,
                 action: Action::Wait,
             },
         };
@@ -3052,7 +3613,6 @@ mod tests {
                 context: guessed,
                 branch: service.engine.branch().clone(),
                 command: Command::Act {
-                    expected_revision: 0,
                     action: Action::Wait,
                 },
             },
@@ -3151,6 +3711,7 @@ mod tests {
         assert_eq!(
             disclosed.base,
             ObservationBase {
+                snapshot: snapshot.state.snapshot.clone(),
                 cursor: snapshot.cursor,
                 revision: snapshot.state.revision,
             }
@@ -3203,7 +3764,9 @@ mod tests {
                 .annotate_backend(
                     actor,
                     "recovery-test",
-                    Anchor::State { revision: 0 },
+                    Anchor::State {
+                        snapshot: SnapshotId("trusted-recovery-note".into()),
+                    },
                     AnnotationCategory::Note,
                     &"x".repeat(256),
                 )
@@ -3235,7 +3798,7 @@ mod tests {
             panic!("recovery must publish one complete logical snapshot");
         };
         assert_eq!(request_id, "recover");
-        assert_eq!(*snapshot.state, expected_state);
+        crate::assert_disclosed_state_eq(&snapshot.state, &expected_state);
         assert_eq!(
             snapshot.history, expected_history,
             "recovery cannot prune history to fit"
@@ -3284,7 +3847,7 @@ mod tests {
                 panic!("healthy peer must receive its snapshot");
             };
             assert_eq!(request_id, "healthy-reset");
-            assert_eq!(*snapshot.state, before);
+            crate::assert_disclosed_state_eq(&snapshot.state, &before);
         }
     }
 
@@ -3336,7 +3899,7 @@ mod tests {
                 "queued",
                 &engine.branch().clone(),
                 crate::journal::Command::AdmitIntention {
-                    expected_revision: 0,
+                    expected_boundary: 0,
                     action: crate::journal::Action::Move {
                         direction: crate::journal::Direction::East,
                     },
@@ -3371,7 +3934,6 @@ mod tests {
                 branch: service.engine.branch().clone(),
                 command: Command::CancelIntention {
                     step: None,
-                    expected_revision: 0,
                     intention: IntentionId(admitted.entry.id.0.clone()),
                 },
             },
@@ -3408,7 +3970,6 @@ mod tests {
             context: service.input_context(client.id).unwrap(),
             branch: service.engine.branch().clone(),
             command: Command::Act {
-                expected_revision: 0,
                 action: Action::Move {
                     direction: Direction::East,
                 },
@@ -3508,7 +4069,7 @@ mod tests {
         let mut healthy = service.connect(&account, "headless".into()).unwrap();
         healthy.messages.try_recv().unwrap();
         let branch = service.engine.branch().clone();
-        let revision = service.engine.revision(ActorId(1)).unwrap();
+        let revision = service.engine.causal_boundary(ActorId(1)).unwrap();
         // These frames fit the existing native client's frame ceiling. Their
         // backlog exceeds 64 MiB while still far below the 256 message slots.
         for _ in 0..65 {
@@ -3537,7 +4098,10 @@ mod tests {
             ServerMessage::Snapshot { .. }
         ));
         assert_eq!(service.engine.branch(), &branch);
-        assert_eq!(service.engine.revision(ActorId(1)).unwrap(), revision);
+        assert_eq!(
+            service.engine.causal_boundary(ActorId(1)).unwrap(),
+            revision
+        );
     }
 
     #[test]
@@ -3647,9 +4211,9 @@ mod tests {
             let owner = role == AccessRole::Player;
             assert_eq!(Arc::ptr_eq(&retained, &shared), owner);
             if let Some(previous) = retained_projections.insert(owner, Arc::clone(&retained)) {
-                assert!(
-                    Arc::ptr_eq(&previous, &retained),
-                    "equal role projections must share storage"
+                assert_eq!(
+                    previous, retained,
+                    "equal role projections retain exact disclosed content"
                 );
             }
             let disclosed = &retained.observation;
@@ -3853,60 +4417,6 @@ mod tests {
     }
 
     #[test]
-    fn observation_sharing_requires_equal_state_actor_and_branch() {
-        let mut service = Service::new(Engine::memory(Scenario::two_room(0)).unwrap());
-        let account = Account {
-            role: AccessRole::Spectator,
-            user: "observer".into(),
-            token: "test-only".into(),
-            actors: BTreeSet::from([ActorId(1)]),
-        };
-        let mut connection = service.connect(&account, "observer".into()).unwrap();
-        connection.messages.try_recv().unwrap();
-        service.handle(
-            connection.id,
-            "attach".into(),
-            Request::Attach { actor: ActorId(1) },
-        );
-        connection.messages.try_recv().unwrap();
-        let original = Arc::clone(
-            &service.clients[&connection.id]
-                .last_observation
-                .as_ref()
-                .unwrap()
-                .state,
-        );
-        assert!(Arc::ptr_eq(
-            &original,
-            &service.share_observation((*original).clone())
-        ));
-
-        // Metadata can change without changing the revision or simulation tick.
-        let mut changed = (*original).clone();
-        changed.wizard_game = !changed.wizard_game;
-        let replacement = service.share_observation(changed.clone());
-        assert!(!Arc::ptr_eq(&original, &replacement));
-        assert_eq!(replacement.as_ref(), &changed);
-        assert_ne!(original.wizard_game, replacement.wizard_game);
-        assert_eq!(original.revision, replacement.revision);
-        assert_eq!(original.observation.tick, replacement.observation.tick);
-
-        let client = service.clients.get_mut(&connection.id).unwrap();
-        client.actor = Some(ActorId(2));
-        assert!(!Arc::ptr_eq(
-            &original,
-            &service.share_observation((*original).clone())
-        ));
-        let client = service.clients.get_mut(&connection.id).unwrap();
-        client.actor = Some(ActorId(1));
-        client.last_observation.as_mut().unwrap().branch = BranchId("other-branch".into());
-        assert!(!Arc::ptr_eq(
-            &original,
-            &service.share_observation((*original).clone())
-        ));
-    }
-
-    #[test]
     fn rejected_connection_preserves_identity_and_waits_for_transport_release() {
         let frame = tor_protocol::MAX_RESPONSE_BYTES;
         let mut service = Service::with_outbound_limits(
@@ -3970,25 +4480,9 @@ mod tests {
                 );
                 let ServerMessage::Snapshot { snapshot, .. } = client.messages.try_recv().unwrap()
                 else {
-                    panic!("initial snapshot");
+                    panic!("initial snapshot")
                 };
                 connections.push((client, snapshot));
-            }
-            let first = &service.clients[&connections[0].0.id]
-                .last_observation
-                .as_ref()
-                .unwrap()
-                .state;
-            for (client, _) in &connections {
-                let disclosed = &service.clients[&client.id]
-                    .last_observation
-                    .as_ref()
-                    .unwrap()
-                    .state;
-                assert!(
-                    Arc::ptr_eq(first, disclosed),
-                    "equal initial snapshots must share their retained observation"
-                );
             }
             assert_eq!(
                 connections
@@ -3998,105 +4492,111 @@ mod tests {
                     .len(),
                 watchers
             );
-            let revisions = BTreeMap::from([(ActorId(1), 0)]);
-            let result = service
-                .engine
-                .command(
-                    "test",
-                    "test",
-                    ActorId(1),
-                    "wait",
-                    &service.engine.branch().clone(),
-                    crate::journal::Command::Act {
-                        expected_revision: 0,
-                        action: crate::journal::Action::Wait,
-                    },
-                )
-                .unwrap();
-            let before = tor_simulation::diagnostics::work_counts();
-            service.action_result_update(&revisions, &result).unwrap();
-            let after = tor_simulation::diagnostics::work_counts();
             assert_eq!(
-                after.observations - before.observations,
-                1,
-                "watchers: {watchers}"
+                connections
+                    .iter()
+                    .map(|(_, snapshot)| snapshot.state.snapshot.clone())
+                    .collect::<BTreeSet<_>>()
+                    .len(),
+                watchers,
+                "capabilities belong to attachments, not shared display counters"
             );
-            let expected = service.engine.state(ActorId(1)).unwrap();
-            let first: &StateView = &service.clients[&connections[0].0.id]
-                .last_observation
-                .as_ref()
-                .unwrap()
-                .state;
-            for (client, _) in &connections {
-                let disclosed: &StateView = &service.clients[&client.id]
-                    .last_observation
-                    .as_ref()
-                    .unwrap()
-                    .state;
-                assert!(
-                    std::ptr::eq(first, disclosed),
-                    "one actor observation must be shared across its readers"
+            // The test transport decodes serialized messages, so the received
+            // snapshot has an independent Arc. Preserve the server allocations
+            // separately to prove that causal updates never replace them.
+            let retained_pictures: BTreeMap<_, _> = connections
+                .iter()
+                .map(|(client, _)| {
+                    (
+                        client.id,
+                        Arc::clone(
+                            &service.clients[&client.id]
+                                .last_observation
+                                .as_ref()
+                                .unwrap()
+                                .state,
+                        ),
+                    )
+                })
+                .collect();
+            for (index, action) in [
+                crate::journal::Action::Wait,
+                crate::journal::Action::Move {
+                    direction: crate::journal::Direction::East,
+                },
+                crate::journal::Action::Move {
+                    direction: crate::journal::Direction::West,
+                },
+                crate::journal::Action::Wait,
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let before_states = service.semantic_states().unwrap();
+                let result = service
+                    .engine
+                    .command(
+                        "test",
+                        "test",
+                        ActorId(1),
+                        &format!("wait-{index}"),
+                        &service.engine.branch().clone(),
+                        crate::journal::Command::Act {
+                            expected_boundary: service.engine.causal_boundary(ActorId(1)).unwrap(),
+                            action,
+                        },
+                    )
+                    .unwrap();
+                let before = tor_simulation::diagnostics::work_counts();
+                let pictures_before = Engine::picture_adaptation_count();
+                service
+                    .action_result_update(&before_states, &result)
+                    .unwrap();
+                let after = tor_simulation::diagnostics::work_counts();
+                assert_eq!(
+                    Engine::picture_adaptation_count() - pictures_before,
+                    if index == 1 || index == 2 { 2 } else { 0 },
+                    "canonical fallback is once per actor, not per {watchers} watchers"
                 );
-            }
-            let retained = Arc::clone(
-                &service.clients[&connections[0].0.id]
-                    .last_observation
-                    .as_ref()
-                    .unwrap()
-                    .state,
-            );
-            for (client, snapshot) in &mut connections {
-                let ServerMessage::Update { update } = client.messages.try_recv().unwrap() else {
-                    panic!("observation update");
-                };
-                assert_eq!(update.cursor.sequence, snapshot.cursor.sequence + 1);
-                assert_eq!(update.branch, snapshot.branch);
-                let (state, event) = match update.body {
-                    UpdateBody::Observation { state, event } => {
-                        (Arc::unwrap_or_clone(state), event)
-                    }
-                    UpdateBody::ObservationDelta { state, event, .. } => {
-                        (state.apply(&snapshot.state).unwrap(), event)
-                    }
-                    _ => panic!("observation body"),
-                };
-                assert_eq!(state, expected);
-                assert_eq!(event.unwrap().id, result.entry.id);
-            }
-            let next_result = service
-                .engine
-                .command(
-                    "test",
-                    "test",
-                    ActorId(1),
-                    "wait-again",
-                    &service.engine.branch().clone(),
-                    crate::journal::Command::Act {
-                        expected_revision: expected.revision,
-                        action: crate::journal::Action::Wait,
-                    },
-                )
-                .unwrap();
-            service
-                .action_result_update(
-                    &BTreeMap::from([(ActorId(1), expected.revision)]),
-                    &next_result,
-                )
-                .unwrap();
-            assert_eq!(*retained, expected, "an older boundary stays immutable");
-            let current = &service.clients[&connections[0].0.id]
-                .last_observation
-                .as_ref()
-                .unwrap()
-                .state;
-            assert!(!Arc::ptr_eq(&retained, current));
-            for (client, _) in &connections {
-                let next = &service.clients[&client.id]
-                    .last_observation
-                    .as_ref()
-                    .unwrap()
-                    .state;
-                assert!(Arc::ptr_eq(current, next));
+                assert_eq!(
+                    after.observations - before.observations,
+                    1,
+                    "watchers: {watchers}"
+                );
+                for (client, snapshot) in &mut connections {
+                    let ServerMessage::Update { update } = client.messages.try_recv().unwrap()
+                    else {
+                        panic!("outcome update")
+                    };
+                    assert_eq!(
+                        update.cursor.sequence,
+                        snapshot.cursor.sequence + index as u64 + 1
+                    );
+                    assert_eq!(update.branch, snapshot.branch);
+                    let UpdateBody::Outcome {
+                        event: Some(event),
+                        facts,
+                        ..
+                    } = update.body
+                    else {
+                        panic!("ordered outcome")
+                    };
+                    assert_eq!(event.id, result.entry.id);
+                    assert!(facts
+                        .facts
+                        .iter()
+                        .any(|fact| matches!(fact, OutcomeFact::OwnAction { .. })));
+                    let retained = &service.clients[&client.id]
+                        .last_observation
+                        .as_ref()
+                        .unwrap()
+                        .state;
+                    assert!(
+                        Arc::ptr_eq(retained, &retained_pictures[&client.id]),
+                        "causal updates do not mutate or replace retained pictures"
+                    );
+                    assert_eq!(retained.as_ref(), snapshot.state.as_ref());
+                }
             }
         }
     }
@@ -4126,7 +4626,7 @@ mod tests {
             ServerMessage::Update { update } if matches!(&update.body, UpdateBody::Readiness { readiness } if readiness.admission)));
         assert!(matches!(controller.messages.try_recv().unwrap(),
             ServerMessage::Ack { request_id, .. } if request_id == "control"));
-        observer.messages.try_recv().unwrap();
+        while observer.messages.try_recv().is_ok() {}
         for i in 0..QUEUE {
             service.handle(controller.id, format!("snapshot-{i}"), Request::Snapshot);
         }
@@ -4139,7 +4639,12 @@ mod tests {
                 context: service.input_context(observer.id).unwrap(),
                 branch: branch.clone(),
                 command: Command::Wizard {
-                    expected_revision: 0,
+                    expected_revision: service.clients[&observer.id]
+                        .last_observation
+                        .as_ref()
+                        .unwrap()
+                        .state
+                        .revision,
                     operation: "rewind initial".into(),
                 },
             },
@@ -4187,7 +4692,7 @@ mod tests {
             ServerMessage::Update { update } if matches!(&update.body, UpdateBody::Readiness { readiness } if readiness.admission)));
         assert!(matches!(controller.messages.try_recv().unwrap(),
             ServerMessage::Ack { request_id, .. } if request_id == "control"));
-        observer.messages.try_recv().unwrap();
+        while observer.messages.try_recv().is_ok() {}
         for i in 0..QUEUE {
             service.handle(controller.id, format!("snapshot-{i}"), Request::Snapshot);
         }
@@ -4198,7 +4703,6 @@ mod tests {
                 context: service.input_context(controller.id).unwrap(),
                 branch: service.engine.branch().clone(),
                 command: Command::Act {
-                    expected_revision: 0,
                     action: Action::Wait,
                 },
             },
@@ -4266,7 +4770,7 @@ mod tests {
             }
             assert!(service.clients.contains_key(&client.id));
         }
-        let revisions = BTreeMap::from([(ActorId(1), 0)]);
+        let before_states = service.semantic_states().unwrap();
         let result = service
             .engine
             .command(
@@ -4276,12 +4780,14 @@ mod tests {
                 "wait",
                 &service.engine.branch().clone(),
                 crate::journal::Command::Act {
-                    expected_revision: 0,
+                    expected_boundary: 0,
                     action: crate::journal::Action::Wait,
                 },
             )
             .unwrap();
-        service.action_result_update(&revisions, &result).unwrap();
+        service
+            .action_result_update(&before_states, &result)
+            .unwrap();
         for client in &clients[..2] {
             assert!(client.close.borrow().is_some());
             assert!(!service.clients.contains_key(&client.id));
@@ -4292,7 +4798,7 @@ mod tests {
         let messages: Vec<_> = std::iter::from_fn(|| survivor.messages.try_recv().ok()).collect();
         assert!(messages.iter().any(|message| matches!(message,
             ServerMessage::Update { update } if matches!(update.body,
-                UpdateBody::Observation { .. } | UpdateBody::ObservationDelta { .. }))));
+                UpdateBody::Outcome { .. }))));
     }
 
     #[test]
@@ -4361,7 +4867,6 @@ mod tests {
         while client.messages.try_recv().is_ok() {}
         service.handle(client.id, "control".into(), Request::AcquireControl);
         while client.messages.try_recv().is_ok() {}
-        let revision = service.engine.revision(ActorId(1)).unwrap();
         service.handle(
             client.id,
             "wait".into(),
@@ -4369,7 +4874,6 @@ mod tests {
                 context: service.input_context(client.id).unwrap(),
                 branch: service.engine.branch().clone(),
                 command: Command::Act {
-                    expected_revision: revision,
                     action: Action::Wait,
                 },
             },
@@ -4388,10 +4892,10 @@ mod tests {
     #[test]
     fn ai_turns_run_until_a_controlled_actor_is_due() {
         let (mut service, _client) = character_waiting_on_a_guard();
-        let before = service.engine.revision(ActorId(1)).unwrap();
+        let before = service.engine.causal_boundary(ActorId(1)).unwrap();
         service.run_until_blocked();
         assert_eq!(service.engine.next_actor(), Some(ActorId(1)));
-        assert_ne!(service.engine.revision(ActorId(1)).unwrap(), before);
+        assert_ne!(service.engine.causal_boundary(ActorId(1)).unwrap(), before);
         assert!(matches!(service.step(), Step::Blocked));
     }
 
@@ -4412,7 +4916,7 @@ mod tests {
         for i in 0..QUEUE - HEADROOM + 1 {
             service.handle(client.id, format!("fill-{i}"), Request::Snapshot);
         }
-        let before = service.engine.revision(ActorId(1)).unwrap();
+        let before = service.engine.causal_boundary(ActorId(1)).unwrap();
         let Step::Full(full) = service.step() else {
             panic!("the run must wait for the client");
         };
@@ -4420,12 +4924,12 @@ mod tests {
             full.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
             [client.id]
         );
-        assert_eq!(service.engine.revision(ActorId(1)).unwrap(), before);
+        assert_eq!(service.engine.causal_boundary(ActorId(1)).unwrap(), before);
         assert!(client.close.borrow().is_none());
         while client.messages.try_recv().is_ok() {}
         service.run_until_blocked();
         assert_eq!(service.engine.next_actor(), Some(ActorId(1)));
-        assert_ne!(service.engine.revision(ActorId(1)).unwrap(), before);
+        assert_ne!(service.engine.causal_boundary(ActorId(1)).unwrap(), before);
     }
 
     #[tokio::test]
@@ -4498,7 +5002,12 @@ mod tests {
     #[tokio::test]
     async fn mail_waiting_in_the_mailbox_is_handled_before_the_next_action() {
         let (service, mut client) = character_waiting_on_a_guard();
-        let revision = service.engine.revision(ActorId(1)).unwrap();
+        let revision = service.clients[&client.id]
+            .last_observation
+            .as_ref()
+            .unwrap()
+            .state
+            .revision;
         let branch = service.engine.branch().clone();
         let (mail, mailbox) = mpsc::channel(8);
         mail.send(crate::runner::Mail::Request {
@@ -4583,11 +5092,11 @@ mod tests {
         for (index, case, operation, expected) in [
             (1, 0, "combat capture on", Some(ErrorCode::Unauthorized)),
             (1, 0, "combat inspect bad", Some(ErrorCode::Unauthorized)),
-            (0, 1, "combat capture on", Some(ErrorCode::StaleRevision)),
+            (0, 1, "combat capture on", Some(ErrorCode::StaleContext)),
             (0, 2, "combat capture on", Some(ErrorCode::WrongBranch)),
             (0, 3, "combat capture on", Some(ErrorCode::StaleContext)),
             (0, 0, "combat capture on", None),
-            (0, 1, "combat capture off", Some(ErrorCode::StaleRevision)),
+            (0, 1, "combat capture off", Some(ErrorCode::StaleContext)),
             (0, 0, "combat inspect", None),
             (0, 0, "combat inspect 1", Some(ErrorCode::InvalidAction)),
             (0, 0, "combat capture off", None),
@@ -4613,7 +5122,13 @@ mod tests {
                         service.engine.branch().clone()
                     },
                     command: Command::Wizard {
-                        expected_revision: before.revision + u64::from(case == 1),
+                        expected_revision: service.clients[&id]
+                            .last_observation
+                            .as_ref()
+                            .unwrap()
+                            .state
+                            .revision
+                            + u64::from(case == 1),
                         operation: operation.into(),
                     },
                 },
@@ -4650,7 +5165,11 @@ mod tests {
                     })
                     .expect("private diagnostics reply");
                 assert!(report.validate().is_ok());
-                assert_eq!(report.enabled, operation != "combat capture off");
+                assert_eq!(
+                    report.enabled,
+                    operation != "combat capture off",
+                    "{operation}"
+                );
                 assert_eq!(context.actor, ActorId(1));
                 assert_eq!(context.input, service.input_context(id).unwrap());
             }
@@ -4713,7 +5232,12 @@ mod tests {
                     context: service.input_context(id).unwrap(),
                     branch: service.engine.branch().clone(),
                     command: Command::Wizard {
-                        expected_revision: before.revision,
+                        expected_revision: service.clients[&id]
+                            .last_observation
+                            .as_ref()
+                            .unwrap()
+                            .state
+                            .revision,
                         operation: format!("creature inspect {target}"),
                     },
                 },
@@ -4760,7 +5284,7 @@ mod tests {
             );
         }
         for (case, code) in [
-            (0, ErrorCode::StaleRevision),
+            (0, ErrorCode::StaleContext),
             (1, ErrorCode::WrongBranch),
             (2, ErrorCode::StaleContext),
             (3, ErrorCode::InvalidAction),
@@ -4781,7 +5305,13 @@ mod tests {
                         service.engine.branch().clone()
                     },
                     command: Command::Wizard {
-                        expected_revision: before.revision + u64::from(case == 0),
+                        expected_revision: service.clients[&id]
+                            .last_observation
+                            .as_ref()
+                            .unwrap()
+                            .state
+                            .revision
+                            + u64::from(case == 0),
                         operation: format!("creature inspect {}", if case == 3 { 999 } else { 2 }),
                     },
                 },
@@ -4838,3 +5368,324 @@ mod magic_item_tests;
 #[cfg(test)]
 #[path = "weapon_selection_session_tests.rs"]
 mod weapon_selection_tests;
+
+#[cfg(test)]
+mod input_operand_context_tests {
+
+    #[test]
+    fn spectator_readiness_ignores_owner_inventory_and_control_generations() {
+        for inventory_change in [true, false] {
+            let (mut service, controller) = fixture();
+            let actor = ActorId(1);
+            let account = Account {
+                role: AccessRole::Spectator,
+                user: "readiness-spectator".into(),
+                token: "spectator-test".into(),
+                actors: BTreeSet::from([actor]),
+            };
+            let mut spectator = service.connect(&account, "headless".into()).unwrap();
+            service.handle(
+                spectator.id,
+                "attach-spectator".into(),
+                Request::Attach { actor },
+            );
+            while spectator.messages.try_recv().is_ok() {}
+            let spectator_context = service.input_context(spectator.id).unwrap();
+            let spectator_readiness = service.current_readiness(spectator.id).unwrap();
+            assert!(!spectator_readiness.permissions.admission);
+            assert!(spectator_readiness.permissions.resume.is_empty());
+            assert!(spectator_readiness.permissions.cancel.is_empty());
+            let controller_readiness = service.current_readiness(controller.id).unwrap();
+            let before = service.engine.state(actor).unwrap();
+            if inventory_change {
+                // Inventory presence is public. Its private authority generation must
+                // nevertheless not turn spectator readiness into an owner-input clock.
+                let item = before.observation.ground_items[0].item.id;
+                let generation = service.engine.input_generation(actor).unwrap();
+                let wire = Command::Act {
+                    action: Action::Take {
+                        item,
+                        quantity: None,
+                    },
+                };
+                let decoded = crate::wire_adapter::decode_command(&wire).unwrap();
+                let branch = service.engine.branch().clone();
+                let command = service
+                    .engine
+                    .resolve_command(actor, &branch, decoded)
+                    .unwrap();
+                service
+                    .engine
+                    .command(
+                        "input-test",
+                        "headless",
+                        actor,
+                        "take-for-authority",
+                        &branch,
+                        command,
+                    )
+                    .unwrap();
+                service.engine.execute_next_intention().unwrap().unwrap();
+                assert!(service
+                    .engine
+                    .state(actor)
+                    .unwrap()
+                    .observation
+                    .inventory
+                    .iter()
+                    .any(|held| held.id == item));
+                assert!(service.engine.input_generation(actor).unwrap() > generation);
+            } else {
+                assert!(service.set_controller(actor, None));
+                assert!(service.set_controller(actor, Some(controller.id)));
+                assert_eq!(
+                    service.engine.state(actor).unwrap(),
+                    before,
+                    "control ABA changes authority, not the disclosed observation"
+                );
+            }
+            assert_ne!(
+                service.current_readiness(controller.id).unwrap(),
+                controller_readiness,
+                "owner authority must still invalidate"
+            );
+            assert_eq!(
+                service.current_readiness(spectator.id).unwrap(),
+                spectator_readiness,
+                "spectator permissions and input context must not expose owner generation changes"
+            );
+            service.refresh_readiness();
+            assert_eq!(
+                service.input_context(spectator.id).unwrap(),
+                spectator_context
+            );
+            let updates: Vec<_> =
+                std::iter::from_fn(|| spectator.messages.try_recv().ok()).collect();
+            assert!(
+                !updates.iter().any(|message| matches!(message,
+                    ServerMessage::Update { update, .. }
+                        if matches!(&update.body, UpdateBody::Readiness { .. })
+                )),
+                "spurious spectator readiness update: {updates:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn input_registration_survives_one_viewer_and_ends_with_last_disconnect() {
+        let actor = ActorId(1);
+        let mut engine = Engine::memory(Scenario::two_room(42)).unwrap();
+        engine.enable_wizard().unwrap();
+        let mut service = Service::new(engine);
+        let account = Account {
+            role: AccessRole::Player,
+            user: "registration-test".into(),
+            token: "test".into(),
+            actors: BTreeSet::from([actor]),
+        };
+        let first = service.connect(&account, "first-viewer".into()).unwrap();
+        service.handle(first.id, "attach-first".into(), Request::Attach { actor });
+        assert_eq!(service.engine.input_generation(actor).unwrap(), 0);
+        assert!(
+            service.controllers.is_empty(),
+            "observers acquire no control"
+        );
+        teleport(
+            &mut service,
+            actor,
+            "registration-move",
+            Position {
+                region: 2,
+                x: 1,
+                y: 1,
+                z: 0,
+            },
+        );
+        let generation = service.engine.input_generation(actor).unwrap();
+        assert!(generation > 0, "positive noninitial registration witness");
+        let second = service.connect(&account, "second-viewer".into()).unwrap();
+        service.handle(second.id, "attach-second".into(), Request::Attach { actor });
+        assert_eq!(service.engine.input_generation(actor).unwrap(), generation);
+        assert_eq!(service.clients[&first.id].actor, Some(actor));
+        assert_eq!(service.clients[&second.id].actor, Some(actor));
+        service.disconnect(first.id);
+        assert!(!service.clients.contains_key(&first.id));
+        assert!(service.clients.contains_key(&second.id));
+        assert_eq!(service.engine.input_generation(actor).unwrap(), generation);
+        assert!(service.pending_pauses.is_empty());
+        service.disconnect(second.id);
+        assert!(service.engine.input_generation(actor).is_err());
+        assert!(!service.control_generations.contains_key(&actor));
+        assert!(service.pending_pauses.is_empty());
+    }
+    use super::*;
+    use crate::journal::{Command as BackendCommand, Position, WizardOperation};
+    use crate::{ActorSetup, Scenario};
+
+    fn fixture() -> (Service, Connection) {
+        let mut scenario = Scenario::two_room(42);
+        scenario.actors.push(ActorSetup {
+            position: Position {
+                region: 1,
+                x: 2,
+                y: 1,
+                z: 0,
+            },
+            turn_ticks: 100,
+        });
+        let mut engine = Engine::memory(scenario).unwrap();
+        engine.enable_wizard().unwrap();
+        let mut service = Service::new(engine);
+        let account = Account {
+            role: AccessRole::Player,
+            user: "input-test".into(),
+            token: "test".into(),
+            actors: BTreeSet::from([ActorId(1)]),
+        };
+        let mut client = service.connect(&account, "headless".into()).unwrap();
+        service.handle(
+            client.id,
+            "attach".into(),
+            Request::Attach { actor: ActorId(1) },
+        );
+        service.handle(client.id, "control".into(), Request::AcquireControl);
+        while client.messages.try_recv().is_ok() {}
+        (service, client)
+    }
+    fn teleport(service: &mut Service, target: ActorId, request: &str, position: Position) {
+        let actor = ActorId(1);
+        service
+            .engine
+            .command(
+                "test",
+                "test",
+                actor,
+                request,
+                &service.engine.branch().clone(),
+                BackendCommand::Wizard {
+                    display_basis: None,
+                    expected_boundary: service.engine.causal_boundary(actor).unwrap(),
+                    operation: WizardOperation::Teleport {
+                        actor: target,
+                        position,
+                    },
+                },
+            )
+            .unwrap();
+    }
+    fn wait(service: &mut Service, client: &Connection, context: InputContext, request: &str) {
+        service.handle(
+            client.id,
+            request.into(),
+            Request::Command {
+                context,
+                branch: service.engine.branch().clone(),
+                command: Command::Act {
+                    action: Action::Wait,
+                },
+            },
+        );
+    }
+    #[test]
+    fn unrelated_display_change_accepts_original_context_and_retry_exactly_once() {
+        let (mut service, mut client) = fixture();
+        let context = service.input_context(client.id).unwrap();
+        let revision = service.engine.causal_boundary(ActorId(1)).unwrap();
+        teleport(
+            &mut service,
+            ActorId(2),
+            "neighbor",
+            Position {
+                region: 1,
+                x: 3,
+                y: 1,
+                z: 0,
+            },
+        );
+        assert!(service.engine.causal_boundary(ActorId(1)).unwrap() > revision);
+        assert_eq!(
+            service.current_readiness(client.id),
+            service.clients[&client.id].readiness
+        );
+        wait(&mut service, &client, context.clone(), "original");
+        let admitted: Vec<_> = std::iter::from_fn(|| client.messages.try_recv().ok()).collect();
+        assert!(
+            admitted
+                .iter()
+                .any(|m| matches!(m, ServerMessage::Ack { .. })),
+            "{admitted:?}"
+        );
+        assert!(service.engine.has_pending_intention(ActorId(1)));
+        let sequence = service.engine.save_status().accepted_sequence;
+        // The admission changed input authority. Exact receipt retry still wins first.
+        assert_ne!(service.input_context(client.id).unwrap(), context);
+        wait(&mut service, &client, context, "original");
+        let retry: Vec<_> = std::iter::from_fn(|| client.messages.try_recv().ok()).collect();
+        assert!(
+            retry.iter().any(|m| matches!(m, ServerMessage::Ack { .. })),
+            "{retry:?}"
+        );
+        assert_eq!(service.engine.save_status().accepted_sequence, sequence);
+    }
+    #[test]
+    fn origin_and_control_aba_reject_without_publication_or_admission() {
+        for control in [false, true] {
+            let (mut service, mut client) = fixture();
+            let context = service.input_context(client.id).unwrap();
+            if control {
+                assert!(service.set_controller(ActorId(1), None));
+                assert!(service.set_controller(ActorId(1), Some(client.id)));
+            } else {
+                teleport(
+                    &mut service,
+                    ActorId(1),
+                    "away",
+                    Position {
+                        region: 2,
+                        x: 1,
+                        y: 1,
+                        z: 0,
+                    },
+                );
+                teleport(
+                    &mut service,
+                    ActorId(1),
+                    "back",
+                    Position {
+                        region: 1,
+                        x: 1,
+                        y: 1,
+                        z: 0,
+                    },
+                );
+            }
+            assert_eq!(
+                service.input_context(client.id).unwrap(),
+                context,
+                "no intermediate publication"
+            );
+            let sequence = service.engine.save_status().accepted_sequence;
+            wait(&mut service, &client, context, "stale");
+            let replies: Vec<_> = std::iter::from_fn(|| client.messages.try_recv().ok()).collect();
+            assert!(
+                replies.iter().any(|m| matches!(
+                    m,
+                    ServerMessage::Error {
+                        code: ErrorCode::StaleContext,
+                        ..
+                    }
+                )),
+                "{replies:?}"
+            );
+            assert!(!service.engine.has_pending_intention(ActorId(1)));
+            assert_eq!(service.engine.save_status().accepted_sequence, sequence);
+        }
+    }
+}
+
+#[path = "presentation_queries.rs"]
+mod presentation_queries;
+
+#[cfg(test)]
+#[path = "palette_outcome_tests.rs"]
+mod palette_outcome_tests;

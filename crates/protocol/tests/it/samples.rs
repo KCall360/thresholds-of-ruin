@@ -38,6 +38,7 @@ fn request_kind(request: &Request) -> &'static str {
         Request::AcquireControl => "acquire_control",
         Request::ReleaseControl => "release_control",
         Request::Snapshot => "snapshot",
+        Request::Observe => "observe",
         Request::Palette => "palette",
         Request::Map { .. } => "map",
         Request::Chart { .. } => "chart",
@@ -93,6 +94,7 @@ const CLIENT_KINDS: &[&str] = &[
     "acquire_control",
     "release_control",
     "snapshot",
+    "observe",
     "palette",
     "map",
     "chart",
@@ -148,6 +150,7 @@ server_sample_kinds! {
     Welcome => ("welcome", None),
     Snapshot => ("snapshot", None),
     SnapshotPart => ("snapshot_part", None),
+    Outcome => ("update.outcome", None),
     Readiness => ("update.readiness", None),
     Intention => ("update.intention", None),
     Travel => ("update.travel", None),
@@ -182,6 +185,7 @@ fn server_kind(message: &ServerMessage) -> ServerSampleKind {
         ServerMessage::Snapshot { .. } => Kind::Snapshot,
         ServerMessage::SnapshotPart { .. } => Kind::SnapshotPart,
         ServerMessage::Update { update } => match update.body {
+            UpdateBody::Outcome { .. } => Kind::Outcome,
             UpdateBody::Readiness { .. } => Kind::Readiness,
             UpdateBody::Intention { .. } => Kind::Intention,
             UpdateBody::Travel { .. } => Kind::Travel,
@@ -829,4 +833,44 @@ fn recorded_polymorph_has_dual_aim_and_changed_only_diagnostic() {
                 .as_str()
                 .is_some_and(|item| dual_items.contains(item))
     }));
+}
+
+#[test]
+fn recorded_noticed_outcome_has_disclosed_event_time_position() {
+    let mut noticed = Vec::new();
+    let mut doors = Vec::new();
+    for sample in samples()["server"].as_array().unwrap() {
+        let message: ServerMessage = round_trip(sample);
+        if let ServerMessage::Update { update } = message {
+            if let UpdateBody::Outcome { facts, .. } = update.body {
+                for fact in &facts.facts {
+                    if let OutcomeFact::Noticed {
+                        actor, position, ..
+                    } = fact
+                    {
+                        assert_ne!(*actor, facts.self_target);
+                        noticed.push(*position);
+                    }
+                    if let OutcomeFact::DoorChanged {
+                        name,
+                        open,
+                        position,
+                    } = fact
+                    {
+                        doors.push((name.clone(), *open, *position));
+                    }
+                }
+            }
+        }
+    }
+    // The original reveal and the foreign-door recording both notice the actor.
+    assert_eq!(noticed, vec![Position { x: 2, y: 0, z: 0 }; 2]);
+    assert_eq!(
+        doors,
+        vec![(
+            "wooden door".to_owned(),
+            true,
+            Position { x: 1, y: 0, z: 0 }
+        )]
+    );
 }

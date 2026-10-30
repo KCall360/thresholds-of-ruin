@@ -294,12 +294,13 @@ class PostmergeTests(unittest.TestCase):
                              ('windows_binaries', ('producer_debug', 'producer_release')),
                              ('selected_consumer', ('consumer',))]:
             needs[group]['outputs'] = {'toolchain_' + role: json.dumps(self.compiler) for role in roles}
+        needs['profiles']['outputs'].update(linux_debug_shard_1='1', linux_debug_shard_2='1')
         needs['windows_binaries']['outputs'].update(producer_debug='1', producer_release='1')
         return current, event, needs
 
     def test_seal_requires_full_pr_all_gates_and_all_unique_compiler_outputs(self):
         with patch.dict(os.environ, {'GITHUB_EVENT_NAME': 'pull_request'}):
-            for mutation in ('mode', 'event', 'missing_role', 'extra_role', 'failed_group', 'missing_group', 'parents'):
+            for mutation in ('mode', 'event', 'missing_role', 'extra_role', 'failed_group', 'missing_group', 'shard_compiler', 'shard_attempt', 'missing_attempt', 'parents'):
                 current, event, needs = self.seal_inputs()
                 good = postmerge.seal(current, event, needs)
                 self.assertEqual(good['assurance'], 'fresh-full-pr')
@@ -310,6 +311,11 @@ class PostmergeTests(unittest.TestCase):
                 elif mutation == 'extra_role': needs['profiles']['outputs']['unowned'] = 'x'
                 elif mutation == 'failed_group': needs['check']['result'] = 'failure'
                 elif mutation == 'missing_group': del needs['check']
+                elif mutation == 'shard_compiler':
+                    changed = {**self.compiler, 'release': '1.99.2'}
+                    needs['profiles']['outputs']['toolchain_linux_debug_python_shard_2'] = json.dumps(changed)
+                elif mutation == 'missing_attempt': del needs['profiles']['outputs']['linux_debug_shard_2']
+                elif mutation == 'shard_attempt': needs['profiles']['outputs']['linux_debug_shard_2'] = '2'
                 else: current['parents'].reverse()
                 with self.assertRaises((ValueError, KeyError)): postmerge.seal(current, event, needs)
         current, event, needs = self.seal_inputs()
@@ -505,7 +511,8 @@ class PostmergeTests(unittest.TestCase):
         self.assertEqual(successful, {
             'Change scope and documentation', 'Repository tooling lint', 'Dependencies (bans licenses sources)',
             'Rust (ubuntu-latest, debug, rust)', 'Rust (ubuntu-latest, release, rust)',
-            'Rust (ubuntu-latest, debug, python)', 'Rust (ubuntu-latest, release, python)',
+            'Rust (ubuntu-latest, debug, python shard 1)', 'Rust (ubuntu-latest, debug, python shard 2)',
+            'Rust (ubuntu-latest, release, python)',
             'Rust (windows-latest, debug, rust)', 'Rust (windows-latest, release, rust)',
             'Full applications (windows-latest, debug)', 'Full applications (windows-latest, release)',
             'Rust (windows-latest, debug, python shard 1)', 'Rust (windows-latest, debug, python shard 2)',
@@ -523,7 +530,7 @@ class PostmergeTests(unittest.TestCase):
             self.assertIn('name: ' + literal, workflow_job(job))
         self.assertIn('name: Full PR qualification', workflow_job('full_qualification'))
         self.assertIn('name: Post-merge integration', workflow_job('postmerge'))
-        self.assertIn('name: Rust (${{ matrix.os }}, ${{ matrix.profile }}, ${{ matrix.partition }})', workflow_job('profiles'))
+        self.assertIn("format('python shard {0}', matrix.shard)", workflow_job('profiles'))
         self.assertIn('profile: [debug, release]', workflow_job('profiles'))
         self.assertIn('partition: [rust, python]', workflow_job('profiles'))
         self.assertIn('shard: [1, 2]', workflow_job('windows_python'))

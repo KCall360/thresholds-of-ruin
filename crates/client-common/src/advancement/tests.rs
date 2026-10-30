@@ -2,6 +2,7 @@ use super::*;
 
 fn context() -> ReplyContext {
     ReplyContext {
+        snapshot: tor_protocol::SnapshotId("fixture".into()),
         input: InputContext {
             stream: StreamContext {
                 stream: StreamId("owner-stream".into()),
@@ -95,6 +96,110 @@ fn opened() -> AdvancementPages {
     let mut pages = AdvancementPages::default();
     install(&mut pages, overview_page(), "open").unwrap();
     pages
+}
+
+#[test]
+fn pending_pages_survive_ordered_cursor_progress_on_the_same_picture() {
+    for overview in [true, false] {
+        let mut pages = if overview {
+            AdvancementPages::default()
+        } else {
+            opened()
+        };
+        let page = if overview {
+            overview_page()
+        } else {
+            AdvancementPage {
+                basis: basis(),
+                revision: 6,
+                query: AdvancementQuery::Ledger {
+                    basis: basis(),
+                    offset: 0,
+                },
+                total: 0,
+                next: None,
+                entries: vec![],
+            }
+        };
+        pages
+            .track(&context(), "in-flight", 6, &page.query)
+            .unwrap();
+        let mut advanced = context();
+        advanced.cursor.sequence += 1;
+        advanced.cursor.tick += 1;
+        pages.observe(&advanced, true);
+        assert!(!pages.is_current(&advanced));
+        pages
+            .accept(&advanced, "in-flight", &page, MAX_ADVANCEMENT_PAGE_BYTES)
+            .unwrap();
+        assert!(pages.is_current(&advanced));
+        assert!(!pages.is_current(&context()));
+    }
+}
+
+#[test]
+fn pending_pages_reject_changed_picture_authority_and_backward_cursors() {
+    for field in 0..10 {
+        let mut pages = AdvancementPages::default();
+        let page = overview_page();
+        pages
+            .track(&context(), "in-flight", 6, &page.query)
+            .unwrap();
+        let mut changed = context();
+        match field {
+            0 => changed.actor = ActorId(2),
+            1 => changed.branch = BranchId("other".into()),
+            2 => changed.input.stream.stream = StreamId("other".into()),
+            3 => changed.input.stream.epoch += 1,
+            4 => changed.input.readiness_revision += 1,
+            5 => changed.snapshot = tor_protocol::SnapshotId("other".into()),
+            6 => changed.revision += 1,
+            7 => changed.cursor.sequence -= 1,
+            8 => changed.cursor.tick -= 1,
+            _ => {}
+        }
+        pages.observe(&changed, field != 9);
+        assert!(
+            pages
+                .accept(&changed, "in-flight", &page, MAX_ADVANCEMENT_PAGE_BYTES)
+                .is_err(),
+            "field {field}"
+        );
+        assert!(pages.page().is_none());
+    }
+}
+
+#[test]
+fn presentation_freshness_requires_the_exact_context_and_explicit_validity() {
+    let pages = opened();
+    assert!(
+        pages.is_current(&context()),
+        "a validated owner page is current"
+    );
+    for field in 0..8 {
+        let mut changed = context();
+        match field {
+            0 => changed.actor = ActorId(2),
+            1 => changed.branch = BranchId("other".into()),
+            2 => changed.input.stream.stream = StreamId("other".into()),
+            3 => changed.input.stream.epoch += 1,
+            4 => changed.input.readiness_revision += 1,
+            5 => changed.cursor.sequence += 1,
+            6 => changed.cursor.tick += 1,
+            _ => changed.revision += 1,
+        }
+        assert!(!pages.is_current(&changed));
+    }
+    let mut invalidated = pages.clone();
+    invalidated.invalidate();
+    assert!(
+        !invalidated.is_current(&context()),
+        "invalidation at the same revision is stale"
+    );
+    let mut redacted = pages.clone();
+    redacted.observe(&context(), false);
+    assert!(!redacted.is_current(&context()));
+    assert!(!AdvancementPages::default().is_current(&context()));
 }
 fn proposal() -> AdvancementProposal {
     AdvancementProposal::Replacement {
@@ -193,7 +298,6 @@ fn confirmation_preserves_refund_only_operands_and_never_refreshes_a_stale_previ
             .confirm(&context(), &view, SupplySelection::Carried)
             .unwrap(),
         Command::Act {
-            expected_revision: 6,
             action: Action::Respec {
                 basis: Box::new(basis()),
                 replacement: match proposal() {
@@ -533,6 +637,7 @@ fn resume_and_cancel_name_only_the_exact_currently_permitted_respec_intention() 
         branch: context.branch.clone(),
         cursor: context.cursor,
         state: std::sync::Arc::new(StateView {
+            snapshot: tor_protocol::SnapshotId("fixture".into()),
             wizard_game: false,
             revision: context.revision,
             observation: view,
@@ -790,12 +895,10 @@ fn form_confirmation_retains_the_exact_preview_and_rejects_a_substituted_form() 
             purchase,
             basis: actual_basis,
         },
-        expected_revision,
     } = command
     else {
         panic!("exact purchase")
     };
-    assert_eq!(expected_revision, 6);
     assert_eq!(*actual_basis, basis());
     assert_eq!(AdvancementProposal::Purchase { purchase }, selected);
 }
@@ -842,7 +945,6 @@ fn growth_source_controls_keep_exact_preview_and_basis_without_client_xp() {
                 )
                 .unwrap(),
             Command::Act {
-                expected_revision: 6,
                 action: Action::ChooseGrowthSource {
                     basis: Box::new(basis()),
                     source
@@ -1012,7 +1114,6 @@ fn intellect_expertise_controls_preview_and_commit_exact_entitlement() {
                 )
                 .unwrap(),
             Command::Act {
-                expected_revision: 6,
                 action: Action::ChooseIntellectExpertise {
                     basis: Box::new(basis()),
                     choice
@@ -1132,4 +1233,60 @@ fn permanent_potion_strength_has_distinct_overview_and_preview_label() {
                 .any(|row| row.contains(&format!("gross refund rows {refunds}"))));
         }
     }
+}
+
+#[test]
+fn supply_display_mode_is_disclosed_separately_from_the_retained_page() {
+    let context = context();
+    let mut observation = crate::test_support::observation();
+    observation.tick = context.cursor.tick;
+    let snapshot: Snapshot = serde_json::from_value(serde_json::json!({
+        "readiness": {"revision": context.input.readiness_revision.to_string(), "admission": false, "resume": [], "cancel": []},
+        "context": context.input.stream, "actor": context.actor, "branch": context.branch,
+        "cursor": context.cursor, "has_control": true, "intentions": [],
+        "history": {"entries": [], "older_before": null},
+        "state": {"snapshot": context.snapshot, "wizard_game": false, "revision": context.revision.to_string(), "observation": observation},
+    })).unwrap();
+    let state = crate::ClientState::from_snapshot(snapshot).unwrap();
+    assert_eq!(
+        state.reply_context(),
+        context,
+        "positive fixture keeps the issued display identity"
+    );
+    let mut pages = opened();
+    let before = pages.page().cloned();
+    assert!(!pages.shows_supplies());
+    assert!(pages
+        .request(AdvancementInput::Supplies, &state)
+        .unwrap()
+        .is_none());
+    assert!(pages.shows_supplies());
+    assert_eq!(
+        pages.page().cloned(),
+        before,
+        "supply display does not mutate the retained protocol page"
+    );
+    assert!(pages.display(&state.state().observation)[0].starts_with("Ration:"));
+    assert!(pages
+        .request(AdvancementInput::Ledger, &state)
+        .unwrap()
+        .is_some());
+    assert!(
+        pages.shows_supplies(),
+        "the retained display stays until a validated reply arrives"
+    );
+    let ledger = AdvancementPage {
+        basis: basis(),
+        revision: context.revision,
+        query: AdvancementQuery::Ledger {
+            basis: basis(),
+            offset: 0,
+        },
+        total: 0,
+        next: None,
+        entries: vec![],
+    };
+    ledger.validate().unwrap();
+    install(&mut pages, ledger, "ledger-after-supplies").unwrap();
+    assert!(!pages.shows_supplies());
 }

@@ -10,6 +10,10 @@ use super::outfit::{Heraldry, Pattern};
 use super::*;
 
 mod accessory_parts;
+mod arm;
+pub(in crate::creatures) use arm::*;
+mod surface;
+use surface::closed_surface_step;
 mod armor_parts;
 mod beast_parts;
 mod boot_parts;
@@ -28,6 +32,7 @@ mod fur_parts;
 mod garment_details;
 #[cfg(test)]
 mod griffin_tests;
+mod head;
 mod headwear_parts;
 mod membrane_parts;
 #[cfg(test)]
@@ -38,6 +43,8 @@ mod panel_parts;
 mod raptor_parts;
 mod royal_parts;
 mod sleeve_parts;
+#[cfg(test)]
+mod test_support;
 mod waist_parts;
 pub(in crate::creatures) use face::*;
 mod hair;
@@ -91,6 +98,9 @@ mod garment_tests;
 
 #[cfg(test)]
 mod joint_tests;
+
+#[cfg(test)]
+mod surface_tests;
 
 #[cfg(test)]
 mod xeroc_tests;
@@ -824,9 +834,10 @@ struct Kit<'a, 'w, 's> {
     rig: Rig,
     key: String,
     /// The cache identity of parts that only some of the outfit shapes:
-    /// the head (by its headwear and whether a gorget hides the neck) and
+    /// the head (by its resolved adornments and neck coverage) and
     /// hanging hair (by nothing worn at all). Redressing reuses them.
     head_key: String,
+    head_recipe: head::Recipe,
     hair_key: String,
     /// Every part is drawn translucent (a phantom).
     ghost: bool,
@@ -983,6 +994,7 @@ pub fn spawn(
     parent: Entity,
     look: &Look,
 ) -> Rig {
+    let head_recipe = head::Recipe::resolve(look);
     let mut kit = Kit {
         commands,
         library,
@@ -1016,16 +1028,8 @@ pub fn spawn(
             Some(recipe) => format!("{}:recipe:{recipe:?}", look.key),
             None => look.key.clone(),
         },
-        head_key: {
-            let outfit = Outfit::worn(look);
-            format!(
-                "{}:{:?}:{}:{:?}",
-                look.body_key.as_deref().unwrap_or(&look.key),
-                outfit.head,
-                outfit.outer == Some(Outer::Cuirass),
-                outfit.trimmings.earrings
-            )
-        },
+        head_key: head_recipe.key(look),
+        head_recipe,
         hair_key: look.body_key.clone().unwrap_or_else(|| look.key.clone()),
         ghost: look.style.ghostly(),
     };
@@ -1084,6 +1088,26 @@ pub fn spawn(
             .id();
         kit.commands.entity(lift).add_child(light);
     }
+    // Tag only the meshes directly attached to generated anatomical frames.
+    // Held props have their own attachment frames, and labels/rings are outside
+    // this set. Commands run after these children have been constructed.
+    let mut frames: Vec<_> = kit.rig.joints.iter().flatten().copied().collect();
+    if look.plan == Plan::Serpent {
+        frames.extend(&kit.rig.segments);
+    }
+    kit.commands.queue(move |world: &mut World| {
+        for frame in frames {
+            let children: Vec<_> = world
+                .get::<Children>(frame)
+                .map(|children| children.iter().collect())
+                .unwrap_or_default();
+            for child in children {
+                if world.get::<Mesh3d>(child).is_some() {
+                    world.entity_mut(child).insert(super::BodySurface);
+                }
+            }
+        }
+    });
     kit.rig
 }
 

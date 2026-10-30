@@ -68,7 +68,7 @@ fn projected(
 ) -> Value {
     encoded(&crate::adapt::observation(
         observation,
-        scene,
+        &scene,
         "private-save-salt",
         true,
         &|_| [None, None, None],
@@ -82,7 +82,7 @@ fn request(action: Value) -> p::Action {
             "type": "command", "branch": "perception-branch",
             "context": {"stream": {"stream": "perception-stream", "epoch": "0"},
                 "readiness_revision": "0"},
-            "command": {"type": "act", "expected_revision": "0", "action": action}
+            "command": {"type": "act", "action": action}
         }
     })
     .to_string();
@@ -608,7 +608,7 @@ fn apparent_retry_matching_uses_saved_facts_before_live_availability() {
     guise(&mut view);
     let original_wire = take(scope.apparent_object(SUBJECT), None);
     let saved = Command::AdmitIntention {
-        expected_revision: 17,
+        expected_boundary: 17,
         action: decode_action(&original_wire, &scope, &view).unwrap(),
     };
     let restored: Command =
@@ -620,19 +620,27 @@ fn apparent_retry_matching_uses_saved_facts_before_live_availability() {
         take(scope.item(s::ItemId(SUBJECT.0)), None),
     ] {
         let decoded = decode_command(&p::Command::Act {
-            expected_revision: 17,
             action: wire.clone(),
         })
         .unwrap();
         assert_eq!(decoded.matches(&restored, &scope), wire == original_wire);
         assert!(decode_action(&wire, &scope, &view).is_err());
     }
-    let wrong_revision = decode_command(&p::Command::Act {
-        expected_revision: 18,
+    let same_action = decode_command(&p::Command::Act {
         action: original_wire,
     })
     .unwrap();
-    assert!(!wrong_revision.matches(&restored, &scope));
+    let mut different_receipt_revision = restored.clone();
+    let Command::AdmitIntention {
+        expected_boundary: expected_revision,
+        ..
+    } = &mut different_receipt_revision
+    else {
+        unreachable!()
+    };
+    *expected_revision = 18;
+    assert!(same_action.matches(&different_receipt_revision, &scope),
+        "gameplay retry matches canonical action independently of the internal presentation revision");
 }
 
 #[test]
@@ -641,7 +649,7 @@ fn old_creature_token_retry_remains_exact_when_new_actions_require_contact() {
     contact(&mut view, ActorDisclosure::Creature);
     let original_wire = attack(scope.actor(SUBJECT));
     let saved = Command::AdmitIntention {
-        expected_revision: 11,
+        expected_boundary: 11,
         action: decode_action(&original_wire, &scope, &view).unwrap(),
     };
     let restored: Command =
@@ -661,7 +669,6 @@ fn old_creature_token_retry_remains_exact_when_new_actions_require_contact() {
     ));
     for wire in [original_wire.clone(), current_wire] {
         let decoded = decode_command(&p::Command::Act {
-            expected_revision: 11,
             action: wire.clone(),
         })
         .unwrap();
@@ -669,7 +676,6 @@ fn old_creature_token_retry_remains_exact_when_new_actions_require_contact() {
     }
     view.visible_actors.clear();
     let decoded = decode_command(&p::Command::Act {
-        expected_revision: 11,
         action: original_wire.clone(),
     })
     .unwrap();
@@ -992,11 +998,10 @@ fn equipped_weapon_selection_keeps_item_scope_socket_and_contact_authority_indep
     .is_ok());
 
     let command = Command::AdmitIntention {
-        expected_revision: 7,
+        expected_boundary: 7,
         action: backend,
     };
     let decoded = decode_command(&p::Command::Act {
-        expected_revision: 7,
         action: wire.clone(),
     })
     .unwrap();
@@ -1009,12 +1014,9 @@ fn equipped_weapon_selection_keeps_item_scope_socket_and_contact_authority_indep
         unreachable!()
     };
     invocation.weapon = p::WeaponSelection::Default;
-    assert!(!decode_command(&p::Command::Act {
-        expected_revision: 7,
-        action: changed
-    })
-    .unwrap()
-    .matches(&command, &scope));
+    assert!(!decode_command(&p::Command::Act { action: changed })
+        .unwrap()
+        .matches(&command, &scope));
 }
 
 #[test]
@@ -1106,14 +1108,10 @@ fn projectile_delivery_preserves_exact_owned_operands_without_hidden_profile_aut
         );
         assert_eq!(view, before);
         let command = Command::AdmitIntention {
-            expected_revision: 7,
+            expected_boundary: 7,
             action: backend,
         };
-        let decoded = decode_command(&p::Command::Act {
-            expected_revision: 7,
-            action: wire,
-        })
-        .unwrap();
+        let decoded = decode_command(&p::Command::Act { action: wire }).unwrap();
         assert!(
             decoded.matches(&command, &scope),
             "receipt comparison needs no live item state"

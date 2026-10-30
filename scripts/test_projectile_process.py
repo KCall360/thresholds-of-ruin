@@ -152,13 +152,13 @@ class ProjectileProcesses(ProcessTestCase):
         self.assertIn("No choices on this page.", text.command("throw"))
         self.assertEqual(self.reply("projectile_choices", start)["page"]["choices"], [])
         text.command("cancel")
-        self.assertEqual(self.snapshot()["state"], initial["state"])
+        self.assertDisclosedStateEqual(self.snapshot()["state"], initial["state"])
         learned = self.learn_knife(text)
         dagger = item(learned, "dagger")["id"]
         self.text_throw_preview(text)
-        self.assertEqual(self.snapshot()["state"], learned["state"])
+        self.assertDisclosedStateEqual(self.snapshot()["state"], learned["state"])
         text.command("no")
-        self.assertEqual(self.snapshot()["state"], learned["state"])
+        self.assertDisclosedStateEqual(self.snapshot()["state"], learned["state"])
         self.assertEqual(self.admissions("rogue.throw"), [])
         terms = self.text_throw_preview(text)
         before_focus = resource(learned, "focus")["balance"]
@@ -181,6 +181,13 @@ class ProjectileProcesses(ProcessTestCase):
         self.assertLess(int(view(self.request(self.target, {"type": "snapshot"}))["combat"]["hp"]), self.target_health)
         self.assertNotIn("Server error", text.command("equip shortbow"))
         equipped = self.settle()
+        # Peer waits settle equipment on the server, not on this Text stream.
+        # Establish its completed picture before opening a NEW source menu;
+        # never retry or rebind an already issued projectile selection.
+        start = len(self.replies)
+        self.assertNotIn("Server error", text.command("sync"))
+        synchronized = self.reply("snapshot", start)["snapshot"]
+        self.assertDisclosedStateEqual(synchronized["state"], equipped["state"])
         bow = item(equipped, "shortbow")["id"]
         arrow = item(equipped, "arrow")["id"]
         start = len(self.replies)
@@ -200,7 +207,7 @@ class ProjectileProcesses(ProcessTestCase):
         start = len(self.replies)
         self.assert_preview(text.command("east"), self.reply("ability_weapon_preview", start),
                             "rogue.launch", {"kind": "launch", "launcher": launcher, "ammunition": arrow})
-        self.assertEqual(self.snapshot()["state"], equipped["state"])
+        self.assertDisclosedStateEqual(self.snapshot()["state"], equipped["state"])
         self.assertNotIn("Server error", text.command("yes"))
         launched = self.settle()
         final = launched
@@ -219,7 +226,7 @@ class ProjectileProcesses(ProcessTestCase):
         at_landing = self.settle()
         self.assertTrue(next(row for row in view(at_landing)["ground_items"]
                              if row["item"]["id"] == dagger)["reachable"])
-        self.assertIn("Taken", text.command(f"take #{dagger}"))
+        self.assertIn("You pick up ", text.command(f"take #{dagger}"))
         final = self.settle()
         self.assertEqual(item(final, "dagger")["quantity"], "1")
         self.flush_save()
@@ -227,7 +234,7 @@ class ProjectileProcesses(ProcessTestCase):
         shutil.rmtree(self.package)
         self.server(scenario=unrelated_fallback(self), seed=None)
         resumed, restored = self.client()
-        self.assertEqual(restored["state"], final["state"])
+        self.assertDisclosedStateEqual(restored["state"], final["state"])
         self.assertEqual(restored["history"], final["history"])
         self.assertEqual(restored["intentions"], [])
 
@@ -251,7 +258,7 @@ class ProjectileProcesses(ProcessTestCase):
 
         choose()
         self.say(text, "no")
-        self.assertEqual(self.snapshot()["state"], before["state"])
+        self.assertDisclosedStateEqual(self.snapshot()["state"], before["state"])
         self.assertEqual(self.admissions("rogue.throw"), [])
         choose()
         self.say(text, "yes")
@@ -270,10 +277,16 @@ class ProjectileProcesses(ProcessTestCase):
         native = self.native_keys(window)
 
         def press(name, key):
+            if name == "Z":
+                native("Shift_L", True)
+                try:
+                    return self.native_press(window, native, "z", key)
+                finally:
+                    native("Shift_L", False)
             return self.native_press(window, native, name, key)
 
         def choose_throw():
-            menu = press("z", "abilities")
+            menu = press("Z", "abilities")
             index = [row["id"] for row in menu["ability_choices"]].index("rogue.throw")
             for _ in range(index):
                 press("Down", "down")
@@ -312,11 +325,7 @@ class ProjectileProcesses(ProcessTestCase):
         owner.stop()
         window, initial = self.capture_client(native=True)
         native = self.native_keys(window)
-        menu = press("z", "abilities")
-        index = [row["id"] for row in menu["ability_choices"]].index("rogue.launch")
-        for _ in range(index):
-            press("Down", "down")
-        sources = press("Return", "enter")
+        sources = press("f", "fire")
         self.assertIn("shortbow", "\n".join(sources["projectile_rows"]))
         start = len(self.replies)
         ammunition = press("Return", "enter")

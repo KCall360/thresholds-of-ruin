@@ -49,6 +49,14 @@ fn fixture() -> Game {
             },
         },
     });
+    let mut caster = crate::creatures::Template::new(TemplateId::new("event_caster").unwrap(), 0);
+    caster.modifiers.push(Modifier {
+        cancellable: false,
+        scope: Scope::Always,
+        op: ModifierOp::GrantAbility {
+            ability: AbilityId::new("spark_lance_fire").unwrap(),
+        },
+    });
     let mut rules = crate::test_creatures::ruleset().document().clone();
     rules.conditions.push(serde_json::from_value(serde_json::json!({
         "id":"event_detecting", "family":"event_detecting", "name":"Detecting",
@@ -66,6 +74,7 @@ fn fixture() -> Game {
                 (invisible.id.clone(), invisible),
                 (detecting.id.clone(), detecting),
                 (guised.id.clone(), guised),
+                (caster.id.clone(), caster),
             ]
             .into(),
         },
@@ -1353,4 +1362,694 @@ fn typed_checkpoint_rejects_source_grant_substitution_and_initiator_to_spectator
             "{mutation}"
         );
     }
+}
+
+#[test]
+fn shared_event_geometry_preserves_exact_proof_fields_and_committed_receipts() {
+    let mut game = fixture();
+    host_damage(&mut game, 1);
+    let observer = ActorId(3);
+    let (shared_view, shared_scene, shared_proof) =
+        game.observe_event_shared_scene(observer).unwrap();
+    let (owned_view, owned_scene, owned_proof) = game.observe_event_scene(observer).unwrap();
+    assert_eq!(shared_view, owned_view);
+    assert_eq!(*shared_scene, owned_scene);
+    assert!(
+        !shared_proof.entries.is_empty(),
+        "fixture must exercise real event authority"
+    );
+    assert_eq!(shared_proof.observer, owned_proof.observer);
+    assert_eq!(shared_proof.witness, owned_proof.witness);
+    assert_eq!(shared_proof.entries, owned_proof.entries);
+    let witness = game.event_observation_witness();
+    let mut shared_game = game.clone();
+    let mut owned_game = game;
+    let mut shared_view = shared_view;
+    let mut owned_view = owned_view;
+    shared_game
+        .record_event_observation(&witness, &shared_proof, &mut shared_view)
+        .unwrap();
+    owned_game
+        .record_event_observation(&witness, &owned_proof, &mut owned_view)
+        .unwrap();
+    assert_eq!(shared_view, owned_view);
+    shared_game.seal_event_observations().unwrap();
+    owned_game.seal_event_observations().unwrap();
+    assert_eq!(shared_game.event_receipts, owned_game.event_receipts);
+    assert_eq!(
+        events(&restored(&shared_game), observer),
+        events(&restored(&owned_game), observer)
+    );
+}
+
+#[test]
+fn commit_event_facts_match_rich_authority_without_materialization() {
+    let mut game = fixture();
+    host_damage(&mut game, 1);
+    let observer = ActorId(3);
+    let witness = game.event_observation_witness();
+    let (mut rich, scene, proof) = game.observe_event_shared_scene(observer).unwrap();
+    let original = game.clone();
+    let before = crate::diagnostics::work_counts().observations;
+    let before_vectors = crate::diagnostics::work_counts().actor_reference_vectors;
+    let facts = game.capture_commit_event_facts(observer).unwrap();
+    assert_eq!(
+        crate::diagnostics::work_counts().actor_reference_vectors,
+        before_vectors,
+        "event authority must not allocate an intermediate reference row vector"
+    );
+    let materialized = crate::diagnostics::work_counts().observations - before;
+    assert_eq!(
+        game, original,
+        "capturing authority must remain a pure read"
+    );
+    assert_eq!(facts.observer(), observer);
+    assert_eq!(facts.tick(), game.tick());
+    assert_eq!(facts.scene(), &scene);
+    assert_eq!(facts.proof.observer, proof.observer);
+    assert_eq!(facts.proof.witness, proof.witness);
+    assert_eq!(facts.proof.entries, proof.entries);
+    assert!(
+        facts.proof.entries.iter().any(|entry| {
+            entry.key.actor == ActorId(1)
+                && entry.key.target == ActorId(2)
+                && entry.source == Some(ActorReferenceKind::Creature)
+                && entry.target == Some(ActorReferenceKind::Creature)
+        }),
+        "ordinary fixture must grant the known source and target identities"
+    );
+    let mut lightweight = game.clone();
+    let mut oracle = game;
+    lightweight
+        .record_commit_event_facts(&witness, &facts)
+        .unwrap();
+    assert_ne!(
+        lightweight.event_receipts, original.event_receipts,
+        "the nonempty candidate must really extend the observer's historical authority"
+    );
+    assert!(
+        events(&original, observer).is_empty(),
+        "a rejected candidate cannot publish receipts"
+    );
+    oracle
+        .record_event_observation(&witness, &proof, &mut rich)
+        .unwrap();
+    assert_eq!(lightweight.event_receipts, oracle.event_receipts);
+    assert!(events(&lightweight, observer).iter().any(|event| matches!(
+        event,
+        DisclosedCombatEvent::Ability {
+            caster: Some(ActorId(1)),
+            target: Some(ActorId(2)),
+            ..
+        }
+    )));
+    lightweight.seal_event_observations().unwrap();
+    oracle.seal_event_observations().unwrap();
+    assert_eq!(
+        events(&restored(&lightweight), observer),
+        events(&restored(&oracle), observer)
+    );
+    assert_eq!(
+        materialized, 0,
+        "commit event authority must not materialize a rich Observation"
+    );
+}
+
+#[test]
+fn commit_event_facts_keep_hidden_identity_and_reject_stale_or_wrong_owner() {
+    let mut hidden = fixture();
+    template(&mut hidden, ActorId(1), Some("event_invisible"));
+    host_damage(&mut hidden, 1);
+    let observer = ActorId(3);
+    let witness = hidden.event_observation_witness();
+    let (mut rich, scene, proof) = hidden.observe_event_shared_scene(observer).unwrap();
+    let facts = hidden.capture_commit_event_facts(observer).unwrap();
+    assert_eq!(facts.scene(), &scene);
+    assert_eq!(facts.proof.observer, proof.observer);
+    assert_eq!(facts.proof.witness, proof.witness);
+    assert_eq!(facts.proof.entries, proof.entries);
+    assert!(
+        facts.proof.entries.is_empty(),
+        "a third party must not identify the invisible source"
+    );
+    let original = hidden.clone();
+    let mut candidate = hidden.clone();
+    candidate
+        .record_commit_event_facts(&witness, &facts)
+        .unwrap();
+    hidden
+        .record_event_observation(&witness, &proof, &mut rich)
+        .unwrap();
+    assert_eq!(candidate.event_receipts, hidden.event_receipts);
+    assert!(events(&candidate, observer).is_empty());
+    let victim_sources: Vec<_> = candidate.event_receipts.observers[&ActorId(2)]
+        .entries
+        .iter()
+        .filter(|entry| entry.key.kind == EventKind::Resolved)
+        .map(|entry| entry.source)
+        .collect();
+    assert_eq!(
+        victim_sources,
+        vec![Some(ActorReferenceKind::Contact)],
+        "the adjacent invisible source grants tactile Contact, not identified Creature authority"
+    );
+    assert!(events(&candidate, ActorId(2)).iter().any(|event| matches!(
+        event,
+        DisclosedCombatEvent::UnseenAbility {
+            caster: Some(ActorId(1)),
+            target: ActorId(2),
+            ..
+        }
+    )));
+    assert_eq!(
+        candidate.event_receipts, original.event_receipts,
+        "empty hidden proof must remain a no-op, not manufacture a receipt watermark"
+    );
+    let retained = original.event_receipts.observers.clone();
+    drop(candidate);
+    assert!(original.event_receipts.observers.shares_storage(&retained));
+    assert!(events(&original, observer).is_empty());
+
+    let mut game = fixture();
+    host_damage(&mut game, 1);
+    let witness = game.event_observation_witness();
+    let facts = game.capture_commit_event_facts(observer).unwrap();
+    let receipts = game.event_receipts.clone();
+    let mut wrong_owner = facts.clone();
+    wrong_owner.observer = ActorId(1);
+    assert!(game
+        .record_commit_event_facts(&witness, &wrong_owner)
+        .is_err());
+    assert_eq!(game.event_receipts, receipts);
+    let mut elapsed = game.clone();
+    elapsed.tick += 1;
+    assert!(elapsed.record_commit_event_facts(&witness, &facts).is_err());
+    assert_eq!(elapsed.event_receipts, receipts);
+    template(&mut game, observer, Some("event_detecting"));
+    let current_witness = game.event_observation_witness();
+    assert!(game
+        .record_commit_event_facts(&current_witness, &facts)
+        .is_err());
+    assert_eq!(game.event_receipts, receipts);
+}
+
+mod boundary_effects_contracts {
+    use super::*;
+    use crate::ObservationChange;
+
+    fn rich(
+        game: &Game,
+        observer: ActorId,
+    ) -> (
+        crate::Observation,
+        std::sync::Arc<Vec<tor_world::SightCell>>,
+        Vec<crate::detection::DetectionView>,
+    ) {
+        let (observation, scene) = game.observe_shared_scene(observer).unwrap();
+        let charts = [
+            crate::chart::Kind::Monsters,
+            crate::chart::Kind::Food,
+            crate::chart::Kind::Magic,
+            crate::chart::Kind::Mapping,
+        ]
+        .into_iter()
+        .map(|kind| game.detection_chart(observer, kind).unwrap())
+        .collect();
+        (observation, scene, charts)
+    }
+    fn with_remote() -> (Game, ActorId) {
+        let mut game = fixture();
+        game.world
+            .add_region(tor_world::Region {
+                id: RegionId(3),
+                name: "isolated".into(),
+                bounds: tor_world::Extent::new(6, 3, 1).unwrap(),
+            })
+            .unwrap();
+        let remote = game
+            .spawn_actor(
+                Location {
+                    region: RegionId(3),
+                    position: Position { x: 1, y: 1, z: 0 },
+                },
+                std::num::NonZeroU64::new(100).unwrap(),
+            )
+            .unwrap();
+        (game, remote)
+    }
+    #[test]
+    fn remote_actor_change_certifies_equal_without_rich_projection() {
+        let (before, remote) = with_remote();
+        let observer = ActorId(1);
+        let mut after = before.clone();
+        after.actors.get_mut(&remote).unwrap().location.position.x += 1;
+        assert_eq!(
+            rich(&before, observer),
+            rich(&after, observer),
+            "positive cold full-view oracle"
+        );
+        assert_ne!(
+            before.actors[&remote].location,
+            after.actors[&remote].location
+        );
+        let count = crate::diagnostics::work_counts().observations;
+        let effects = after.boundary_effects_since(&before);
+        assert_eq!(effects.changed_actors().collect::<Vec<_>>(), vec![remote]);
+        assert_eq!(
+            effects.observation_change(observer).unwrap(),
+            ObservationChange::Unchanged
+        );
+        assert_eq!(
+            crate::diagnostics::work_counts().observations - count,
+            0,
+            "authority must not materialize rich views"
+        );
+    }
+    #[test]
+    fn adjacent_and_apparent_subject_changes_take_cold_path() {
+        let before = fixture();
+        let observer = ActorId(1);
+        let subject = ActorId(2);
+        assert!(before
+            .observe(observer)
+            .unwrap()
+            .visible_actors
+            .iter()
+            .any(|row| row.id == subject));
+        let mut after = before.clone();
+        after.actors.get_mut(&subject).unwrap().asset = Some("changed".into());
+        assert_ne!(rich(&before, observer), rich(&after, observer));
+        assert_eq!(
+            after
+                .boundary_effects_since(&before)
+                .observation_change(observer)
+                .unwrap(),
+            ObservationChange::NeedsProjection
+        );
+        let mut before = fixture();
+        template(&mut before, subject, Some("event_guised"));
+        assert!(
+            before
+                .observe(observer)
+                .unwrap()
+                .apparent_objects
+                .iter()
+                .any(|row| row.subject == subject),
+            "positive apparent-object authority"
+        );
+        let mut after = before.clone();
+        after.actors.get_mut(&subject).unwrap().location.position.x += 1;
+        assert_ne!(rich(&before, observer), rich(&after, observer));
+        assert_eq!(
+            after
+                .boundary_effects_since(&before)
+                .observation_change(observer)
+                .unwrap(),
+            ObservationChange::NeedsProjection
+        );
+    }
+    #[test]
+    fn lighting_and_chart_roots_remain_conservative() {
+        let before = fixture();
+        let observer = ActorId(1);
+        let mut after = before.clone();
+        after.set_region_light(RegionId(1), false).unwrap();
+        assert_ne!(rich(&before, observer), rich(&after, observer));
+        assert_eq!(
+            after
+                .boundary_effects_since(&before)
+                .observation_change(observer)
+                .unwrap(),
+            ObservationChange::NeedsProjection
+        );
+        let mut after = before.clone();
+        after
+            .chart_history
+            .entry(observer)
+            .or_default()
+            .record_attempt(
+                crate::chart_history::Kind::Food,
+                crate::chart_history::Attempt {
+                    attempted_at: after.tick,
+                    status: crate::chart_history::AttemptStatus::Empty,
+                },
+                None,
+            )
+            .unwrap();
+        assert_ne!(rich(&before, observer), rich(&after, observer));
+        assert_eq!(
+            after
+                .boundary_effects_since(&before)
+                .observation_change(observer)
+                .unwrap(),
+            ObservationChange::NeedsProjection
+        );
+    }
+    #[test]
+    fn tick_origin_and_local_physics_have_exact_or_conservative_witnesses() {
+        let before = fixture();
+        let observer = ActorId(1);
+        let mut after = before.clone();
+        after.tick += 1;
+        assert_ne!(rich(&before, observer), rich(&after, observer));
+        assert_eq!(
+            after
+                .boundary_effects_since(&before)
+                .observation_change(observer)
+                .unwrap(),
+            ObservationChange::Changed
+        );
+        let mut after = before.clone();
+        after.actors.get_mut(&observer).unwrap().location.position.x = 0;
+        assert_ne!(rich(&before, observer), rich(&after, observer));
+        assert_eq!(
+            after
+                .boundary_effects_since(&before)
+                .observation_change(observer)
+                .unwrap(),
+            ObservationChange::Changed
+        );
+        let mut after = before.clone();
+        after.physics.displaced.insert(observer);
+        assert_ne!(rich(&before, observer), rich(&after, observer));
+        assert_eq!(
+            after
+                .boundary_effects_since(&before)
+                .observation_change(observer)
+                .unwrap(),
+            ObservationChange::NeedsProjection
+        );
+        let mut after = before.clone();
+        after.physics.displaced.insert(ActorId(2));
+        assert_eq!(rich(&before, observer), rich(&after, observer));
+        assert_eq!(
+            after
+                .boundary_effects_since(&before)
+                .observation_change(observer)
+                .unwrap(),
+            ObservationChange::Unchanged
+        );
+    }
+    #[test]
+    fn linked_hold_and_expired_receipt_views_cannot_be_certified_unchanged() {
+        let mut species = crate::test_creatures::species();
+        let flag = crate::content_ids::FlagId::new("magical").unwrap();
+        species.modifiers.push(Modifier {
+            cancellable: false,
+            scope: Scope::Always,
+            op: ModifierOp::Flag { flag: flag.clone() },
+        });
+        let build = crate::test_creatures::build(species);
+        let mut before = Game::two_room_in_stone(42, build.content().clone());
+        for x in [1, 2] {
+            let id = before
+                .spawn_actor(at(x, 1), std::num::NonZeroU64::new(100).unwrap())
+                .unwrap();
+            before
+                .configure_creature(
+                    id,
+                    crate::CreatureIdentity {
+                        name: format!("holder {x}"),
+                        faction: "neutral".into(),
+                    },
+                    build.clone(),
+                )
+                .unwrap();
+        }
+        let mut after = before.clone();
+        let id = after
+            .apply_linked_hold(
+                ActorId(1),
+                ActorId(2),
+                crate::linked_hold::HoldPolicy {
+                    sustaining: flag,
+                    preparation: 100,
+                    recovery: 100,
+                    protection: 400,
+                },
+            )
+            .unwrap()
+            .expect("positive sustaining hold fixture");
+        assert_eq!(after.linked_holds(ActorId(2))[0].id, id);
+        assert_ne!(rich(&before, ActorId(2)), rich(&after, ActorId(2)));
+        assert_eq!(
+            after
+                .boundary_effects_since(&before)
+                .observation_change(ActorId(2))
+                .unwrap(),
+            ObservationChange::NeedsProjection
+        );
+        let mut before = fixture();
+        host_damage(&mut before, 1);
+        let witness = before.event_observation_witness();
+        let previous = capture(&mut before, ActorId(3), &witness);
+        assert!(
+            !previous.combat.unwrap().events.is_empty(),
+            "positive third-party receipt"
+        );
+        let mut after = before.clone();
+        after.begin_event_batch().unwrap();
+        assert!(after
+            .observe(ActorId(3))
+            .unwrap()
+            .combat
+            .unwrap()
+            .events
+            .is_empty());
+        assert_ne!(rich(&before, ActorId(3)), rich(&after, ActorId(3)));
+        assert_eq!(
+            after
+                .boundary_effects_since(&before)
+                .observation_change(ActorId(3))
+                .unwrap(),
+            ObservationChange::NeedsProjection
+        );
+    }
+    #[test]
+    fn tick_fast_path_preserves_malformed_projection_rejection() {
+        let before = fixture();
+        let observer = ActorId(1);
+        assert!(before.observe(observer).is_ok(), "valid positive baseline");
+        let mut after = before.clone();
+        after
+            .actors
+            .get_mut(&observer)
+            .unwrap()
+            .anatomy
+            .slots
+            .push(crate::content_ids::EquipmentSlot::new("missing_fixture_slot").unwrap());
+        after.tick += 1;
+        assert!(after.observe(observer).is_err());
+        assert!(after
+            .boundary_effects_since(&before)
+            .observation_change(observer)
+            .is_err());
+    }
+    #[test]
+    fn frozen_lifecycle_keeps_historical_charts_but_not_display_tick() {
+        let mut frozen = fixture();
+        let observer = ActorId(1);
+        frozen
+            .chart_history
+            .entry(observer)
+            .or_default()
+            .record_attempt(
+                crate::chart_history::Kind::Food,
+                crate::chart_history::Attempt {
+                    attempted_at: 0,
+                    status: crate::chart_history::AttemptStatus::Empty,
+                },
+                None,
+            )
+            .unwrap();
+        let mut records = crate::MemoryRecords::default();
+        frozen
+            .apply_region_transition(
+                &crate::RegionTransition {
+                    active: [RegionId(2)].into(),
+                    loaded: [RegionId(1), RegionId(2)].into(),
+                },
+                &mut records,
+            )
+            .unwrap();
+        assert!(
+            frozen.actor_frozen(observer),
+            "positive frozen observer fixture"
+        );
+        let mut later = frozen.clone();
+        later.tick = 50;
+        let old = rich(&frozen, observer);
+        let current = rich(&later, observer);
+        assert_eq!(
+            old.2, current.2,
+            "historical chart content does not advance with world tick"
+        );
+        assert_ne!(old.0.tick, current.0.tick);
+        assert_eq!(later.actor_clock(observer), frozen.actor_clock(observer));
+        assert_eq!(
+            later
+                .boundary_effects_since(&frozen)
+                .observation_change(observer)
+                .unwrap(),
+            ObservationChange::Changed
+        );
+        let mut thawed = later.clone();
+        thawed
+            .apply_region_transition(
+                &crate::RegionTransition {
+                    active: [RegionId(1), RegionId(2)].into(),
+                    loaded: [RegionId(1), RegionId(2)].into(),
+                },
+                &mut records,
+            )
+            .unwrap();
+        assert!(!thawed.actor_frozen(observer));
+        assert_ne!(later.actor_clock(observer), thawed.actor_clock(observer));
+        assert_eq!(later.tick, thawed.tick);
+        assert_eq!(
+            thawed
+                .boundary_effects_since(&later)
+                .observation_change(observer)
+                .unwrap(),
+            ObservationChange::NeedsProjection
+        );
+    }
+}
+
+#[test]
+fn committed_event_knowledge_matches_rich_commit_without_materialization() {
+    let mut game = fixture();
+    let observer = ActorId(3);
+    let ability = AbilityId::new("spark_lance_fire").unwrap();
+    template(&mut game, ActorId(1), Some("event_caster"));
+    assert!(!game.actors[&observer]
+        .recognized_abilities
+        .contains(&ability));
+    game.host_region_continuation = true;
+    game.begin_event_batch().unwrap();
+    let mut outcome = damage(ActorId(1), ActorId(2), 1);
+    outcome.ability = Some(ability.clone());
+    game.apply_outcome(outcome).unwrap();
+    game.seal_participant_events().unwrap();
+    game.host_region_continuation = false;
+    let witness = game.event_observation_witness();
+    let (mut rich, _, proof) = game.observe_event_shared_scene(observer).unwrap();
+    let facts = game.capture_commit_event_facts(observer).unwrap();
+    game.record_committed_event_knowledge(observer).unwrap();
+    assert!(
+        !game.actors[&observer]
+            .recognized_abilities
+            .contains(&ability),
+        "pure capture and uncommitted event identity cannot teach an observer"
+    );
+    let mut rejected = game.clone();
+    rejected.tick += 1;
+    assert!(rejected
+        .record_commit_event_facts(&witness, &facts)
+        .and_then(|()| rejected.record_committed_event_knowledge(observer))
+        .is_err());
+    assert!(!rejected.actors[&observer]
+        .recognized_abilities
+        .contains(&ability));
+    assert_eq!(rejected.event_receipts, game.event_receipts);
+    let mut oracle = game.clone();
+    oracle
+        .record_event_observation(&witness, &proof, &mut rich)
+        .unwrap();
+    oracle.record_observation_knowledge(&rich).unwrap();
+    let before = crate::diagnostics::work_counts().observations;
+    game.record_commit_event_facts(&witness, &facts).unwrap();
+    game.record_committed_event_knowledge(observer).unwrap();
+    assert!(game.actors[&observer]
+        .recognized_abilities
+        .contains(&ability));
+    assert_eq!(game, oracle);
+    assert_eq!(
+        crate::diagnostics::work_counts().observations,
+        before,
+        "committing historical knowledge must not construct an Observation"
+    );
+    let known = game.actors[&observer].recognized_abilities.clone();
+    game.record_committed_event_knowledge(observer).unwrap();
+    assert!(game.actors[&observer]
+        .recognized_abilities
+        .shares_storage(&known));
+    game.seal_event_observations().unwrap();
+    assert!(restored(&game).actors[&observer]
+        .recognized_abilities
+        .contains(&ability));
+}
+
+#[test]
+fn committed_event_knowledge_ignores_noncombat_owners_like_ordinary_views() {
+    let mut game = fixture();
+    let observer = game
+        .spawn_actor(at(3, 2), std::num::NonZeroU64::new(100).unwrap())
+        .unwrap();
+    let ability = AbilityId::new("spark_lance_fire").unwrap();
+    template(&mut game, ActorId(1), Some("event_caster"));
+    assert!(!game.actors[&observer]
+        .recognized_abilities
+        .contains(&ability));
+    game.host_region_continuation = true;
+    game.begin_event_batch().unwrap();
+    let mut outcome = damage(ActorId(1), ActorId(2), 1);
+    outcome.ability = Some(ability.clone());
+    game.apply_outcome(outcome).unwrap();
+    game.seal_participant_events().unwrap();
+    game.host_region_continuation = false;
+    let witness = game.event_observation_witness();
+    let facts = game.capture_commit_event_facts(observer).unwrap();
+    game.record_commit_event_facts(&witness, &facts).unwrap();
+    assert!(
+        game.disclosed_event_history(observer)
+            .iter()
+            .any(|event| matches!(event,
+                DisclosedCombatEvent::Ability { id, .. } if id == &ability
+            )),
+        "fixture must retain a real licensed ability receipt for the plain observer"
+    );
+    let view = game.observe(observer).unwrap();
+    assert!(view.combat.is_none());
+    let mut oracle = game.clone();
+    oracle.record_observation_knowledge(&view).unwrap();
+    game.record_committed_event_knowledge(observer).unwrap();
+    assert_eq!(game, oracle);
+    assert!(!game.actors[&observer]
+        .recognized_abilities
+        .contains(&ability));
+    assert!(matches!(
+        game.record_committed_event_knowledge(ActorId(999)),
+        Err(GameError::UnknownActor)
+    ));
+}
+
+#[test]
+fn sealed_observation_scene_preserves_geometry_without_actor_classification() {
+    let mut game = fixture();
+    game.seal_event_observations().unwrap();
+    game.lifecycle.scenes = crate::observation::ActorScenes::default();
+    let observer = ActorId(3);
+    let retained = game.clone();
+    let before = crate::diagnostics::work_counts();
+    let scene = game.capture_observation_scene_shared(observer).unwrap();
+    let after = crate::diagnostics::work_counts();
+    assert_eq!(after.perception_projections, before.perception_projections);
+    assert_eq!(after.observations, before.observations);
+    assert_eq!(
+        scene,
+        *game.capture_commit_event_facts(observer).unwrap().scene()
+    );
+    assert_eq!(game, retained);
+    let missing = ActorId(u64::MAX);
+    assert_eq!(
+        game.capture_observation_scene_shared(missing).unwrap_err(),
+        game.capture_commit_event_facts(missing).unwrap_err()
+    );
+    host_damage(&mut game, 1);
+    assert!(game.event_origins.open, "positive unexpected-open fixture");
+    assert_eq!(
+        game.capture_observation_scene_shared(observer).unwrap(),
+        *game.capture_commit_event_facts(observer).unwrap().scene()
+    );
 }

@@ -41,12 +41,12 @@ defensive statistics. Enhanced attributes do not increase defenses (p. 25).
 The [Rogue source armor catalog](rogue-5.4.4/content.md#armor-8) owns its eight
 identities and AC values. Original Rogue armor changes the chance of being hit,
 not damage reduction; see its [combat rules](rogue-5.4.4/rules.md).
-The [TOR item reference](../reference/items.md#equipment-birth-and-the-finite-rogue-catalog)
+The [TOR item reference](../reference/equipment.md#equipment-birth-and-the-finite-rogue-catalog)
 owns the adapted armor ladder and its provisional-balance rationale.
 
 TOR's additive reduction is conceptually closer to Stormlight Deflect than to
 Rogue AC, but it is **not a direct conversion**. In particular,
-[ordinary TOR armor](../reference/items.md#armor-and-corrosion) reduces Impact
+[ordinary TOR armor](../reference/equipment.md#armor-and-corrosion) reduces Impact
 and Keen, whereas this Stormlight edition also includes energy. Magical wards
 are a separate TOR contract. Different damage scales and other defenses prevent
 equating protection merely because two numbers match.

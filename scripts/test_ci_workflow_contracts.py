@@ -250,5 +250,25 @@ class WorkflowAdoption(unittest.TestCase):
         self.assertNotIn('adopted=true', workflow)
 
 
+
+
+class LinuxDebugShardWorkflow(unittest.TestCase):
+    def test_isolated_debug_owners_keep_cap_and_exact_union_gate(self):
+        profiles = workflow_job('profiles')
+        self.assertIn("timeout-minutes: ${{ matrix.partition == 'python' && 40 || 60 }}", profiles)
+        for index in (1, 2):
+            self.assertIn(f'partition: python\n            shard: {index}', profiles)
+            self.assertIn(f'linux_debug_shard_{index}:', profiles)
+        self.assertIn("format('--ci-python-shard {0}', matrix.shard)", profiles)
+        gate = workflow_step('Require both complete Linux debug Python shards')
+        self.assertIn("matrix.os == 'ubuntu-latest'", gate)
+        self.assertIn("needs.scope.outputs.mode == 'full'", gate)
+        self.assertIn("needs.scope.outputs.docs_only == 'false'", gate)
+        for index in (1, 2):
+            self.assertIn(f'verification-ubuntu-latest-debug-python-shard-{index}-attempt-', gate)
+        self.assertIn('--profile debug --directory .local/shard-coverage/linux-debug', gate)
+        self.assertIn('--origin-attempt "${{ steps.linux_cohort.outputs.origin_attempt }}"', gate)
+
+
 if __name__ == '__main__':
     unittest.main()

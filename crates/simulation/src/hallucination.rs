@@ -92,18 +92,37 @@ impl Game {
                     && appearance.object_presentation.is_none()
             })
     }
-    pub(crate) fn apply_hallucinated_presentation(
+    pub(crate) fn apply_hallucinated_map_presentation(
         &self,
-        view: &mut Observation,
+        observer: ActorId,
+        view: &mut crate::MapObservation,
         sight: &[SightCell],
     ) -> Result<(), GameError> {
-        let observer = view.actor;
         let Some(clock) = self.projected_hallucination(observer)? else {
             return Ok(());
         };
-        let phase = clock.phase();
-        let eyes: BTreeSet<_> = sight.iter().map(|cell| cell.location).collect();
-        for item in &mut view.ground_items {
+        let eyes = sight.iter().map(|cell| cell.location).collect();
+        self.apply_hallucinated_map_fields(
+            observer,
+            clock.phase(),
+            &eyes,
+            &mut view.visible_cells,
+            &mut view.ground_items,
+            &view.exits,
+        );
+        Ok(())
+    }
+
+    fn apply_hallucinated_map_fields(
+        &self,
+        observer: ActorId,
+        phase: u64,
+        eyes: &BTreeSet<Location>,
+        visible_cells: &mut tor_world::Shared<Vec<crate::CellView>>,
+        ground_items: &mut [crate::GroundItemView],
+        exits: &[crate::ExitView],
+    ) {
+        for item in ground_items {
             if !eyes.contains(&item.location) {
                 continue;
             }
@@ -115,6 +134,38 @@ impl Game {
             item.asset = None;
             item.corpse = None;
         }
+        let disclosed_stairs: BTreeSet<_> = exits
+            .iter()
+            .filter(|exit| matches!(exit.direction, Direction::Up | Direction::Down))
+            .map(|exit| exit.location)
+            .collect();
+        for cell in crate::observation::observation_cells_mut(visible_cells).iter_mut() {
+            if eyes.contains(&cell.location)
+                && !self.genuinely_known_stair(observer, cell.location)
+                && !cell.wall
+                && disclosed_stairs.contains(&cell.location)
+            {
+                cell.object_presentation = Some(self.cosmetic_object(
+                    observer,
+                    terrain_subject(cell.location),
+                    AppearanceChannel::Terrain,
+                    phase,
+                ));
+            }
+        }
+    }
+
+    pub(crate) fn apply_hallucinated_presentation(
+        &self,
+        view: &mut Observation,
+        sight: &[SightCell],
+    ) -> Result<(), GameError> {
+        let observer = view.actor;
+        let Some(clock) = self.projected_hallucination(observer)? else {
+            return Ok(());
+        };
+        let phase = clock.phase();
+        let eyes: BTreeSet<_> = sight.iter().map(|cell| cell.location).collect();
         for object in &mut view.apparent_objects {
             if !self.genuinely_sees_guise(observer, object.subject, &eyes) {
                 continue;
@@ -140,26 +191,14 @@ impl Game {
                 actor.presentation = Some(presentation);
             }
         }
-        let disclosed_stairs: BTreeSet<_> = view
-            .exits
-            .iter()
-            .filter(|exit| matches!(exit.direction, Direction::Up | Direction::Down))
-            .map(|exit| exit.location)
-            .collect();
-        for cell in &mut view.visible_cells {
-            if eyes.contains(&cell.location)
-                && !self.genuinely_known_stair(observer, cell.location)
-                && !cell.wall
-                && disclosed_stairs.contains(&cell.location)
-            {
-                cell.object_presentation = Some(self.cosmetic_object(
-                    observer,
-                    terrain_subject(cell.location),
-                    AppearanceChannel::Terrain,
-                    phase,
-                ));
-            }
-        }
+        self.apply_hallucinated_map_fields(
+            observer,
+            phase,
+            &eyes,
+            &mut view.visible_cells,
+            &mut view.ground_items,
+            &view.exits,
+        );
         Ok(())
     }
 }

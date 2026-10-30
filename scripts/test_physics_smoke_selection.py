@@ -140,6 +140,22 @@ class BenchmarkProcessSupport(unittest.TestCase):
                 self.assertEqual(Path(calls[1][1]['stdout'].name), case.directory / 'physics_bench.jsonl')
                 self.assertEqual(Path(calls[1][1]['stderr'].name), case.directory / 'physics_bench-stderr.log')
 
+    def test_example_resolution_does_not_run_a_second_workload_or_guess_app_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            case = SimpleNamespace(directory=root, bin=root / 'ordinary-app-bundle')
+            executable = root / 'cargo-target' / 'debug' / 'examples' / ('active_mob_bench' + SUFFIX)
+            calls = []
+            def run(command, **kwargs):
+                calls.append(command)
+                kwargs['stdout'].write(json.dumps(self.artifact(executable, name='active_mob_bench')) + '\n')
+            with patch.dict(os.environ, {'TOR_TEST_PROFILE': 'debug'}), \
+                    patch.object(support.subprocess, 'run', side_effect=run):
+                self.assertEqual(support.benchmark_executable(case, 'active_mob_bench'), executable)
+            self.assertEqual(len(calls), 1, 'resolving the example must not run a duplicate workload')
+            self.assertEqual(calls[0][0], 'cargo')
+            self.assertFalse((case.bin / 'examples').exists())
+
     def test_streaming_caller_uses_emitted_example_outside_application_bundle(self):
         class ReportBoundary(Exception):
             pass

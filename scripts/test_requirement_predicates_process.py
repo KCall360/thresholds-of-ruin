@@ -50,7 +50,7 @@ class RequirementPredicateProcesses(ProcessTestCase):
         # child, and removing a permanent prerequisite must disable both nodes.
         initial = snapshot()
         self.assertIn("Server error", wizard.command("wizard creature talent 1 2 fixture_child"))
-        self.assertEqual(snapshot(), initial)
+        self.assertDisclosedStateEqual(snapshot(), initial)
         for command in ("wizard creature talent 1 1 fixture_parent",
                         "wizard creature talent 1 2 fixture_child"):
             self.assertNotIn("Server error", wizard.command(command), command)
@@ -73,7 +73,7 @@ class RequirementPredicateProcesses(ProcessTestCase):
         rules_path.unlink()
         self.server(scenario=ROOT / "scenarios/two-room", seed=None, wizard=True)
         observer, restored = self.client(WIZARD_TOKEN, observe=True)
-        self.assertEqual(restored["state"], dormant)
+        self.assertDisclosedStateEqual(restored["state"], dormant)
         wizard, _ = self.text_client(WIZARD_TOKEN, observe=True)
         self.assertNotIn("Server error", wizard.command("wizard creature template 1 land_bound off"))
         self.assertEqual(snapshot()["observation"]["combat"]["own_stats"], active_stats)

@@ -6,6 +6,13 @@ use tor_world::Location;
 
 const MAX_CONTACTS: usize = 4096;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct AwarenessSubject {
+    subject: ActorId,
+    disclosure: crate::perception::ActorDisclosure,
+    previous: Option<Contact>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Contact {
@@ -282,9 +289,54 @@ impl Game {
                     })
             })
     }
+    /// Freeze only ordinary row membership and the old receipt snapshot. Live
+    /// hostility, source state, capacity checks and contests retain their order.
+    /// This compact vector owns one entry per subject, never one per body cell.
+    fn awareness_subjects(
+        &self,
+        observer: ActorId,
+    ) -> Result<(Location, Vec<AwarenessSubject>), GameError> {
+        let owner = self.actors.get(&observer).ok_or(GameError::UnknownActor)?;
+        let previous = |subject| {
+            owner
+                .awareness
+                .contacts
+                .binary_search_by_key(&subject, |c| c.subject)
+                .ok()
+                .map(|index| owner.awareness.contacts[index])
+        };
+        let snapshot = self.scene_snapshot_shared(observer)?;
+        let projection = snapshot.classified_actors(self, observer)?;
+        let subjects = projection
+            .iter()
+            .filter_map(|(&subject, perceived)| {
+                if subject == observer
+                    || self
+                        .projected_actor_reference(
+                            observer,
+                            subject,
+                            snapshot.projection_cells(),
+                            &projection,
+                        )
+                        .is_none()
+                {
+                    return None;
+                }
+                Some(AwarenessSubject {
+                    subject,
+                    disclosure: perceived.disclosure,
+                    previous: previous(subject),
+                })
+            })
+            .collect::<Vec<_>>();
+        crate::diagnostics::awareness_subject_candidates(subjects.len());
+        Ok((owner.location, subjects))
+    }
+
     /// Initial encounter, movement and renewed contact are causal events. A
     /// detected body's later movement does not make it disappear behind a ring.
     pub(crate) fn reconcile_awareness(&mut self) -> Result<(), GameError> {
+        let _diagnostic_span = crate::diagnostics::spans::span("awareness");
         if self.lifecycle.initial_awareness_deferred {
             return Ok(());
         }
@@ -332,15 +384,11 @@ impl Game {
             if !self.awareness_eligible(observer) {
                 continue;
             }
-            let view = self.observe(observer)?;
-            let old = self.actors[&observer].awareness.contacts.clone();
+            let (observer_at, subjects) = self.awareness_subjects(observer)?;
             let mut contacts = Vec::new();
-            let mut subjects = std::collections::BTreeSet::new();
-            for visible in &view.visible_actors {
-                if visible.id == observer
-                    || !self.perceived_hostile(observer, visible.id, visible.disclosure)
-                    || !subjects.insert(visible.id)
-                {
+            for candidate in subjects {
+                let subject = candidate.subject;
+                if !self.perceived_hostile(observer, subject, candidate.disclosure) {
                     continue;
                 }
                 if contacts.len() == MAX_CONTACTS {
@@ -348,11 +396,11 @@ impl Game {
                 }
                 // Public projection rows are occupied body cells, not distinct
                 // actors. A visible head still identifies one canonical anchor.
-                let source_at = self.actors[&visible.id].location;
-                let previous = old.iter().find(|c| c.subject == visible.id);
+                let source_at = self.actors[&subject].location;
+                let previous = candidate.previous;
                 let unchanged = previous
-                    .is_some_and(|c| c.observer_at == view.location && c.source_at == source_at);
-                let unhidden = self.actors[&visible.id]
+                    .is_some_and(|c| c.observer_at == observer_at && c.source_at == source_at);
+                let unhidden = self.actors[&subject]
                     .perception()
                     .continual_stealth
                     .is_none();
@@ -361,21 +409,27 @@ impl Game {
                 } else if unchanged {
                     previous.expect("receipt").detected
                 } else {
-                    self.resolve_awareness_contest(observer, visible.id)?
+                    self.resolve_awareness_contest(observer, subject)?
                 };
                 contacts.push(Contact {
-                    subject: visible.id,
-                    observer_at: view.location,
+                    subject,
+                    observer_at,
                     source_at,
                     detected,
                 });
             }
-            contacts.sort_by_key(|c| c.subject);
-            self.actors
-                .get_mut(&observer)
-                .expect("observer")
-                .awareness
-                .contacts = contacts;
+            // Candidates are distinct and in canonical ActorId order; filtering
+            // preserves the strictly ordered persisted contact invariant.
+            // Reclassification is causal even when its result is unchanged.
+            // Avoid publishing a no-op actor write: it would detach snapshots
+            // and falsely invalidate independent observer dependencies.
+            if contacts != self.actors[&observer].awareness.contacts {
+                self.actors
+                    .get_mut(&observer)
+                    .expect("observer")
+                    .awareness
+                    .contacts = contacts;
+            }
         }
         self.lifecycle.awareness_contexts.0 = tor_world::Shared::new(Some(witness));
         Ok(())
@@ -560,21 +614,10 @@ impl Game {
             if listener == source || !self.awareness_eligible(listener) {
                 continue;
             }
-            let actor = &self.actors[&listener];
-            let scene = self.world.eye_scene(actor.location, actor.orientation, 6);
-            let heard = |at| {
-                scene
-                    .iter()
-                    .any(|cell| cell.physical && cell.location == at)
-            };
             // Prefer the heard source point; an impact-only witness learns just
             // that point, never the remote attacker's current position.
-            let alert = if heard(source_at) {
-                Some(source_at)
-            } else {
-                impact_at.filter(|at| heard(*at))
-            };
-            let view = self.observe(listener)?;
+            let alert = self.attack_sound_alert(listener, source_at, impact_at)?;
+            let view = self.observe_actor_references(listener)?;
             let reference = view
                 .visible_actors
                 .iter()
@@ -667,7 +710,7 @@ impl Game {
         {
             return Ok(());
         }
-        let view = self.observe(observer)?;
+        let view = self.observe_actor_references(observer)?;
         if !view.visible_actors.iter().any(|other| {
             other.id == contact.subject
                 && other.disclosure.reference() == Some(contact.reference)
@@ -718,7 +761,7 @@ impl Game {
             let Some(reference) = cue.reference else {
                 continue;
             };
-            let view = self.observe(cue.listener)?;
+            let view = self.observe_actor_references(cue.listener)?;
             if !view.visible_actors.iter().any(|actor| {
                 actor.id == witness.source && actor.disclosure.reference() == Some(reference)
             }) {
@@ -803,6 +846,306 @@ mod tests {
         game.refresh_navigation();
         game.initialize_discovery().unwrap();
         game
+    }
+
+    #[test]
+    fn irrelevant_visibility_change_reconciles_without_detaching_unchanged_contacts() {
+        let mut game = encounter(false);
+        assert!(
+            game.actors[&OWNER].awareness.detected(SUBJECT),
+            "positive established contact"
+        );
+        let remote = game
+            .spawn_actor(at(2, 2, 2), std::num::NonZeroU64::new(100).unwrap())
+            .unwrap();
+        game.reconcile_awareness().unwrap();
+        assert!(!game
+            .observe(OWNER)
+            .unwrap()
+            .visible_actors
+            .iter()
+            .any(|actor| actor.id == remote));
+        let retained = game.clone();
+        let visibility = game.actors.visibility_epoch();
+        game.actors.get_mut(&remote).unwrap().location.position.x += 1;
+        assert_ne!(
+            game.actors.visibility_epoch(),
+            visibility,
+            "remote movement invalidates the global awareness witness"
+        );
+        let expected = game.clone();
+        let contacts = game.actors[&OWNER].awareness.contacts.clone();
+        let rng = game.rules_rng;
+        let before = crate::diagnostics::work_counts();
+        game.reconcile_awareness().unwrap();
+        let after = crate::diagnostics::work_counts();
+        assert_eq!(
+            game, expected,
+            "reconciliation is semantically unchanged, including candidate snapshots"
+        );
+        assert_eq!(game.actors[&OWNER].awareness.contacts, contacts);
+        assert_eq!(game.rules_rng, rng);
+        assert!(
+            after.perception_projections > before.perception_projections,
+            "the invalidated witness must really rescan observers"
+        );
+        assert_eq!(after.observations, before.observations);
+        assert_eq!(
+            after.actor_table_copies - before.actor_table_copies,
+            0,
+            "unchanged contact writes must not detach actor payloads"
+        );
+        assert!(game.actors.shares_actor_payload(&retained.actors, OWNER));
+    }
+
+    #[test]
+    fn compact_awareness_subjects_match_canonical_body_rows_without_row_vectors() {
+        for stealth in [false, true] {
+            let mut game = encounter_with_height(stealth, 2);
+            game.set_body(
+                SUBJECT,
+                crate::BodySpec {
+                    cells: vec![[0, 0, 0], [0, 0, 1]],
+                    eye: [0, 0, 1],
+                    mass: 80,
+                },
+            )
+            .unwrap();
+            let oracle_counts = crate::diagnostics::work_counts();
+            let view = game.observe_actor_references(OWNER).unwrap();
+            assert!(
+                crate::diagnostics::work_counts().actor_reference_vectors
+                    > oracle_counts.actor_reference_vectors,
+                "the differential oracle really materializes canonical body rows"
+            );
+            let mut expected = Vec::new();
+            for visible in view.visible_actors {
+                if visible.id == OWNER
+                    || expected
+                        .last()
+                        .is_some_and(|prior: &AwarenessSubject| prior.subject == visible.id)
+                {
+                    continue;
+                }
+                expected.push(AwarenessSubject {
+                    subject: visible.id,
+                    disclosure: visible.disclosure,
+                    previous: game.actors[&OWNER]
+                        .awareness
+                        .contacts
+                        .iter()
+                        .find(|c| c.subject == visible.id)
+                        .copied(),
+                });
+            }
+            assert!(expected
+                .iter()
+                .any(|candidate| candidate.subject == SUBJECT));
+            let unchanged = game.clone();
+            let before = crate::diagnostics::work_counts();
+            let (at, actual) = game.awareness_subjects(OWNER).unwrap();
+            assert_eq!(at, view.location);
+            assert_eq!(
+                actual, expected,
+                "compact membership and prior receipts match canonical rows"
+            );
+            assert_eq!(
+                game, unchanged,
+                "candidate staging has no rules or RNG effects"
+            );
+            let after = crate::diagnostics::work_counts();
+            assert_eq!(
+                after.awareness_subject_candidates - before.awareness_subject_candidates,
+                actual.len()
+            );
+            assert_eq!(
+                after.actor_reference_vectors - before.actor_reference_vectors,
+                0,
+                "compact awareness must not materialize the discarded body-row vector"
+            );
+        }
+    }
+
+    #[test]
+    fn compact_awareness_reconciliation_matches_cold_contact_order_and_rng() {
+        for stealth in [false, true] {
+            let mut game = encounter_with_height(stealth, 2);
+            game.set_body(
+                SUBJECT,
+                crate::BodySpec {
+                    cells: vec![[0, 0, 0], [0, 0, 1]],
+                    eye: [0, 0, 1],
+                    mass: 80,
+                },
+            )
+            .unwrap();
+            game.actors
+                .get_mut(&OWNER)
+                .unwrap()
+                .awareness
+                .contacts
+                .clear();
+            game.lifecycle.awareness_contexts = Default::default();
+            assert_eq!(
+                game.combat.ai.keys().copied().collect::<Vec<_>>(),
+                vec![OWNER]
+            );
+            let mut cold = game.clone();
+            let view = cold.observe_actor_references(OWNER).unwrap();
+            let old = cold.actors[&OWNER].awareness.contacts.clone();
+            let mut contacts = Vec::new();
+            let mut subjects = std::collections::BTreeSet::new();
+            for visible in &view.visible_actors {
+                if visible.id == OWNER
+                    || !cold.perceived_hostile(OWNER, visible.id, visible.disclosure)
+                    || !subjects.insert(visible.id)
+                {
+                    continue;
+                }
+                assert!(contacts.len() < MAX_CONTACTS);
+                let source_at = cold.actors[&visible.id].location;
+                let previous = old.iter().find(|c| c.subject == visible.id);
+                let unchanged = previous
+                    .is_some_and(|c| c.observer_at == view.location && c.source_at == source_at);
+                let unhidden = cold.actors[&visible.id]
+                    .perception()
+                    .continual_stealth
+                    .is_none();
+                let detected = if unhidden || previous.is_some_and(|c| c.detected) {
+                    true
+                } else if unchanged {
+                    previous.unwrap().detected
+                } else {
+                    cold.resolve_awareness_contest(OWNER, visible.id).unwrap()
+                };
+                contacts.push(Contact {
+                    subject: visible.id,
+                    observer_at: view.location,
+                    source_at,
+                    detected,
+                });
+            }
+            contacts.sort_by_key(|c| c.subject);
+            cold.actors.get_mut(&OWNER).unwrap().awareness.contacts = contacts;
+            game.reconcile_awareness().unwrap();
+            assert_eq!(game.rules_rng, cold.rules_rng, "same ordered contest draws");
+            assert_eq!(
+                game, cold,
+                "canonical body-row oracle retains contacts and all rules state"
+            );
+        }
+    }
+
+    #[test]
+    fn awareness_reconciliation_projects_actor_rows_without_full_observations() {
+        let mut game = encounter(false);
+        assert!(game.actors[&OWNER].awareness.detected(SUBJECT));
+        game.actors
+            .get_mut(&OWNER)
+            .unwrap()
+            .awareness
+            .contacts
+            .clear();
+        game.lifecycle.awareness_contexts = Default::default();
+        let rng = game.rules_rng;
+        let before = crate::diagnostics::work_counts();
+        game.reconcile_awareness().unwrap();
+        assert_eq!(
+            game.actors[&OWNER].awareness.contacts,
+            vec![Contact {
+                subject: SUBJECT,
+                observer_at: game.actors[&OWNER].location,
+                source_at: game.actors[&SUBJECT].location,
+                detected: true,
+            }]
+        );
+        assert_eq!(game.rules_rng, rng);
+        let after = crate::diagnostics::work_counts();
+        assert_eq!(
+            after.perception_projections - before.perception_projections,
+            1
+        );
+        assert_eq!(
+            after.observations, before.observations,
+            "awareness needs fresh actor references, not a terrain/inventory/combat view"
+        );
+    }
+
+    #[test]
+    fn attack_awareness_capture_and_application_do_not_build_full_observations() {
+        let mut game = encounter(false);
+        game.actors
+            .get_mut(&OWNER)
+            .unwrap()
+            .awareness
+            .contacts
+            .clear();
+        let rng = game.rules_rng;
+        // Explicitly cold geometry/classification makes the work bound
+        // independent of incidental fixture setup. Capture and fresh reference
+        // revalidation may share the same exact visibility witness.
+        game.lifecycle.scenes = Default::default();
+        let visibility = game.actors.visibility_epoch();
+        let before = crate::diagnostics::work_counts();
+        let witness = game.capture_attack_awareness(SUBJECT, OWNER).unwrap();
+        assert_eq!(witness.cues.len(), 1);
+        let cue = &witness.cues[0];
+        assert_eq!(cue.listener, OWNER);
+        assert_eq!(cue.alert, Some(game.actors[&SUBJECT].location));
+        assert_eq!(
+            cue.reference,
+            Some(crate::perception::ActorReferenceKind::Creature)
+        );
+        assert!(cue.others.is_empty());
+        game.apply_attack_awareness(witness).unwrap();
+        assert_eq!(
+            game.actors[&OWNER].awareness.contacts,
+            vec![Contact {
+                subject: SUBJECT,
+                observer_at: game.actors[&OWNER].location,
+                source_at: game.actors[&SUBJECT].location,
+                detected: true,
+            }]
+        );
+        assert_eq!(
+            game.actors[&OWNER].awareness.alert_at(game.tick),
+            Some(game.actors[&SUBJECT].location)
+        );
+        assert_eq!(game.rules_rng, rng);
+        assert_eq!(game.actors.visibility_epoch(), visibility);
+        let after = crate::diagnostics::work_counts();
+        assert_eq!(
+            after.perception_projections - before.perception_projections,
+            1
+        );
+        assert_eq!(
+            after.observations, before.observations,
+            "capture and revalidation must not construct unrelated full disclosure"
+        );
+    }
+
+    #[test]
+    fn unchanged_attack_listener_reuses_physical_hearing_geometry() {
+        let game = encounter(false);
+        let before_game = game.clone();
+        let first = game.capture_attack_awareness(SUBJECT, OWNER).unwrap();
+        assert_eq!(first.cues.len(), 1);
+        assert_eq!(first.cues[0].alert, Some(game.actors[&SUBJECT].location));
+        let before = crate::diagnostics::work_counts();
+        let repeated = game.capture_attack_awareness(SUBJECT, OWNER).unwrap();
+        assert_eq!(repeated.cues.len(), 1);
+        assert_eq!(repeated.cues[0].listener, first.cues[0].listener);
+        assert_eq!(repeated.cues[0].alert, first.cues[0].alert);
+        assert_eq!(repeated.cues[0].reference, first.cues[0].reference);
+        assert!(repeated.cues[0].others.is_empty());
+        assert_eq!(game, before_game);
+        assert_eq!(game.rules_rng, before_game.rules_rng);
+        let after = crate::diagnostics::work_counts();
+        assert_eq!(
+            after.hearing_scene_builds, before.hearing_scene_builds,
+            "unchanged listener geometry is independent of the current attack"
+        );
+        assert_eq!(after.hearing_scene_cells, before.hearing_scene_cells);
     }
 
     #[test]

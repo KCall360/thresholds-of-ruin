@@ -33,7 +33,7 @@ impl ProjectileMenu {
             return Err("Projectile selection requires control of your character.".into());
         }
         Ok(Self {
-            context: state.snapshot().reply_context(),
+            context: state.reply_context(),
             ability: ability.clone(),
             inventory: view.inventory.clone(),
             interactions: view.interactions.clone(),
@@ -51,7 +51,7 @@ impl ProjectileMenu {
     pub fn current(&self, state: &ClientState) -> bool {
         let view = &state.state().observation;
         state.has_control()
-            && state.snapshot().reply_context() == self.context
+            && state.reply_context() == self.context
             && crate::abilities::available(view).contains(&self.ability)
             && view.inventory == self.inventory
             && view.interactions == self.interactions

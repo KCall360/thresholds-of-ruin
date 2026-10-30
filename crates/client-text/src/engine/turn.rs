@@ -48,6 +48,9 @@ pub trait Link {
     fn palette(&self) -> &Palette;
     fn role(&self) -> AccessRole;
     fn is_synchronized(&self) -> bool;
+    fn completed_observation_request(&self, _id: &str, _message: &ServerMessage) -> bool {
+        false
+    }
     fn set_pace(&mut self, pace: Duration);
     fn pace(&self) -> Duration;
     fn inspection_pages(
@@ -103,6 +106,9 @@ impl Link for Connection {
     }
     fn is_synchronized(&self) -> bool {
         Connection::is_synchronized(self)
+    }
+    fn completed_observation_request(&self, id: &str, message: &ServerMessage) -> bool {
+        Connection::completed_observation_request(self, id, message)
     }
     fn set_pace(&mut self, pace: Duration) {
         Connection::set_pace(self, pace);
@@ -385,7 +391,7 @@ pub async fn projectile_choices(
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Until {
     /// An action: acknowledged, its result seen, and the character ready.
-    Acted { revision: u64 },
+    Acted,
     /// A journey: acknowledged, ended, and the character ready.
     Journey,
     /// Resumed play: the character ready.
@@ -428,16 +434,16 @@ impl Reader<'_> {
     }
 
     /// Apply one message and record its beats.
-    pub fn record(&mut self, before: &StateView, link: &impl Link, message: &ServerMessage) {
+    pub fn record(&mut self, _before: &StateView, link: &impl Link, message: &ServerMessage) {
         let after = link.client().state();
         match message {
             ServerMessage::Update { update } => match &update.body {
-                UpdateBody::Observation { event, .. }
-                | UpdateBody::ObservationDelta { event, .. } => {
-                    let beats =
-                        self.chronicler
-                            .observe(before, after, event.as_deref(), link.palette());
-                    self.beats.extend(beats);
+                UpdateBody::Outcome { facts, .. } => {
+                    self.beats
+                        .extend(self.chronicler.outcome(facts, link.palette()));
+                }
+                UpdateBody::Observation { .. } | UpdateBody::ObservationDelta { .. } => {
+                    self.chronicler.learn(after, link.palette());
                 }
                 UpdateBody::Travel { status, .. } if status.phase != TravelPhase::Active => {
                     self.beats.push(Beat::Journey {
@@ -453,6 +459,7 @@ impl Reader<'_> {
                 | UpdateBody::Intention { .. } => {}
             },
             ServerMessage::Snapshot { .. } => {
+                self.chronicler.reset_baseline(after, link.palette());
                 self.resynced = true;
                 self.beats.push(Beat::Resync);
             }
@@ -513,12 +520,10 @@ impl Reader<'_> {
     }
 }
 
-fn terminal(state: &StateView) -> bool {
+fn terminal(state: &ClientState) -> bool {
     state
-        .observation
-        .combat
-        .as_ref()
-        .is_some_and(|c| c.terminal || c.dead)
+        .outcome_status()
+        .is_some_and(|status| status.terminal || status.dead)
 }
 
 /// Send `request` and read until it's finished as `until` says.
@@ -528,6 +533,7 @@ async fn settle(
     request: Request,
     until: Until,
 ) -> Result<Settled, Error> {
+    let observing = matches!(request, Request::Observe);
     let id = link.send(request).await?;
     let mut acked = false;
     let mut admission: Option<crate::admission::AdmissionBoundary> = None;
@@ -550,10 +556,10 @@ async fn settle(
         };
         let Some(message) = link.next(ANSWER).await? else {
             let permissions_missing =
-                !terminal(link.client().state()) && !link.client().can_admit_intention();
+                !terminal(link.client()) && !link.client().can_admit_intention();
             let incomplete = match until {
                 Until::Answered => admission.is_some(),
-                Until::Acted { .. } => {
+                Until::Acted => {
                     admission
                         .as_ref()
                         .is_some_and(|boundary| !boundary.settled())
@@ -562,7 +568,7 @@ async fn settle(
                 Until::Journey => ended.is_some() && permissions_missing,
                 Until::Ready => false,
             };
-            if acked && !incomplete {
+            if acked && !incomplete && !observing {
                 return Ok(others(ended, execution_failed));
             }
             if execution_failed {
@@ -573,6 +579,9 @@ async fn settle(
         reader.record(&before, link, &message);
         if !link.is_synchronized() {
             continue;
+        }
+        if observing && link.completed_observation_request(&id, &message) {
+            return Ok(Settled::Done);
         }
         // A scoped execution notice is an explicit stop, not a settlement:
         // preserve the queue and its permissions for inspection/cancellation.
@@ -648,12 +657,11 @@ async fn settle(
             }
             _ => {}
         }
-        if !acked {
+        if observing || !acked {
             continue;
         }
-        let state = link.client().state();
-        let ended_run = terminal(state);
-        let ready = state.observation.ready || ended_run;
+        let ended_run = terminal(link.client());
+        let ready = link.client().character_ready() || ended_run;
         // Observation and journey completion precede their permission update.
         // Keep existing turn pacing, but consume that boundary before new input.
         let permissions_ready = ended_run || link.client().can_admit_intention();
@@ -674,11 +682,7 @@ async fn settle(
         match until {
             Until::Answered if answered => return Ok(Settled::Done),
             Until::Ready if ready => return Ok(Settled::Done),
-            Until::Acted { revision }
-                if gameplay_ready && action_settled && state.revision > revision =>
-            {
-                return Ok(Settled::Done)
-            }
+            Until::Acted if gameplay_ready && action_settled => return Ok(Settled::Done),
             Until::Journey => {
                 ended = link
                     .client()
@@ -961,7 +965,7 @@ pub fn may_act(link: &impl Link) -> Result<(), &'static str> {
         Err("Spectator access is read-only.")
     } else if !link.client().has_control() {
         Err("You are observing. Use control to take over when it is available.")
-    } else if terminal(link.client().state()) {
+    } else if terminal(link.client()) {
         Err("This run has ended. You can still look around, read history, or quit.")
     } else {
         Ok(())
@@ -1002,8 +1006,7 @@ pub async fn run_goal(
         waiting: None,
     };
     // After reconnecting during recovery, play resumes before anything new.
-    let state = link.client().state();
-    if !state.observation.ready
+    if (!link.client().character_ready() || !link.client().can_admit_intention())
         && link
             .client()
             .travel()
@@ -1016,7 +1019,7 @@ pub async fn run_goal(
             episode.end = End::Deferred;
         } else if matches!(resumed, Settled::Waiting(_)) {
             episode.end = End::Waiting;
-        } else if !link.client().state().observation.ready {
+        } else if !link.client().character_ready() || !link.client().can_admit_intention() {
             // Say why play won't come round to this character.
             episode.end = End::Refused(waiting_reason(reader.waiting).into());
         }
@@ -1037,12 +1040,9 @@ pub async fn run_goal(
                 let request = Request::Command {
                     context: link.client().input_context(),
                     branch,
-                    command: Command::Act {
-                        expected_revision: revision,
-                        action,
-                    },
+                    command: Command::Act { action },
                 };
-                match settle(link, &mut reader, request, Until::Acted { revision }).await? {
+                match settle(link, &mut reader, request, Until::Acted).await? {
                     Settled::Done | Settled::Journey(_) => acted = true,
                     Settled::Waiting(_) => episode.end = End::Waiting,
                     Settled::Deferred => episode.end = End::Deferred,
@@ -1060,6 +1060,13 @@ pub async fn run_goal(
                         });
                     }
                     Settled::Lost => episode.end = End::Lost,
+                }
+                if episode.end == End::Done
+                    && !link.client().observation_current()
+                    && settle(link, &mut reader, Request::Observe, Until::Answered).await?
+                        == Settled::Lost
+                {
+                    episode.end = End::Lost;
                 }
             }
             Step::Travel(destination) => {
@@ -1081,6 +1088,14 @@ pub async fn run_goal(
                     let mut next = None;
                     let settled = settle(link, &mut reader, request, Until::Journey).await?;
                     let waiting = matches!(settled, Settled::Waiting(_));
+                    if !matches!(settled, Settled::Lost | Settled::Deferred)
+                        && !link.client().observation_current()
+                        && settle(link, &mut reader, Request::Observe, Until::Answered).await?
+                            == Settled::Lost
+                    {
+                        episode.end = End::Lost;
+                        break;
+                    }
                     // A yielded journey can still have an authoritative ending.
                     // Tell that outcome without treating it as permission for
                     // another leg, the goal's action, or the remaining chain.
@@ -1236,12 +1251,7 @@ fn figure_target(goal: &Goal) -> Option<ActorTarget> {
 }
 
 fn hp(link: &impl Link) -> u64 {
-    link.client()
-        .state()
-        .observation
-        .combat
-        .as_ref()
-        .map_or(0, |c| c.hp)
+    link.client().outcome_status().map_or(0, |status| status.hp)
 }
 
 /// Why an attack ended when its target moved off as the character closed in.

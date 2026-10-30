@@ -10,7 +10,7 @@ fn required_chart_catalog_roundtrips_and_delta_replacement_never_manufactures_na
     let original = super::projection::state();
     assert!(original.state().observation.charts.is_empty());
     let original_view = view(&original, &Palette::default());
-    let mut snapshot = original.snapshot();
+    let mut snapshot = original.reset_snapshot().unwrap();
     Arc::make_mut(&mut snapshot.state).observation.charts = vec![
         ChartSummary {
             kind: ChartKind::Monsters,
@@ -69,6 +69,7 @@ fn required_chart_catalog_roundtrips_and_delta_replacement_never_manufactures_na
     );
     let mut next = client.state().clone();
     next.revision += 1;
+    next.snapshot = SnapshotId(format!("fixture-display-{}", next.revision));
     next.observation.charts[0].status = ChartStatus::Inactive;
     next.observation.charts[0].acquired_at = None;
     next.observation.charts[0].chart = None;

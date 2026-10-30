@@ -409,6 +409,7 @@ mod tests {
     #[test]
     fn creature_catalog_byte_budget_matches_actual_envelope_and_rejects_one_large_row() {
         let context: tor_protocol::ReplyContext = serde_json::from_value(serde_json::json!({
+            "snapshot":"\\".repeat(128),
             "input":{"stream":{"stream":"stream\\\"escaped","epoch":"18446744073709551615"},
                 "readiness_revision":"18446744073709551615"},
             "actor":"18446744073709551615","branch":"branch\\\"escaped",

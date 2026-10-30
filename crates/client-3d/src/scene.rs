@@ -30,7 +30,11 @@ pub(super) fn receive(
     for event in events {
         match event {
             NetEvent::Ready => game.busy = false,
-            NetEvent::Advancement(lines) => game.advancement = lines,
+            NetEvent::Advancement(view) => {
+                game.advancement.clone_from(&view.lines);
+                game.advancement_view = *view;
+                game.advancement_serial += 1;
+            }
             NetEvent::Charts(lines) => game.charts = lines,
             NetEvent::Projectile(prompt) => {
                 // A chosen delivery waits for its direction like any aim.
@@ -665,7 +669,7 @@ fn build_actors(
             ))
             .add_child(ring)
             .id();
-        let rig = creatures::spawn(commands, library, meshes, entity, &look);
+        let rig = creatures::loading::request(commands, library, meshes, entity, &look);
         if let Some(hand) = rig.joint(J::HandR) {
             game.hands.insert(entity, hand);
         }
@@ -893,7 +897,7 @@ fn build_items(
             if let Some(old) = game.corpses.remove(&item.id) {
                 commands.entity(old.entity).despawn();
             }
-            let entity = creatures::spawn_corpse(
+            let entity = creatures::corpse::request_corpse(
                 commands,
                 library,
                 meshes,
@@ -1019,6 +1023,19 @@ fn prune_corpses(
 /// Show each figure's main-hand weapon in its hand: the player's from its own
 /// inventory, everyone else's from their disclosed worn equipment. A figure
 /// with nothing disclosed holds nothing, rather than a guessed weapon.
+/// A newly ready hand must receive the latest disclosed weapon even without a
+/// subsequent network view. The same reconciliation also removes stale grips.
+pub(super) fn refresh_held(
+    mut commands: Commands,
+    mut game: ResMut<Game>,
+    mut library: ResMut<PropLibrary>,
+    mut meshes: ResMut<Assets<Mesh>>,
+) {
+    if let Some(view) = game.view.clone() {
+        update_held(&mut commands, &mut game, &mut library, &mut meshes, &view);
+    }
+}
+
 fn update_held(
     commands: &mut Commands,
     game: &mut Game,

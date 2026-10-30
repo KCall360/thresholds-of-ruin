@@ -52,7 +52,6 @@ impl Player {
             context: self.client.input_context(),
             branch: self.branch.clone(),
             command: Command::Act {
-                expected_revision: self.state.revision,
                 action: Action::Move { direction },
             },
         };

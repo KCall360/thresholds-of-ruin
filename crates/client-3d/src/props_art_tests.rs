@@ -150,3 +150,65 @@ fn nonsword_items_do_not_claim_sword_handle_frames() {
         );
     }
 }
+
+#[test]
+fn smooth_small_tubes_keep_closed_surfaces_without_blanket_subdivision() {
+    let mut parts = Parts::default();
+    parts.soften();
+    parts.matte.tube(
+        &[Vec3::ZERO, Vec3::Y * 0.03],
+        &[Vec2::splat(0.01); 2],
+        10,
+        &|_, _, t| Vec3::new(0.2 + 0.6 * t, 0.3, 0.4),
+    );
+    let mesh = parts.matte.finish().unwrap();
+    let VertexAttributeValues::Float32x3(positions) =
+        mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap()
+    else {
+        panic!("tube positions")
+    };
+    assert!(positions.iter().flatten().all(|v| v.is_finite()));
+    let indices: Vec<_> = mesh.indices().unwrap().iter().collect();
+    let mut edges = std::collections::HashMap::new();
+    let mut volume = 0.0;
+    for triangle in indices.as_chunks::<3>().0 {
+        let points = triangle.map(|i| Vec3::from(positions[i]));
+        volume += points[0].dot(points[1].cross(points[2])) / 6.0;
+        let keys = points.map(|p| p.to_array().map(|v| (v * 1e6).round() as i32));
+        for i in 0..3 {
+            let (a, b) = (keys[i], keys[(i + 1) % 3]);
+            let (key, sign) = if a < b { ((a, b), 1) } else { ((b, a), -1) };
+            let entry = edges.entry(key).or_insert((0, 0));
+            entry.0 += 1;
+            entry.1 += sign;
+        }
+    }
+    assert!(
+        volume > 1e-7,
+        "positive control: tube has outward enclosed volume"
+    );
+    assert!(
+        edges
+            .values()
+            .all(|&(count, balance)| count == 2 && balance == 0),
+        "end caps and seams remain closed"
+    );
+    let VertexAttributeValues::Float32x4(colors) = mesh.attribute(Mesh::ATTRIBUTE_COLOR).unwrap()
+    else {
+        panic!("tube colors")
+    };
+    let red_min = colors.iter().map(|c| c[0]).fold(f32::INFINITY, f32::min);
+    let red_max = colors
+        .iter()
+        .map(|c| c[0])
+        .fold(f32::NEG_INFINITY, f32::max);
+    assert!(
+        red_max - red_min > 0.3,
+        "paint still spans both authored ends"
+    );
+    assert!(
+        indices.len() / 3 <= 100,
+        "a straight 3cm tube must not need hundreds of triangles just for smooth shading: {}",
+        indices.len() / 3
+    );
+}

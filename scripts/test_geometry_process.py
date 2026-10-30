@@ -15,7 +15,7 @@ class GeometryProcesses(ProcessTestCase):
         observer, seen = self.client(SPECTATOR_TOKEN)
         ascii_client = self.launch("tor-client-ascii", ["--connect", self.address, "--automation", "--capture", self.save.parent / "wide.ppm"], token=SPECTATOR_TOKEN)
         frame = self.ascii_frame(ascii_client, lambda f: f["state"] is not None and not f["busy"])
-        self.assertEqual(frame["state"], seen["state"])
+        self.assertDisclosedStateEqual(frame["state"], seen["state"])
         o = seen["state"]["observation"]
         self.assertEqual({(c["position"]["x"], c["position"]["y"]) for c in o["visible_cells"] if c["place_hint"]}, {(0, 0), (5, 0)})
         self.assertEqual(o["ground_items"][0]["position"], fixture["item_offset"])
@@ -29,7 +29,7 @@ class GeometryProcesses(ProcessTestCase):
         arrived = self.request(observer, {"type": "snapshot"})
         self.assertEqual(arrived["state"]["observation"]["inventory"][0]["name"], "stone tablet")
         self.assertEqual(arrived["state"]["observation"]["tick"], '650')
-        self.key(ascii_client, "escape", wait_for_simulation=False)
+        self.key(ascii_client, "save_quit", wait_for_simulation=False)
         ascii_client.child.wait(timeout=10)
         self.assertTrue((self.save.parent / "wide.ppm").exists())
 
@@ -50,7 +50,7 @@ class GeometryProcesses(ProcessTestCase):
         tablet = next(i["item"]["id"] for i in o["ground_items"] if i["position"] == remote)
         self.assertIsNotNone(self.act(wizard, {"type": "take", "item": tablet})["error"])  # Visible is not reachable.
         ascii_seen = initial_ascii
-        self.assertEqual(ascii_seen["state"], visible["state"])
+        self.assertDisclosedStateEqual(ascii_seen["state"], visible["state"])
         self.wizard_command(wizard, "wall 1 1 0 0 closed")
         occluded = self.request(observer, {"type": "snapshot"})
         self.assertFalse(any(item["position"] == remote for item in occluded["state"]["observation"]["ground_items"]))
@@ -67,15 +67,15 @@ class GeometryProcesses(ProcessTestCase):
         arrived = self.request(observer, {"type": "snapshot"})
         self.assertEqual(arrived["state"]["observation"]["position"], fixture["destination"])
         self.assertEqual(arrived["state"]["observation"]["tick"], str(fixture["tick"]))
-        ascii_seen = self.ascii_frame(ascii_client, lambda frame: frame["state"]["revision"] == arrived["state"]["revision"])
-        self.assertEqual(ascii_seen["state"], arrived["state"])
+        ascii_seen = self.ascii_frame(ascii_client, lambda frame: frame["state"]["observation"] == arrived["state"]["observation"])
+        self.assertDisclosedStateEqual(ascii_seen["state"], arrived["state"])
         for client in (wizard, observer, ascii_client):
             client.stop()
         server.stop()
         server = self.server(wizard=True)
         wizard = self.wizard()
         observer, resumed = self.client(SPECTATOR_TOKEN)
-        self.assertEqual(resumed["state"], arrived["state"])
+        self.assertDisclosedStateEqual(resumed["state"], arrived["state"])
         self.wizard_command(wizard, "rewind initial")
         rewound = self.request(observer, {"type": "snapshot"})
         self.assertNotEqual(rewound["branch"], initial["branch"])

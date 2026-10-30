@@ -457,4 +457,4 @@ reconnection and blocks another Read until resolved. Device names and charge
 knowledge are separate: learning a device type does not reveal every instance's
 charges. `zap <name or #id> <direction>` works at rank zero and spends a charge
 when it resolves, even if the ray misses or is resisted. Empty devices still take
-time. See [item authority and knowledge](../reference/items.md#reading-identification-and-charged-devices).
+time. See [item authority and knowledge](../reference/magic-items.md#reading-identification-and-charged-devices).

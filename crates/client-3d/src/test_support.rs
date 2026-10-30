@@ -10,6 +10,7 @@ pub(crate) fn view(revision: u64) -> View {
     let branch = BranchId("test".into());
     View {
         shown: ReplyContext {
+            snapshot: tor_protocol::SnapshotId(format!("fixture-display-{revision}")),
             input: InputContext {
                 stream: context.clone(),
                 readiness_revision: 0,
@@ -31,12 +32,14 @@ pub(crate) fn view(revision: u64) -> View {
         actors: vec![],
         items: vec![],
         inventory: vec![],
+        equipment: Default::default(),
         holds: vec![],
         abilities: vec![],
         identify: None,
         narration: vec![],
         status: Default::default(),
         hp: None,
+        attributes: None,
         has_control: false,
         can_act: false,
         history: vec![],

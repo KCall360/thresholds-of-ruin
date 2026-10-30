@@ -26,6 +26,10 @@ serde = { version = "1", features = ["derive"] }
 uuid = { version = "1", features = ["v4"] }
 bevy = "0.16"
 wgpu-types = { version = "24", default-features = false }
+softbuffer = { version = "=0.4.8", default-features = false, features = ["x11", "x11-dlopen"] }
+fontdue = { version = "=0.9.3", default-features = false, features = ["std", "simd"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
+winit = { version = "0.30", default-features = false, features = ["rwh_06", "x11"] }
 
 [profile.dev]
 opt-level = 3

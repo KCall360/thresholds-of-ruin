@@ -161,7 +161,7 @@ class SurvivalDiagnosticsProcesses(ProcessTestCase):
         self.assertFalse(package.exists())
         server = self.server("--checkpoint-interval", 1, seed=None, scenario=fallback, extra_env=env)
         player, reopened = self.client()
-        self.assertEqual(reopened["state"], expected)
+        self.assertDisclosedStateEqual(reopened["state"], expected)
         restarted = self.barrier(player, log)
         new_rows = restarted[len(boundary_rows):]
         self.assertEqual(new_rows[0]["event"], "survival.begin")

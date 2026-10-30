@@ -2637,6 +2637,15 @@ mod growth_tests {
                 equip_growth_obstruction(&mut game, modifiers);
                 assert_fatal_award_retained_without_growth(&mut game);
             }
+            // A publication with no creature change must not detach the payload,
+            // even when earned XP is held behind an unchanged obstruction.
+            let prior = game.actors[&ActorId(1)].combat.as_ref().unwrap().clone();
+            let outcome = game.actor_outcome(ActorId(1)).unwrap();
+            game.commit_actor_outcome(outcome).unwrap();
+            assert!(std::ptr::eq(
+                prior.creature(),
+                game.actors[&ActorId(1)].combat.as_ref().unwrap().creature(),
+            ));
             let before = game.clone();
             let folds = crate::diagnostics::work_counts().health_derivations;
             for _ in 0..3 {
