@@ -133,10 +133,17 @@ class RogueProfileContent(unittest.TestCase):
         changed = sorted(path for path in starter if tuned[path] != starter[path])
         self.assertEqual(changed, [("abilities", "rogue.drain_vitality"),
                                    ("abilities", "rogue.energy_drain"),
+                                   ("conditions", "rogue.confused"),
                                    ("constants", "default_abilities"), ("nutrition",)])
         self.assertEqual(sorted(set(tuned) - set(starter)), [
             ("abilities", "filch_charm", "strikes"), ("abilities", "filch_gold", "strikes"),
             ("growth", "threshold_base"), ("growth", "threshold_per_tier"), ("health_recovery",)])
+
+    def test_confusion_lengthens_as_in_rogue(self):
+        by_path = {tuple(row["path"]): row["value"] for row in self.rules["overrides"]}
+        confused = by_path[("conditions", "rogue.confused")]
+        self.assertEqual(confused["stacking"], {"kind": "extend"})
+        self.assertEqual(confused["timing"], {"kind": "actor_active", "on_expiry": {"kind": "remove"}})
 
     def test_signature_effects_follow_rogue_rates(self):
         # Rider pairings measured by the encounter study against Rogue's

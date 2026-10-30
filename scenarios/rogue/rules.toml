@@ -159,10 +159,12 @@ op = "add"
 path = ["flags", "gaze_capable"]
 value = { id = "gaze_capable", name = "Gaze-capable", modifiers = [] }
 
+# Rogue lengthens confusion that lands while confused and grants no immunity
+# afterwards: extend stacking, no expiry protection.
 [[overrides]]
 op = "add"
 path = ["conditions", "rogue.confused"]
-value = { id = "rogue.confused", family = "rogue.confused", lifecycle = "timed", name = "Confused", modifiers = [{ scope = "always", op = { kind = "locomotion", value = { kind = "confused", chance = { numerator = 4, denominator = 5 } } } }], stacking = { kind = "keep" }, source_scoped = false, descriptors = ["mind_affecting"], capacity = "reject", timing = { kind = "actor_active", on_expiry = { kind = "protect", duration = 400 } }, restrictions = [], preparation = "preserve" }
+value = { id = "rogue.confused", family = "rogue.confused", lifecycle = "timed", name = "Confused", modifiers = [{ scope = "always", op = { kind = "locomotion", value = { kind = "confused", chance = { numerator = 4, denominator = 5 } } } }], stacking = { kind = "extend" }, source_scoped = false, descriptors = ["mind_affecting"], capacity = "reject", timing = { kind = "actor_active", on_expiry = { kind = "remove" } }, restrictions = [], preparation = "preserve" }
 
 [[overrides]]
 op = "add"

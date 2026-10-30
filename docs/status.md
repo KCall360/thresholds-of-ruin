@@ -844,7 +844,7 @@ Against the ratified tolerances, a sixteen-seed campaign passes levels, food,
 depth-4 share and encounters; the starvation share (5 of 9 deaths) is waived
 as a limit of the bot, which spends more turns per floor than Rogue's food
 supply sustains. Orcs are greedy, the food-drought guarantee forces food on the
-fourth foodless floor as Rogue does, and `died` events name their cause. Signature effects are measured too: of 128 judged encounter ratios only the medusa's confusion falls outside ±35%, capped by `keep` stacking of a protected condition. Monster flight on low Health is a scenario capability Rogue disables, and arenas can stand on a floor and report a per-action timeline.
+fourth foodless floor as Rogue does, and `died` events name their cause. Signature effects are measured too: all 128 judged encounter ratios are within ±35%. Monster flight on low Health is a scenario capability Rogue disables, and arenas can stand on a floor and report a per-action timeline.
 Rogue species are built through the [progression plan](plans/progression.md)'s
 advancement ledger, edge rules, regeneration and strike sequences; each of its
 phases still needs separate approval.

@@ -208,7 +208,7 @@ at least 20 attack checks; species that seldom attack get four times the seeds.
 Rogue 5.4.4 monsters never flee, so the package disables the
 `low_health_flight` capability rather than editing species.
 
-Final study over seeds 0–15: 128 judged ratios, all within ±35% except the
+Final study over seeds 0–15: 128 judged ratios, all within ±35%.
 medusa's confusion.
 
 | Species | Signature | Target | Measured | Foe checks | Within ±35% |
@@ -220,7 +220,7 @@ medusa's confusion.
 | N nymph | steal magic item | 0.45 | 0.42 | 74 | Yes |
 | F venus flytrap | hold | 0.70 | 0.69 | 826 | Yes |
 | W wraith | level drain | 0.08 | 0.08 | 212 | Yes |
-| M medusa | gaze confusion | 0.49 | 0.27 | 330 | No |
+| M medusa | gaze confusion | 0.49 | 0.56 | 330 | Yes |
 | V vampire | maximum-Health drain | 0.21 | 0.18 | 582 | Yes |
 
 Values chosen by measurement: the wraith's drain rider uses Lore against Physical
@@ -238,10 +238,10 @@ blow never acts.
 
 Open limits: the dragon's breath is a ranged action in Rogue, not a hit rider, so
 the per-hit target does not judge it. The ice monster attacks too rarely (16
-checks) for its own ratios to be judged, as in Rogue. The medusa's confusion
-lands at about half Rogue's rate per attack because `rogue.confused` keeps an
-existing confusion instead of extending it, as Rogue does; that condition's
-stacking is a protected shape, so matching Rogue needs an engine decision.
+checks) for its own ratios to be judged, as in Rogue. Rogue lengthens confusion that lands while the
+player is already confused and grants no immunity afterwards, so `rogue.confused`
+extends and has no expiry protection; with `keep` and 400 protected ticks, the
+medusa confused at about half Rogue's rate.
 
 Open engine defect: a held adventurer's AI basic-melee plan against an adjacent
 flytrap fails execution with `InvalidPlan` when the flytrap's Clutch resolves
