@@ -73,7 +73,7 @@ pub use tor_simulation::EdibleSpec;
 use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
-pub const RULESET: &str = "interactions-v56";
+pub const RULESET: &str = "interactions-v57";
 const VALIDATOR: &str = "tor-scenario-47";
 /// The manifest and the validator's files are bounded to this.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
@@ -5214,7 +5214,7 @@ mod tests {
         let original = read_package(&root).unwrap();
         original.check_identity().unwrap();
         assert_eq!(original.certificate.validator, "tor-scenario-47");
-        assert_eq!(original.certificate.ruleset, "interactions-v56");
+        assert_eq!(original.certificate.ruleset, "interactions-v57");
         let current_artifact = artifact::relative_root(&original);
         for (boundary, identity) in [
             ("validator", "tor-scenario-27"),
@@ -5228,6 +5228,7 @@ mod tests {
             ("ruleset", "interactions-v40"),
             ("ruleset", "interactions-v41"),
             ("ruleset", "interactions-v42"),
+            ("ruleset", "interactions-v56"),
         ] {
             let mut package = original.clone();
             if boundary == "validator" {
@@ -5241,7 +5242,11 @@ mod tests {
             assert!(crate::storage::schema::scenario::decode_content_package(&encoded).is_err());
             assert!(package.check_identity().is_err(), "{boundary}");
         }
-        assert!(resolve_rules_source("import = \"interactions-v35\"\n", "rules.toml").is_err());
+        for previous in ["interactions-v35", "interactions-v56"] {
+            assert!(
+                resolve_rules_source(&format!("import = \"{previous}\"\n"), "rules.toml").is_err()
+            );
+        }
     }
 
     fn compact_package(domain: crate::procedural_world::Domain) -> Package {
@@ -7047,7 +7052,7 @@ mod tests {
 
     #[test]
     fn shared_rules_import_accepts_validated_scenario_override() {
-        let source = r#"import = "interactions-v56"
+        let source = r#"import = "interactions-v57"
 [[overrides]]
 op = "set"
 path = ["constants", "base_defense"]

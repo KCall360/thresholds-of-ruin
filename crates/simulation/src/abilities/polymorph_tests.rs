@@ -552,3 +552,122 @@ fn paid_polymorph_identifies_only_immediate_visible_changed_form() {
         }
     }
 }
+
+/// Count the complete ordinary paid path, not fixture creation or assertions.
+/// These are baseline observations, not budgets or a performance improvement.
+#[test]
+fn body_compile_work_paid_polymorph_baseline() {
+    let actor = ActorId(1);
+    // Independently fixed launch/save/selection witnesses, as in the delivery
+    // contract above. No seed search or substitute direct effect application.
+    for (case, seed, expected_form, changed, draws) in [
+        ("paid_resisted", 1_u64, None, false, 6_u64),
+        ("paid_changed", 2, Some("one"), true, 7),
+        ("paid_blocked_fit", 5, Some("two"), false, 7),
+    ] {
+        let (mut game, item, base) =
+            fixture_with_discovery(crate::ItemDiscovery::DiscernibleEffect);
+        let build = game.creature(actor).unwrap().build().clone();
+        let mut at = game.actors[&actor].location;
+        at.position.x += 1;
+        let target = game
+            .spawn_actor(at, std::num::NonZeroU64::new(100).unwrap())
+            .unwrap();
+        game.configure_creature(
+            target,
+            crate::CreatureIdentity {
+                name: "work-count recipient".into(),
+                faction: "fixture".into(),
+            },
+            build.clone(),
+        )
+        .unwrap();
+        game.actors.get_mut(&target).unwrap().ready_at = 100_000;
+        crate::test_creatures::injure(&mut game, target, 1).unwrap();
+        let personal = build.ledger().entries()[1].clone();
+        let tick = game.tick;
+        game.rules_rng = seed;
+
+        let before = crate::diagnostics::work_counts();
+        let issued = game
+            .admit_intention(
+                actor,
+                crate::Action::Zap {
+                    item,
+                    aim: crate::DeviceAim::Direction {
+                        direction: crate::abilities::StepDirection::East,
+                    },
+                },
+                crate::IntentionOrigin::Human,
+            )
+            .unwrap();
+        let done = game.execute_next_intention().unwrap();
+        assert_eq!(done.intention.id, issued);
+        done.outcome.unwrap();
+        let after = crate::diagnostics::work_counts();
+
+        assert_eq!(game.tick - tick, 100, "ordinary item preparation is paid");
+        assert_eq!(game.items[&item].charges, Some(1));
+        assert_eq!(
+            game.rules_rng,
+            seed.wrapping_add(0x9e3779b97f4a7c15_u64.wrapping_mul(draws)),
+            "body Health streams and measurement do not consume combat RNG"
+        );
+        let recipient = game.creature(target).unwrap();
+        assert_eq!(recipient.build().ledger().entries()[1], personal);
+        assert_eq!(recipient.health().injury(), 1);
+        assert!(!recipient.health().dead());
+        assert_eq!(
+            recipient.build().active_body_package().unwrap().id,
+            if changed {
+                form("one")
+            } else {
+                base.id.clone()
+            }
+        );
+        if !changed {
+            assert_eq!(recipient.build(), &build);
+        }
+        let resolutions: Vec<_> = game
+            .event_log
+            .iter()
+            .filter_map(|event| match event {
+                crate::combat::CombatEvent::Resolved { outcome, .. }
+                    if outcome.intention == Some(issued) =>
+                {
+                    Some(outcome)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(resolutions.len(), 1);
+        assert_eq!(
+            resolutions[0].effects,
+            expected_form.map_or_else(Vec::new, |id| {
+                vec![ResolvedEffect::BalefulPolymorph {
+                    form: Some(form(id)),
+                    changed,
+                }]
+            })
+        );
+        assert_eq!(
+            game.actors[&actor]
+                .knowledge
+                .contains("fixture.polymorph_wand"),
+            changed,
+            "paid nonchanges do not identify this discernible-only device"
+        );
+        println!(
+            "body_work_v1 {}",
+            serde_json::json!({
+                "case": case, "scope": "paid_admission_through_completion", "initial_hd": 2,
+                "permanent_creature_compiles": after.permanent_creature_compiles - before.permanent_creature_compiles,
+                "dynamic_creature_folds": after.dynamic_creature_folds - before.dynamic_creature_folds,
+                "raw_hit_die_visits": after.raw_hit_die_visits - before.raw_hit_die_visits,
+                "advancement_choice_visits": after.advancement_choice_visits - before.advancement_choice_visits,
+                "creature_build_copies": after.creature_build_copies - before.creature_build_copies,
+                "health_provenance_copies": after.health_provenance_copies - before.health_provenance_copies,
+            })
+        );
+    }
+}

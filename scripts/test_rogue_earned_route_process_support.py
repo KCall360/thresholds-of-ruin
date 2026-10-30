@@ -1581,7 +1581,7 @@ class RouteResumeHardeningTests(unittest.TestCase):
             else:
                 self.assertEqual(current, old, name)
 
-    def test_current_baseline_v27_changes_only_item_form_format_and_rules_identity(self):
+    def test_retained_baseline_v27_changes_only_item_form_format_and_rules_identity(self):
         import hashlib
         import tomllib
         from arena_evaluation import files
@@ -1617,9 +1617,6 @@ class RouteResumeHardeningTests(unittest.TestCase):
         self.assertEqual(transition['current_rules_dependencies'], source['rules_dependencies'])
         self.assertEqual(source['rules_dependencies'], {
             'interactions-v56': '6c4c3eb331a1567c50e1fed30fa59fd37f69f6d2413d829be49a0253748b5f80'})
-        bundled = ROOT / 'crates/simulation/data/default-ruleset.toml'
-        self.assertEqual(hashlib.sha256(bundled.read_bytes()).hexdigest(),
-                         source['rules_dependencies']['interactions-v56'])
         self.assertEqual(set(source['package_inputs']), set(prior['package_inputs']))
         for name in source['package_inputs']:
             current = (snapshot / 'package' / name).read_bytes()
@@ -1638,8 +1635,53 @@ class RouteResumeHardeningTests(unittest.TestCase):
                 self.assertEqual(current, old.replace(b'interactions-v55', b'interactions-v56', 1))
             else:
                 self.assertEqual(current, old, name)
+
+    def test_current_baseline_v28_changes_only_flee_rules_identity(self):
+        import hashlib
+        from arena_evaluation import files
+        from process_harness import ROOT
+        snapshot = ROOT / 'scripts/fixtures/rogue-earned-baseline-v28'
+        previous = ROOT / 'scripts/fixtures/rogue-earned-baseline-v27'
+        transition_bytes = (snapshot / 'format-transition.json').read_bytes()
+        transition = json.loads(transition_bytes)
+        source = json.loads((snapshot / 'source.json').read_text())
+        prior = json.loads((previous / 'source.json').read_text())
+        self.assertEqual(transition['format'], 1)
+        self.assertEqual((transition['previous_snapshot'], transition['current_snapshot']),
+                         (previous.name, snapshot.name))
+        self.assertEqual((transition['previous_scenario_format'], transition['current_scenario_format']),
+                         (35, 35))
+        self.assertEqual((transition['previous_ruleset'], transition['current_ruleset']),
+                         ('interactions-v56', 'interactions-v57'))
+        self.assertEqual(transition['previous_source_sha256'],
+                         hashlib.sha256((previous / 'source.json').read_bytes()).hexdigest())
+        for name in ('package_inputs', 'rules_dependencies', 'reference'):
+            self.assertEqual(transition['previous_' + name], prior[name])
+        self.assertEqual(files(previous / 'package'), prior['package_inputs'])
+        self.assertEqual(files(snapshot / 'package'), source['package_inputs'])
+        self.assertTrue(source['reference'].startswith(prior['reference'] + '; '))
+        self.assertTrue(source['reference'].endswith(
+            'transition-sha256:' + hashlib.sha256(transition_bytes).hexdigest()))
+        self.assertIn('compiler and route qualification pending', source['reference'])
+        self.assertIn('source bytes only', transition['only_transformation'])
+        self.assertIn('No maze_rooms or room_omissions policy', transition['only_transformation'])
+        self.assertEqual(transition['retained_fixture_reference'],
+                         'b0b04c0c8b846323836efafdb9d85a99157ce7e4:scripts/fixtures/rogue-earned-baseline-v27')
+        self.assertEqual(transition['current_rules_dependencies'], source['rules_dependencies'])
+        bundled = ROOT / 'crates/simulation/data/default-ruleset.toml'
+        self.assertEqual(source['rules_dependencies'], {
+            'interactions-v57': hashlib.sha256(bundled.read_bytes()).hexdigest()})
+        self.assertEqual(set(source['package_inputs']), set(prior['package_inputs']))
+        for name in source['package_inputs']:
+            current = (snapshot / 'package' / name).read_bytes()
+            old = (previous / 'package' / name).read_bytes()
+            if name == 'rules.toml':
+                self.assertEqual(old.count(b'interactions-v56'), 1)
+                self.assertEqual(current, old.replace(b'interactions-v56', b'interactions-v57', 1))
+            else:
+                self.assertEqual(current, old, name)
         loader = (ROOT / 'scripts/test_rogue_earned_route_process.py').read_text()
-        self.assertIn("'production': ROOT / 'scripts/fixtures/rogue-earned-baseline-v27'", loader)
+        self.assertIn("'production': ROOT / 'scripts/fixtures/rogue-earned-baseline-v28'", loader)
 
     def test_artifact_capacity_is_infrastructure_not_controller_failure(self):
         self.assertEqual(classify_failure(ValueError('JSON artifact exceeds bounded size')),

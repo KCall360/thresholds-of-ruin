@@ -164,16 +164,32 @@ paid work retains its committed-prefix and recovery obligations; failed candidat
 execution does not leak new engagement or RNG. Human and autonomous controllers
 share the same capability, source and target gates.
 
-## Current retreat limitation
+<a id="current-retreat-limitation"></a>
+## Retreat distance and limits
 
-The current flee heuristic compares the current route's step count against a
-same-region candidate's Manhattan distance, while an off-threat-region candidate
-scores `current + 1`. These are not one uniform distance metric. A source-supported
-split-corridor construction suggests region partitioning can change retreat choice.
-It has **not been runtime-reproduced in this documentation review**. See the
-[qualified finding](../development/documentation-review.md#recommended-engineering-work)
-for the exact proposed fixture and scope; do not infer optimal or topology-neutral
-retreat from the general routing contract.
+Flee compares **hop counts of the stable minimum-duration remembered routes**
+from the current position and each legal, currently disclosed candidate. It does
+not compare accumulated movement time, Manhattan coordinates, or an invented
+`current + 1` for another region. Candidate searches start in the actual post-step
+location and body orientation, so translated/rotated joins retain their frames.
+Only a strictly greater score qualifies; existing direction order resolves ties.
+
+The current route to the threat must be known. If it is unavailable, there is no
+proved strict improvement: retained commitment, visible self-defense/basic attack
+and eventual Wait retain their ordinary priority. A candidate whose remembered
+**directed** graph has no return path to an otherwise reachable known threat has
+unbounded distance in that graph and can qualify as an escape. This does not prove
+that no undisclosed return path exists. No reverse link or hidden topology is
+invented, and first-step collision/disclosure checks still apply.
+
+A separate frontier per candidate adds search work (at most ten candidate
+origins); this is a correctness change, not a measured optimization or an optimal
+escape planner.
+The [regressions](../../crates/simulation/src/ai_flee_tests.rs) cover split/unsplit
+corridors, rotated and one-way portals, blocked retreat, missing remembered
+connections, pure previews and checkpointed autonomous execution. The
+[review record](../development/documentation-review.md#recommended-engineering-work)
+retains the original source-only finding and its subsequent confirmation.
 
 ## Worked control-flow examples
 

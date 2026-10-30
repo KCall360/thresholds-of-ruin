@@ -5,6 +5,71 @@
 //! before capturing outcomes, just as it does for a complete observation.
 use super::*;
 
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct OutcomeWork {
+    disclosed_cells: usize,
+    item_rows: usize,
+    object_rows: usize,
+    actor_rows: usize,
+    location_lookups: usize,
+    emitted_rows: usize,
+}
+
+#[cfg(test)]
+thread_local! {
+    static OUTCOME_WORK: std::cell::Cell<OutcomeWork> = const {
+        std::cell::Cell::new(OutcomeWork {
+            disclosed_cells: 0, item_rows: 0, object_rows: 0, actor_rows: 0,
+            location_lookups: 0, emitted_rows: 0,
+        })
+    };
+}
+
+#[cfg(test)]
+fn record_work(update: impl FnOnce(&mut OutcomeWork)) {
+    OUTCOME_WORK.with(|counter| {
+        let mut work = counter.get();
+        update(&mut work);
+        counter.set(work);
+    });
+}
+
+/// Per-call grouping of already-projected rows, not a disclosure cache. Each
+/// group retains input order; scene occurrences (including portal copies) still
+/// select and emit rows only after the location-and-frame disclosure gate.
+#[derive(Default)]
+struct LocationRows<'a> {
+    items: std::collections::BTreeMap<w::Location, Vec<&'a s::GroundItemView>>,
+    objects: std::collections::BTreeMap<w::Location, Vec<&'a s::perception::ApparentObjectView>>,
+    actors: std::collections::BTreeMap<w::Location, Vec<&'a s::ActorView>>,
+}
+
+impl<'a> LocationRows<'a> {
+    fn new(view: &'a s::Observation) -> Self {
+        let mut rows = Self::default();
+        for item in &view.ground_items {
+            #[cfg(test)]
+            record_work(|work| work.item_rows += 1);
+            rows.items.entry(item.location).or_default().push(item);
+        }
+        for object in &view.apparent_objects {
+            #[cfg(test)]
+            record_work(|work| work.object_rows += 1);
+            rows.objects
+                .entry(object.location)
+                .or_default()
+                .push(object);
+        }
+        for actor in &view.visible_actors {
+            #[cfg(test)]
+            record_work(|work| work.actor_rows += 1);
+            rows.actors.entry(actor.location).or_default().push(actor);
+        }
+        rows
+    }
+}
+
 pub(crate) fn outcome_observation(
     view: &s::Observation,
     scene: &[w::SightCell],
@@ -22,10 +87,15 @@ pub(crate) fn outcome_observation(
     let mut underfoot = p::OutcomeUnderfoot::default();
     let mut underfoot_cell_seen = false;
     let mut visible_actors = Vec::new();
+    // Do not scan or allocate groups when no scene occurrence is authorized.
+    let mut location_rows = None;
     for cell in scene {
         let Some(&visible) = disclosed.get(&(cell.location, cell.rotation)) else {
             continue;
         };
+        #[cfg(test)]
+        record_work(|work| work.disclosed_cells += 1);
+        let rows = location_rows.get_or_insert_with(|| LocationRows::new(view));
         let at_feet = cell.offset == (w::Position { x: 0, y: 0, z: 0 });
         if at_feet && !underfoot_cell_seen {
             underfoot_cell_seen = true;
@@ -64,11 +134,11 @@ pub(crate) fn outcome_observation(
                 family: trap.family.map(trap_family),
             }),
         });
-        for item in view
-            .ground_items
-            .iter()
-            .filter(|item| item.location == cell.location)
-        {
+        #[cfg(test)]
+        record_work(|work| work.location_lookups += 3);
+        for item in rows.items.get(&cell.location).into_iter().flatten() {
+            #[cfg(test)]
+            record_work(|work| work.emitted_rows += 1);
             if at_feet {
                 underfoot.items.push(p::OutcomeUnderfootItem {
                     name: underfoot_name(item.presentation.as_ref(), &item.name),
@@ -80,11 +150,9 @@ pub(crate) fn outcome_observation(
                 name: ground_name(item.presentation.as_ref(), &item.name),
             });
         }
-        for object in view
-            .apparent_objects
-            .iter()
-            .filter(|object| object.location == cell.location)
-        {
+        for object in rows.objects.get(&cell.location).into_iter().flatten() {
+            #[cfg(test)]
+            record_work(|work| work.emitted_rows += 1);
             if at_feet {
                 underfoot.items.push(p::OutcomeUnderfootItem {
                     name: underfoot_name(object.presentation.as_ref(), &object.appearance.name),
@@ -96,11 +164,9 @@ pub(crate) fn outcome_observation(
                 name: ground_name(object.presentation.as_ref(), &object.appearance.name),
             });
         }
-        for actor in view
-            .visible_actors
-            .iter()
-            .filter(|actor| actor.location == cell.location)
-        {
+        for actor in rows.actors.get(&cell.location).into_iter().flatten() {
+            #[cfg(test)]
+            record_work(|work| work.emitted_rows += 1);
             visible_actors.push(p::OutcomeActorName {
                 asset: actor.presentation.as_ref().map_or_else(
                     || actor.asset.clone(),
@@ -293,6 +359,10 @@ fn underfoot_name(
         None => item_name.into(),
     }
 }
+
+#[cfg(test)]
+#[path = "outcomes_work_tests.rs"]
+mod work_tests;
 
 #[cfg(test)]
 mod tests {

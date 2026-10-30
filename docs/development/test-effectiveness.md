@@ -33,6 +33,34 @@ failure. Record errors, cancellations, waivers and not-run checks separately.
 Define the evidence window and deduplicate before adding totals; never extrapolate
 a repository-lifetime count from a partial set of logs.
 
+## Cross-region retreat and save-anchor boundaries, 30 October 2026
+
+The documentation review's mixed flee-distance candidate was reproduced against
+unchanged production AI before repair. In
+`ai::flee_tests::cornered_flee_does_not_approach_a_threat_across_region_partitions`,
+the split six-cell corridor chose `Move(East)` toward a visible threat instead of
+`Wait`; its unsplit control and the separate positive rotated-retreat method
+passed. This is **one production root, one distinct intended failing method and
+one failed execution** in this first-red window. Before that reproduction, a new
+fixture's customized species was absent from its Game catalog: one fixture-setup
+root caused two failed methods/executions. Those failures are not flee evidence.
+
+The correction uses the same remembered-route step-count policy from actual
+post-step frames. Six dedicated methods cover split/unsplit and rotated joins,
+one-way escape, missing remembered connections, blocked movement, decision purity
+and checkpointed autonomous execution. The affected AI owner passes 76 methods;
+the remembered-route unit owner passes 10. These are targeted local results, not
+full workspace, platform/release or performance qualification.
+
+Save-owned note-anchor adapters separately preserve current string/null encoding
+and validation. The save-schema owner passes 21 methods, including independent
+shape/rejection fixtures for snapshots and private optional entry boundaries.
+Two journal-boundary tests, eleven history integration tests, two AI execution/
+recovery tests and the actual-server action/annotation restart witness also pass.
+These characterize compatibility hardening; no prior data-corruption failure is
+claimed. Deterministic AI replay compatibility requires its own explicit rules
+identity decision, independent of unchanged serialized shapes.
+
 ## Projected limb surface investigation, 28 October 2026
 
 Two existing source-contract defects were confirmed while developing the new
@@ -2710,3 +2738,26 @@ regression still requires nonzero failure and retained diagnostics when the
 suite deadline expires. Individual frame waits, quit deadlines, test selection,
 native assertions and hosted no-waiver rules are unchanged. Fresh final-head
 hosted native and core qualification remain required after this control change.
+
+### Measurement-witness setup and rules-source inventory
+
+The local rules-identity and count-witness checkpoint exposed two test-fixture
+causes, not additional gameplay defects. The new source-only comparator name
+was missing from the documentation workload allowlist (one failing method in a
+39-test Python checkpoint); adding that name preserved historical identifiers,
+and all 19 documentation tests then passed. The new scaled Polymorph fixture
+attempted to configure an actor already owning combat and correctly received
+`ActorBusy` before its measurement (one failing method/execution). Constructing
+2/16/64 HD in the original birth builder instead retained every semantic
+assertion; all four count tests then passed and produced 16 rows. Existing
+ordinary fixtures still construct exactly two HD.
+
+An earlier outcome-test preflight tried to serialize the deliberately non-wire
+compact observation type: two compiler diagnostics from one scaffolding error,
+not two failing behavioral methods. The correction compares complete typed
+inputs and serializes actual eventful outcome facts, without changing any wire
+type. Four outcome-adapter tests pass before and after the per-call index,
+preserving privacy, occurrence/list ordering and required matched-row emissions.
+The count reductions do not establish a release timing improvement. Focused
+local feedback is not full or hosted qualification; failed evidence remains
+separate from subsequent passing checks.

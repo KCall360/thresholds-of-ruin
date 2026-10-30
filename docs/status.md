@@ -7,8 +7,11 @@ fully optimized or qualified for every workload. Follow the
 [testing policy](development/testing.md).
 
 **Current formats:** protocol **66**, save format **64**, scenario format **35**,
-ruleset **`interactions-v56`**, scenario validator **`tor-scenario-47`**.
-Unsupported identities are rejected rather than migrated. Current private
+ruleset **`interactions-v57`**, scenario validator **`tor-scenario-47`**.
+Unsupported identities are rejected rather than migrated. Rules-identity
+changes invalidate all saves pinned to the previous identity,
+not only saves containing affected AI. Wire and physical save formats need not
+change with a deterministic rules correction. Current private
 creature records include explicit Health-roll policy, stable HD/purchase ownership,
 body snapshots and pending-return state; authored content can register body forms.
 

@@ -469,34 +469,8 @@ impl Game {
         }
         if ai.state == State::Flee {
             let threat = threat.expect("flee has a disclosed or remembered threat");
-            let current = route(threat).map_or(0, |r| r.len());
-            let mut choices = Vec::new();
-            for direction in Direction::HORIZONTAL
-                .into_iter()
-                .chain([Direction::Up, Direction::Down])
-            {
-                if let Some((at, _)) = self.actor_translation(id, direction) {
-                    if view
-                        .visible_cells
-                        .iter()
-                        .any(|c| c.location == at && !c.wall)
-                    {
-                        // Distances in the actor's current region; portal retreat uses remembered route length.
-                        let score = if at.region == threat.region {
-                            (at.position.x - threat.position.x).unsigned_abs() as usize
-                                + (at.position.y - threat.position.y).unsigned_abs() as usize
-                                + (at.position.z - threat.position.z).unsigned_abs() as usize
-                        } else {
-                            current + 1
-                        };
-                        choices.push((score, direction));
-                    }
-                }
-            }
-            if let Some((_, direction)) = choices
-                .into_iter()
-                .filter(|(d, _)| *d > current)
-                .max_by_key(|(d, _)| *d)
+            if let Some(direction) = route(threat)
+                .and_then(|route| self.ai_retreat_direction(id, threat, route.len(), view))
             {
                 // A technique may use only this already disclosed legal retreat.
                 // Paid prefixes still escape through the ordinary atomic Move.
@@ -671,6 +645,38 @@ impl Game {
             }
         }
         Some(AiDecision::action(Action::Wait, ai, behavior))
+    }
+
+    fn ai_retreat_direction(
+        &self,
+        actor: ActorId,
+        threat: Location,
+        current: usize,
+        view: &crate::Observation,
+    ) -> Option<Direction> {
+        Direction::HORIZONTAL
+            .into_iter()
+            .chain([Direction::Up, Direction::Down])
+            .filter_map(|direction| {
+                let (at, orientation) = self.actor_translation(actor, direction)?;
+                if !view
+                    .visible_cells
+                    .iter()
+                    .any(|c| c.location == at && !c.wall)
+                {
+                    return None;
+                }
+                let mut search = self.route_search_from(actor, at, orientation).ok()?;
+                // Compare like with like: hop counts of the same stable
+                // minimum-duration remembered-route policy, not local coordinates.
+                // A directed escape can remove every remembered return path to
+                // this known threat; that is unbounded distance in this graph.
+                // An unknown current distance never reaches this comparison.
+                let distance = search.route(threat).map_or(usize::MAX, |route| route.len());
+                (distance > current).then_some((distance, direction))
+            })
+            .max_by_key(|(distance, _)| *distance)
+            .map(|(_, direction)| direction)
     }
 
     /// Default combat policy uses personal capabilities and resources, never
@@ -1066,6 +1072,10 @@ fn disclosed_ray_direction(
 
 #[path = "ai_defense.rs"]
 mod defense;
+
+#[cfg(test)]
+#[path = "ai_flee_tests.rs"]
+mod flee_tests;
 
 #[cfg(test)]
 mod tests {

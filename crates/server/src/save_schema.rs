@@ -550,12 +550,37 @@ impl Action {
 )]
 pub(crate) enum Anchor {
     State {
+        #[serde(with = "snapshot_id")]
         snapshot: wire::SnapshotId,
     },
     Entry {
         #[serde(with = "EntryId")]
         id: wire::EntryId,
     },
+}
+
+/// Snapshot capabilities keep their current stored string shape and validation.
+/// These constraints belong to the save reader, independently of wire serde or
+/// the protocol's future identity-validation policy.
+pub(crate) mod snapshot_id {
+    use super::*;
+
+    pub(crate) fn serialize<S: serde::Serializer>(
+        value: &wire::SnapshotId,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        value.0.serialize(serializer)
+    }
+
+    pub(crate) fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<wire::SnapshotId, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        if value.is_empty() || value.len() > 128 || value.chars().any(char::is_control) {
+            return Err(serde::de::Error::custom("invalid snapshot identity"));
+        }
+        Ok(wire::SnapshotId(value))
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1616,6 +1641,124 @@ mod tests {
             serde_json::to_value(decoded).unwrap(),
             serde_json::from_str::<serde_json::Value>(json).unwrap()
         );
+    }
+
+    #[test]
+    fn saved_note_anchors_keep_current_string_shapes_and_private_boundary() {
+        use crate::journal::{Command, RecordedAnchor};
+        use serde_json::json;
+
+        // Independent current-save fixtures, including the byte-length boundary
+        // and strings requiring JSON escaping. No wire serializer is the oracle.
+        for snapshot in [
+            "issued-snapshot".to_owned(),
+            "snapshot \\\"é".to_owned(),
+            "a".repeat(128),
+            "é".repeat(64),
+        ] {
+            let command = Command::Annotate {
+                anchor: wire::Anchor::State {
+                    snapshot: wire::SnapshotId(snapshot.clone()),
+                },
+                text: "note".into(),
+                source: wire::ClientSource::User,
+                audience: wire::Audience::Private,
+                category: wire::AnnotationCategory::Note,
+            };
+            let expected = json!({
+                "type":"annotate", "anchor":{"type":"state", "snapshot":snapshot},
+                "text":"note", "source":"user", "audience":"private", "category":"note"
+            });
+            assert_eq!(serde_json::to_value(&command).unwrap(), expected);
+            assert_eq!(
+                super::super::codec::strict::<Command>(&serde_json::to_vec(&expected).unwrap())
+                    .unwrap(),
+                command
+            );
+
+            for boundary in [None, Some("private-causal-entry"), Some("entry \\\"é")] {
+                let anchor = RecordedAnchor::State {
+                    snapshot: wire::SnapshotId(snapshot.clone()),
+                    boundary: boundary.map(|id| wire::EntryId(id.into())),
+                };
+                let expected = json!({"type":"state", "snapshot":snapshot, "boundary":boundary});
+                assert_eq!(serde_json::to_value(&anchor).unwrap(), expected);
+                assert_eq!(
+                    super::super::codec::strict::<RecordedAnchor>(
+                        &serde_json::to_vec(&expected).unwrap()
+                    )
+                    .unwrap(),
+                    anchor
+                );
+                assert_eq!(
+                    anchor.to_public(),
+                    wire::Anchor::State {
+                        snapshot: wire::SnapshotId(snapshot.clone())
+                    }
+                );
+            }
+        }
+        // Entry anchors retain the same independent string identity shape.
+        check_stored::<RecordedAnchor>(r#"{"type":"entry","id":"retained-entry"}"#);
+    }
+
+    #[test]
+    fn saved_note_anchors_preserve_identity_validation_and_required_fields() {
+        use crate::journal::{Command, RecordedAnchor};
+        use serde_json::json;
+
+        let command = json!({
+            "type":"annotate", "anchor":{"type":"state", "snapshot":"issued-snapshot"},
+            "text":"note", "source":"user", "audience":"private", "category":"note"
+        });
+        let recorded = json!({"type":"state", "snapshot":"issued-snapshot", "boundary":null});
+        let command_ok = |value: &serde_json::Value| {
+            super::super::codec::strict::<Command>(&serde_json::to_vec(value).unwrap()).is_ok()
+        };
+        let recorded_ok = |value: &serde_json::Value| {
+            super::super::codec::strict::<RecordedAnchor>(&serde_json::to_vec(value).unwrap())
+                .is_ok()
+        };
+        assert!(command_ok(&command));
+        assert!(recorded_ok(&recorded));
+        for invalid in [
+            json!(""),
+            json!("a".repeat(129)),
+            json!("é".repeat(65)),
+            json!("snapshot\nidentity"),
+            json!("snapshot\u{7f}identity"),
+            json!("snapshot\u{85}identity"),
+            json!(null),
+            json!(1),
+            json!([]),
+            json!({"id":"snapshot"}),
+        ] {
+            let mut value = command.clone();
+            value["anchor"]["snapshot"] = invalid.clone();
+            assert!(!command_ok(&value), "accepted receipt snapshot {invalid}");
+            let mut value = recorded.clone();
+            value["snapshot"] = invalid.clone();
+            assert!(!recorded_ok(&value), "accepted recorded snapshot {invalid}");
+        }
+        let mut missing = command;
+        missing["anchor"]
+            .as_object_mut()
+            .unwrap()
+            .remove("snapshot");
+        assert!(!command_ok(&missing));
+        for field in ["snapshot", "boundary"] {
+            let mut missing = recorded.clone();
+            missing.as_object_mut().unwrap().remove(field);
+            assert!(!recorded_ok(&missing), "accepted missing {field}");
+        }
+        for invalid in [json!(1), json!([]), json!({"id":"entry"})] {
+            let mut value = recorded.clone();
+            value["boundary"] = invalid.clone();
+            assert!(!recorded_ok(&value), "accepted recorded boundary {invalid}");
+        }
+        let mut extra = recorded;
+        extra["entry"] = json!("unexpected");
+        assert!(!recorded_ok(&extra));
     }
 
     #[test]
