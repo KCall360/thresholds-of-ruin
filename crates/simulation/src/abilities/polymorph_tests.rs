@@ -669,5 +669,15 @@ fn body_compile_work_paid_polymorph_baseline() {
                 "health_provenance_copies": after.health_provenance_copies - before.health_provenance_copies,
             })
         );
+        let maximum_compiles = match case {
+            "paid_changed" => 2,
+            "paid_resisted" | "paid_blocked_fit" => 0,
+            _ => panic!("unbudgeted paid body-work case: {case}"),
+        };
+        let compiles = after.permanent_creature_compiles - before.permanent_creature_compiles;
+        assert!(
+            compiles <= maximum_compiles,
+            "{case}: {compiles} permanent compiles exceeds {maximum_compiles}"
+        );
     }
 }

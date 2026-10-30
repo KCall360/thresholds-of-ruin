@@ -96,6 +96,19 @@ AI 80, travel 10, autonomous movement 5 and both paid-prefix methods, with the
 six original assertions untouched. Hosted and local optimized results remain
 separate; the initial failed run is not relabeled green.
 
+## Body-refactor process binary inventory, 30 October 2026
+
+The focused text Polymorph reopen/retry check first failed before gameplay:
+its helper also launches a headless observer, but the local binary inventory
+included only server, scenario compiler and text client. The missing
+`tor-client-headless` produced `FileNotFoundError`. This is one local setup/
+inventory root, one failed method and one failed execution, not a gameplay or
+persistence defect. Building the omitted executable and rerunning the exact
+method passed without weakening assertions or changing runtime source; the
+failed receipt remains separate. Select process binaries from helper dependencies,
+not only the client named in the method. The owner is
+[`MagicItemProcesses.test_text_paid_self_polymorph_reopens_and_retries_without_source_or_private_ledger`](../../scripts/test_magic_items_process.py).
+
 ## Projected limb surface investigation, 28 October 2026
 
 Two existing source-contract defects were confirmed while developing the new
