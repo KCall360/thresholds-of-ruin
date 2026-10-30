@@ -18,6 +18,28 @@ ROOT = HERE.parents[2]
 
 
 class IndependentVerification(unittest.TestCase):
+    def test_windows_native_suite_has_bounded_headroom_for_the_expanded_selection(self):
+        spec = importlib.util.spec_from_file_location("client_3d_verify_budget", HERE / "verify.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        # Hosted debug completed 35 of 57 selected methods in 3000 seconds,
+        # with 21 passes, 14 skips and no assertion failures. Leave room for
+        # the remaining methods without changing any individual frame wait.
+        self.assertGreaterEqual(module.process_timeout("win32"), 90 * 60)
+        self.assertLessEqual(module.process_timeout("win32"), 100 * 60)
+        self.assertEqual(module.process_timeout("linux"), 50 * 60)
+
+    def test_windows_native_job_reserves_build_and_artifact_headroom(self):
+        workflow = (ROOT / ".github/workflows/client-3d.yml").read_text(encoding="utf-8")
+        self.assertIn("timeout-minutes: ${{ matrix.os == 'windows-latest' && 150 || 120 }}", workflow)
+        # Forty minutes of measured compilation, ninety for native processes,
+        # and fifteen for setup/artifact cleanup fit the bounded Windows job.
+        minutes = int(re.search(r"timeout-minutes: .*&& (\d+) ", workflow)[1])
+        spec = importlib.util.spec_from_file_location("client_3d_verify_job_budget", HERE / "verify.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        self.assertGreaterEqual(minutes * 60, module.process_timeout("win32") + (40 + 15) * 60)
+
     def test_failed_native_child_retains_evidence_inside_its_verification_logs(self):
         spec = importlib.util.spec_from_file_location("client_3d_verify_artifacts", HERE / "verify.py")
         module = importlib.util.module_from_spec(spec)
@@ -492,7 +514,7 @@ class LocalGraphicalWaiverContracts(unittest.TestCase):
                 self.assertIn("test_runner.py", command[1])
                 self.assertEqual(command[-1], "-v")
                 self.assertNotIn("--waive-local-graphical", command)
-                self.assertEqual(kwargs["timeout"], module.PROCESS_TIMEOUT)
+                self.assertEqual(kwargs["timeout"], module.process_timeout(module.sys.platform))
                 Path(kwargs["env"]["TOR_TEST_TIMINGS"]).write_text("\n".join(json.dumps(row) for row in rows) + "\n")
                 raise module.subprocess.TimeoutExpired(command, kwargs["timeout"])
             printed = io.StringIO()

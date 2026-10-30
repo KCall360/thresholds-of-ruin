@@ -2681,3 +2681,32 @@ An initial local preflight omitted the integration target's `test-support`
 feature; the corrected feature configuration compiled. This setup failure and
 the deliberate first-red executions are not additional production root causes.
 Final-head hosted route and full qualification remain required.
+
+### Expanded Windows native suite exceeded its aggregate budget
+
+The next head passed both core platform aggregates and fresh full PR
+qualification, including the Windows release earned-route shard. The independent
+[Windows debug](https://github.com/KCall360/thresholds-of-ruin/actions/runs/41005205490/job/123898652846)
+and [Windows release](https://github.com/KCall360/thresholds-of-ruin/actions/runs/41005205490/job/123898652879)
+3D jobs then exhausted the process suite's 3000-second budget. The debug receipt
+records exit 124 after 3000.063 seconds, with 21 passed and 14 skipped methods out
+of 57 selected; release records exit 124 after 3000.016 seconds, with 22 passed
+and 15 skipped. Neither timing stream contains an assertion-error diagnostic.
+The remaining selected methods were interrupted or never reached, not passed.
+
+This is one aggregate infrastructure budget cause and two failed suite
+executions, not two failing native methods or a demonstrated gameplay defect.
+The expanded UI coverage consumed the old allowance while making valid progress:
+graphical advancement alone passed in 858.7 seconds on debug and 827.3 seconds
+on release. Debug compilation and setup consumed approximately forty minutes
+before process acceptance started. No claim about 100-creature performance
+follows from these software-rendered test timings.
+
+Two configuration regressions first rejected the old suite/job allowances.
+Windows process acceptance now has a bounded 90-minute suite allowance, and its
+job allows 150 minutes for compilation, acceptance and artifact cleanup. Linux
+keeps its 50-minute suite and 120-minute job limits. The existing timeout
+regression still requires nonzero failure and retained diagnostics when the
+suite deadline expires. Individual frame waits, quit deadlines, test selection,
+native assertions and hosted no-waiver rules are unchanged. Fresh final-head
+hosted native and core qualification remain required after this control change.
