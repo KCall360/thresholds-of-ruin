@@ -117,6 +117,26 @@ pub struct ArenaEvaluation {
     pub actions: u64,
     pub termination: ArenaTermination,
     pub participants: Vec<ArenaParticipant>,
+    /// Every committed AI step, when requested; absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeline: Option<Vec<ArenaStep>>,
+}
+
+/// One AI step: who acted, at what tick, the journal entries it appended and
+/// the combat events it produced, in their saved shapes.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ArenaStep {
+    #[serde(serialize_with = "decimal")]
+    pub tick: u64,
+    pub actor: ActorId,
+    pub journal: Vec<serde_json::Value>,
+    pub events: Vec<serde_json::Value>,
+}
+
+/// Optional observation of a run; options never change its outcome.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RunOptions {
+    pub timeline: bool,
 }
 
 fn participant(engine: &Engine, actor: u64) -> Result<ArenaParticipant, Failure> {
@@ -273,6 +293,11 @@ fn measured_recovery(value: &ArenaParticipant) -> Result<u64, Failure> {
 /// Run a fresh, unpaused, all-AI package arena. Errors remain explicit failures;
 /// no work is synthesized when the ordinary engine has no admissible decision.
 pub fn run(scenario: Scenario) -> Result<ArenaEvaluation, Failure> {
+    run_with(scenario, RunOptions::default())
+}
+
+/// [`run`] with optional observation such as a per-step timeline.
+pub fn run_with(scenario: Scenario, options: RunOptions) -> Result<ArenaEvaluation, Failure> {
     let package = scenario
         .package
         .as_ref()
@@ -305,6 +330,7 @@ pub fn run(scenario: Scenario) -> Result<ArenaEvaluation, Failure> {
         .into_iter()
         .map(|id| Ok((id, participant(&engine, id)?)))
         .collect::<Result<BTreeMap<_, _>, Failure>>()?;
+    let mut timeline = options.timeline.then(Vec::new);
     loop {
         let run = engine
             .game
@@ -317,7 +343,27 @@ pub fn run(scenario: Scenario) -> Result<ArenaEvaluation, Failure> {
         let Some((actor, _)) = engine.next_ai_action() else {
             break;
         };
+        let journaled = engine.archive.records.len();
         engine.advance_ai(actor)?;
+        if let Some(timeline) = &mut timeline {
+            let saved = |value: Result<serde_json::Value, _>| {
+                value.map_err(|_| invalid("Arena timeline entry is not serializable"))
+            };
+            timeline.push(ArenaStep {
+                tick: engine.game.tick(),
+                actor: ActorId(actor.0),
+                journal: engine.archive.records[journaled..]
+                    .iter()
+                    .map(|record| saved(serde_json::to_value(&record.entry.content)))
+                    .collect::<Result<_, _>>()?,
+                events: engine
+                    .game
+                    .combat_events()
+                    .iter()
+                    .map(|event| saved(serde_json::to_value(event)))
+                    .collect::<Result<_, _>>()?,
+            });
+        }
         let run = engine.game.arena_run().expect("validated arena runtime");
         let failed = matches!(
             engine
@@ -382,6 +428,7 @@ pub fn run(scenario: Scenario) -> Result<ArenaEvaluation, Failure> {
         actions: run.actions,
         termination,
         participants: participants.into_values().collect(),
+        timeline,
     })
 }
 

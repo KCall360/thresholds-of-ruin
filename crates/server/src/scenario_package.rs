@@ -199,6 +199,18 @@ pub struct Arena {
     pub control: ArenaControl,
     pub ticks: u64,
     pub actions: u64,
+    /// Places the arena's regions on a floor of this activation profile and
+    /// depth, so floor rules such as theft's depth-scaled amounts and same-floor
+    /// relocation apply. No first-entry population runs there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub floor: Option<ArenaFloor>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArenaFloor {
+    pub profile: String,
+    pub depth: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -2801,6 +2813,17 @@ impl Package {
                     && self.manifest.objective.is_none(),
                 "Invalid arena limits, participants or objective",
             )?;
+            if let Some(floor) = &arena.floor {
+                require(
+                    floor.depth > 0
+                        && self
+                            .manifest
+                            .floor_activation
+                            .as_ref()
+                            .is_some_and(|plan| plan.profiles.contains_key(&floor.profile)),
+                    "Arena floor needs a positive depth and a floor activation profile",
+                )?;
+            }
         }
         for (faction, enemies) in &self.manifest.factions {
             let origin = Origin::Faction(faction);
@@ -4769,6 +4792,26 @@ impl Package {
         if arena.start_paused {
             game.control_arena(true, 0)
                 .map_err(|_| fail("Invalid initial arena control"))?;
+        }
+        if let Some(floor) = &arena.floor {
+            // After the initial floor activation, so the arena floor runs no
+            // first-entry population; it only supplies floor context.
+            let regions = self
+                .index
+                .regions
+                .iter()
+                .map(|region| self.region_def(region.id))
+                .collect::<Result<Vec<_>, _>>()?;
+            let regions: Vec<&RegionDef> = regions.iter().map(|region| &**region).collect();
+            let scope = self.profile_scope(
+                &format!("arena/{}", floor.depth),
+                &floor.profile,
+                floor.depth,
+                &regions,
+                &[],
+            );
+            game.register_activation_scope(scope)
+                .map_err(|error| fail(format!("Arena floor: {error:?}")))?;
         }
         Ok(())
     }

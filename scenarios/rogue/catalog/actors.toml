@@ -370,7 +370,7 @@ restoration = "authored"
 future_growth = { kind = "disabled" }
 nutrition = { kind = "exempt" }
 hit_dice = [
-  { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "rogue.confusing_gaze" } }] },
+  { source = "racial", purchases = [] },
   { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "second_strike" } }] },
   { source = "racial", purchases = [] },
   { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "third_strike" } }] },

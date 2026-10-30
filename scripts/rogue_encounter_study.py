@@ -35,7 +35,14 @@ ACTOR_ID = 3
 #   for a usable count of attacks.
 SEE_INVISIBLE = "rogue.ring_see_invisible"
 RING_SLOT = 7  # first ring socket of the default anatomy
-EXTRA_SEEDS = {"O": 4, "F": 4, "X": 4}
+# Species that seldom attack get more seeds, so their own ratios are measured.
+EXTRA_SEEDS = {"O": 4, "F": 4, "X": 4, "I": 4, "B": 4, "L": 4, "N": 4, "W": 4, "V": 4}
+# A ratio is judged only when its side made this many attack checks; fewer
+# are reported but are noise.
+MINIMUM_SIDE_CHECKS = 20
+SIDE = {"player_hit": "player", "player_damage_per_action": "player",
+        "player_actions_to_kill": "player", "foe_hit": "foe", "foe_damage_per_action": "foe",
+        "foe_actions_to_kill": "foe", "signature_per_action": "foe"}
 # The revealed xeroc waits: it engages first as well, so its own attacks are
 # measured. The greedy orc needs no edit: with no Gold in the arena it acquires
 # the adventurer itself, as a Rogue orc in a room without gold does.
@@ -51,9 +58,12 @@ SIGNATURE_EFFECTS = {
     "F": ("apply_linked_hold",), "V": ("lose_maximum_health",),
     "W": ("drain_latest_hit_die",), "M": ("apply_condition:rogue.confused",),
 }
-# Thieves need something to take: Rogue players carry gold and magic items.
-STUDY_GOLD = 50
+ARENA_PROFILE = "rogue.low_depth"
+# Thieves need something to take on every attack, so a theft never depends on
+# whether an earlier one emptied the pack: plenty of gold and magic items.
+STUDY_GOLD = 10000
 STUDY_CHARM = "rogue.healing"
+STUDY_CHARMS = 20
 
 
 def archetype(glyph):
@@ -82,7 +92,7 @@ def leveled_character(manifest, level):
     return character
 
 
-def encounter(manifest, actors, glyph, level, mirrored=False):
+def encounter(manifest, actors, glyph, level, mirrored=False, depth=None):
     name = archetype(glyph)
     if name not in actors:
         raise ValueError(f"No actor archetype for {glyph}: {name}")
@@ -94,7 +104,7 @@ def encounter(manifest, actors, glyph, level, mirrored=False):
     if glyph == "L":
         character["loadout"].append({"archetype": "rogue.gold", "quantity": STUDY_GOLD})
     if glyph == "N":
-        character["loadout"].append({"archetype": STUDY_CHARM, "quantity": 1})
+        character["loadout"].append({"archetype": STUDY_CHARM, "quantity": STUDY_CHARMS})
     profiles = copy.deepcopy(manifest["ai_profiles"])
     profiles["study_rogue"] = {"idle": "explore", "doors": True, "care": True, "equipment": True,
                                "loot": True, "gold": False, "flee_percent": 0}
@@ -103,11 +113,22 @@ def encounter(manifest, actors, glyph, level, mirrored=False):
         "version": "1.0", "ruleset": "rules.toml", "modules": copy.deepcopy(manifest["modules"]),
         "default_character": character["id"], "characters": [character],
         "factions": copy.deepcopy(manifest["factions"]), "ai_profiles": profiles,
-        "capabilities": {"npc_stair_traversal": True, "owner_advancement": False, "corpses": False},
+        "capabilities": {"npc_stair_traversal": True, "owner_advancement": False, "corpses": False,
+                         "low_health_flight": manifest["capabilities"].get("low_health_flight", True)},
         "themes": copy.deepcopy(manifest["themes"]), "assets": copy.deepcopy(manifest["assets"]),
         "arena": {"participants": [character["id"], ACTOR_ID], "control": "all_ai",
                   "ticks": 40000, "actions": 4000},
     }
+    if depth is not None:
+        # The arena stands on a dungeon floor of the species' depth, so floor
+        # rules apply (a thief's depth-scaled take and same-floor vanish). No
+        # wanderers arrive and no first-entry population runs there.
+        activation = copy.deepcopy(manifest["floor_activation"])
+        activation.pop("wandering", None)
+        # Families name generated worlds; the arena's authored chamber has none.
+        activation["families"] = {}
+        study["floor_activation"] = activation
+        study["arena"]["floor"] = {"profile": ARENA_PROFILE, "depth": depth}
     start, target = ([7, 2, 0], [1, 2, 0]) if mirrored else ([1, 2, 0], [7, 2, 0])
     region = {"id": 1, "name": "Rogue encounter study", "size": [9, 5, 2], "chamber": True,
               "gravity": [0, 0, -1], "anchors": {"start": start},
@@ -146,8 +167,9 @@ def write_package(directory, study, region, compiler):
         raise RuntimeError(f"{directory.name}: {result.stderr.strip()}")
 
 
-def run(arena, directory, seed):
-    result = subprocess.run([str(arena), "--scenario", str(directory), "--seed", str(seed), "--all-ai"],
+def run(arena, directory, seed, timeline=False):
+    result = subprocess.run([str(arena), "--scenario", str(directory), "--seed", str(seed), "--all-ai",
+                             *(["--timeline"] if timeline else [])],
                             capture_output=True, text=True, encoding="utf-8", timeout=300)
     try:
         report = json.loads(result.stdout)
@@ -223,7 +245,9 @@ def compare(target, measured, tolerance):
         ratio = got / want if want and got is not None else None
         # Arena damage excludes overkill, so the adventurer's damage per action
         # reads low against small foes; it is reported but not judged.
-        judged = ratio is not None and metric != "player_damage_per_action"
+        checks = (measured.get("counts") or {}).get(SIDE[metric] + "_checks")
+        judged = (ratio is not None and metric != "player_damage_per_action"
+                  and (checks is None or checks >= MINIMUM_SIDE_CHECKS))
         rows[metric] = {"target": want, "measured": got, "ratio": ratio,
                         "within": 1 / (1 + tolerance) <= ratio <= 1 + tolerance if judged else None}
     return rows
@@ -243,7 +267,8 @@ def study(output, compiler, arena, seeds, glyphs, tolerance=DEFAULT_TOLERANCE):
         reports = []
         for mirrored in (False, True):
             directory = output / f"{glyph.lower()}-{'mirrored' if mirrored else 'forward'}"
-            package, region = encounter(manifest, actors, glyph, target.player_level, mirrored)
+            package, region = encounter(manifest, actors, glyph, target.player_level, mirrored,
+                                        target.depth)
             write_package(directory, package, region, compiler)
             span = EXTRA_SEEDS.get(glyph, 1)
             species_seeds = [seed * span + offset for seed in seeds for offset in range(span)]

@@ -77,13 +77,27 @@ op = "add"
 path = ["talents", "rogue.freezing_touch"]
 value = { id = "rogue.freezing_touch", name = "Freezing Touch", prerequisites = [], requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 1 }, { kind = "subtype_in", subtypes = ["cold"] }] }, form_choices = [], modifiers = [{ scope = "always", op = { kind = "grant_ability", ability = "rogue.freezing_touch" } }] }
 
+# Rogue nymphs steal a magic item on a hit; theft riders keep a check, the
+# easiest pairing, so the per-attack rate tracks Rogue.
+[[overrides]]
+op = "set"
+path = ["abilities", "filch_charm", "strikes"]
+value = { kind = "natural_melee", additional_riders = [{ trigger = "success", check = { skill = { kind = "natural_attack" }, defense = "spiritual" }, effects = [{ kind = "theft", selection = { kind = "magical_unit" }, relocation = { flag = "theft_vanish", policy = "same_floor" } }], descriptors = [] }] }
+
+# Rogue leprechauns steal gold on a hit the player fails to save against;
+# natural attack against Spiritual gives that rate.
+[[overrides]]
+op = "set"
+path = ["abilities", "filch_gold", "strikes"]
+value = { kind = "natural_melee", additional_riders = [{ trigger = "success", check = { skill = { kind = "natural_attack" }, defense = "spiritual" }, effects = [{ kind = "theft", selection = { kind = "currency", currency = "gold", amount = { kind = "depth_scaled_uniform", minimum = 2, maximum_base = 51, per_depth = 10 } }, relocation = { flag = "theft_vanish", policy = "same_floor" } }], descriptors = [] }] }
+
 # DR1: accepted TOR Spiritual-checked restorable maximum-Health drain.
 # Species natural damage is imported once; this action adds no Feed or damage.
 # Timing and AI priority follow CH1's provisional signature pattern.
 [[overrides]]
 op = "add"
 path = ["abilities", "rogue.drain_vitality"]
-value = { cancellable = true, id = "rogue.drain_vitality", name = "Drain Vitality", interaction = "hostile_to_target", tags = ["attack"], basic_attack = false, invocation = "actor_target", timing = { source = { kind = "fixed", prepare = 100, recover = 100 }, scaled_by = "speed" }, reach = { kind = "melee" }, strikes = { kind = "natural_melee", additional_riders = [{ trigger = "success", check = { skill = { kind = "natural_attack" }, defense = "spiritual" }, effects = [{ kind = "lose_maximum_health", amount = { kind = "rolled", dice = { count = 1, sides = 3, bonus = 0 } } }], descriptors = [] }] }, ai = { priority = 20, hostile = true, minimum_resource_percent = 0, range_preference = "any" } }
+value = { cancellable = true, id = "rogue.drain_vitality", name = "Drain Vitality", interaction = "hostile_to_target", tags = ["attack"], basic_attack = false, invocation = "actor_target", timing = { source = { kind = "fixed", prepare = 100, recover = 100 }, scaled_by = "speed" }, reach = { kind = "melee" }, strikes = { kind = "natural_melee", additional_riders = [{ trigger = "success", check = { skill = { kind = "named", skill = "spellcasting" }, defense = "cognitive" }, effects = [{ kind = "lose_maximum_health", amount = { kind = "rolled", dice = { count = 1, sides = 3, bonus = 0 } } }], descriptors = [] }] }, ai = { priority = 20, hostile = true, minimum_resource_percent = 0, range_preference = "any" } }
 
 [[overrides]]
 op = "add"
@@ -130,7 +144,7 @@ value = { id = "rogue.venomous_bite", name = "Venomous Bite", prerequisites = []
 [[overrides]]
 op = "add"
 path = ["abilities", "rogue.energy_drain"]
-value = { cancellable = true, id = "rogue.energy_drain", name = "Energy Drain", interaction = "hostile_to_target", tags = ["attack"], basic_attack = false, invocation = "actor_target", timing = { source = { kind = "fixed", prepare = 100, recover = 100 }, scaled_by = "speed" }, reach = { kind = "melee" }, strikes = { kind = "natural_melee", additional_riders = [{ trigger = "success", check = { skill = { kind = "natural_attack" }, defense = "spiritual" }, effects = [{ kind = "drain_latest_hit_die" }], descriptors = [] }] }, ai = { priority = 20, hostile = true, minimum_resource_percent = 0, range_preference = "any" } }
+value = { cancellable = true, id = "rogue.energy_drain", name = "Energy Drain", interaction = "hostile_to_target", tags = ["attack"], basic_attack = false, invocation = "actor_target", timing = { source = { kind = "fixed", prepare = 100, recover = 100 }, scaled_by = "speed" }, reach = { kind = "melee" }, strikes = { kind = "natural_melee", additional_riders = [{ trigger = "success", check = { skill = { kind = "named", skill = "lore" }, defense = "physical" }, effects = [{ kind = "drain_latest_hit_die" }], descriptors = [] }] }, ai = { priority = 20, hostile = true, minimum_resource_percent = 0, range_preference = "any" } }
 
 [[overrides]]
 op = "add"

@@ -26,6 +26,44 @@ fn scenario(actions: u64, ticks: u64) -> Scenario {
 }
 
 #[test]
+fn a_requested_timeline_records_every_step_without_changing_the_run() {
+    let plain = arena_evaluation::run(scenario(32, 100000)).unwrap();
+    assert!(plain.timeline.is_none());
+    assert!(serde_json::to_value(&plain)
+        .unwrap()
+        .get("timeline")
+        .is_none());
+    let traced = arena_evaluation::run_with(
+        scenario(32, 100000),
+        arena_evaluation::RunOptions { timeline: true },
+    )
+    .unwrap();
+    let timeline = traced.timeline.clone().unwrap();
+    // The trace observes the run; the measured outcome is identical.
+    assert_eq!(
+        arena_evaluation::ArenaEvaluation {
+            timeline: None,
+            ..traced
+        },
+        plain
+    );
+    assert_eq!(timeline.len(), 32);
+    assert!(timeline.windows(2).all(|pair| pair[0].tick <= pair[1].tick));
+    let ids: Vec<_> = plain.participants.iter().map(|p| p.actor).collect();
+    assert!(timeline.iter().all(|step| ids.contains(&step.actor)));
+    assert!(timeline.iter().all(|step| !step.journal.is_empty()));
+    let resolved = timeline
+        .iter()
+        .flat_map(|step| &step.events)
+        .filter(|event| event.get("Resolved").is_some())
+        .count();
+    assert!(resolved > 0);
+    let value = serde_json::to_value(&timeline[0]).unwrap();
+    assert!(value["tick"].is_string());
+    assert!(value["journal"][0]["type"].is_string());
+}
+
+#[test]
 fn ordinary_engine_arena_report_is_deterministic_bounded_and_conserves_damage() {
     let report = arena_evaluation::run(scenario(32, 100000)).unwrap();
     assert_eq!(report, arena_evaluation::run(scenario(32, 100000)).unwrap());

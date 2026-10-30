@@ -70,6 +70,8 @@ pub struct ScenarioCapabilities {
     pub owner_advancement: bool,
     #[serde(default = "enabled")]
     pub corpses: bool,
+    #[serde(default = "enabled")]
+    pub low_health_flight: bool,
 }
 
 fn enabled() -> bool {
@@ -1013,6 +1015,7 @@ impl Package {
                 npc_stair_traversal: capabilities.npc_stair_traversal,
                 owner_advancement: capabilities.owner_advancement,
                 corpses: capabilities.corpses,
+                low_health_flight: capabilities.low_health_flight,
             },
         )
     }
@@ -1181,6 +1184,20 @@ impl Package {
         let Some(profile) = profile else {
             return Ok(None);
         };
+        Ok(Some(
+            self.profile_scope(identity, profile, depth, regions, rooms),
+        ))
+    }
+
+    /// One floor scope of a known activation profile over immutable regions.
+    pub(super) fn profile_scope(
+        &self,
+        identity: &str,
+        profile: &str,
+        depth: u32,
+        regions: &[&RegionDef],
+        rooms: &[runtime::PreparedRoomGroup],
+    ) -> runtime::PreparedScope {
         let mut cells = BTreeSet::new();
         let mut protected = BTreeSet::new();
         for region in regions {
@@ -1200,15 +1217,15 @@ impl Package {
             }
             protected.extend(region.anchors.values().map(|at| loc(region.id, *at)));
         }
-        Ok(Some(runtime::PreparedScope {
+        runtime::PreparedScope {
             scope: identity.into(),
             depth,
-            profile: profile.clone(),
+            profile: profile.into(),
             members: regions.iter().map(|region| RegionId(region.id)).collect(),
             cells: cells.into_iter().collect(),
             protected,
             rooms: rooms.to_vec(),
-        }))
+        }
     }
 
     /// Called once by original/base reconstruction after the starting scope is

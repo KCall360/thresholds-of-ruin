@@ -45,9 +45,10 @@ class RogueProfileContent(unittest.TestCase):
         self.assertTrue(all(len(row["purchases"]) <= 1 for row in schedule))
         self.assertTrue(all(count <= 5 for count in ranks(build).values()), ranks(build))
 
-    def test_capabilities_disable_owner_choices_and_corpses(self):
+    def test_capabilities_disable_owner_choices_corpses_and_flight(self):
         self.assertEqual(self.manifest["capabilities"], {
-            "npc_stair_traversal": False, "owner_advancement": False, "corpses": False})
+            "npc_stair_traversal": False, "owner_advancement": False, "corpses": False,
+            "low_health_flight": False})
 
     def test_rogue_starting_kit_has_no_bandages(self):
         [character] = self.manifest["characters"]
@@ -94,8 +95,17 @@ class RogueProfileContent(unittest.TestCase):
         self.assertEqual(rogue_item_table.rewrite(text), text)
 
     def test_only_listed_sources_differ_from_the_starter_package(self):
-        for name in ["catalog/actors.toml", "catalog/bodies.toml", "catalog/items.toml"]:
-            self.assertEqual((PACKAGE / name).read_bytes(), (STARTER / name).read_bytes(), name)
+        self.assertEqual((PACKAGE / "catalog/items.toml").read_bytes(),
+                         (STARTER / "catalog/items.toml").read_bytes())
+        # The medusa confuses with its first strike, as Rogue's does, instead of
+        # spending a turn on a separate gaze: its first racial row buys nothing.
+        gaze = ('{ source = "racial", purchases = [{ pool = "advancement", selection = '
+                '{ kind = "talent", talent = "rogue.confusing_gaze" } }] }')
+        for name in ["catalog/actors.toml", "catalog/bodies.toml"]:
+            starter = (STARTER / name).read_text(encoding="utf-8")
+            self.assertEqual(starter.count(gaze), 1, name)
+            self.assertEqual((PACKAGE / name).read_text(encoding="utf-8"),
+                             starter.replace(gaze, '{ source = "racial", purchases = [] }'), name)
         # Species differ only in tuned values: Health, defense and accuracy
         # modifiers, the melee bonus and damage amounts. Orcs are greedy, as in
         # Rogue, where the starter package keeps them passive.
@@ -103,7 +113,6 @@ class RogueProfileContent(unittest.TestCase):
             species = load(path / "catalog/creatures.toml")["creatures"]["species"]
             species["rogue.orc"]["behavior"]["disposition"] = "greedy"
             for row in species.values():
-                row["behavior"]["flee_percent"] = 0
                 row["modifiers"] = [modifier for modifier in row.get("modifiers", [])
                                     if not (modifier["op"].get("kind") == "add"
                                             and modifier["op"]["stat"]["kind"] in ("health", "defense"))
@@ -111,19 +120,47 @@ class RogueProfileContent(unittest.TestCase):
                 if "bonus" in row.get("melee", {}):
                     row["melee"]["bonus"] = 0
                 for strike in row.get("melee", {}).get("strikes", []):
+                    strike["riders"] = []  # signature riders are listed below
                     for effect in strike.get("on_success", []):
                         for component in effect.get("damage", {}).get("components", []):
                             # Damage amounts are tuned values (die size and bonus).
                             component["amount"] = "tuned"
             return species
         self.assertEqual(untuned(PACKAGE), untuned(STARTER))
-        starter = load(STARTER / "rules.toml")
-        changed = [row["path"] for row, old in zip(self.rules["overrides"], starter["overrides"])
-                   if row != old]
-        self.assertEqual(changed, [["nutrition"], ["constants", "default_abilities"]])
-        added = [row["path"] for row in self.rules["overrides"][len(starter["overrides"]):]]
-        self.assertEqual(added, [["health_recovery"], ["growth", "threshold_base"],
-                                 ["growth", "threshold_per_tier"]])
+        starter = {tuple(row["path"]): row for row in load(STARTER / "rules.toml")["overrides"]}
+        tuned = {tuple(row["path"]): row for row in self.rules["overrides"]}
+        self.assertLessEqual(set(starter), set(tuned))
+        changed = sorted(path for path in starter if tuned[path] != starter[path])
+        self.assertEqual(changed, [("abilities", "rogue.drain_vitality"),
+                                   ("abilities", "rogue.energy_drain"),
+                                   ("constants", "default_abilities"), ("nutrition",)])
+        self.assertEqual(sorted(set(tuned) - set(starter)), [
+            ("abilities", "filch_charm", "strikes"), ("abilities", "filch_gold", "strikes"),
+            ("growth", "threshold_base"), ("growth", "threshold_per_tier"), ("health_recovery",)])
+
+    def test_signature_effects_follow_rogue_rates(self):
+        # Rider pairings measured by the encounter study against Rogue's
+        # per-attack signature rates.
+        by_path = {tuple(row["path"]): row["value"] for row in self.rules["overrides"]}
+
+        def rider(path):
+            [row] = by_path[path]["strikes"]["additional_riders"]
+            return row["check"]
+        self.assertEqual(rider(("abilities", "rogue.energy_drain")),
+                         {"skill": {"kind": "named", "skill": "lore"}, "defense": "physical"})
+        self.assertEqual(rider(("abilities", "rogue.drain_vitality")),
+                         {"skill": {"kind": "named", "skill": "spellcasting"}, "defense": "cognitive"})
+        natural = {"skill": {"kind": "natural_attack"}, "defense": "spiritual"}
+        for ability in ("filch_gold", "filch_charm"):
+            [row] = by_path[("abilities", ability, "strikes")]["additional_riders"]
+            self.assertEqual(row["check"], natural)
+            self.assertEqual(row["effects"][0]["kind"], "theft")
+        species = load(PACKAGE / "catalog/creatures.toml")["creatures"]["species"]
+        [confusion] = species["rogue.medusa"]["melee"]["strikes"][0]["riders"]
+        self.assertEqual(confusion["check"], natural)
+        self.assertEqual(confusion["effects"],
+                         [{"kind": "apply_condition", "condition": "rogue.confused", "duration": 300}])
+        self.assertTrue(all(not strike["riders"] for strike in species["rogue.medusa"]["melee"]["strikes"][1:]))
 
     def test_orcs_are_greedy_and_every_other_species_keeps_its_disposition(self):
         tuned = load(PACKAGE / "catalog/creatures.toml")["creatures"]["species"]
@@ -131,19 +168,17 @@ class RogueProfileContent(unittest.TestCase):
         self.assertEqual(tuned["rogue.orc"]["behavior"]["disposition"], "greedy")
         self.assertTrue(tuned["rogue.orc"]["behavior"]["gold"])
         self.assertEqual(starter["rogue.orc"]["behavior"]["disposition"], "passive")
-        def without_flight(behavior):
-            return {key: value for key, value in behavior.items() if key != "flee_percent"}
         changed = [name for name in tuned
-                   if without_flight(tuned[name]["behavior"]) != without_flight(starter[name]["behavior"])]
+                   if tuned[name].get("behavior") != starter[name].get("behavior")]
         self.assertEqual(changed, ["rogue.orc"])
 
     def test_rogue_monsters_never_flee_on_low_health(self):
         # Rogue 5.4.4 has no monster flight: an attacked monster fights until it
-        # dies. Forced flight (scare monster) is separate and unaffected.
-        tuned = load(PACKAGE / "catalog/creatures.toml")["creatures"]["species"]
-        self.assertEqual({name: row["behavior"]["flee_percent"] for name, row in tuned.items()},
-                         {name: 0 for name in tuned})
-        self.assertEqual(len(tuned), 27)  # 26 monsters and the adventurer's species
+        # dies. The scenario disables the mechanic; species keep their values.
+        manifest = load(PACKAGE / "scenario.toml")
+        self.assertIs(manifest["capabilities"]["low_health_flight"], False)
+        starter = load(STARTER / "scenario.toml")
+        self.assertNotIn("low_health_flight", starter.get("capabilities", {}))
 
     def test_rogue_value_tuning_in_rules(self):
         by_path = {tuple(row["path"]): row["value"] for row in self.rules["overrides"]}

@@ -646,13 +646,16 @@ a placement skip. Query, preload, revisit, ascent and restart never grant stock.
 
 Scenario capabilities switch shared mechanics on or off for one scenario; no
 mechanic is removed from the engine. `npc_stair_traversal` is required inside a
-`[capabilities]` table. `owner_advancement` and `corpses` may be omitted and then
-keep the engine default, enabled. With `owner_advancement = false` the server
+`[capabilities]` table. `owner_advancement`, `corpses` and `low_health_flight` may
+be omitted and then keep the engine default, enabled. With `owner_advancement = false` the server
 refuses owner purchases, future-source and Intellect choices and respec, before
 any preview work; growth then follows only authored rows. With `corpses = false`
 an ordinary death leaves no corpse item and allocates no item identity, while
-carried items still drop at the death location. The compiled and saved policy
-records all three switches explicitly. Unknown switches reject compilation.
+carried items still drop at the death location. With `low_health_flight = false`
+AI actors never flee because their Health fell below their species'
+`flee_percent`; forced flight, such as from a scare effect, still applies. The
+compiled and saved policy records every switch explicitly. Unknown switches
+reject compilation.
 
 The optional `npc_stair_traversal` capability defaults to allowing NPC stairs.
 When false, only the selected declared player character can voluntarily traverse

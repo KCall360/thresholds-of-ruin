@@ -445,6 +445,7 @@ struct ScenarioCapabilities {
     npc_stair_traversal: bool,
     owner_advancement: bool,
     corpses: bool,
+    low_health_flight: bool,
 }
 
 #[derive(Serialize, Deserialize)]

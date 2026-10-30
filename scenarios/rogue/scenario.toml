@@ -92,6 +92,8 @@ max_depth = 1000000
 npc_stair_traversal = false
 owner_advancement = false
 corpses = false
+# Rogue 5.4.4 monsters never flee on low Health; forced flight still applies.
+low_health_flight = false
 
 # Relocate the one ordinary identity on every eligible actual player entry.
 [unique_retrieval]

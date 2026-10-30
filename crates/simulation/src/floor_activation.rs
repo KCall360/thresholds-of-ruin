@@ -42,6 +42,9 @@ pub struct ScenarioCapabilities {
     pub owner_advancement: bool,
     /// Ordinary deaths leave a corpse item; carried items still drop.
     pub corpses: bool,
+    /// AI actors flee below their species' `flee_percent` of Health. Forced
+    /// flight, such as from a scare effect, is unaffected.
+    pub low_health_flight: bool,
 }
 impl<'de> Deserialize<'de> for ScenarioCapabilities {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -51,12 +54,14 @@ impl<'de> Deserialize<'de> for ScenarioCapabilities {
             npc_stair_traversal: bool,
             owner_advancement: bool,
             corpses: bool,
+            low_health_flight: bool,
         }
         let fields: Fields = crate::bounded::named_map(deserializer)?;
         Ok(Self {
             npc_stair_traversal: fields.npc_stair_traversal,
             owner_advancement: fields.owner_advancement,
             corpses: fields.corpses,
+            low_health_flight: fields.low_health_flight,
         })
     }
 }
@@ -67,6 +72,7 @@ impl Default for ScenarioCapabilities {
             npc_stair_traversal: true,
             owner_advancement: true,
             corpses: true,
+            low_health_flight: true,
         }
     }
 }
@@ -1338,6 +1344,11 @@ impl Game {
     }
     pub fn scenario_capabilities(&self) -> &ScenarioCapabilities {
         &self.scenario_policy.capabilities
+    }
+    /// Fixtures that build their scene first switch capabilities afterwards.
+    #[cfg(test)]
+    pub(crate) fn scenario_capabilities_mut(&mut self) -> &mut ScenarioCapabilities {
+        &mut self.scenario_policy.capabilities
     }
     pub(crate) fn can_use_abstract_stairs(&self, id: ActorId) -> bool {
         !self.actors[&id].locomotion().levitating

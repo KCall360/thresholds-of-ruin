@@ -1,21 +1,21 @@
 {
   "validator": "tor-scenario-48",
   "ruleset": "interactions-v56",
-  "ruleset_hash": "6145d3db22e725fc43d6a17e4083e65bd0c180edbce5019b2e60e03e6f186239",
+  "ruleset_hash": "cb6bcfed24ab5fbec382e963ff8284925f83f45888b86431805667433193d2f6",
   "ruleset_dependencies": {
     "interactions-v56": "6c4c3eb331a1567c50e1fed30fa59fd37f69f6d2413d829be49a0253748b5f80"
   },
-  "content_hash": "9ec8a471bf0853d33bdc1bdc346399d257a9b6a141f57cb8fee32ef36c5ce2f8",
+  "content_hash": "34342fcee17cc73bbf099f994670107d777b42655e0592cec89487d4c1c2ade1",
   "files": {
-    "catalog/actors.toml": "25cdbb1b0810e8252644051cafe9d275eba0b2e27ad4f30c89097e4fcbc35c61",
-    "catalog/bodies.toml": "bbe18281cf810fcc7bf158de7ca07f153114c980c166cada9a4c83e108f8a16f",
-    "catalog/creatures.toml": "a5b4e5a7e7b345413c79cb523a4039828ebfe6e06b5ec216b4136c76f431fd45",
+    "catalog/actors.toml": "32912d0c1bf75035165a73aea3ed22411bbb098f74242be5874233548ca429c6",
+    "catalog/bodies.toml": "c70ca7dc03c2cfea53b8f9f4f9430da104246c4745f0f5f002cd456806e5f005",
+    "catalog/creatures.toml": "a5934044e2bf2096b573a043a9030dc4c448d8c61bc89f3415b49079c463a0b3",
     "catalog/items.toml": "02253ff0cbd16d2d9b73f1029bdb2d1e6d470982185fd7d77650296f1dfeb322",
     "index.json": "9bcdcd8e7340350480abf05c4edbe9b8a8ef04e77258d462167b598589354902",
-    "rules.toml": "d6ed8c9ba560f7062c3c6b38583861a22b4a174d0ef167b6f6d3e409dd82c573",
-    "scenario.toml": "6a31833313a40d486120971f4103ad7216f4b16dc1a93e0589fcb1b1255c88df"
+    "rules.toml": "79414df13edab37f669c4163ac00dda4f7760241cf378414395ac6c679cabca7",
+    "scenario.toml": "c1dd9958ea44178e8dc829792fc877f05505829fdc73999ff99ff0ccfb387471"
   },
   "regions": 0,
-  "model_hash": "bd7933a2a886612b6fa9388b7cff78381afd1b83c62b2ea2ef3fef1d3a9fd7d7",
+  "model_hash": "4569817614f5d89df4d610afff838b73d100c3b375381c0db17288d552d55e29",
   "coverage": "all authored regions and character starts; descriptor structural bounds; deterministic sampled groups at seeds 0, 1, 42 under explicit work budget; no all-seed or winnability proof"
 }

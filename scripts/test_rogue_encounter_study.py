@@ -70,17 +70,42 @@ class EncounterPackages(unittest.TestCase):
         rows = study.compare(target, measured, 0.35)
         self.assertFalse(rows["signature_per_action"]["within"])
 
+    def test_encounters_stand_on_a_quiet_floor_of_the_species_depth(self):
+        manifest, actors = study.load_source()
+        package, _ = study.encounter(manifest, actors, "L", 8, depth=9)
+        self.assertEqual(package["arena"]["floor"], {"profile": study.ARENA_PROFILE, "depth": 9})
+        self.assertEqual(package["floor_activation"]["families"], {})
+        self.assertNotIn("wandering", package["floor_activation"])
+        self.assertIs(package["capabilities"]["low_health_flight"], False)
+        plain, _ = study.encounter(manifest, actors, "L", 8)
+        self.assertNotIn("floor", plain["arena"])
+
     def test_thieves_have_something_to_steal(self):
         manifest, actors = study.load_source()
         gold, _ = study.encounter(manifest, actors, "L", 5)
         self.assertIn({"archetype": "rogue.gold", "quantity": study.STUDY_GOLD},
                       gold["characters"][0]["loadout"])
         charm, _ = study.encounter(manifest, actors, "N", 5)
-        self.assertIn({"archetype": study.STUDY_CHARM, "quantity": 1},
+        self.assertIn({"archetype": study.STUDY_CHARM, "quantity": study.STUDY_CHARMS},
                       charm["characters"][0]["loadout"])
         plain, _ = study.encounter(manifest, actors, "K", 5)
         self.assertNotIn({"archetype": "rogue.gold", "quantity": study.STUDY_GOLD},
                          plain["characters"][0]["loadout"])
+
+    def test_a_side_with_too_few_attacks_is_reported_but_not_judged(self):
+        target = next(row for row in study.reference.targets() if row.glyph == "I")
+        measured = {metric: None for metric in study.METRICS}
+        measured.update(player_hit=target.player_hit * 2, foe_hit=0.01,
+                        counts={"player_checks": 20, "foe_checks": 19})
+        rows = study.compare(target, measured, 0.35)
+        self.assertFalse(rows["player_hit"]["within"])
+        self.assertIsNone(rows["foe_hit"]["within"])
+        self.assertEqual(rows["foe_hit"]["measured"], 0.01)
+        measured["counts"]["foe_checks"] = 20
+        self.assertFalse(study.compare(target, measured, 0.35)["foe_hit"]["within"])
+        # Rarely attacking species get more seeds.
+        for glyph in "IBLNWV":
+            self.assertEqual(study.EXTRA_SEEDS[glyph], 4)
 
     def test_compare_flags_ratios_outside_tolerance(self):
         target = study.reference.targets()[0]
@@ -140,6 +165,29 @@ class EncounterProcess(unittest.TestCase):
         self.assertEqual(row["encounters"], 2 * study.EXTRA_SEEDS["F"])
         self.assertFalse([outcome for outcome in row["outcomes"] if outcome.startswith("failure")])
         self.assertGreater(row["counts"]["foe_checks"], 0)
+
+    def test_thieves_steal_on_a_floored_arena(self):
+        # Theft needs floor context: a depth-scaled take and a same-floor vanish.
+        binaries = Path(os.environ.get("TOR_TEST_BINARIES", study.ROOT / "target/debug"))
+        suffix = ".exe" if (binaries / "tor-arena.exe").exists() else ""
+        for glyph in "LN":
+            with self.subTest(glyph=glyph), tempfile.TemporaryDirectory(dir=study.ROOT / "target") as output:
+                report = study.study(Path(output), binaries / ("tor-scenario" + suffix),
+                                     binaries / ("tor-arena" + suffix), [0, 1], glyph)
+                [row] = report["species"]
+                self.assertFalse([outcome for outcome in row["outcomes"] if outcome.startswith("failure")])
+                self.assertGreater(row["counts"]["foe_signature"], 0)
+
+    def test_an_arena_floor_must_name_a_known_profile(self):
+        binaries = Path(os.environ.get("TOR_TEST_BINARIES", study.ROOT / "target/debug"))
+        suffix = ".exe" if (binaries / "tor-arena.exe").exists() else ""
+        manifest, actors = study.load_source()
+        package, region = study.encounter(manifest, actors, "L", 8, depth=8)
+        package["arena"]["floor"]["profile"] = "rogue.no_such_profile"
+        with tempfile.TemporaryDirectory(dir=study.ROOT / "target") as output:
+            with self.assertRaisesRegex(RuntimeError, "Arena floor needs"):
+                study.write_package(Path(output) / "unknown", package, region,
+                                    binaries / ("tor-scenario" + suffix))
 
     def test_the_unedited_greedy_orc_attacks(self):
         # No Gold in the arena: the package's greedy orc acquires the adventurer
