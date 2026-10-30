@@ -831,7 +831,7 @@ fn phase5_purchase_reduced_maximum_death_uses_one_lifecycle_boundary() {
         "a maximum reduction is not received damage"
     );
     assert_eq!(creature.build_epoch().get(), 2);
-    assert_eq!(game.combat_events().iter().filter(|event| matches!(event, tor_simulation::combat::CombatEvent::Died { actor: dead } if *dead == actor)).count(), 1);
+    assert_eq!(game.combat_events().iter().filter(|event| matches!(event, tor_simulation::combat::CombatEvent::Died { actor: dead, .. } if *dead == actor)).count(), 1);
     assert_eq!(round_trip(&game), game);
 }
 
@@ -1182,7 +1182,7 @@ fn phase5_lethal_equipped_purchase_preview_matches_finalized_death_state_once() 
     assert!(after.conditions().is_empty());
     assert_eq!(preview.runtime().canceled_resource_holds, 0);
     assert!(game.equipment(actor).unwrap().is_empty());
-    assert_eq!(game.combat_events().iter().filter(|event| matches!(event, tor_simulation::combat::CombatEvent::Died { actor: dead } if *dead == actor)).count(), 1);
+    assert_eq!(game.combat_events().iter().filter(|event| matches!(event, tor_simulation::combat::CombatEvent::Died { actor: dead, .. } if *dead == actor)).count(), 1);
     let observation = game.observe(actor).unwrap();
     assert_eq!(
         observation

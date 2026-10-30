@@ -106,6 +106,8 @@ pub(crate) struct ActorOutcome {
     pub(crate) entry_cause: crate::floor_activation::EntryCause,
     pub(crate) spent_items: Option<crate::supplies::PreparationLineage>,
     pub(crate) nutrition_empty_depletion: bool,
+    /// Active time exhausted the reserve and killed the actor.
+    starved: bool,
     /// Item-owned changes staged with an atomic body/equipment candidate.
     pub(crate) extinguish_lights: std::collections::BTreeSet<ItemId>,
     pub(crate) survival: crate::survival_diagnostics::SurvivalFlows,
@@ -273,6 +275,7 @@ impl Game {
             state,
             spent_items: None,
             nutrition_empty_depletion: false,
+            starved: false,
             extinguish_lights: Default::default(),
             survival: Default::default(),
             events: vec![],
@@ -366,6 +369,7 @@ impl Game {
                 };
                 let settled = combat.advance_active_with_endpoint_context(prefix, endpoint_context);
                 outcome.nutrition_empty_depletion = settled.empty_time_depletion;
+                outcome.starved |= settled.starved;
                 if collect {
                     outcome.survival.active(&settled);
                 }
@@ -376,6 +380,7 @@ impl Game {
                     if elapsed > prefix {
                         let settled = combat.advance_active(elapsed - prefix);
                         outcome.nutrition_empty_depletion = settled.empty_time_depletion;
+                        outcome.starved |= settled.starved;
                         if collect {
                             outcome.survival.active(&settled);
                         }
@@ -1684,7 +1689,15 @@ impl Game {
             motion: std::mem::take(&mut actor.motion),
             orientation: actor.orientation,
         };
-        outcome.events.push(CombatEvent::Died { actor: outcome.id });
+        let cause = if outcome.starved {
+            crate::combat::DeathCause::Starvation
+        } else {
+            crate::combat::DeathCause::Injury
+        };
+        outcome.events.push(CombatEvent::Died {
+            actor: outcome.id,
+            cause,
+        });
         Ok(DeathOutcome {
             corpse: ItemId(self.next_item_id),
             next_item_id,
@@ -2184,7 +2197,13 @@ mod tests {
         assert_eq!(
             game.combat_events()
                 .iter()
-                .filter(|event| matches!(event, CombatEvent::Died { actor: ActorId(1) }))
+                .filter(|event| matches!(
+                    event,
+                    CombatEvent::Died {
+                        actor: ActorId(1),
+                        cause: crate::combat::DeathCause::Injury,
+                    }
+                ))
                 .count(),
             1
         );

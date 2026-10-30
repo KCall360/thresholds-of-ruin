@@ -524,7 +524,8 @@ fn a_death_is_an_event_naming_the_dead() {
             },
             DisclosedCombatEvent::Died {
                 actor: ActorId(1),
-                reference: tor_simulation::perception::ActorReferenceKind::Creature
+                reference: tor_simulation::perception::ActorReferenceKind::Creature,
+                cause: tor_simulation::combat::DeathCause::Injury,
             },
         ]
     );

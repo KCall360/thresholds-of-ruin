@@ -272,7 +272,7 @@ fn clients_cannot_choose_a_role_and_welcome_requires_server_authority() {
 fn combat_facts_are_data_not_prose() {
     let events: Vec<CombatEventView> = serde_json::from_str(
         r#"[{"type":"ability","ability":{"id":"basic_melee","name":"Attack"},"caster":"a_0202020202020202020202020202020202020202020202020202020202020202","target":null,"outcome":"unaffected","strike":null},
-            {"type":"interrupted","actor":"a_0101010101010101010101010101010101010101010101010101010101010101"},{"type":"died","actor":"a_0202020202020202020202020202020202020202020202020202020202020202"}]"#,
+            {"type":"interrupted","actor":"a_0101010101010101010101010101010101010101010101010101010101010101"},{"type":"died","actor":"a_0202020202020202020202020202020202020202020202020202020202020202","cause":"injury"}]"#,
     )
     .unwrap();
     assert_eq!(
@@ -292,7 +292,8 @@ fn combat_facts_are_data_not_prose() {
                 actor: ActorTarget::from_digest([1; 32])
             },
             CombatEventView::Died {
-                actor: ActorTarget::from_digest([2; 32])
+                actor: ActorTarget::from_digest([2; 32]),
+                cause: tor_protocol::DeathCause::Injury,
             },
         ]
     );
@@ -305,6 +306,28 @@ fn combat_facts_are_data_not_prose() {
         r#"{"type":"died","actor":"a_0202020202020202020202020202020202020202020202020202020202020202","message":"The scout died."}"#
     )
     .is_err());
+}
+
+#[test]
+fn a_death_names_a_closed_required_cause() {
+    let died = |cause: &str| {
+        serde_json::from_str::<CombatEventView>(&format!(
+            r#"{{"type":"died","actor":"a_0202020202020202020202020202020202020202020202020202020202020202"{cause}}}"#
+        ))
+    };
+    assert_eq!(
+        died(r#","cause":"starvation""#).unwrap(),
+        CombatEventView::Died {
+            actor: ActorTarget::from_digest([2; 32]),
+            cause: DeathCause::Starvation,
+        }
+    );
+    assert!(died("").is_err(), "the cause is required");
+    assert!(
+        died(r#","cause":"poison""#).is_err(),
+        "the cause is a closed set"
+    );
+    assert!(died(r#","cause":"starvation","killer":"a_01""#).is_err());
 }
 
 #[test]

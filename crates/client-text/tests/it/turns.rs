@@ -1006,6 +1006,7 @@ async fn an_exchange_of_blows_is_told_in_order_and_a_death_ends_it() {
                     },
                     CombatEventView::Died {
                         actor: super::actor_target(2),
+                        cause: tor_protocol::DeathCause::Injury,
                     },
                 ],
             );
@@ -1228,6 +1229,7 @@ async fn timed_attack_finishes_its_lifecycle_before_chained_pickup_or_refusal() 
                     50,
                     vec![CombatEventView::Died {
                         actor: super::actor_target(2),
+                        cause: tor_protocol::DeathCause::Injury,
                     }],
                 );
                 after.observation.visible_actors.clear();
@@ -1948,6 +1950,7 @@ async fn a_figure_that_steps_up_to_meet_an_attack_is_attacked() {
                     },
                     CombatEventView::Died {
                         actor: super::actor_target(2),
+                        cause: tor_protocol::DeathCause::Injury,
                     },
                 ],
             );
@@ -2693,7 +2696,10 @@ fn sparring(kill: usize) -> impl FnMut(&Request, &StateView) -> Vec<Frame> {
         }];
         let mut after = combat(now.clone(), 50, vec![]);
         if dies {
-            events.push(CombatEventView::Died { actor: *target });
+            events.push(CombatEventView::Died {
+                actor: *target,
+                cause: tor_protocol::DeathCause::Injury,
+            });
             after.observation.visible_actors.retain(|a| a.id != *target);
         }
         after.observation.combat.as_mut().unwrap().events = events;
@@ -3225,6 +3231,7 @@ async fn falling_hp_warns_and_a_death_is_told_once_with_an_account() {
             c.terminal = true;
             c.events = vec![CombatEventView::Died {
                 actor: super::actor_target(1),
+                cause: tor_protocol::DeathCause::Injury,
             }];
         }
         vec![Frame::View(after, Some(Event::Waited)), Frame::Ack]
@@ -3278,6 +3285,7 @@ async fn observed_loss_account_remains_exact_above_one_health_domain() {
             view.terminal = true;
             view.events = vec![CombatEventView::Died {
                 actor: super::actor_target(1),
+                cause: tor_protocol::DeathCause::Injury,
             }];
         }
         vec![Frame::View(after, Some(Event::Waited)), Frame::Ack]

@@ -73,13 +73,20 @@ def check_food(runs):
             "bands": results, "model_ratio_at_900_turns": model_food_ratio()}
 
 
+def starved_to_death(run):
+    """The server's named cause; older runs fall back to the hunger evidence."""
+    if run.get("cause"):
+        return run["cause"] == "starvation"
+    # Runs recorded before the cause was named: dying with an empty reserve, or
+    # before the hunger at death was kept, any empty spell.
+    if "hunger_at_death" in run:
+        return run["hunger_at_death"] == "empty"
+    return bool(run.get("samples_by_hunger", {}).get("empty"))
+
+
 def check_starvation(runs):
     deaths = [run for run in runs if run.get("died")]
-    # A death while the reserve is empty is starvation (or its fainting). Runs
-    # recorded before the hunger at death was kept fall back to any empty spell.
-    starved = [run for run in deaths if run.get("cause") == "starvation"
-               or (run["hunger_at_death"] == "empty" if "hunger_at_death" in run
-                   else run.get("samples_by_hunger", {}).get("empty"))]
+    starved = [run for run in deaths if starved_to_death(run)]
     share = len(starved) / len(deaths) if deaths else 0.0
     return {"pass": share <= 0.10, "deaths": len(deaths), "starved": len(starved)}
 

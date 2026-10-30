@@ -26,8 +26,8 @@ leave no corpses, though what they carried still drops. Load it with
 
 Floors follow Rogue's item generation: nine chances at 36% for an item, drawn
 by Rogue's category and type weights, arrows and darts in groups of 8 to 15, and
-a treasure room on about one floor in twenty. If more than three new floors in a
-row produced no food, the next new floor places a ration. Natural healing
+a treasure room on about one floor in twenty. If three new floors in a row
+produced no food, the next new floor places a ration. Natural healing
 follows Rogue's level-based rate, and healing does not cost food. Monster
 Health, accuracy, defense and damage are tuned so each species' fights resemble
 Rogue's at its usual depth; see the [tuning plan](../plans/rogue-tuning.md) for

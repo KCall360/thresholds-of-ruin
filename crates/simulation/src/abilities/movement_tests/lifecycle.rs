@@ -569,7 +569,7 @@ fn pushed_entry_allocates_stock_before_later_lethal_effect_in_the_same_batch() {
             matches!(event,
                 crate::combat::CombatEvent::Interrupted { actor, .. }
                 | crate::combat::CombatEvent::SequenceEnded { actor, .. }
-                | crate::combat::CombatEvent::Died { actor } if *actor == protagonist
+                | crate::combat::CombatEvent::Died { actor, .. } if *actor == protagonist
             )
             .then_some(index)
         })

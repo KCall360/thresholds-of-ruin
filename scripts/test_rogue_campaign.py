@@ -151,6 +151,21 @@ class RunSummaries(unittest.TestCase):
         self.assertEqual(run["first_entry_ticks"], {"1": "0", "2": "88300"})
         self.assertEqual(run["growth"], [["0", 2], ["50000", 3], ["500000", 9]])
 
+    def test_the_named_cause_of_death_is_recorded(self):
+        me, other = "a_01", "a_02"
+        view = {"self_target": me, "combat": {"events": [
+            {"type": "died", "actor": other, "cause": "injury"},
+            {"type": "died", "actor": me, "cause": "starvation"}]}}
+        self.assertEqual(campaign.own_death_cause(view), "starvation")
+        view["combat"]["events"] = view["combat"]["events"][:1]
+        self.assertIsNone(campaign.own_death_cause(view))
+        run = campaign.summarize(fake_controller(), [sample(0), sample(6000)], "death",
+                                 seed=1, wall_seconds=1.0, cause="starvation")
+        self.assertEqual(run["cause"], "starvation")
+        censored = campaign.summarize(fake_controller(), [sample(0), sample(6000)],
+                                      "censored_action_budget", seed=1, wall_seconds=1.0)
+        self.assertIsNone(censored["cause"])
+
     def test_a_failed_closing_save_keeps_the_finished_run(self):
         run = campaign.summarize(fake_controller(), [sample(0), sample(6000)],
                                  "death", seed=2, wall_seconds=1.0)

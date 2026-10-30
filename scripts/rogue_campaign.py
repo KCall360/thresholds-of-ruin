@@ -96,7 +96,15 @@ def observation(frame):
     return frame["state"]["observation"]
 
 
-def summarize(controller, samples, outcome, *, seed, wall_seconds):
+def own_death_cause(view):
+    """The cause the server names for the observer's own death in this view."""
+    for event in view["combat"].get("events", []):
+        if event.get("type") == "died" and event.get("actor") == view["self_target"]:
+            return event["cause"]
+    return None
+
+
+def summarize(controller, samples, outcome, *, seed, wall_seconds, cause=None):
     """One versioned run summary from the controller's disclosed history.
 
     Fields the ordinary disclosures cannot support (wanderer arrivals, kills by
@@ -122,6 +130,8 @@ def summarize(controller, samples, outcome, *, seed, wall_seconds):
         "summary": SUMMARY, "seed": seed, "outcome": outcome,
         "died": outcome == "death", "deepest_depth": deepest,
         "death_depth": deepest if outcome == "death" else None,
+        # As the server's died event names it; None if no view carried it.
+        "cause": cause if outcome == "death" else None,
         "final_tick": final["tick"], "commands": controller.commands,
         "level_on_arrival": {str(depth): level for depth, level in sorted(levels.items())},
         # The evidence behind level_on_arrival, so it can be recomputed.
@@ -323,13 +333,14 @@ class CampaignRun(ProcessTestCase):
             # The route's start check expects one class HD; a deep start has the
             # same one racial body HD plus its already grown scheduled rows.
             rogue_earned_route.starting_body_hd = lambda summary, character: 1
-        samples, outcome, refusal = [], None, None
+        samples, outcome, refusal, cause = [], None, None, None
         sweeps, waits, searches, refused, deadlines = {}, 0, 0, 0, 0
         while outcome is None:
             frame = self.settled(player)
             state = frame["state"]
             controller.observe(state, self.advancement(player))
             combat = observation(frame)["combat"]
+            cause = own_death_cause(observation(frame)) or cause
             decision = controller.choose(state)
             samples.append({"tick": state["observation"]["tick"], "phase": decision.phase,
                             "depth": controller.depth,
@@ -396,7 +407,7 @@ class CampaignRun(ProcessTestCase):
                     raise
                 deadlines += 1
         CampaignRun.result = summarize(controller, samples, outcome, seed=self.seed,
-                                       wall_seconds=time.monotonic() - started)
+                                       wall_seconds=time.monotonic() - started, cause=cause)
         CampaignRun.result["refusal"] = refusal
         CampaignRun.result["searches"] = searches
         CampaignRun.result["settlement_deadlines"] = deadlines

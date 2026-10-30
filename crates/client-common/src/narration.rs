@@ -325,8 +325,14 @@ pub fn combat_event(event: &CombatEventView, before: &Observation, after: &Obser
             format!("You are affected by {}.", condition.name)
         }
         CombatEventView::Interrupted { .. } => "Your attack was interrupted.".into(),
-        CombatEventView::Died { actor } if *actor == observer => "You died.".into(),
-        CombatEventView::Died { actor } => format!("{} died.", subject(Some(*actor))),
+        CombatEventView::Died { actor, cause } => match (*actor == observer, cause) {
+            (true, DeathCause::Starvation) => "You starved to death.".into(),
+            (true, DeathCause::Injury) => "You died.".into(),
+            (false, DeathCause::Starvation) => {
+                format!("{} starved to death.", subject(Some(*actor)))
+            }
+            (false, DeathCause::Injury) => format!("{} died.", subject(Some(*actor))),
+        },
     }
 }
 
@@ -1081,9 +1087,24 @@ mod tests {
         );
         assert_eq!(
             line(CombatEventView::Died {
-                actor: tor_protocol::ActorTarget::from_digest([2; 32])
+                actor: tor_protocol::ActorTarget::from_digest([2; 32]),
+                cause: DeathCause::Injury,
             }),
             "The ruin scout died."
+        );
+        assert_eq!(
+            line(CombatEventView::Died {
+                actor: tor_protocol::ActorTarget::from_digest([2; 32]),
+                cause: DeathCause::Starvation,
+            }),
+            "The ruin scout starved to death."
+        );
+        assert_eq!(
+            line(CombatEventView::Died {
+                actor: tor_protocol::ActorTarget::from_digest([1; 32]),
+                cause: DeathCause::Starvation,
+            }),
+            "You starved to death."
         );
         assert_eq!(objective(ObjectiveKind::ReachExit), "Reach the exit.");
         assert_eq!(injury(Injury::BadlyWounded), "badly wounded");
@@ -1159,7 +1180,13 @@ mod tests {
             preparation_active: false,
             recovery_remaining: 0,
             actors: vec![],
-            events: vec![hit.clone(), CombatEventView::Died { actor: scout }],
+            events: vec![
+                hit.clone(),
+                CombatEventView::Died {
+                    actor: scout,
+                    cause: DeathCause::Injury,
+                },
+            ],
             objective: None,
             exit: None,
             victory: false,
@@ -1178,7 +1205,10 @@ mod tests {
                 Topic::LostSight(scout),
                 Topic::Pacing,
                 Topic::Combat(hit),
-                Topic::Combat(CombatEventView::Died { actor: scout }),
+                Topic::Combat(CombatEventView::Died {
+                    actor: scout,
+                    cause: DeathCause::Injury,
+                }),
                 Topic::Status,
             ]
         );

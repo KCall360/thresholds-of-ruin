@@ -42,6 +42,13 @@ class Acceptance(unittest.TestCase):
         self.assertEqual(acceptance.check_starvation([fed])["starved"], 0)
         self.assertEqual(acceptance.check_starvation([starved])["starved"], 1)
 
+    def test_the_named_cause_of_death_decides_starvation(self):
+        # The server's cause overrides the hunger evidence either way.
+        combat = dict(run({1: 1}, died=True, at_death="empty"), cause="injury")
+        starved = dict(run({1: 1}, died=True, at_death="nourished"), cause="starvation")
+        self.assertEqual(acceptance.check_starvation([combat])["starved"], 0)
+        self.assertEqual(acceptance.check_starvation([starved])["starved"], 1)
+
     def test_food_is_judged_against_the_model_ratio(self):
         expected = acceptance.model_food_ratio()
         at_model = expected * 90000 / 100 / acceptance.MEAL

@@ -828,6 +828,7 @@ fn tell(teller: &mut Teller, beats: &[Beat]) {
             Beat::Condition(name) => teller.say(format!("you are affected by {name}")),
             Beat::Interrupted => teller.say("your attack is interrupted"),
             Beat::Died(Who::Me) => teller.say("you die. This run has ended"),
+            Beat::Starved => teller.say("you starve to death. This run has ended"),
             Beat::Died(Who::Figure(f)) => {
                 teller.dead.insert(f.id);
                 let who = teller.the(f);
@@ -1162,6 +1163,14 @@ mod tests {
         assert_eq!(
             told(vec![Entry::Beats(beats)]),
             "The oak door to the west swings open. The ruin scout falls dead."
+        );
+    }
+
+    #[test]
+    fn starving_to_death_is_told_as_starvation() {
+        assert_eq!(
+            told(vec![Entry::Beats(vec![Beat::Starved])]),
+            "You starve to death. This run has ended."
         );
     }
 

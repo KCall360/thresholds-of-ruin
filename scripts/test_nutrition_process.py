@@ -371,6 +371,10 @@ class NutritionProcesses(ProcessTestCase):
                 break
         self.assertTrue({"hungry", "weak", "empty"}.issubset(states))
         self.assertTrue(observation(final)["combat"]["dead"])
+        # The server names the cause of death; the client need not infer it.
+        died = [event for event in observation(final)["combat"]["events"] if event["type"] == "died"]
+        self.assertEqual(died, [{"type": "died", "actor": observation(final)["self_target"],
+                                 "cause": "starvation"}])
         self.assertEqual(nutrition(final)["reserve"], -3)
         self.assertEqual(final["intentions"], [])
         dropped = [row["item"] for row in observation(final)["ground_items"] if row["item"]["name"] == "fixture meal"]

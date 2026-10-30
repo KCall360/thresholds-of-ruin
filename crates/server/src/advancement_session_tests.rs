@@ -1681,7 +1681,7 @@ fn canonical_wraith_earned_regrowth_survives_source_free_service_reopen() {
                 let deaths: Vec<_> = events
                     .iter()
                     .filter_map(|event| match event {
-                        CombatEventView::Died { actor } => Some(*actor),
+                        CombatEventView::Died { actor, .. } => Some(*actor),
                         _ => None,
                     })
                     .collect();

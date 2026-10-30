@@ -375,7 +375,7 @@ pub fn happenings(observation: &Observation) -> Vec<Happening> {
                 outcome: *outcome,
                 strike: *strike,
             }),
-            CombatEventView::Died { actor } => Some(Happening::Died(*actor)),
+            CombatEventView::Died { actor, .. } => Some(Happening::Died(*actor)),
             _ => None,
         })
         .collect()

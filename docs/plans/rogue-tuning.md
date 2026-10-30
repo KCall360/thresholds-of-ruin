@@ -131,7 +131,8 @@ are closed-form, without running Rogue:
 - **Progression.** Expected kill XP, including depth and Health adjustments, and
   the resulting level on arrival at each depth from the threshold table.
 - **Supplies.** Nine 36% attempts with category weights; food is a renewal chain
-  over the drought counter, giving about 0.56 food items per new floor.
+  over the drought counter, giving about 0.60 food items per new floor, with
+  the fourth consecutive foodless floor forced (about one floor in ten).
 - **Pressure.** One wanderer per 94 turns on average, trap counts by depth, and
   the `doctor` healing rate by level.
 
@@ -229,13 +230,20 @@ expected healing potions and a spare ration; the bot drinks a known healing
 potion below 40% Health. From depth 1 the adventurer reaches level 4 by depth 3
 and 5 by depth 4 or 5, matching the model. Deep starts survive with that gear,
 but the fixed bot earns little XP within its command budgets, so deep pacing is
-not yet measured. Intermittent harness timeouts occurred while builds saturated
-the machine.
+not yet measured.
+
+Two player habits keep the bot from dying of its own policy: when Weak or
+fainting with no food it stops resting and heads for known down stairs, and it
+keeps fighting an adjacent foe at low Health instead of walking away (escaping
+only up stairs). Each run records the foes, phases and hunger over its last 30
+samples and the hunger at death. `--work-root` puts saves and process logs on a
+fast volume, and the headless client's output spool rolls over at 64 MiB, since
+disk stalls on a slow volume blocked the harness past its reply deadline.
 
 The campaign also reads the saved first-entry receipts and counts the items
-that actually landed. Over the measured floors it found about 4.1 items and 0.7
-food per floor; the model expects about 3.6 items (3.24 ordinary, plus treasure
-rooms and the drought guarantee) and 0.6 food, within the noise of so few floors.
+that actually landed. [`rogue_generation_probe.py`](../../scripts/rogue_generation_probe.py)
+generates 120 first floors: 0.56 food per floor against Rogue's 0.52 ordinary
+rate (z = 0.6) and 3.7 items per floor, so generation matches the source.
 
 **Targets.** Ratified by the maintainer on 29 October 2026: level on arrival
 within ±1 of the model at depths 1–10 and ±2 at 11–26; food found against spent
@@ -253,9 +261,12 @@ limit is why there are two. Missiles keep Rogue's groups of 8 to 15.
 [`rogue_item_table.py`](../../scripts/rogue_item_table.py) generates these
 stages from the research tables.
 
-The `food_drought` stage places one ration (or, one time in ten, fruit) when more
-than three consecutive earlier first-entry floors and this floor's earlier stages
-placed no food. The count is derived from the retained entry records, so no new
+The `food_drought` stage places one ration (or, one time in ten, fruit) when
+three consecutive earlier first-entry floors and this floor's earlier stages
+placed no food (`threshold = 2`: more than two earlier floors). Rogue increments
+`no_food` before placing a new level's items and forces food when it exceeds 3,
+so its fourth foodless level is the forced one; the package first used 3, one
+floor late, until campaign starvation exposed it. The count is derived from the retained entry records, so no new
 counter is saved; revisits, preparation and rollback cannot change it, and the
 receipt audit recomputes it. See the
 [authoring reference](../reference/scenario-packages.md#first-entry-population).
@@ -322,34 +333,42 @@ Package edits regenerate certificates and run
   mechanic still works in a scenario that enables it.
 - Engine adaptations are recorded as deliberate differences, not tuned away.
 
-### Acceptance results (29 October 2026)
+### Acceptance results (30 October 2026)
 
 [`rogue_acceptance.py`](../../scripts/rogue_acceptance.py) checks the ratified
-tolerances against an eight-seed campaign from depth 1 (seeds 0–7, 1,500
-commands per floor, 6,000 per run) and the final encounter study.
+tolerances against a sixteen-seed campaign from depth 1 (seeds 0–15, 3,000
+commands per floor, 15,000 per run) and the final encounter study, with the
+orc measured under its own greedy acquisition.
 
 | Tolerance | Result | Evidence |
 | --- | --- | --- |
 | Level on arrival, pacing model | Pass | Depths 1–26 within one level |
-| Level on arrival, campaign | Pass | Mean 1, 3.4, 4.7 and 5 at depths 1–4 against 1, 3, 4 and 5 |
+| Level on arrival, campaign | Pass | Mean 1, 3.0, 4.6, 5.5, 6.0, 6.2, 6.6, 6.8 and 7.0 at depths 1–9 against 1, 3, 4, 5, 5, 6, 6, 7 and 7 |
 | Encounter ratios | Pass | 26 species, 117 judged ratios, all within ±35% |
-| Food found against spent | Fail | 0.55 of the model's ratio over depths 1–5; ×1.5 allows 0.67 |
-| Starvation share | Fail | One death in eight runs, a starvation on depth 4 |
-| Runs reaching depth 4 | Fail | 2 of 8 |
+| Food found against spent | Pass | 0.93 of the model's ratio at depths 1–5 and 1.03 at 6–10, at the bot's pace |
+| Runs reaching depth 4 | Pass | 13 of 16 |
+| Starvation share | Waived: bot-limited | 5 of 9 deaths |
 
-The three failures come mostly from the campaign bot, not the tuned values:
+The maintainer accepted food as matching Rogue and waived the starvation share
+as a limit of the bot, not the tuned values (30 October 2026):
 
-- Six runs ended on the per-floor command limit (one on route exhaustion),
-  not by death. Three of those never started a search sweep, so the bot spent
-  the floor on something other than finding hidden stairs.
-- The bot spent about 1,150 Rogue turns per floor where the model assumes 900,
-  which alone lowers the food ratio by about a fifth. Floors yielded 0.39 food
-  each against the model's 0.56, within chance for 28 floors.
-- The starved run found no food on four floors; Rogue's guarantee applies from
-  the fifth. At the bot's pace, four foodless floors outlast the starting food
-  as they would in Rogue at a slow pace.
+- Generation matches the source: 0.56 food per first floor over 120 floors
+  against Rogue's 0.52 ordinary rate, and the drought guarantee now forces food
+  on the fourth foodless floor, as Rogue's `no_food` counter does.
+- At Rogue's rates a floor yields about 780 turns of food. The bot spends about
+  980 turns per floor at depths 1–5, much of it resting to full Health, so long
+  runs starve by arithmetic; four of the five starved runs ate all or nearly
+  all the food they picked up. One rested for 900 turns and then descended past
+  uncollected food.
 
-Diagnostic reruns of one stalled seed with per-floor phase counts hit a
-headless-client reply deadline twice, so the cause of the stalls is not yet
-known. Run-shape acceptance needs that diagnosis, a bot that finds stairs
-within the floor budget, and more seeds; the tuned values are unchanged.
+Fixes made while measuring:
+
+- Levels on arrival compared ticks as text, crediting later level-ups to
+  shallow floors; earlier campaign level results were unreliable.
+- The starvation check judged any empty spell during a run; it now uses the
+  server's named cause of death, falling back to the hunger at death for older
+  runs.
+- A failed closing save no longer discards a finished run. Three concurrent
+  debug servers with 35–70 MB saves fell behind on saving ("Saving is behind
+  schedule") until an explicit save reply timed out; this is recorded as a
+  possible persistence performance issue, not investigated here.

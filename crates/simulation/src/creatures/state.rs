@@ -70,6 +70,8 @@ pub struct ActiveTimeOutcome {
     /// An observation overflow invalidates diagnostics without changing gameplay.
     pub diagnostics_incomplete: bool,
     pub(crate) empty_time_depletion: bool,
+    /// The reserve reached its starvation limit and exhausted Health.
+    pub(crate) starved: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1892,6 +1894,7 @@ impl CreatureState {
         let mut nutrition_time_demand = 0;
         let mut nutrition_regeneration_demand = 0;
         let mut empty_time_depletion = false;
+        let mut starved_to_death = false;
         while ticks > 0 && !self.health.dead() {
             let policy = self.build.ruleset().document().nutrition;
             let nutrition_rate = self.derived.nutrition_rate_thirtieths;
@@ -2019,6 +2022,7 @@ impl CreatureState {
                 // The shared injury/death primitive has no attacker. The actor
                 // lifecycle later publishes ordinary death with no FatalCause.
                 self.health.deplete();
+                starved_to_death = true;
                 self.received_health_loss_remaining = self
                     .build
                     .ruleset()
@@ -2036,6 +2040,7 @@ impl CreatureState {
             nutrition_regeneration_demand,
             regenerated,
             empty_time_depletion,
+            starved: starved_to_death,
             nutrition_spent: match (nutrition_before, self.nutrition) {
                 (
                     crate::nutrition::Nutrition::Required {

@@ -1350,7 +1350,9 @@ observer knows. An `ability` names its disclosed technique, optional `caster` an
 `target`, qualitative `outcome` and nullable actual `strike` ordinal as described
 above; a participant the observer couldn't see is `null`.
 `interrupted` reports the observer's own wind-up being interrupted, and `died`
-names a disclosed actor that died, after the blow that killed it. The server
+names a disclosed actor that died, after the blow that killed it, with its
+`cause`: `starvation` when its food reserve ran out, otherwise `injury`. The
+cause is a category, never a causer. The server
 sends facts, never prose: clients write their own sentences, and actor
 descriptions and names are empty when nothing is authored. The observer's own
 body, including repeated portal views, has `ActorView.id` equal to

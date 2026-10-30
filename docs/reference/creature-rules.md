@@ -505,7 +505,8 @@ or roll back together. The exact-unit hold, hidden operand and ordinary item-wor
 are in [items](items.md#explicit-edibility).
 
 Reaching `starve_at` invokes ordinary injury/death and lifecycle cleanup. It has
-no invented attacker or XP recipient. Timers/effects precede action completion:
+no invented attacker or XP recipient; the death event names its cause as
+starvation, and every other death as injury. Timers/effects precede action completion:
 if Eat and starvation share a tick, death cancels Eat and releases its held unit
 unconsumed; ordinary death drops it. Completing one tick earlier can save the
 creature. Strict restore checks the reserve against the saved Health nutrition
