@@ -8,9 +8,10 @@ import unittest
 import rogue_encounter_study as study
 
 
-def participant(actor, checks, hits, damage, maximum):
+def participant(actor, checks, hits, damage, maximum, effects=None):
     return {"actor": str(actor), "attack_checks": str(checks), "hits": str(hits),
-            "damage_dealt": str(damage), "initial": {"maximum_health": str(maximum)}}
+            "damage_dealt": str(damage), "initial": {"maximum_health": str(maximum)},
+            "effects": {name: {"applications": str(count)} for name, count in (effects or {}).items()}}
 
 
 class EncounterPackages(unittest.TestCase):
@@ -44,6 +45,42 @@ class EncounterPackages(unittest.TestCase):
         self.assertEqual(measured["foe_damage_per_action"], 6 * 2 / 6)
         self.assertEqual(measured["player_actions_to_kill"], 8 / 3)
         self.assertEqual(measured["foe_actions_to_kill"], 20 / 2)
+
+    def test_signature_effects_are_pooled_per_foe_action(self):
+        reports = [{"participants": [participant(1, 4, 2, 10, 20),
+                                     participant(3, 6, 3, 6, 8, {"corrode_armor": 2, "damage": 3})]},
+                   {"participants": [participant(1, 2, 2, 8, 20),
+                                     participant(3, 2, 1, 1, 8, {"corrode_armor": 1})]}]
+        measured = study.measure(reports, 1, 3, foe_strikes=2, signature=("corrode_armor",))
+        # Three applications over eight strike checks, which are four actions.
+        self.assertEqual(measured["signature_per_action"], 3 / 4)
+        self.assertEqual(measured["counts"]["foe_signature"], 3)
+        unsigned = study.measure(reports, 1, 3, foe_strikes=2)
+        self.assertIsNone(unsigned["signature_per_action"])
+
+    def test_signature_effect_names_follow_the_package(self):
+        self.assertEqual(study.SIGNATURE_EFFECTS["I"], ("apply_condition:rogue.frozen",))
+        self.assertEqual(study.SIGNATURE_EFFECTS["M"], ("apply_condition:rogue.confused",))
+        # Rogue's dragon breathes as its own ranged action, not as a hit rider,
+        # so a per-hit target cannot judge it.
+        self.assertNotIn("D", study.SIGNATURE_EFFECTS)
+        target = next(row for row in study.reference.targets() if row.glyph == "A")
+        measured = {metric: None for metric in study.METRICS}
+        measured["signature_per_action"] = target.signature_per_action * 3
+        rows = study.compare(target, measured, 0.35)
+        self.assertFalse(rows["signature_per_action"]["within"])
+
+    def test_thieves_have_something_to_steal(self):
+        manifest, actors = study.load_source()
+        gold, _ = study.encounter(manifest, actors, "L", 5)
+        self.assertIn({"archetype": "rogue.gold", "quantity": study.STUDY_GOLD},
+                      gold["characters"][0]["loadout"])
+        charm, _ = study.encounter(manifest, actors, "N", 5)
+        self.assertIn({"archetype": study.STUDY_CHARM, "quantity": 1},
+                      charm["characters"][0]["loadout"])
+        plain, _ = study.encounter(manifest, actors, "K", 5)
+        self.assertNotIn({"archetype": "rogue.gold", "quantity": study.STUDY_GOLD},
+                         plain["characters"][0]["loadout"])
 
     def test_compare_flags_ratios_outside_tolerance(self):
         target = study.reference.targets()[0]

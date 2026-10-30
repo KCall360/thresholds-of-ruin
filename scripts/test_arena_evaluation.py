@@ -14,7 +14,7 @@ def run(seed, orientation, variant, termination):
             "status": "ok", "report": {"termination": termination}}
 
 
-def run_report(value="42", format="tor-arena-run-v5"):
+def run_report(value="42", format="tor-arena-run-v6"):
     # Only the fields consumed by the Python identity/summary gate are modeled.
     # The real-process tests exercise the complete Rust report and its counters.
     return {"format": format, "input": {"seed": value},
@@ -179,7 +179,8 @@ class ArenaEvaluationTests(unittest.TestCase):
         self.assertEqual(trial["constraints"], {"validation": 0, "failures": 0, "coverage": 0})
 
     def test_nonzero_exit_retains_only_bounded_failure_diagnostics(self):
-        for format in ("tor-arena-run-v2", "tor-arena-run-v3", "tor-arena-run-v4", "tor-arena-run-v5"):
+        for format in ("tor-arena-run-v2", "tor-arena-run-v3", "tor-arena-run-v4", "tor-arena-run-v5",
+                       "tor-arena-run-v6"):
             with self.subTest(format=format):
                 report = {"format": format, "status": "failure", "message": "x" * 1001}
                 self.assertEqual(self.execute_report(report, 2),
@@ -307,7 +308,8 @@ class ArenaResumeTests(unittest.TestCase):
         import arena_evaluation as arena
         for pending, obsolete in ((False, "tor-arena-run-v2"), (True, "tor-arena-run-v2"),
                                   (False, "tor-arena-run-v3"), (True, "tor-arena-run-v3"),
-                                  (False, "tor-arena-run-v4"), (True, "tor-arena-run-v4")):
+                                  (False, "tor-arena-run-v4"), (True, "tor-arena-run-v4"),
+                                  (False, "tor-arena-run-v5"), (True, "tor-arena-run-v5")):
             with self.subTest(pending=pending, obsolete=obsolete), tempfile.TemporaryDirectory() as directory:
                 binary, plan, output = self.fixture(Path(directory))
                 failure = {"status": "failure", "message": "Evaluation timeout"}

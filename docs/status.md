@@ -17,7 +17,7 @@ instead of copying these identities.
 The independent compiled inputs use RulesInput **26**, ContentPackage **33** and
 RegionInput **9**. Physical TORB/TORJ/TORR framing stays at **6** and TORC at **1**;
 rooms **2**, grid-rooms **1** and world-family **1** are unchanged. The independent
-arena run report is **`tor-arena-run-v5`**; its enclosing batch/matrix/search
+arena run report is **`tor-arena-run-v6`**; its enclosing batch/matrix/search
 formats remain unchanged. Current payloads require explicit nullable rider
 conditions, bounded sequence-hit/attempt progress, actor nutrition, condition
 semantics, exact periodic-regeneration nutrition rates/fractions and personal

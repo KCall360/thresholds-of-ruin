@@ -14,7 +14,7 @@ use tor_simulation::{
 };
 
 /// Current offline run-report contract, shared by success and CLI failure writers.
-pub const FORMAT: &str = "tor-arena-run-v5";
+pub const FORMAT: &str = "tor-arena-run-v6";
 
 fn decimal<S: Serializer>(value: &u64, serializer: S) -> Result<S::Ok, S::Error> {
     serializer.collect_str(value)
@@ -70,6 +70,11 @@ pub struct ArenaAbility {
     #[serde(serialize_with = "decimal")]
     pub applications: u64,
 }
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct ArenaEffect {
+    #[serde(serialize_with = "decimal")]
+    pub applications: u64,
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ArenaParticipant {
     pub actor: ActorId,
@@ -95,6 +100,9 @@ pub struct ArenaParticipant {
     #[serde(serialize_with = "decimal")]
     pub health_recovered: u64,
     pub abilities: BTreeMap<String, ArenaAbility>,
+    /// Effects this participant's resolutions applied, by kind; a condition
+    /// effect is qualified by its condition, as in `apply_condition:frozen`.
+    pub effects: BTreeMap<String, ArenaEffect>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ArenaEvaluation {
@@ -153,6 +161,7 @@ fn participant(engine: &Engine, actor: u64) -> Result<ArenaParticipant, Failure>
         healing_received: 0,
         health_recovered: 0,
         abilities: BTreeMap::new(),
+        effects: BTreeMap::new(),
     })
 }
 
@@ -225,7 +234,31 @@ fn record_resolution(
         counter.resolutions += 1;
         counter.applications += u64::from(outcome.result == OutcomeStatus::Applied);
     }
+    let source = participants
+        .get_mut(&outcome.actor.0)
+        .expect("validated participant");
+    for effect in &outcome.effects {
+        source
+            .effects
+            .entry(effect_name(effect)?)
+            .or_default()
+            .applications += 1;
+    }
     Ok(())
+}
+
+/// An effect's report name: its serialized kind, qualified by the condition a
+/// condition effect applies.
+fn effect_name(effect: &ResolvedEffect) -> Result<String, Failure> {
+    let kind = serde_json::to_value(effect)
+        .ok()
+        .and_then(|value| value["kind"].as_str().map(str::to_owned))
+        .ok_or_else(|| invalid("Arena effect has no kind"))?;
+    Ok(match effect {
+        ResolvedEffect::ApplyCondition { id, .. }
+        | ResolvedEffect::ApplyPersistentCondition { id } => format!("{kind}:{}", id.as_str()),
+        _ => kind,
+    })
 }
 fn measured_recovery(value: &ArenaParticipant) -> Result<u64, Failure> {
     value
@@ -377,7 +410,61 @@ mod recovery_measurement_tests {
             healing_received: 0,
             health_recovered: 0,
             abilities: BTreeMap::new(),
+            effects: BTreeMap::new(),
         }
+    }
+    #[test]
+    fn applied_effects_are_counted_for_their_source_by_kind_and_condition() {
+        let mut participants = BTreeMap::from([(1, subject(1)), (2, subject(2))]);
+        let frozen = tor_simulation::content_ids::ConditionId::new("frozen").unwrap();
+        let outcome = |effects| tor_simulation::abilities::Outcome {
+            actor: SimActor(1),
+            target: SimActor(2),
+            ability: None,
+            intention: None,
+            result: OutcomeStatus::Applied,
+            check: None,
+            resistance: None,
+            participation: tor_simulation::abilities::AttemptedParticipation::target(),
+            target_rider_participated: false,
+            effects,
+        };
+        for effects in [
+            vec![
+                ResolvedEffect::Damage { amount: 2 },
+                ResolvedEffect::ApplyCondition {
+                    id: frozen.clone(),
+                    duration: 300,
+                },
+            ],
+            vec![
+                ResolvedEffect::ApplyCondition {
+                    id: frozen.clone(),
+                    duration: 100,
+                },
+                ResolvedEffect::Theft {
+                    quantity: 3,
+                    relocation: None,
+                },
+            ],
+        ] {
+            record_resolution(&mut participants, &outcome(effects)).unwrap();
+        }
+        let counts: BTreeMap<_, _> = participants[&1]
+            .effects
+            .iter()
+            .map(|(name, effect)| (name.as_str(), effect.applications))
+            .collect();
+        assert_eq!(
+            counts,
+            BTreeMap::from([("apply_condition:frozen", 2), ("damage", 1), ("theft", 1)])
+        );
+        assert!(participants[&2].effects.is_empty());
+        let report = serde_json::to_value(&participants[&1]).unwrap();
+        assert_eq!(
+            report["effects"]["apply_condition:frozen"]["applications"],
+            "2"
+        );
     }
     #[test]
     fn non_ability_damage_and_explicit_healing_conserve_injury_despite_capacity_changes() {

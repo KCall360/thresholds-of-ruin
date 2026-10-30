@@ -103,6 +103,7 @@ class RogueProfileContent(unittest.TestCase):
             species = load(path / "catalog/creatures.toml")["creatures"]["species"]
             species["rogue.orc"]["behavior"]["disposition"] = "greedy"
             for row in species.values():
+                row["behavior"]["flee_percent"] = 0
                 row["modifiers"] = [modifier for modifier in row.get("modifiers", [])
                                     if not (modifier["op"].get("kind") == "add"
                                             and modifier["op"]["stat"]["kind"] in ("health", "defense"))
@@ -130,9 +131,19 @@ class RogueProfileContent(unittest.TestCase):
         self.assertEqual(tuned["rogue.orc"]["behavior"]["disposition"], "greedy")
         self.assertTrue(tuned["rogue.orc"]["behavior"]["gold"])
         self.assertEqual(starter["rogue.orc"]["behavior"]["disposition"], "passive")
+        def without_flight(behavior):
+            return {key: value for key, value in behavior.items() if key != "flee_percent"}
         changed = [name for name in tuned
-                   if tuned[name].get("behavior") != starter[name].get("behavior")]
+                   if without_flight(tuned[name]["behavior"]) != without_flight(starter[name]["behavior"])]
         self.assertEqual(changed, ["rogue.orc"])
+
+    def test_rogue_monsters_never_flee_on_low_health(self):
+        # Rogue 5.4.4 has no monster flight: an attacked monster fights until it
+        # dies. Forced flight (scare monster) is separate and unaffected.
+        tuned = load(PACKAGE / "catalog/creatures.toml")["creatures"]["species"]
+        self.assertEqual({name: row["behavior"]["flee_percent"] for name, row in tuned.items()},
+                         {name: 0 for name in tuned})
+        self.assertEqual(len(tuned), 27)  # 26 monsters and the adventurer's species
 
     def test_rogue_value_tuning_in_rules(self):
         by_path = {tuple(row["path"]): row["value"] for row in self.rules["overrides"]}

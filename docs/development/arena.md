@@ -840,7 +840,7 @@ expression kinds cannot be changed by parameters. For example, `["resources", "m
 whose stable identity is `mana`, independent of declaration order. Character and
 region actor segments select their numeric `id`, never their array position.
 Only non-identity arrays, such as effects and modifiers, use positional indices. Each arena
-report uses `tor-arena-run-v5` and includes the actual ruleset ID and exact bundled
+report uses `tor-arena-run-v6` and includes the actual ruleset ID and exact bundled
 source SHA-256, also included in its input fingerprint. Participant HD counts and
 Health/maximum-Health/injury are canonical unsigned 64-bit decimal strings;
 resource balances remain bounded JSON numbers. Overlapping targets, missing paths and edits
