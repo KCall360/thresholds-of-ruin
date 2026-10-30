@@ -1684,6 +1684,39 @@ resumed. No release baseline, library cache or source was removed, and this
 resource interruption is not a gameplay defect or stale-test failure.
 
 
+## PR integration: supply-overlay fixture snapshot identity (2026-10-29)
+
+After integrating main's issued-snapshot API, the focused shared advancement
+owner reported 29 passing methods and one setup failure in
+`advancement::tests::supply_display_mode_is_disclosed_separately_from_the_retained_page`.
+Its JSON fixture omitted the newly required `state.snapshot` field. This is one
+stale fixture cause, one distinct failing method and one failed execution; it is
+not a production defect or behavioral first-red evidence. The fixture now names
+the same issued snapshot as its retained page context and independently asserts
+that full context before exercising supply-overlay behavior. The existing
+retained-page, requested-query and validated-reply assertions stay intact.
+No production source changes were needed. The earlier full 3D debug verifier
+remains evidence for unchanged production code. The fresh shared advancement owner
+passed all 30 methods after the fixture repair, and shared Clippy passed.
+
+## PR release-client check: backend startup deadline (2026-10-29)
+
+The nine-method optimized-client selection passed eight methods. The advancement
+method, and one unchanged focused execution of that same method, timed out before
+the server published its address; no client window or advancement assertion was
+reached. Both executions retain their original 15-second startup deadline and
+failure evidence. This is one unresolved startup cause, one distinct method and
+two failed executions, not evidence of a graphical advancement defect. The second
+trace reached `restore.store.end` at 13.7 seconds, then only reached
+`restore.replay.begin` during cleanup at 66 seconds. Two unrelated long campaign
+validations were active on the host; that observation does not prove the cause.
+The successful full debug gate and eight optimized-client witnesses remain
+separate evidence. The remaining boundary is checked with a freshly built,
+matching-source optimized backend, without changing its test or deadlines.
+The subsequent nine-method selection passed with both client and backend in
+release configuration. This qualifies those selected release contracts; it does
+not explain the failed debug-backend startup timings or qualify the full matrix.
+
 ## Add the next useful finding
 
 One compact row or paragraph per diagnosed cause is enough:

@@ -1173,9 +1173,14 @@ fn supply_display_mode_is_disclosed_separately_from_the_retained_page() {
         "context": context.input.stream, "actor": context.actor, "branch": context.branch,
         "cursor": context.cursor, "has_control": true, "intentions": [],
         "history": {"entries": [], "older_before": null},
-        "state": {"wizard_game": false, "revision": context.revision.to_string(), "observation": observation},
+        "state": {"snapshot": context.snapshot, "wizard_game": false, "revision": context.revision.to_string(), "observation": observation},
     })).unwrap();
     let state = crate::ClientState::from_snapshot(snapshot).unwrap();
+    assert_eq!(
+        state.reply_context(),
+        context,
+        "positive fixture keeps the issued display identity"
+    );
     let mut pages = opened();
     let before = pages.page().cloned();
     assert!(!pages.shows_supplies());
