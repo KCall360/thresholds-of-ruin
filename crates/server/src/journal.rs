@@ -20,8 +20,9 @@ fn required_option<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RecordedAnchor {
     State {
+        #[serde(with = "crate::storage::schema::snapshot_id")]
         snapshot: tor_protocol::SnapshotId,
-        #[serde(deserialize_with = "required_option")]
+        #[serde(with = "crate::storage::schema::optional_entry")]
         boundary: Option<EntryId>,
     },
     Entry {

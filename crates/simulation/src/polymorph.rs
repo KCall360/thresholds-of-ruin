@@ -712,6 +712,17 @@ mod tests {
         Arc<BodyPackage>,
         Arc<BodyPackage>,
     ) {
+        fixture_with_hit_dice(2)
+    }
+    fn fixture_with_hit_dice(
+        total_hd: usize,
+    ) -> (
+        Game,
+        ActorId,
+        Arc<BodyPackage>,
+        Arc<BodyPackage>,
+        Arc<BodyPackage>,
+    ) {
         let base_species = crate::test_creatures::species();
         let mut weak = crate::test_creatures::unmodified_species("polymorph_weak");
         weak.anatomy = AnatomySpec::default();
@@ -804,7 +815,7 @@ mod tests {
         let build = CreatureBuild::new(
             content.clone(),
             base_species.id,
-            HdLedger::seeded(vec![HdSource::Racial; 2], 42).unwrap(),
+            HdLedger::seeded(vec![HdSource::Racial; total_hd], 42).unwrap(),
             ManaBinding::Intellect,
             [Skill::Deception, Skill::Persuasion],
         )
@@ -1071,6 +1082,195 @@ mod tests {
             corpses
         );
     }
+    fn report_body_compile_work(
+        case: &str,
+        scope: &str,
+        initial_hd: usize,
+        before: crate::diagnostics::WorkCounts,
+        after: crate::diagnostics::WorkCounts,
+    ) {
+        println!(
+            "body_work_v1 {}",
+            serde_json::json!({
+                "case": case, "scope": scope, "initial_hd": initial_hd,
+                "permanent_creature_compiles": after.permanent_creature_compiles - before.permanent_creature_compiles,
+                "dynamic_creature_folds": after.dynamic_creature_folds - before.dynamic_creature_folds,
+                "raw_hit_die_visits": after.raw_hit_die_visits - before.raw_hit_die_visits,
+                "advancement_choice_visits": after.advancement_choice_visits - before.advancement_choice_visits,
+                "creature_build_copies": after.creature_build_copies - before.creature_build_copies,
+                "health_provenance_copies": after.health_provenance_copies - before.health_provenance_copies,
+            })
+        );
+    }
+
+    /// Legal builder-scaled fixtures, not claims about live Rogue populations.
+    /// Separate plain/live-source rows retain the baseline-versus-effective fold
+    /// distinction. Setup and independent state checks stay outside the counts.
+    #[test]
+    fn body_compile_work_successful_transition_baseline() {
+        for total_hd in [2, 16, 64] {
+            for live_sources in [false, true] {
+                let (mut game, actor, _, _, strong) = fixture_with_hit_dice(total_hd);
+                let personal =
+                    game.creature(actor).unwrap().build().ledger().entries()[1..].to_vec();
+                let item = live_sources.then(|| ring(&mut game, actor, 60));
+                let condition = crate::content_ids::ConditionId::new("body_tail_health").unwrap();
+                if live_sources {
+                    game.apply_condition(actor, &condition, actor, 1_000)
+                        .unwrap();
+                }
+                let injury = if live_sources { 45 } else { 2 };
+                crate::test_creatures::injure(&mut game, actor, injury).unwrap();
+                let conditions = game.creature(actor).unwrap().conditions().clone();
+                let rng = game.rules_rng;
+                let before = crate::diagnostics::work_counts();
+                let result = game.polymorph_creature(actor, strong.clone()).unwrap();
+                let after = crate::diagnostics::work_counts();
+
+                assert_eq!(result, BodyTransitionResult::Changed);
+                let creature = game.creature(actor).unwrap();
+                assert_eq!(
+                    creature.build().active_body_package().unwrap().id,
+                    strong.id
+                );
+                assert_eq!(creature.build().ledger().entries()[2..], personal);
+                assert_eq!(creature.health().injury(), u64::from(injury));
+                assert!(
+                    !creature.health().dead(),
+                    "no intermediate equipment-loss death"
+                );
+                assert_eq!(creature.conditions(), &conditions);
+                assert_eq!(game.rules_rng, rng, "body streams are not combat RNG");
+                assert!(game.equipment(actor).unwrap().is_empty());
+                if let Some(item) = item {
+                    assert_eq!(game.items[&item].location, ItemLocation::Carried(actor));
+                    assert!(game.items[&item].condition.cursed);
+                }
+                report_body_compile_work(
+                    if live_sources {
+                        "changed_with_condition_and_cursed_gear"
+                    } else {
+                        "changed_plain"
+                    },
+                    "body_transition",
+                    total_hd,
+                    before,
+                    after,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn body_compile_work_noop_rejection_and_pending_return_baseline() {
+        let (mut game, actor, base, weak, _) = fixture();
+        let unchanged = game.clone();
+        let before = crate::diagnostics::work_counts();
+        assert_eq!(
+            game.polymorph_creature(actor, base.clone()).unwrap(),
+            BodyTransitionResult::Unchanged
+        );
+        let after = crate::diagnostics::work_counts();
+        assert_eq!(game, unchanged);
+        report_body_compile_work("already_effective", "body_transition", 2, before, after);
+
+        let mut forged = (*base).clone();
+        forged.body.cells.push([2, 0, 0]);
+        let before = crate::diagnostics::work_counts();
+        assert!(game.polymorph_creature(actor, Arc::new(forged)).is_err());
+        let after = crate::diagnostics::work_counts();
+        assert_eq!(game, unchanged, "catalog mismatch rejects atomically");
+        report_body_compile_work("rejected_definition", "body_transition", 2, before, after);
+
+        game.polymorph_creature(actor, weak.clone()).unwrap();
+        crate::test_creatures::injure(&mut game, actor, 2).unwrap();
+        let blocker = game
+            .spawn_actor(at(2), NonZeroU64::new(100).unwrap())
+            .unwrap();
+        let unchanged = game.clone();
+        let before = crate::diagnostics::work_counts();
+        assert_eq!(
+            game.polymorph_creature(actor, base.clone()).unwrap(),
+            BodyTransitionResult::Blocked
+        );
+        let after = crate::diagnostics::work_counts();
+        assert_eq!(game, unchanged);
+        report_body_compile_work("blocked_geometry", "body_transition", 2, before, after);
+
+        let rng = game.rules_rng;
+        let personal = game.creature(actor).unwrap().build().ledger().entries()[1].clone();
+        let before = crate::diagnostics::work_counts();
+        game.apply_effects(actor, &[crate::rules::Effect::CancelSpecials])
+            .unwrap();
+        let after = crate::diagnostics::work_counts();
+        let creature = game.creature(actor).unwrap();
+        assert!(creature.cancelled() && creature.polymorph_return_pending());
+        assert_eq!(creature.build().active_body_package().unwrap().id, weak.id);
+        assert_eq!(creature.health().injury(), 2);
+        assert_eq!(game.rules_rng, rng);
+        report_body_compile_work(
+            "cancellation_blocked_return",
+            "effect_application",
+            2,
+            before,
+            after,
+        );
+
+        let unchanged = game.clone();
+        let before = crate::diagnostics::work_counts();
+        game.finish_pending_body_return(actor).unwrap();
+        let after = crate::diagnostics::work_counts();
+        assert_eq!(game, unchanged);
+        report_body_compile_work("pending_retry_blocked", "pending_return", 2, before, after);
+
+        let before = crate::diagnostics::work_counts();
+        game.teleport(actor, at(3)).unwrap();
+        let after = crate::diagnostics::work_counts();
+        let creature = game.creature(actor).unwrap();
+        assert!(creature.cancelled() && !creature.polymorph_return_pending());
+        assert_eq!(creature.build().active_body_package().unwrap().id, base.id);
+        assert_eq!(creature.build().ledger().entries()[1], personal);
+        assert_eq!(creature.health().injury(), 2);
+        assert_eq!(game.actors[&actor].location, at(3));
+        assert_eq!(game.actors[&blocker].location, at(2));
+        assert_eq!(game.rules_rng, rng);
+        report_body_compile_work(
+            "pending_return_after_move",
+            "teleport_and_return",
+            2,
+            before,
+            after,
+        );
+    }
+
+    #[test]
+    fn body_compile_work_immediate_cancellation_return_baseline() {
+        let (mut game, actor, base, _, strong) = fixture();
+        game.polymorph_creature(actor, strong).unwrap();
+        crate::test_creatures::injure(&mut game, actor, 20).unwrap();
+        let rng = game.rules_rng;
+        let before = crate::diagnostics::work_counts();
+        game.apply_effects(actor, &[crate::rules::Effect::CancelSpecials])
+            .unwrap();
+        let after = crate::diagnostics::work_counts();
+        let creature = game.creature(actor).unwrap();
+        assert!(
+            !creature.health().dead(),
+            "suppression and return share final Health"
+        );
+        assert!(creature.cancelled() && !creature.polymorph_return_pending());
+        assert_eq!(creature.health().injury(), 20);
+        assert_eq!(creature.build().active_body_package().unwrap().id, base.id);
+        assert_eq!(game.rules_rng, rng);
+        report_body_compile_work(
+            "immediate_cancellation_return",
+            "effect_application",
+            3,
+            before,
+            after,
+        );
+    }
+
     fn pending_contact_fixture(
         lethal: bool,
         teleport_trap: bool,

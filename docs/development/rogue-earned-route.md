@@ -18,13 +18,12 @@ The route arm named `production` is the explicit, frozen preactivation E/S sourc
 snapshot at `8d09063840c51aa4189b146c287829102856b279`, with an explicitly recorded
 adaptation for the current scenario format. Its ordinary population remains two
 emus and two snakes. The source-only fixture
-`scripts/fixtures/rogue-earned-baseline-v27` retains exact package inputs and its
-current bundled-rule source hash. Its latest source-only transition advances
-the scenario header from 34 to 35 and the bundled import from its prior pinned
-identity to current `interactions-v56` for seeded item forms and physical charged
-devices.
-The [prior source receipt](../../scripts/fixtures/rogue-earned-baseline-v26/source.json)
-and [current transition receipt](../../scripts/fixtures/rogue-earned-baseline-v27/format-transition.json)
+`scripts/fixtures/rogue-earned-baseline-v28` retains exact package inputs and its
+current bundled-rule source hash. Its latest source-only transition changes only
+the bundled import to current `interactions-v57` for consistent remembered-route
+flee decisions. The scenario header and all other authored inputs are unchanged.
+The [prior source receipt](../../scripts/fixtures/rogue-earned-baseline-v27/source.json)
+and [current transition receipt](../../scripts/fixtures/rogue-earned-baseline-v28/format-transition.json)
 retain the exact old/new identities and hashes; their historical proof is not
 rewritten. The dependency digest attests to actual bundled source bytes, not a
 compiler certificate. No body-package enrollment, two-HD player kit, treasure-room stages, darts,
@@ -34,7 +33,7 @@ this transition does not qualify compiler output or route outcomes.
 All other authored package bytes, including anatomy, items, player kits and
 population stages, are unchanged; no maze or room-omission policy, wandering policy, control
 scrolls, utility-magic or ring loot, discovery stages, traps or secret closures are
-imported. Frozen v6–v26 inputs and their source/transition receipts remain immutable research
+imported. Frozen v6–v27 inputs and their source/transition receipts remain immutable research
 evidence. Shared living-dungeon, awareness, hazards, levitation, discovery, wearable, utility-magic, persistent-condition and
 action-duration rules
 make this a new experiment input, with no claim of identical outcomes or a
@@ -42,7 +41,7 @@ requalified pilot. The source
 receipt alone does not establish compiler validation, regenerated certificates
 or route acceptance. Current route CI must still qualify the adapted fixture.
 Certificate regeneration must select gameplay packages under `scenarios/` (and
-the explicit client menagerie), excluding source-only comparator snapshots.
+all three independent 3D packages), excluding source-only comparator snapshots.
 Validate comparators only in campaign copies: generated `index.json`,
 `validation.json`, and `.compiled` files violate their exact source closure.
 New campaigns have distinct source fingerprints and cannot resume an earlier
