@@ -2586,3 +2586,36 @@ recorded local failures. The corrected walkthrough still requires a hosted
 actual-process rerun: local dev-opt0 fixture compilation hits the unchanged
 30-second cap before gameplay. No corrected walkthrough pass is claimed, and its
 remaining qualification is not replaced by the pure-driver or Rust results.
+
+## PR #207: native fixture races and post-test job budget (2026-10-29)
+
+The initial [3D CI run](https://github.com/KCall360/thresholds-of-ruin/actions/runs/40988267824)
+exposed two fixture causes in two native methods, each failing in Linux debug and
+release: four confirmed failed executions, not four defects. The map/journal wait
+called `startswith` on a legitimate transitional `screen: null`; the HUD's empty-
+dock witness requested physical x=1411 on the default 1280-pixel Xvfb desktop,
+which correctly clamped the pointer to x=1279. Both the press and finally-release
+errors belong to that same HUD execution. No production gameplay defect follows
+from either result.
+
+The map waits now treat absent screens as not-yet-matched. The blank-dock witness
+uses bottom center, still below the buttons, and retains exact revision/position,
+mouse readback, own-window, button release and no-click-through assertions.
+`NativeMouseContract` exercises the actual native test methods with independent
+valid frames and a 1440x900 client on a clamping 1280x1024 fake desktop. Its two
+regressions first reproduced the exact CI failures, then passed; these mocks do
+not qualify physical OS input. The native methods remain mandatory in hosted CI.
+Initial isolated-regression setup omissions were corrected before the intended
+first-red evidence; they are authoring/setup failures, not additional product or
+stale-fixture causes.
+
+Separately, the [Windows debug Python shard](https://github.com/KCall360/thresholds-of-ruin/actions/runs/40988267891/job/123848053534)
+completed verification successfully (2028 seconds), uploaded its evidence, then
+hit the 40-minute whole-job limit during Rust-cache cleanup. The Windows
+aggregate correctly rejected the cancelled cohort. This is one infrastructure
+budget cause and one cancelled job, not a failed test method or passed full gate.
+The Windows Python job now allows 50 minutes, retaining all per-test/verifier
+limits and fail-closed cohort validation. An independent workflow regression
+rejects the old budget and requires bounded post-verification headroom. Fresh
+final-head hosted qualification remains required; earlier cancelled/failed jobs
+are never relabelled as passes.

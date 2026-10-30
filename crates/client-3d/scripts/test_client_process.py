@@ -264,11 +264,12 @@ class Native3DProcesses(ProcessTestCase):
         self.assertTrue(opened["panel_actions"])
         native = self.native_keys(window)
         closed = self.tap(window, native, "Escape", lambda frame: not frame["panel_open"])
+        # Bottom center is reachable even when Xvfb is narrower than the client.
         try:
-            mouse([0.98, 0.98], True)
+            mouse([0.5, 0.98], True)
             blank = self.captured(window, lambda frame: "Left" in frame["mouse"])
         finally:
-            mouse([0.98, 0.98], False)
+            mouse([0.5, 0.98], False)
         self.assertEqual(blank["revision"], closed["revision"], "empty dock areas must also block world clicks")
         self.captured(window, lambda frame: "Left" not in frame["mouse"])
         journal = next(button for button in initial["hud"]["buttons"] if button["action"] == "Journal")
@@ -1796,7 +1797,7 @@ class Native3DProcesses(ProcessTestCase):
         window = self.launch("tor-client-3d", ["--connect", self.address, "--capture", self.directory / "map-journal", "--capture-every", "0.4", "--quit-after", "600"], executable=executable)
         initial = self.captured(window, lambda frame: frame["has_control"] and not frame["busy"])
         native = self.native_keys(window)
-        opened = self.tap(window, native, "m", lambda frame: frame["screen"].startswith("Places") and (frame.get("map_journal") or {}).get("visible"))
+        opened = self.tap(window, native, "m", lambda frame: (frame["screen"] or "").startswith("Places") and (frame.get("map_journal") or {}).get("visible"))
         left, top, right, bottom = opened["map_journal"]["picture_bounds"]
         self.assertGreater(right - left, 0.25)
         self.assertGreater(bottom - top, 0.3)
@@ -1811,14 +1812,14 @@ class Native3DProcesses(ProcessTestCase):
         self.assertGreater(colored, 100, "the enlarged map must contain actual disclosed terrain")
         history = self.tap(window, native, "F2", lambda frame: frame["screen"] == "History")
         self.assertTrue(history["map_journal"]["visible"])
-        note = self.tap(window, native, "F4", lambda frame: frame["screen"].startswith("Note"))
+        note = self.tap(window, native, "F4", lambda frame: (frame["screen"] or "").startswith("Note"))
         self.assertTrue(note["map_journal"]["visible"])
         typed = self.tap(window, native, "m", lambda frame: frame["typed"] == "m")
         self.assertTrue(typed["screen"].startswith("Note"), "M belongs to the note draft")
         self.assertEqual(typed["revision"], initial["revision"])
         self.assertEqual(typed["world_feet"], initial["world_feet"])
         self.tap(window, native, "Escape", lambda frame: frame["screen"] is None and not frame["map_journal"]["visible"])
-        self.tap(window, native, "m", lambda frame: frame["screen"].startswith("Places"))
+        self.tap(window, native, "m", lambda frame: (frame["screen"] or "").startswith("Places"))
         self.tap(window, native, "m", lambda frame: frame["screen"] is None)
         native("Escape", True)
         try:

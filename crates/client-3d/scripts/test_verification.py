@@ -168,9 +168,11 @@ class IndependentVerification(unittest.TestCase):
 
 class FakeX11Desktop:
     """Model X11 coordinates and the observed xdotool relative-sync behavior."""
-    def __init__(self, *, reported_position=None, reported_window=71):
-        self.origin = (200, 100)
-        self.size = (800, 600)
+    def __init__(self, *, reported_position=None, reported_window=71,
+                 origin=(200, 100), size=(800, 600), root_size=None):
+        self.origin = origin
+        self.size = size
+        self.root_size = root_size
         self.pointer = (600, 400)
         self.reported_position = reported_position
         self.reported_window = reported_window
@@ -184,6 +186,8 @@ class FakeX11Desktop:
         # A relative no-op can therefore wait for a movement that never happens.
         if '--sync' in command and self.pointer == target and self.pointer != (x, y):
             raise subprocess.TimeoutExpired(command, 10)
+        if self.root_size:
+            target = tuple(max(0, min(value, limit - 1)) for value, limit in zip(target, self.root_size))
         self.pointer = target
 
     def run(self, command, **_options):
@@ -198,7 +202,8 @@ class FakeX11Desktop:
 
     def output(self, command, **_options):
         if command[1] == 'getwindowgeometry':
-            return 'WINDOW=71\nX=200\nY=100\nWIDTH=800\nHEIGHT=600\nSCREEN=0\n'
+            return (f'WINDOW=71\nX={self.origin[0]}\nY={self.origin[1]}\n'
+                    f'WIDTH={self.size[0]}\nHEIGHT={self.size[1]}\nSCREEN=0\n')
         if command[1] == 'mousemove':
             self.move(command)
         elif command[1] != 'getmouselocation':
@@ -240,6 +245,73 @@ class NativeMouseContract(unittest.TestCase):
                     with self.assertRaises(AssertionError):
                         mouse((0.5, 0.5), True)
                     self.assertEqual(desktop.buttons, [])
+
+
+    def test_hud_background_target_remains_reachable_on_the_default_xvfb_desktop(self):
+        spec = importlib.util.spec_from_file_location('client_3d_hud_fixture', HERE / 'test_client_process.py')
+        native = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(native)
+        actor = native.Native3DProcesses('test_framed_hud_dock_opens_inventory_without_a_world_action')
+        actions = ['Inventory', 'Equipment', 'Character', 'Map', 'Places', 'Journal', 'Wait']
+        buttons = [{'action': action, 'screen': [0.2 + i * 0.08, 0.9], 'size': [80, 54]}
+                   for i, action in enumerate(actions)]
+        initial = {'has_control': True, 'busy': False, 'revision': '7', 'world_feet': [2, 3, 0],
+                   'hud': {'readiness': 'READY', 'buttons': buttons}, 'screen': None,
+                   'panel_open': False, 'mouse': []}
+        closed = dict(initial)
+        frames = iter([initial, dict(initial, panel_open=True, panel_actions=['Drop']),
+                       dict(initial, mouse=['Left']), closed, dict(initial, screen='History')])
+        def captured(_window, predicate):
+            frame = next(frames)
+            self.assertTrue(predicate(frame), 'positive frame fixture must match the requested state')
+            return frame
+        def tap(_window, _native, _key, predicate):
+            self.assertTrue(predicate(closed))
+            return closed
+        actor.suffix = ""  # The isolated fixture bypasses process-class setup.
+        actor.address = "127.0.0.1:1"
+        actor.directory = Path("fixture")
+        actor.server = mock.Mock()
+        actor.fallback_package = mock.Mock(return_value=Path('fixture'))
+        actor.launch = mock.Mock(return_value=SimpleNamespace(child=mock.Mock()))
+        actor.launch.return_value.child.poll.return_value = None
+        actor.launch.return_value.child.wait.return_value = 0
+        actor.captured = captured
+        actor.tap = tap
+        actor.native_keys = mock.Mock(return_value=mock.Mock())
+        desktop = FakeX11Desktop(origin=(0, 0), size=(1440, 900), root_size=(1280, 1024))
+        with self.linux_mouse(desktop) as mouse:
+            actor.native_mouse = lambda _window: mouse
+            actor.test_framed_hud_dock_opens_inventory_without_a_world_action()
+        background = [point for action, point in desktop.buttons if action == 'mousedown' and point[1] > 870]
+        self.assertEqual(len(background), 1, 'retain the independent empty-background click witness')
+        self.assertLess(background[0][0], 1280)
+        self.assertGreater(background[0][1], max(button['screen'][1] * 900 + button['size'][1] / 2
+                                               for button in buttons))
+
+    def test_map_screen_wait_ignores_transitional_frames_before_the_requested_screen(self):
+        spec = importlib.util.spec_from_file_location('client_3d_screen_fixture', HERE / 'test_client_process.py')
+        native = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(native)
+        actor = native.Native3DProcesses('test_map_journal_shares_the_disclosed_map_and_preserves_note_typing')
+        actor.suffix = ""  # The isolated fixture bypasses process-class setup.
+        actor.address = "127.0.0.1:1"
+        actor.directory = Path("fixture")
+        actor.server = mock.Mock()
+        actor.launch = mock.Mock()
+        actor.captured = mock.Mock(return_value={'has_control': True, 'busy': False})
+        actor.native_keys = mock.Mock()
+        class ObservedPredicate(Exception):
+            pass
+        def tap(_window, _native, key, predicate):
+            self.assertEqual(key, 'm')
+            self.assertFalse(predicate({'screen': None, 'map_journal': {'visible': False}}))
+            self.assertFalse(predicate({'screen': 'History', 'map_journal': {'visible': True}}))
+            self.assertTrue(predicate({'screen': 'Places { renaming: None }', 'map_journal': {'visible': True}}))
+            raise ObservedPredicate()
+        actor.tap = tap
+        with self.assertRaises(ObservedPredicate):
+            actor.test_map_journal_shares_the_disclosed_map_and_preserves_note_typing()
 
 
 class LocalGraphicalWaiverContracts(unittest.TestCase):

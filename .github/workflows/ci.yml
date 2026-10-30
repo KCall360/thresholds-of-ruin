@@ -332,7 +332,9 @@ jobs:
     env:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_INCREMENTAL: "0"
-    timeout-minutes: 40
+    # A successful debug shard can take 39 minutes before cache finalization.
+    # Leave post-job cleanup headroom without changing any verifier/test limit.
+    timeout-minutes: 50
     strategy:
       fail-fast: false
       matrix:
