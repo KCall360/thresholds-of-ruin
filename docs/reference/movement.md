@@ -183,7 +183,10 @@ arrival takes precedence in backend status, but the text client still suppresses
 an intended follow-up when a new actor appeared. Actors already visible at the
 start are not new hazards; they still block movement. Fully resisted damage
 does not interrupt. New terrain, ordinary items and place hints do not count as
-hazards. Traps and richer dangerous-terrain classifications remain future work.
+hazards. Traps already exist and their ordinary damage/displacement can stop a
+journey. A separate travel-hazard classification for known traps and richer
+dangerous terrain remains future work; the current route planner does not imply
+such an avoidance policy.
 
 While travel is active, other ordinary action/travel requests are rejected as
 busy. Saving does not cancel it. Presentation pacing and fast-forward only

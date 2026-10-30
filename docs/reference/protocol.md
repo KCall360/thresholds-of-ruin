@@ -1,5 +1,9 @@
 # Wire protocol
 
+For integrated connection/input state, the complete message-family index, paging
+and worked retry/recovery sequences, see [protocol lifecycle](protocol-lifecycle.md).
+The reference below remains the canonical owner of schemas, limits and examples.
+
 The `tor-server` executable serves authored dungeon scenarios over JSON WebSockets.
 `tor-protocol` defines the wire types without depending on world or simulation
 internals. `tor-client-common::ClientState` validates ordered updates and keeps
@@ -788,9 +792,11 @@ ceiling. There are at most 128 connections.
 Host defaults are 16 MiB per frame, 64 MiB per connection and 256 MiB aggregate.
 [CLI limits](cli.md) require positive frame ≤ client ≤ total, with frame no larger
 than the protocol ceiling; invalid limits fail before opening a save. The queue
-retains one encoded representation, not a DTO to encode again. Encoding stops at
-the frame ceiling, with at most one bounded temporary frame prepared before
-admission. Queued and in-flight payloads retain their byte leases until flush or
+retains one encoded representation, not a DTO to encode again. Ordinary response
+encoding stops at the frame ceiling and prepares at most one bounded temporary
+frame before admission. Multipart recovery instead prepares a bounded complete
+transfer and admits its parts atomically; the logical snapshot and aggregate
+encoded transfer have separate limits. Queued and in-flight payloads retain their byte leases until flush or
 socket destruction, including failed writes, close draining, timeouts and task
 cancellation. Payload limits do not measure resident memory: cached observations,
 message preparation, allocator overhead and socket framing/copies are separate.
@@ -813,8 +819,10 @@ message preparation, allocator overhead and socket framing/copies are separate.
   limits admission rather than stalling an unrelated actor's simulation. Default
   per-client limits stop one stream retaining the whole pool, but aggregate
   pressure can still reject another stream. This is not a fair-allocation promise.
-- Updates remain one per simulation step; deltas reduce size without losing the
-  boundaries clients need for presentation.
+- Causal outcomes and lifecycle/readiness changes retain their ordered publication
+  boundaries. Hidden-only steps can produce no outcome; rich pictures are
+  demand-driven through `Observe`, not one mandatory picture per simulation step.
+  Deltas reduce a published picture's size without dropping issued causal updates.
 
 A client whose attached actor leaves the loaded world (see
 [region streaming](../architecture/streaming.md#engine-streaming); a spectator watching

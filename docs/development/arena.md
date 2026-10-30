@@ -180,7 +180,7 @@ seeds and choices; its seed comes from the original spawn stream, independently
 of combat randomness. Regrowing a drained ordinal uses its original seed and
 follows the explicit `choose_again` or `authored` restoration policy. Starting
 ranks survive drain and are never granted again. See the authoritative
-[point ledger](../reference/creature-rules.md#advancement-points-and-starting-ranks).
+[point ledger](../reference/progression.md#advancement-points-and-starting-ranks).
 
 Advancement preserves injury, does not refill enlarged resource pools, and never
 revives a dead actor. Removing a prerequisite class level leaves a retained talent

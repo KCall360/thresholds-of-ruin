@@ -159,7 +159,7 @@ ordinary [advancement preview and confirmation](../play/advancement.md), which
 requires the exact root and form IDs even for singleton Falter.
 
 HD and purchase positions are one-based. Replacement is one atomic, journaled
-privileged edit. It uses the [shared ownership transaction](../reference/creature-rules.md#advancement-points-and-starting-ranks):
+privileged edit. It uses the [shared ownership transaction](../reference/progression.md#advancement-points-and-starting-ranks):
 dormant owned OR alternatives retain their branch, while losing the final owned
 parent route refunds descendants exactly once. The edit preserves starting ranks,
 HD seeds, attribute choices, authored restoration intent and runtime injury.

@@ -10,11 +10,12 @@ rather than treating a historical plan as current behavior.
 | I want to… | Read |
 | --- | --- |
 | Start playing | [Repository README](../README.md), then [text](play/text.md) or [ASCII](play/ascii.md) |
-| Play the Rogue starter slice | [Rogue presets and launch](play/rogue.md) |
+| Play the Rogue starter slice | [Rogue presets and launch](play/rogue.md), [encounters and survival](play/rogue-mechanics.md) |
 | Try the optional 3D prototype | [3D client guide](../crates/client-3d/README.md) |
-| Spend earned points or respec | [Player advancement](play/advancement.md) |
+| Spend points, learn expertise or respec | [Player advancement](play/advancement.md), [progression](reference/progression.md) |
 | Understand the current game and limitations | [Gameplay](play/gameplay.md), [current status](status.md) |
 | Set up a development machine | [Setup](development/setup.md), [contributing](../CONTRIBUTING.md), [testing](development/testing.md) |
+| Follow a request, wire session or combat action end to end | [Engineering reading paths and coverage](development/documentation-coverage.md) |
 | Understand ownership and design | [Architecture overview](architecture/overview.md), [decisions and evidence](architecture/decisions.md) |
 | Author a scenario or rules override | [Scenario packages](reference/scenario-packages.md), [generation](reference/generation.md), [creature rules](reference/creature-rules.md) |
 | Integrate a client or automation | [Protocol](reference/protocol.md), [headless client](reference/headless.md), [CLI](reference/cli.md) |
@@ -24,17 +25,27 @@ rather than treating a historical plan as current behavior.
 
 | Concern | Authoritative guide |
 | --- | --- |
+| End-to-end ingress, tick phases and publication | [Simulation cycle](architecture/simulation-cycle.md) |
+| Attack lifecycle, frozen/live operands and worked arithmetic | [Combat](reference/combat.md) |
+| Autonomous priority and knowledge-limited tactics | [AI](reference/ai.md) |
 | Actions, preparation, rules execution and scheduling | [Simulation](architecture/simulation.md) |
 | Regions, portals, materials, bodies and gravity | [Geometry](architecture/geometry.md) |
 | Eye-based sight, illumination, awareness and reference algorithms | [Perception](architecture/perception.md) |
 | Active/frozen/detached state and content preparation | [Region lifecycle](architecture/streaming.md) |
+| Canonical floor/room/passage sources, load-only preparation and retained roots | [Spatial registry](architecture/spatial-registry.md) |
 | Durability, journals, checkpoints, recovery and history | [Persistence](architecture/persistence.md) |
 | Disclosed client state, narrative, parser and memory | [Client architecture](architecture/clients.md) |
 | Creature mechanics and shared catalog | [Creature rules](reference/creature-rules.md) |
-| Stacks, equipment, consumption and knowledge | [Items](reference/items.md) |
+| Stacks, transfers, consumption and knowledge | [Items](reference/items.md) |
+| Equipment, capacity, corrosion and birth condition | [Equipment](reference/equipment.md) |
+| Rings, potions, scrolls, charged devices and identification | [Magic items](reference/magic-items.md) |
+| Growth/Haste, sensing/mapping, torch fuel and area-device effects | [Effect reference](reference/consumable-effects.md) |
+| Body/personal HD, purchases, expertise, drain/restoration and earned growth | [Progression](reference/progression.md) |
+| Baleful transformations and pending return | [Polymorph](reference/polymorph.md) |
 | Steps, doors, stairs, travel and durable places | [Movement and interaction](reference/movement.md) |
 | Package structure, validation, pinning and overrides | [Scenario packages](reference/scenario-packages.md) |
 | Declarative recipes and generation groups | [Generation](reference/generation.md) |
+| Complete message-family index, authority gates, paging and worked recovery | [Protocol lifecycle](reference/protocol-lifecycle.md) |
 | Authentication, envelopes, serialization and stream recovery | [Wire protocol](reference/protocol.md) |
 | Command-line arguments and environment | [CLI](reference/cli.md) |
 | JSON-lines automation workflow | [Headless client](reference/headless.md) |
@@ -58,6 +69,9 @@ rather than treating a historical plan as current behavior.
 
 ## Plans and external research
 
+Start with the [plan status map](plans/README.md): implemented design records and
+historical acceptance sequences are distinct from future proposals.
+
 - [3D art direction and animation philosophy](art/3d-art-direction.md): working visual targets and quality criteria, with [generation prompts](art/target-prompts.md)
 - [Procedural 3D art continuation](plans/3d-art-continuation.md): implemented foundations, review limits, challenges and next work
 - [Procedural model refactor handoff](plans/procedural-model-handoff.md): current boundaries, proposed contracts and acceptance gaps
@@ -68,8 +82,8 @@ rather than treating a historical plan as current behavior.
 - [Rogue adaptation](plans/rogue.md): decisions and remaining content/survival work
 - [Rogue tuning](plans/rogue-tuning.md): proposed calibration against a locked
   reference build, scenario mechanics profile and drought guarantee
-- [Missing Rogue consumables and devices](plans/rogue-missing-consumables.md):
-  preserved design direction, deferred implementation and unresolved parameters
+- [Consumables and devices design record](plans/rogue-missing-consumables.md):
+  implemented-owner map, retained rationale and remaining boundaries
 - [Script extension design](plans/scripting.md): unimplemented runtime and open choices
 - [Progression and creature construction design](plans/progression-design.md):
   edge-first talents, regeneration and constructed Rogue monsters, with its
@@ -86,6 +100,11 @@ are linked from [decisions](architecture/decisions.md) and the performance guide
 completed implementation diaries are not maintained as current references.
 
 ## Maintaining this documentation
+
+The [source-backed review](development/documentation-review.md) records audiences,
+old-to-new owners, corrections and prioritized engineering questions. The
+[coverage map](development/documentation-coverage.md) distinguishes detailed
+current contracts, joined reading paths and remaining qualification gaps.
 
 1. Put each contract in one authoritative home. Other pages summarize briefly and
    link, rather than copying controls, schema fields, current status or policies.

@@ -9,8 +9,9 @@ The default five-chamber dungeon has creature-backed combat, equipment and item
 interactions: recover the **dawn seal** and return to the entrance. Death is
 persistent. A separate [**Rogue starter slice**](docs/play/rogue.md) authors Warrior
 and Mage presets, ordinary low-depth foes and finite supplies on open-ended,
-generated persistent floors. Its full roster, survival systems, calibrated depth
-curve and retrieval/escape victory remain unfinished. This is a development build, without an installer or automatic
+generated persistent floors. Its full 26-species roster, hunger and recovery,
+current loot and Amulet retrieval/ascent objective are implemented; calibrated
+depth/food pressure and complete-run balance remain unfinished. This is a development build, without an installer or automatic
 server launch for the Text and ASCII clients. Windows and Linux are supported.
 An optional [procedural 3D prototype](crates/client-3d/README.md) has its own
 workspace, checks and private local-server launcher. Remote deployment remains
@@ -58,8 +59,8 @@ cargo run -p tor-client-ascii
 ```
 
 In text mode, start with `look`, `help`, `inventory`, and compass directions.
-In ASCII, use arrow keys or HJKL/YUBN to move, A to attack, G to pick up, D to
-drop, and `_` or a map click to travel. Full controls and examples:
+In ASCII, use arrow keys or HJKL/YUBN to move, bump a disclosed opponent to
+attack, `,` to pick up, `d` to drop, and `_` or a map click to travel. Full controls and examples:
 
 - [Text play](docs/play/text.md)
 - [ASCII play](docs/play/ascii.md)
@@ -73,9 +74,9 @@ drop, and `_` or a map click to travel. Full controls and examples:
 Normal client exit requests a durable save. Restart the server with the same
 `--save` path to resume. Ordinary action acknowledgements can precede disk
 persistence; a crash can lose an unsaved suffix. Saves require the current
-formats, and the project does not migrate older pre-release saves. Package games
-may need their matching source package for region data not yet copied into the
-save. See [saving and recovery](docs/architecture/persistence.md).
+formats, and the project does not migrate older pre-release saves. Saves retain canonical content and procedural descriptors; unvisited authored
+regions may still require the exact immutable compiled bundle. Original TOML
+modules are not re-imported on resume. See [saving and recovery](docs/architecture/persistence.md).
 
 ## Develop or author content
 
@@ -87,14 +88,15 @@ Start with the [documentation index](docs/README.md), then choose:
 - [Shared creature rules](docs/reference/creature-rules.md)
 - [AGENTS.md](AGENTS.md) for AI coding agents
 
-Use the maintained verification runner rather than assembling a partial suite:
+Use the maintained verification runner with an explicitly selected affected scope:
 
 ```sh
 python scripts/verify.py quick
 ```
 
-The default `push` tier is required before publication; full Windows/Linux
-debug/release CI is required before merge. Platform prerequisites, focused tests,
+Local publication checkpoints are expedited and risk-based; a `quick`, `push`
+or `full` run is not mandatory solely because publication is due. The canonical
+final-head CI plan and both required platform aggregates must pass before merge. Platform prerequisites, focused tests,
 separate tooling/dependency jobs and evidence-reuse rules are in the
 [testing policy](docs/development/testing.md).
 
