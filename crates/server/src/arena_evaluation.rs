@@ -287,7 +287,11 @@ pub fn run(scenario: Scenario) -> Result<ArenaEvaluation, Failure> {
         engine.advance_ai(actor)?;
         let run = engine.game.arena_run().expect("validated arena runtime");
         let failed = matches!(
-            engine.archive.records.last().map(|record| &record.entry.content),
+            engine
+                .archive
+                .records
+                .last()
+                .map(|record| &record.entry.content),
             Some(crate::journal::JournalContent::IntentionFailed { .. })
         );
         if run.actions == previous && failed {
