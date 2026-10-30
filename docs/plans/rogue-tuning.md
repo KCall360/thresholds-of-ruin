@@ -170,12 +170,26 @@ is rejected. Species that attack fewer than 20 times in a study (the greedy orc)
 are left alone, because their ratios are noise. Mechanics are not changed: armor keeps its damage reduction, so small
 dice gain a flat bonus instead.
 
+Study-only arrangements let every species be measured without changing the
+scenario: against the invisible phantom the adventurer wears see invisible, as
+a Rogue player would; the orc and the xeroc engage first (the orc otherwise
+dies before it swings); and the orc, flytrap and xeroc get four times the seeds.
+The arena itself now counts an admitted autonomous intention that fails at
+execution as a lost turn, ending the encounter as a stalemate after eight in a
+row, instead of rejecting the encounter.
+
 The baseline had 72 of 130 judged ratios in band. TOR foes had far more Health
 than Rogue's (a full first die), dealt little damage through ring mail, and were
-easier to hit at shallow depths. After eight passes, 104 of 111 judged ratios are
-in band over 32 encounters per species, including the deep species. Known limits: the arena
-cannot complete flytrap encounters ("decision did not commit exactly one action"),
-the invisible phantom is never engaged, and xerocs often stay disguised.
+easier to hit at shallow depths. After eleven passes, 114 of 116 judged ratios
+are in band, with all 26 species measured. The two misses are the emu, whose
+1d2 bite sits on either side of the band through ring mail's damage reduction,
+and the leprechaun, whose 1d1 bite armor absorbs entirely (its threat is theft).
+
+Open engine defect: a held adventurer's AI basic-melee plan against an adjacent
+flytrap fails execution with `InvalidPlan` when the flytrap's Clutch resolves
+first, and the rollback makes the same choice repeat. The arena behavior above
+keeps flytrap encounters measurable; the AI admission/execution ordering needs
+its own fix.
 
 ## Layer 2: run-shape targets
 
@@ -192,9 +206,27 @@ decisions. The campaign aggregates death depths, mean level on arrival and the
 hungry share. It is a fixed policy, not a model of human play: it does not use
 potions, scrolls or wands, so its deaths overstate Rogue's danger.
 
-**Targets.** Level at depth against the model; food found against food spent per
-depth band; share of deaths by starvation; and the shape of the death-depth
-distribution. Tolerances are still to be ratified by the maintainer.
+Searching when the known route is exhausted (stairs behind secret doors) and
+waiting out refused steps let runs from depth 1 reach depths 3 to 5. Deep starts
+(`--start-depth`) begin at a floor's up stairs with the model's level for that
+depth, the median best armor from Rogue's expected armor finds, half the
+expected healing potions and a spare ration; the bot drinks a known healing
+potion below 40% Health. From depth 1 the adventurer reaches level 4 by depth 3
+and 5 by depth 4 or 5, matching the model. Deep starts survive with that gear,
+but the fixed bot earns little XP within its command budgets, so deep pacing is
+not yet measured. Intermittent harness timeouts occurred while builds saturated
+the machine.
+
+The campaign also reads the saved first-entry receipts and counts the items
+that actually landed. Over the measured floors it found about 4.1 items and 0.7
+food per floor; the model expects about 3.6 items (3.24 ordinary, plus treasure
+rooms and the drought guarantee) and 0.6 food, within the noise of so few floors.
+
+**Targets.** Proposed, awaiting the maintainer's ratification: level on arrival
+within ±1 of the model at depths 1–10 and ±2 at 11–26; food found against spent
+within ×1.5 of the model per five-floor band; starvation at most 10% of deaths;
+at least 75% of runs reach depth 4; every species with at least 20 measured
+attacks within ±35% of its encounter targets.
 
 ## Food and the drought guarantee
 
@@ -246,10 +278,10 @@ without using potions and scrolls.
 | --- | --- | --- |
 | 1 | Implemented: capability switches, growth schedules and the `scenarios/rogue` package | Protocol 65, save 64, scenario 36 |
 | 2 | Implemented: reference model, targets, encounter study, run summary and campaign harness | No |
-| 3 | Implemented: value tuning of all 26 species, eight passes, 104 of 111 ratios in band | No |
+| 3 | Implemented: value tuning of all 26 species, eleven passes, 114 of 116 ratios in band | No |
 | 4 | Implemented: Rogue item table, grouped missiles and the drought guarantee | Within the unreleased 64/36 bump |
 | 5 | Implemented: treasure rooms; wandering and initial counts already match | No |
-| 6 | Implemented first fit: recovery, regeneration cost and early XP thresholds; deep pacing open | No |
+| 6 | Implemented first fit: recovery, regeneration cost and early XP thresholds; deep pacing and tolerance ratification open | No |
 
 Package edits regenerate certificates and run
 `python scripts/test_scenario_references.py`. Each milestone updates the

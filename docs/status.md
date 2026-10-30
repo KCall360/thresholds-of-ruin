@@ -837,7 +837,7 @@ starter `rogue-exploration` package is unchanged. Later milestones add a Rogue
 reference model and per-species targets, an arena encounter study, seeded
 real-process campaigns, `chance_items` and `food_drought` population stages,
 per-choice quantities, Rogue's item table and treasure rooms, and value tuning
-of all 26 species (104 of 111 judged encounter ratios within ±35%). Recovery,
+of all 26 species (114 of 116 judged encounter ratios within ±35%). Recovery,
 regeneration cost and early XP thresholds have a first fit; deep pacing and
 ratified run-shape tolerances remain open.
 Rogue species are built through the [progression plan](plans/progression.md)'s

@@ -304,7 +304,7 @@ kind = "undead"
 attributes = { strength = 2, speed = 2, intellect = 1, willpower = 2, awareness = 1, presence = 1 }
 anatomy = { slots = ["weapon", "shield", "body_armor", "head_armor", "hands_armor", "feet_armor", "cloak", "ring", "ring", "amulet", "weapon", "held_light"], capacities = { grip = 2 }, primary_attack_socket = { kind = "socket", slot = 0 } }
 displacement = { size = "medium", anchored = false }
-modifiers = [{ scope = "always", op = { kind = "flag", flag = "regenerative" } }, { scope = "always", op = { kind = "add", stat = { kind = "health" }, value = -26 } }, { scope = "always", op = { kind = "add", stat = { kind = "defense", defense = "physical" }, value = 3 } }, { scope = "always", op = { kind = "attribute_without_defense", attribute = "strength", defense = "physical", value = 2 } }]
+modifiers = [{ scope = "always", op = { kind = "flag", flag = "regenerative" } }, { scope = "always", op = { kind = "add", stat = { kind = "health" }, value = -27 } }, { scope = "always", op = { kind = "add", stat = { kind = "defense", defense = "physical" }, value = 3 } }, { scope = "always", op = { kind = "attribute_without_defense", attribute = "strength", defense = "physical", value = 2 } }]
 
 [creatures.species."rogue.vampire".melee]
 skill = "heavy_weaponry"
@@ -315,7 +315,7 @@ recovery = 100
 [[creatures.species."rogue.vampire".melee.strikes]]
 offset = 0
 check = { actor = "user", skill = { kind = "natural_attack" }, against = { kind = "defense", defense = "physical" } }
-on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "keen", amount = { kind = "rolled", dice = { count = 1, sides = 10, bonus = 2 } } }] } }]
+on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "keen", amount = { kind = "rolled", dice = { count = 1, sides = 10, bonus = 3 } } }] } }]
 on_failure = []
 descriptors = []
 riders = []
@@ -354,7 +354,7 @@ behavior = { disposition = "passive", idle = "explore", memory_ticks = 1000, doo
 kind = "aberration"
 attributes = { strength = 2, speed = 1, intellect = 0, willpower = 1, awareness = 1, presence = 0 }
 displacement = { size = "large", anchored = false }
-modifiers = [{ scope = "always", op = { kind = "flag", flag = "natural_sequence" } }, { scope = "always", op = { kind = "add", stat = { kind = "health" }, value = -5 } }, { scope = "always", op = { kind = "add", stat = { kind = "defense", defense = "physical" }, value = 2 } }, { scope = "always", op = { kind = "attribute_without_defense", attribute = "strength", defense = "physical", value = 3 } }]
+modifiers = [{ scope = "always", op = { kind = "flag", flag = "natural_sequence" } }, { scope = "always", op = { kind = "add", stat = { kind = "health" }, value = -7 } }, { scope = "always", op = { kind = "add", stat = { kind = "defense", defense = "physical" }, value = 2 } }, { scope = "always", op = { kind = "attribute_without_defense", attribute = "strength", defense = "physical", value = 4 } }]
 
 [creatures.species."rogue.jabberwock".melee]
 skill = "heavy_weaponry"
@@ -400,7 +400,7 @@ attributes = { strength = 0, speed = 2, intellect = 0, willpower = 0, awareness 
 anatomy = { slots = [], capacities = {}, primary_attack_socket = { kind = "none" } }
 displacement = { size = "small", anchored = false }
 modifiers = [{ scope = "always", op = { kind = "locomotion", value = { kind = "flying", enabled = true } } }, { scope = "always", op = { kind = "add", stat = { kind = "health" }, value = -4 } }, { scope = "always", op = { kind = "add", stat = { kind = "defense", defense = "physical" }, value = 5 } }, { scope = "always", op = { kind = "attribute_without_defense", attribute = "speed", defense = "physical", value = -1 } }]
-melee = { skill = "light_weaponry", bonus = 0, wind_up = 100, recovery = 100, strikes = [{ offset = 0, check = { actor = "user", skill = { kind = "natural_attack" }, against = { kind = "defense", defense = "physical" } }, on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "keen", amount = { kind = "rolled", dice = { count = 1, sides = 4, bonus = 3 } } }] } }], on_failure = [], descriptors = [], riders = [] }] }
+melee = { skill = "light_weaponry", bonus = 0, wind_up = 100, recovery = 100, strikes = [{ offset = 0, check = { actor = "user", skill = { kind = "natural_attack" }, against = { kind = "defense", defense = "physical" } }, on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "keen", amount = { kind = "rolled", dice = { count = 1, sides = 4, bonus = 2 } } }] } }], on_failure = [], descriptors = [], riders = [] }] }
 
 [creatures.species."rogue.venus_flytrap"]
 detection_appearance = { name = "venus flytrap", asset = "creature.plant.venus.flytrap" }
@@ -409,7 +409,7 @@ kind = "plant"
 attributes = { strength = 2, speed = 0, intellect = 0, willpower = 1, awareness = 1, presence = 0 }
 anatomy = { slots = [], capacities = {}, primary_attack_socket = { kind = "none" } }
 displacement = { size = "medium", anchored = false }
-modifiers = [{ scope = "always", op = { kind = "locomotion", value = { kind = "stationary", enabled = true } } }, { cancellable = true, scope = "always", op = { kind = "flag", flag = "grasping" } }, { scope = "always", op = { kind = "add", stat = { kind = "health" }, value = -7 } }, { scope = "always", op = { kind = "add", stat = { kind = "defense", defense = "physical" }, value = 6 } }]
+modifiers = [{ scope = "always", op = { kind = "locomotion", value = { kind = "stationary", enabled = true } } }, { cancellable = true, scope = "always", op = { kind = "flag", flag = "grasping" } }, { scope = "always", op = { kind = "add", stat = { kind = "health" }, value = -5 } }, { scope = "always", op = { kind = "add", stat = { kind = "defense", defense = "physical" }, value = 4 } }]
 melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 100, recovery = 100, strikes = [{ cancellable = true, offset = 0, check = { actor = "user", skill = { kind = "natural_attack" }, against = { kind = "defense", defense = "physical" } }, on_success = [{ kind = "hold_damage", category = "impact" }], on_failure = [], descriptors = [], riders = [] }] }
 
 [creatures.species."rogue.griffin"]
@@ -429,7 +429,7 @@ behavior = { disposition = "passive", idle = "explore", memory_ticks = 1000, doo
 kind = "fey"
 attributes = { strength = 0, speed = 3, intellect = 2, willpower = 1, awareness = 2, presence = 1 }
 displacement = { size = "small", anchored = false }
-modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "health" }, value = 1 } }, { scope = "always", op = { kind = "add", stat = { kind = "defense", defense = "physical" }, value = 1 } }, { scope = "always", op = { kind = "attribute_without_defense", attribute = "speed", defense = "physical", value = -4 } }]
+modifiers = [{ scope = "always", op = { kind = "attribute_without_defense", attribute = "speed", defense = "physical", value = -4 } }, { scope = "always", op = { kind = "add", stat = { kind = "health" }, value = 1 } }, { scope = "always", op = { kind = "add", stat = { kind = "defense", defense = "physical" }, value = 1 } }]
 [creatures.species."rogue.leprechaun".melee]
 skill = "light_weaponry"
 bonus = 0
@@ -450,7 +450,7 @@ behavior = { disposition = "passive", idle = "explore", memory_ticks = 1000, doo
 kind = "fey"
 attributes = { strength = 0, speed = 2, intellect = 2, willpower = 2, awareness = 1, presence = 2 }
 displacement = { size = "medium", anchored = false }
-modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "health" }, value = 1 } }, { scope = "always", op = { kind = "attribute_without_defense", attribute = "speed", defense = "physical", value = -2 } }]
+modifiers = [{ scope = "always", op = { kind = "attribute_without_defense", attribute = "speed", defense = "physical", value = -2 } }, { scope = "always", op = { kind = "add", stat = { kind = "health" }, value = 1 } }]
 [creatures.species."rogue.nymph".melee]
 skill = "light_weaponry"
 bonus = 0
@@ -471,7 +471,7 @@ behavior = { disposition = "passive", idle = "explore", memory_ticks = 1000, doo
 kind = "humanoid"
 attributes = { strength = 2, speed = 1, intellect = 1, willpower = 1, awareness = 1, presence = 0 }
 displacement = { size = "medium", anchored = false }
-modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "defense", defense = "physical" }, value = 3 } }, { scope = "always", op = { kind = "add", stat = { kind = "health" }, value = -9 } }]
+modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "health" }, value = -9 } }, { scope = "always", op = { kind = "add", stat = { kind = "defense", defense = "physical" }, value = 3 } }, { scope = "always", op = { kind = "attribute_without_defense", attribute = "strength", defense = "physical", value = -1 } }]
 [creatures.species."rogue.orc".melee]
 skill = "heavy_weaponry"
 bonus = 0
@@ -480,7 +480,7 @@ recovery = 100
 [[creatures.species."rogue.orc".melee.strikes]]
 offset = 0
 check = { actor = "user", skill = { kind = "natural_attack" }, against = { kind = "defense", defense = "physical" } }
-on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "impact", amount = { kind = "rolled", dice = { count = 1, sides = 8, bonus = 3 } } }] } }]
+on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "impact", amount = { kind = "rolled", dice = { count = 1, sides = 8, bonus = 2 } } }] } }]
 on_failure = []
 descriptors = []
 riders = []
@@ -535,7 +535,7 @@ subtypes = ["incorporeal"]
 attributes = { strength = 2, speed = 2, intellect = 0, willpower = 1, awareness = 1, presence = 0 }
 anatomy = { slots = [], capacities = {}, primary_attack_socket = { kind = "none" } }
 displacement = { size = "medium", anchored = false }
-modifiers = [{ cancellable = true, scope = "always", op = { kind = "perception", value = { kind = "invisible", enabled = true } } }, { scope = "always", op = { kind = "locomotion", value = { kind = "erratic", chance = { numerator = 1, denominator = 5 } } } }, { scope = "always", op = { kind = "add", stat = { kind = "health" }, value = -25 } }]
+modifiers = [{ cancellable = true, scope = "always", op = { kind = "perception", value = { kind = "invisible", enabled = true } } }, { scope = "always", op = { kind = "locomotion", value = { kind = "erratic", chance = { numerator = 1, denominator = 5 } } } }, { scope = "always", op = { kind = "add", stat = { kind = "health" }, value = -25 } }, { scope = "always", op = { kind = "add", stat = { kind = "defense", defense = "physical" }, value = 1 } }, { scope = "always", op = { kind = "attribute_without_defense", attribute = "strength", defense = "physical", value = 1 } }]
 [creatures.species."rogue.phantom".melee]
 skill = "heavy_weaponry"
 bonus = 0
@@ -544,7 +544,7 @@ recovery = 100
 [[creatures.species."rogue.phantom".melee.strikes]]
 offset = 0
 check = { actor = "user", skill = { kind = "natural_attack" }, against = { kind = "defense", defense = "physical" } }
-on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "keen", amount = { kind = "rolled", dice = { count = 4, sides = 4, bonus = 0 } } }] } }]
+on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "keen", amount = { kind = "rolled", dice = { count = 4, sides = 4, bonus = 1 } } }] } }]
 on_failure = []
 descriptors = []
 riders = []
@@ -557,7 +557,7 @@ subtypes = ["shapechanger"]
 attributes = { strength = 2, speed = 1, intellect = 0, willpower = 1, awareness = 1, presence = 0 }
 anatomy = { slots = [], capacities = {}, primary_attack_socket = { kind = "none" } }
 displacement = { size = "medium", anchored = false }
-modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "health" }, value = -5 } }]
+modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "health" }, value = -5 } }, { scope = "always", op = { kind = "attribute_without_defense", attribute = "strength", defense = "physical", value = 1 } }]
 [creatures.species."rogue.xeroc".melee]
 skill = "heavy_weaponry"
 bonus = 0

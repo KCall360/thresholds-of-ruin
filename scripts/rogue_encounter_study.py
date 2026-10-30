@@ -26,6 +26,19 @@ STUDY = "tor-rogue-encounter-study-1"
 # Ratio tolerance for "tuned": measured / target within [1/(1+t), 1+t].
 DEFAULT_TOLERANCE = 0.35
 ACTOR_ID = 3
+# Study-only arrangements so every species yields a measured fight. They edit
+# the study copy, never the scenario:
+# - P: Rogue's phantom is invisible; the adventurer wears see invisible, as a
+#   Rogue player facing one would, so it can be engaged at all.
+# - O, F, X: the orc usually dies to one hit, the flytrap fights from a hold and
+#   the xeroc stays disguised in about half its fights, so they get more seeds
+#   for a usable count of attacks.
+SEE_INVISIBLE = "rogue.ring_see_invisible"
+RING_SLOT = 7  # first ring socket of the default anatomy
+EXTRA_SEEDS = {"O": 4, "F": 4, "X": 4}
+# The orc dies before it swings and the revealed xeroc waits: these foes engage
+# first instead, so their own attacks are measured.
+FOE_ENGAGES = {"O": ("rogue.orc",), "X": ("rogue.human", "rogue.xeroc")}
 METRICS = ("player_hit", "foe_hit", "player_damage_per_action", "foe_damage_per_action",
            "player_actions_to_kill", "foe_actions_to_kill")
 
@@ -61,6 +74,10 @@ def encounter(manifest, actors, glyph, level, mirrored=False):
     if name not in actors:
         raise ValueError(f"No actor archetype for {glyph}: {name}")
     character = leveled_character(manifest, level)
+    if glyph == "P":
+        character["loadout"].append({"archetype": SEE_INVISIBLE, "quantity": 1,
+                                     "equipped_slot": RING_SLOT})
+        character["known_identities"].append(SEE_INVISIBLE)
     profiles = copy.deepcopy(manifest["ai_profiles"])
     profiles["study_rogue"] = {"idle": "explore", "doors": True, "care": True, "equipment": True,
                                "loot": True, "gold": False, "flee_percent": 0}
@@ -82,21 +99,27 @@ def encounter(manifest, actors, glyph, level, mirrored=False):
     return study, region
 
 
+def make_mean(text, species):
+    start = text.index(f'[creatures.species."{species}"]')
+    following = text.find("[creatures.species.", start + 1)
+    end = following if following >= 0 else len(text)
+    block = text[start:end].replace('disposition = "passive"', 'disposition = "mean"', 1)
+    return text[:start] + block + text[end:]
+
+
 def write_package(directory, study, region, compiler):
     if directory.exists():
         shutil.rmtree(directory)
     shutil.copytree(PACKAGE, directory, ignore=shutil.ignore_patterns("index.json", "validation.json"))
     (directory / "scenario.toml").write_text(toml_source(study), encoding="utf-8", newline="\n")
-    # Combat ratios, not acquisition, are measured: the adventurer engages first,
-    # so passive species still fight. This edits only the study copy.
+    # Combat ratios, not acquisition, are measured: one side engages first, so
+    # passive species still fight. This edits only the study copy.
     creatures = directory / "catalog/creatures.toml"
+    glyph = study["id"].split("-")[2].upper()
     text = creatures.read_text(encoding="utf-8")
-    human = text.index('[creatures.species."rogue.human"]')
-    passive = text.index('disposition = "passive"', human)
-    if passive > text.index("[creatures.species.", human + 1):
-        raise ValueError("Unexpected human species layout")
-    creatures.write_text(text[:passive] + 'disposition = "mean"'
-                         + text[passive + len('disposition = "passive"'):],
+    for species in FOE_ENGAGES.get(glyph, ("rogue.human",)):
+        text = make_mean(text, species)
+    creatures.write_text(text,
                          encoding="utf-8", newline="\n")
     (directory / "regions").mkdir()
     (directory / "regions/1.toml").write_text(toml_source(region), encoding="utf-8", newline="\n")
@@ -197,7 +220,9 @@ def study(output, compiler, arena, seeds, glyphs, tolerance=DEFAULT_TOLERANCE):
             directory = output / f"{glyph.lower()}-{'mirrored' if mirrored else 'forward'}"
             package, region = encounter(manifest, actors, glyph, target.player_level, mirrored)
             write_package(directory, package, region, compiler)
-            reports.extend(run(arena, directory, seed) for seed in seeds)
+            span = EXTRA_SEEDS.get(glyph, 1)
+            species_seeds = [seed * span + offset for seed in seeds for offset in range(span)]
+            reports.extend(run(arena, directory, seed) for seed in species_seeds)
         strikes = max(1, len(reference.model.MONSTERS[glyph][5]))
         completed = [report for report in reports if "termination" in report]
         measured = (measure(completed, manifest["characters"][0]["id"], ACTOR_ID, strikes)

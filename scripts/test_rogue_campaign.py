@@ -63,5 +63,40 @@ class CampaignProcess(unittest.TestCase):
         self.assertEqual(run["level_on_arrival"]["1"], 1)
 
 
+
+class ItemGeneration(unittest.TestCase):
+    def receipt(self, scope, decisions):
+        return {"scope": scope, "decisions": decisions}
+
+    def placed(self, content):
+        return {"kind": "placed", "content": content,
+                "entity": {"kind": "item", "id": 1, "quantity": 1}}
+
+    def test_counts_items_food_and_drought_per_floor(self):
+        receipts = [
+            self.receipt("dungeon/1", [
+                {"id": "rogue.items", "result": {"attempts": [self.placed("rogue.healing")]}},
+                {"id": "rogue.items_other", "result": {"attempts": [
+                    self.placed("rogue.ration"), {"kind": "skipped", "content": "rogue.fruit"}]}},
+                {"id": "rogue.food_drought", "result": {"attempts": []}},
+                {"id": "rogue.eight_species_foes", "result": {"attempts": [self.placed("rogue.emu")]}},
+            ]),
+            self.receipt("dungeon/2", [
+                {"id": "rogue.food_drought", "result": {"attempts": [self.placed("rogue.ration")]}},
+                {"id": "rogue.treasure_room", "result": {"selection": {"items": [
+                    self.placed("rogue.dart")]}}},
+            ]),
+        ]
+        generation = campaign.item_generation(receipts)
+        self.assertEqual(generation["floors"], 2)
+        self.assertEqual(generation["items_per_floor"], 2)
+        self.assertEqual(generation["food_per_floor"], 1)
+        self.assertEqual(generation["drought_floors"], 1)
+
+    def test_deep_start_uses_the_model_level(self):
+        self.assertEqual(campaign.deep_start_level(1), 1)
+        self.assertGreater(campaign.deep_start_level(10), campaign.deep_start_level(3))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -53,6 +53,23 @@ class EncounterPackages(unittest.TestCase):
         self.assertIsNone(rows["foe_hit"]["within"])
 
 
+class StudyArrangements(unittest.TestCase):
+    def test_make_mean_changes_only_the_named_species(self):
+        text = ('[creatures.species."rogue.orc"]\nbehavior = { disposition = "passive" }\n'
+                '[creatures.species."rogue.human"]\nbehavior = { disposition = "passive" }\n')
+        changed = study.make_mean(text, "rogue.orc")
+        self.assertIn('rogue.orc"]\nbehavior = { disposition = "mean" }', changed)
+        self.assertIn('rogue.human"]\nbehavior = { disposition = "passive" }', changed)
+
+    def test_phantom_study_wears_see_invisible(self):
+        manifest, actors = study.load_source()
+        package, _ = study.encounter(manifest, actors, "P", 11)
+        [character] = package["characters"]
+        self.assertIn({"archetype": study.SEE_INVISIBLE, "quantity": 1,
+                       "equipped_slot": study.RING_SLOT}, character["loadout"])
+        self.assertIn(study.SEE_INVISIBLE, character["known_identities"])
+
+
 class EncounterProcess(unittest.TestCase):
     def test_one_real_arena_encounter_is_measured(self):
         binaries = Path(os.environ.get("TOR_TEST_BINARIES", study.ROOT / "target/debug"))
@@ -64,6 +81,19 @@ class EncounterProcess(unittest.TestCase):
         self.assertEqual(row["encounters"], 2)
         self.assertGreater(row["counts"]["player_checks"], 0)
         self.assertIsNotNone(row["comparison"]["player_hit"]["measured"])
+
+    def test_flytrap_encounters_complete_with_measured_attacks(self):
+        # A hold can make the adventurer's admitted attack fail; the arena counts
+        # that as a lost turn instead of rejecting the whole encounter.
+        binaries = Path(os.environ.get("TOR_TEST_BINARIES", study.ROOT / "target/debug"))
+        suffix = ".exe" if (binaries / "tor-arena.exe").exists() else ""
+        with tempfile.TemporaryDirectory(dir=study.ROOT / "target") as output:
+            report = study.study(Path(output), binaries / ("tor-scenario" + suffix),
+                                 binaries / ("tor-arena" + suffix), [0], "F")
+        [row] = report["species"]
+        self.assertEqual(row["encounters"], 2 * study.EXTRA_SEEDS["F"])
+        self.assertFalse([outcome for outcome in row["outcomes"] if outcome.startswith("failure")])
+        self.assertGreater(row["counts"]["foe_checks"], 0)
 
 
 if __name__ == "__main__":

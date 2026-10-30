@@ -19,6 +19,9 @@ pub const FORMAT: &str = "tor-arena-run-v5";
 fn decimal<S: Serializer>(value: &u64, serializer: S) -> Result<S::Ok, S::Error> {
     serializer.collect_str(value)
 }
+/// Failed autonomous decisions in a row before an encounter ends as a stalemate.
+const MAX_CONSECUTIVE_FAILED_DECISIONS: u32 = 8;
+
 fn invalid(message: &str) -> Failure {
     Failure::new(ErrorCode::InvalidAction, message)
 }
@@ -264,6 +267,7 @@ pub fn run(scenario: Scenario) -> Result<ArenaEvaluation, Failure> {
         .map(|byte| format!("{byte:02x}"))
         .collect();
     let mut engine = Engine::memory(scenario)?;
+    let mut consecutive_failures = 0_u32;
     let mut participants = ids
         .into_iter()
         .map(|id| Ok((id, participant(&engine, id)?)))
@@ -282,8 +286,23 @@ pub fn run(scenario: Scenario) -> Result<ArenaEvaluation, Failure> {
         };
         engine.advance_ai(actor)?;
         let run = engine.game.arena_run().expect("validated arena runtime");
-        if run.actions != previous + 1 {
+        let failed = matches!(
+            engine.archive.records.last().map(|record| &record.entry.content),
+            Some(crate::journal::JournalContent::IntentionFailed { .. })
+        );
+        if run.actions == previous && failed {
+            // An admitted autonomous intention can fail at execution when an
+            // opponent's resolution intervenes, such as a hold that resolves
+            // first. The actor loses that turn; a long run of such failures
+            // ends the encounter as a stalemate instead of looping.
+            consecutive_failures += 1;
+            if consecutive_failures > MAX_CONSECUTIVE_FAILED_DECISIONS {
+                break;
+            }
+        } else if run.actions != previous + 1 {
             return Err(invalid("Arena decision did not commit exactly one action"));
+        } else {
+            consecutive_failures = 0;
         }
         for event in engine.game.combat_events() {
             match event {
