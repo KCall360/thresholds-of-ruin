@@ -566,5 +566,183 @@ class ScreenshotPixels(unittest.TestCase):
                 + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
         self.assertEqual(dark_fraction(data, (0, 0, 1, 1)), 0.5, "alpha is not brightness")
 
+class PortraitSilhouette(unittest.TestCase):
+    """Known pixel geometry, independent of camera/mesh bounds or the mask."""
+
+    BOUNDS = (0.1, 0.16, 0.9, 0.96)
+
+    @staticmethod
+    def picture(rectangles, *, channels=3, background=(6, 7, 8)):
+        import struct
+        import zlib
+
+        width, height = 400, 500
+        rows = [bytearray((*background, *([255] if channels == 4 else [])) * width)
+                for _ in range(height)]
+        for left, top, right, bottom, color in rectangles:
+            pixel = bytes((*color, *([255] if channels == 4 else [])))
+            for y in range(top, bottom):
+                rows[y][left * channels:right * channels] = pixel * (right - left)
+
+        def chunk(kind, payload):
+            return (struct.pack(">I", len(payload)) + kind + payload
+                    + struct.pack(">I", zlib.crc32(kind + payload)))
+
+        return (b"\x89PNG\r\n\x1a\n"
+                + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8,
+                                             2 if channels == 3 else 6, 0, 0, 0))
+                + chunk(b"IDAT", zlib.compress(b"".join(b"\0" + row for row in rows)))
+                + chunk(b"IEND", b""))
+
+    @staticmethod
+    def figure(bottom=400, lower=(28, 22, 23)):
+        # Head and torso are bright; both legs are visibly distinct from the
+        # clear background but need not be bright or chromatic. Extent 120..399
+        # is authored here, not derived from the production mask.
+        return [(170, 120, 230, 170, (80, 100, 120)),
+                (150, 170, 250, 280, (20, 90, 100)),
+                (165, 280, 190, bottom, lower),
+                (210, 280, 235, bottom, lower)]
+
+    def native_result(self, data, bounds=None):
+        from test_client_process import Native3DProcesses
+
+        with tempfile.TemporaryDirectory(dir=ROOT / ".local") as temporary:
+            path = Path(temporary) / "portrait.png"
+            path.write_bytes(data)
+            frame = {"png": str(path), "actors": [{"is_self": True, "target": "self"}],
+                     "portrait": {"target": "self", "texture_size": [320, 400],
+                                  "bounds": bounds or self.BOUNDS}}
+            case = unittest.FunctionTestCase(lambda: Native3DProcesses.assert_live_portrait(case, frame, frame))
+            result = unittest.TestResult()
+            case.run(result)
+            self.assertFalse(result.errors, result.errors)
+            return result
+
+    def test_native_scale_counts_dark_legs_not_just_colored_clothing(self):
+        result = self.native_result(self.picture(self.figure()))
+        self.assertFalse(result.failures, result.failures)
+
+    def test_known_extent_is_independent_of_clothing_color_and_alpha(self):
+        from render_pixels import portrait_pixels
+
+        for lower in ((28, 22, 23), (28, 28, 28), (70, 80, 100)):
+            for channels in (3, 4):
+                with self.subTest(lower=lower, channels=channels):
+                    colored, fraction = portrait_pixels(
+                        self.picture(self.figure(lower=lower), channels=channels), self.BOUNDS)
+                    self.assertGreater(colored, 1000)
+                    # Every-other-row sampling sees 120..398 within a 400px pane.
+                    self.assertAlmostEqual(fraction, 278 / 400)
+
+    def test_empty_uniform_and_disconnected_noise_do_not_form_a_character(self):
+        from render_pixels import portrait_pixels
+
+        noise = [(x, y, x + 4, y + 4, (80, 100, 120))
+                 for y in range(100, 450, 12) for x in range(60, 340, 12)]
+        # Both borders touch the sampling perimeter; the narrow caption and
+        # outer frame are entirely outside the reported image pane.
+        border = [(48, 90, 352, 96, (80, 100, 120)),
+                  (48, 464, 352, 470, (80, 100, 120)),
+                  (48, 90, 54, 470, (80, 100, 120)),
+                  (346, 90, 352, 470, (80, 100, 120))]
+        caption = [(10, 20, 390, 60, (80, 100, 120)),
+                   (10, 480, 390, 495, (80, 100, 120))]
+        for name, data in (
+                ("empty", self.picture([])),
+                ("uniform", self.picture([], background=(80, 100, 120))),
+                ("border", self.picture(border)),
+                ("caption", self.picture(caption)),
+                ("noise", self.picture(noise))):
+            with self.subTest(name=name):
+                colored, fraction = portrait_pixels(data, self.BOUNDS)
+                self.assertEqual(fraction, 0)
+                if name in ("uniform", "noise", "border"):
+                    self.assertGreater(colored, 1000, "not merely an empty-image rejection")
+                self.assertTrue(self.native_result(data).failures)
+
+    def test_disconnected_marks_cannot_enlarge_an_undersized_body(self):
+        from render_pixels import portrait_pixels
+
+        body = [(150, 190, 250, 310, (20, 90, 100))]
+        marks = [(180, 100, 220, 130, (80, 100, 120)),
+                 (180, 410, 220, 440, (28, 22, 23))]
+        colored, fraction = portrait_pixels(self.picture(body + marks), self.BOUNDS)
+        self.assertGreater(colored, 1000)
+        self.assertAlmostEqual(fraction, 118 / 400)
+        self.assertTrue(self.native_result(self.picture(body + marks)).failures)
+
+    def test_native_scale_keeps_the_strict_point_52_boundary(self):
+        from render_pixels import portrait_pixels
+
+        # These bounds yield exactly 400 in the native floating denominator.
+        # Known sampled endpoints are 120..326/328/330, not inferred by the mask.
+        bounds = (0.1, 0.125, 0.9, 0.925)
+        for bottom, expected, accepted in ((327, 0.515, False), (329, 0.52, False),
+                                           (331, 0.525, True)):
+            with self.subTest(bottom=bottom):
+                data = self.picture(self.figure(bottom=bottom))
+                colored, fraction = portrait_pixels(data, bounds)
+                self.assertGreater(colored, 1000)
+                self.assertEqual(fraction, expected)
+                self.assertEqual(not self.native_result(data, bounds).failures, accepted)
+
+    def test_translated_pane_excludes_other_ui_and_keeps_the_same_figure(self):
+        from render_pixels import portrait_pixels
+
+        translated = [(left + 20, top - 10, right + 20, bottom - 10, color)
+                      for left, top, right, bottom, color in self.figure()]
+        translated += [(0, 0, 400, 50, (80, 100, 120))]
+        colored, fraction = portrait_pixels(self.picture(translated), (0.15, 0.14, 0.95, 0.94))
+        self.assertGreater(colored, 1000)
+        self.assertAlmostEqual(fraction, 278 / 400)
+
+    def test_invalid_or_empty_insets_are_rejected(self):
+        from render_pixels import portrait_pixels
+
+        data = self.picture([])
+        for bounds in ((-0.1, 0, 1, 1), (0, 0, 1.1, 1), (0.5, 0, 0.5, 1),
+                       (0, 0, 0.01, 0.01), (0, float("nan"), 1, 1)):
+            with self.subTest(bounds=bounds), self.assertRaises(ValueError):
+                portrait_pixels(data, bounds)
+
+    def test_background_and_foreground_contrast_cutoffs_are_explicit(self):
+        from render_pixels import portrait_pixels
+
+        for background, expected in (((20, 20, 20), 278 / 400), ((21, 21, 21), 0)):
+            with self.subTest(background=background):
+                _, fraction = portrait_pixels(
+                    self.picture(self.figure(lower=(40, 40, 40)), background=background), self.BOUNDS)
+                self.assertAlmostEqual(fraction, expected)
+        # The default background is (6,7,8): exact 12-channel contrast is not
+        # foreground; 13 is. The colored upper body is unchanged in both cases.
+        for lower, expected in (((18, 19, 20), 158 / 400), ((19, 20, 21), 278 / 400)):
+            with self.subTest(lower=lower):
+                _, fraction = portrait_pixels(self.picture(self.figure(lower=lower)), self.BOUNDS)
+                self.assertAlmostEqual(fraction, expected)
+
+    def test_component_seed_cutoff_and_multiple_bodies_cannot_union(self):
+        from render_pixels import portrait_pixels
+
+        gray = [(left, top, right, bottom, (28, 28, 28))
+                for left, top, right, bottom, _ in self.figure()]
+        # 50 columns × 20 rows on the two-pixel sampling grid, then one sample.
+        patch = [(150, 170, 250, 210, (20, 90, 100))]
+        extra = [(150, 210, 151, 211, (20, 90, 100))]
+        for added, expected_count, expected_span in (([], 1000, 0), (extra, 1001, 278 / 400)):
+            with self.subTest(seeds=expected_count):
+                count, span = portrait_pixels(self.picture(gray + patch + added), self.BOUNDS)
+                self.assertEqual(count, expected_count)
+                self.assertAlmostEqual(span, expected_span)
+        # Both components independently exceed 1000 seeds, but neither meets
+        # scale. Counting their combined top-to-bottom range would falsely pass.
+        separate = [(150, 120, 250, 230, (20, 90, 100)),
+                    (150, 320, 250, 430, (20, 90, 100))]
+        count, span = portrait_pixels(self.picture(separate), self.BOUNDS)
+        self.assertGreater(count, 2000)
+        self.assertAlmostEqual(span, 108 / 400)
+        self.assertTrue(self.native_result(self.picture(separate)).failures)
+
+
 if __name__ == "__main__":
     unittest.main()
