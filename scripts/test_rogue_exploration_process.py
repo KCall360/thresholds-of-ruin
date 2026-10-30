@@ -37,9 +37,13 @@ class RogueBundledPolicy(unittest.TestCase):
         geometry = tomllib.loads((ROOT / "scenarios/tests/rogue-geometry/scenario.toml").read_text(encoding="utf-8"))
         self.assertEqual(geometry["procedural_worlds"], actual["procedural_worlds"])
         # This fixture owns feature-free geometry traversal, not concealed
-        # entrances or pressure traps. Keep the unchanged geometry/lighting
-        # recipe without silently adding gameplay obstacles to that workload.
-        features = ("secret_entrances", "hidden_traps")
+        # entrances, pressure traps, omitted rooms or mazes. Pin the live layout
+        # additions before removing them from the unchanged geometry/lighting
+        # workload comparison; do not silently adopt future policy changes.
+        live_recipe = actual["generation_recipes"]["exploration"]
+        self.assertEqual(live_recipe["room_omissions"], {"count": [0, 1]})
+        self.assertEqual(live_recipe["maze_rooms"], {"one_in": 15})
+        features = ("secret_entrances", "hidden_traps", "room_omissions", "maze_rooms")
         self.assertEqual(geometry["generation_recipes"], {
             name: {key: value for key, value in recipe.items() if key not in features}
             for name, recipe in actual["generation_recipes"].items()

@@ -1773,3 +1773,41 @@ four deep-fixture compiles and unfinished technique methods were deferred to
 required hosted profiles rather than repeating predictable compilation limits
 or starting an optimized-build campaign. No timeout or assertion was relaxed;
 these deferrals are not passes or graphical waivers.
+
+### PR #206 hosted fixture and driver corrections (2026-10-30)
+
+The [first hosted run](https://github.com/KCall360/thresholds-of-ruin/actions/runs/40975162876)
+for [PR #206](https://github.com/KCall360/thresholds-of-ruin/pull/206) exposed
+**five distinct failing methods**, not five production defects. This window has
+four fixture/driver root groups: supplemental-stage count, omitted/maze layout
+migration (shared by two methods), mixed-room band shape, and walkthrough endpoint
+synchronization. The first three are stale/unupdated fixtures; the last is a stale
+driver assumption with harness overlap. Debug/release repeats are additional
+executions of the same methods and causes, not new roots. No complete failed-
+execution total is inferred from selected logs. The walkthrough also overlaps an
+earlier local setup-timeout method above; it is not a new method in a cumulative
+union of those windows.
+
+| Distinct failing method | Established cause and scoped correction |
+| --- | --- |
+| `scenario_package::tests::rogue_magic_catalog_uses_explicit_capabilities_and_appends_finite_stock` | The legacy loop expected every appended stage to have one item attempt. Keep exact legacy-stage checks and independently assert the supplemental 0–1 range, all 17 equal-weight choices, and the mixed treasure policy. |
+| `scenario_package::tests::bundled_rogue_uses_compact_open_family_and_preserves_room_recipe` | The live recipe now lowers to version 5 with omission/maze stages, not the discovery-only version 3. Pin the live stage order and operands; a validated control removes only those two stages for the retained historical geometry/discovery comparison. Live geometry is separately allowed and witnessed to differ. |
+| `test_rogue_roster_package.RogueRosterPackageTests.test_production_retrieval_uses_one_selected_player_bound_ordinary_amulet` | A universal `stage['bands']` lookup failed on `room_cluster`. Dispatch explicitly to required ordinary `bands` or both `item_bands` and `actor_bands`; preserve Amulet exclusion from all stages, starting loadouts and carried pools, without silently skipping missing fields or unknown stage kinds. |
+| `test_rogue_exploration_process.RogueBundledPolicy.test_geometry_fixture_preserves_the_population_free_workload_explicitly` | The same layout migration invalidated a source-recipe comparison that removed only discovery operands. Independently pin omission count `[0, 1]` and maze `one_in = 15` before removing those fields; retain the exact baseline, absent-feature, population-free and character assertions. |
+| `test_rogue_playable_process.RoguePlayableProcesses.test_ordinary_first_floor_foes_earn_second_hd_and_ground_supplies_are_finite` | The driver assumed the returning PC's action was the durable history endpoint. A legitimate hidden bat `MoveWest` completed in the same tick after the PC's `MoveUp`, so the private endpoint correctly differed from the last public entry. The correction uses one unconditional ordinary paid Wait on the verified-cleared returned floor before the unchanged strict visible-endpoint seal; stock, XP, location and entry-receipt guards remain. |
+
+The two exact Rust regressions passed after input-stable preflight and linking.
+Both Python failures were reproduced locally before correction, then all eleven
+methods in their two pure owners passed. All 24 pure movement/transport checks
+also passed, including positive one-Wait behavior and rejection of unsafe input,
+unpaid or moved results, and changed stock. These are scoped local results, not a
+new full-suite or final-head hosted pass. No production behavior, timeout,
+visibility rule or strict endpoint assertion is changed by these corrections.
+
+Hosted execution also passed the previously local-capped Mage source-deletion
+and ordinary-death reopen cases, plus actual treasure, all-17-item, technique and
+deep-fixture cases. Those outcomes resolve the earlier hosted deferrals, not the
+recorded local failures. The corrected walkthrough still requires a hosted
+actual-process rerun: local dev-opt0 fixture compilation hits the unchanged
+30-second cap before gameplay. No corrected walkthrough pass is claimed, and its
+remaining qualification is not replaced by the pure-driver or Rust results.
