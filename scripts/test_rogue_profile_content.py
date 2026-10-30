@@ -94,8 +94,8 @@ class RogueProfileContent(unittest.TestCase):
     def test_only_listed_sources_differ_from_the_starter_package(self):
         for name in ["catalog/actors.toml", "catalog/bodies.toml", "catalog/items.toml"]:
             self.assertEqual((PACKAGE / name).read_bytes(), (STARTER / name).read_bytes(), name)
-        # Species differ only in tuned values: Health and defense modifiers,
-        # melee accuracy and damage-dice bonuses (rogue_species_tuning.py).
+        # Species differ only in tuned values: Health, defense and accuracy
+        # modifiers, the melee bonus and damage amounts.
         def untuned(path):
             species = load(path / "catalog/creatures.toml")["creatures"]["species"]
             for row in species.values():
@@ -108,8 +108,8 @@ class RogueProfileContent(unittest.TestCase):
                 for strike in row.get("melee", {}).get("strikes", []):
                     for effect in strike.get("on_success", []):
                         for component in effect.get("damage", {}).get("components", []):
-                            if component["amount"].get("kind") == "rolled":
-                                component["amount"]["dice"]["bonus"] = 0
+                            # Damage amounts are tuned values (die size and bonus).
+                            component["amount"] = "tuned"
             return species
         self.assertEqual(untuned(PACKAGE), untuned(STARTER))
         starter = load(STARTER / "rules.toml")

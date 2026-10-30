@@ -410,15 +410,16 @@ op = "set"
 path = ["health_recovery"]
 value = { base_period = 2300, reduction_per_hd = 200, minimum_period = 150 }
 
-# Rogue's early levels come quickly. The seeded campaign earned about 515 XP by
-# depth 4; this threshold reaches level 5 there, where the reference model
-# expects 4 to 5. Deeper pacing awaits longer campaigns.
+# A flat 85 XP per Hit Die keeps the locked build within one level of the Rogue
+# reference model at every depth 1-26 (scripts/rogue_pacing_model.py): kill
+# rewards shrink as foes fall below the adventurer's HD, which plays the part of
+# Rogue's doubling thresholds. Early campaigns confirm depths 2-5.
 [[overrides]]
 op = "set"
 path = ["growth", "threshold_base"]
-value = 60
+value = 85
 
 [[overrides]]
 op = "set"
 path = ["growth", "threshold_per_tier"]
-value = 40
+value = 0

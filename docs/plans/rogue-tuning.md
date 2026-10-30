@@ -181,9 +181,12 @@ row, instead of rejecting the encounter.
 The baseline had 72 of 130 judged ratios in band. TOR foes had far more Health
 than Rogue's (a full first die), dealt little damage through ring mail, and were
 easier to hit at shallow depths. After eleven passes, 114 of 116 judged ratios
-are in band, with all 26 species measured. The two misses are the emu, whose
-1d2 bite sits on either side of the band through ring mail's damage reduction,
-and the leprechaun, whose 1d1 bite armor absorbs entirely (its threat is theft).
+are in band, with all 26 species measured. The emu's 1d2 and the leprechaun's
+fixed 1 damage were absorbed by ring mail's reduction; as tuned values, their
+dice become 1d3+2 and 1d3+1, which deliver Rogue's expected damage through the
+armor. With those, all 116 judged ratios are within the ratified ±35%. The
+final study over seeds 0–15 judged 117 ratios, all within ±35%, with at least
+20 measured attacks for every species.
 
 Open engine defect: a held adventurer's AI basic-melee plan against an adjacent
 flytrap fails execution with `InvalidPlan` when the flytrap's Clutch resolves
@@ -203,8 +206,9 @@ triggered and food found are listed as unavailable from ordinary disclosures.
 drives the locked adventurer with the earned-route policy through the headless
 client, settling paused work with disclosed permission. There are no purchase
 decisions. The campaign aggregates death depths, mean level on arrival and the
-hungry share. It is a fixed policy, not a model of human play: it does not use
-potions, scrolls or wands, so its deaths overstate Rogue's danger.
+hungry share. It is a fixed policy, not a model of human play: apart from
+drinking a known healing potion at low Health it uses no potions, scrolls or
+wands, and it eats only rations, so its deaths overstate Rogue's danger.
 
 Searching when the known route is exhausted (stairs behind secret doors) and
 waiting out refused steps let runs from depth 1 reach depths 3 to 5. Deep starts
@@ -222,7 +226,7 @@ that actually landed. Over the measured floors it found about 4.1 items and 0.7
 food per floor; the model expects about 3.6 items (3.24 ordinary, plus treasure
 rooms and the drought guarantee) and 0.6 food, within the noise of so few floors.
 
-**Targets.** Proposed, awaiting the maintainer's ratification: level on arrival
+**Targets.** Ratified by the maintainer on 29 October 2026: level on arrival
 within ±1 of the model at depths 1–10 and ±2 at 11–26; food found against spent
 within ×1.5 of the model per five-floor band; starvation at most 10% of deaths;
 at least 75% of runs reach depth 4; every species with at least 20 measured
@@ -265,12 +269,21 @@ rate of 19 and 7. Regeneration's nutrition cost is zero, as in Rogue.
 
 ## Progression pacing
 
-The locked build earns about 515 XP by depth 4 in seeded campaigns, reaching
-level 3 with the shared thresholds while the model expects level 4 to 5. The
-Rogue rules set the threshold to 60 + 40 per tier (from 100 + 100), which reaches
-level 5 at that XP. This is an early-floor fit; deeper pacing needs campaigns
-that survive past the first floors, which the fixed controller rarely does
-without using potions and scrolls.
+Deep floors are too slow and dangerous for the fixed bot to measure pacing, so
+[`rogue_pacing_model.py`](../../scripts/rogue_pacing_model.py) predicts it from
+the tuned values: each foe's threat tier from its authored Hit Dice, ranks,
+talents and sources, TOR's kill reward and threshold rules, and kills per floor
+from the four initial attempts, Rogue's wanderer rate and treasure rooms. Like
+the reference model, it assumes every monster is killed.
+
+With the shared thresholds (100 + 100 per Hit Die) or the first early fit
+(60 + 40), the adventurer falls behind deep: level 10 at depth 26 where Rogue's
+model expects 14. Kill rewards shrink as foes fall below the adventurer's Hit
+Dice, which already plays the part of Rogue's doubling thresholds, so the Rogue
+rules use a flat 85 XP per Hit Die. That keeps every depth from 1 to 26 within
+one level of the model (mean error 0.42 levels), slightly ahead at depths 2–5.
+Seeded campaigns confirm the early floors; deeper confirmation through play
+needs a bot that kills more efficiently.
 
 ## Milestones
 
@@ -278,10 +291,10 @@ without using potions and scrolls.
 | --- | --- | --- |
 | 1 | Implemented: capability switches, growth schedules and the `scenarios/rogue` package | Protocol 65, save 64, scenario 36 |
 | 2 | Implemented: reference model, targets, encounter study, run summary and campaign harness | No |
-| 3 | Implemented: value tuning of all 26 species, eleven passes, 114 of 116 ratios in band | No |
+| 3 | Implemented: value tuning of all 26 species; all 117 judged ratios within ±35% | No |
 | 4 | Implemented: Rogue item table, grouped missiles and the drought guarantee | Within the unreleased 64/36 bump |
 | 5 | Implemented: treasure rooms; wandering and initial counts already match | No |
-| 6 | Implemented first fit: recovery, regeneration cost and early XP thresholds; deep pacing and tolerance ratification open | No |
+| 6 | Implemented: recovery, regeneration cost and XP thresholds fitted at every depth by the pacing model; tolerances ratified | No |
 
 Package edits regenerate certificates and run
 `python scripts/test_scenario_references.py`. Each milestone updates the
@@ -297,3 +310,35 @@ Package edits regenerate certificates and run
 - The Rogue profile leaves no non-Rogue mechanic enabled, and each disabled
   mechanic still works in a scenario that enables it.
 - Engine adaptations are recorded as deliberate differences, not tuned away.
+
+### Acceptance results (29 October 2026)
+
+[`rogue_acceptance.py`](../../scripts/rogue_acceptance.py) checks the ratified
+tolerances against an eight-seed campaign from depth 1 (seeds 0–7, 1,500
+commands per floor, 6,000 per run) and the final encounter study.
+
+| Tolerance | Result | Evidence |
+| --- | --- | --- |
+| Level on arrival, pacing model | Pass | Depths 1–26 within one level |
+| Level on arrival, campaign | Pass | Mean 1, 3.4, 4.7 and 5 at depths 1–4 against 1, 3, 4 and 5 |
+| Encounter ratios | Pass | 26 species, 117 judged ratios, all within ±35% |
+| Food found against spent | Fail | 0.55 of the model's ratio over depths 1–5; ×1.5 allows 0.67 |
+| Starvation share | Fail | One death in eight runs, a starvation on depth 4 |
+| Runs reaching depth 4 | Fail | 2 of 8 |
+
+The three failures come mostly from the campaign bot, not the tuned values:
+
+- Six runs ended on the per-floor command limit (one on route exhaustion),
+  not by death. Three of those never started a search sweep, so the bot spent
+  the floor on something other than finding hidden stairs.
+- The bot spent about 1,150 Rogue turns per floor where the model assumes 900,
+  which alone lowers the food ratio by about a fifth. Floors yielded 0.39 food
+  each against the model's 0.56, within chance for 28 floors.
+- The starved run found no food on four floors; Rogue's guarantee applies from
+  the fifth. At the bot's pace, four foodless floors outlast the starting food
+  as they would in Rogue at a slow pace.
+
+Diagnostic reruns of one stalled seed with per-floor phase counts hit a
+headless-client reply deadline twice, so the cause of the stalls is not yet
+known. Run-shape acceptance needs that diagnosis, a bot that finds stairs
+within the floor budget, and more seeds; the tuned values are unchanged.

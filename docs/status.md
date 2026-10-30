@@ -837,9 +837,12 @@ starter `rogue-exploration` package is unchanged. Later milestones add a Rogue
 reference model and per-species targets, an arena encounter study, seeded
 real-process campaigns, `chance_items` and `food_drought` population stages,
 per-choice quantities, Rogue's item table and treasure rooms, and value tuning
-of all 26 species (114 of 116 judged encounter ratios within ±35%). Recovery,
-regeneration cost and early XP thresholds have a first fit; deep pacing and
-ratified run-shape tolerances remain open.
+of all 26 species (all 117 judged encounter ratios within ±35%). Recovery
+and regeneration cost follow Rogue's rates, and XP thresholds keep the locked
+build within one level of Rogue's model at every depth by a pacing model.
+Against the ratified tolerances, levels and encounters pass; the eight-seed
+campaign fails food, starvation and depth-4 share, mainly because the bot
+stalls on floors, so run-shape acceptance remains open.
 Rogue species are built through the [progression plan](plans/progression.md)'s
 advancement ledger, edge rules, regeneration and strike sequences; each of its
 phases still needs separate approval.

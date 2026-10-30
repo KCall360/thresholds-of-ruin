@@ -16,7 +16,7 @@ kind = "animal"
 attributes = { strength = 1, speed = 1, intellect = 0, willpower = 0, awareness = 1, presence = 0 }
 anatomy = { slots = [], capacities = {}, primary_attack_socket = { kind = "none" } }
 displacement = { size = "medium", anchored = false }
-melee = { skill = "light_weaponry", bonus = 0, wind_up = 100, recovery = 100, strikes = [{ offset = 0, check = { actor = "user", skill = { kind = "selected_weapon" }, against = { kind = "defense", defense = "physical" } }, on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "impact", amount = { kind = "rolled", dice = { count = 1, sides = 2, bonus = 3 } } }] } }], on_failure = [], descriptors = [], riders = [] }] }
+melee = { skill = "light_weaponry", bonus = 0, wind_up = 100, recovery = 100, strikes = [{ offset = 0, check = { actor = "user", skill = { kind = "selected_weapon" }, against = { kind = "defense", defense = "physical" } }, on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "impact", amount = { kind = "rolled", dice = { count = 1, sides = 3, bonus = 2 } } }] } }], on_failure = [], descriptors = [], riders = [] }] }
 modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "health" }, value = -4 } }, { scope = "always", op = { kind = "add", stat = { kind = "defense", defense = "physical" }, value = 4 } }]
 
 [creatures.species."rogue.snake"]
@@ -438,7 +438,7 @@ recovery = 100
 [[creatures.species."rogue.leprechaun".melee.strikes]]
 offset = 0
 check = { actor = "user", skill = { kind = "natural_attack" }, against = { kind = "defense", defense = "physical" } }
-on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "impact", amount = { kind = "fixed", amount = 1 } }] } }]
+on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "impact", amount = { kind = "rolled", dice = { count = 1, sides = 3, bonus = 1 } } }] } }]
 on_failure = []
 descriptors = []
 riders = []

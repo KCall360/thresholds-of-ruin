@@ -87,6 +87,7 @@ def item_generation(receipts):
             "drought_floors": sum(row["drought"] for row in floors.values())}
 MAX_PATIENT_WAITS = 20
 MAX_REFUSED_STEPS = 5
+RESPONSE_SECONDS = 90
 
 
 def observation(frame):
@@ -125,6 +126,10 @@ def summarize(controller, samples, outcome, *, seed, wall_seconds):
         "samples_by_hunger": dict(hunger),
         "hungry_share": sum(hunger[band] for band in HUNGER_BANDS) / len(samples),
         "meals_eaten": sum(1 for sample in samples if sample["phase"] == "eat"),
+        # Where each floor's commands went, to tell a stalled bot from a slow floor.
+        "phases_per_floor": {str(depth): dict(Counter(sample["phase"] for sample in samples
+                                                      if sample.get("depth") == depth))
+                             for depth in ordered},
         "rest_episodes": controller.rest_episodes,
         "final_level": u64(final["hit_dice"]) - 1,
         "final_health": [final["hp"], final["max_hp"]],
@@ -138,9 +143,23 @@ class CampaignRun(ProcessTestCase):
     """One seeded descent. Constructed by run_seed; never collected as a test."""
     seed = 0
     start_depth = 1
+    save_root = None
     floor_limit = 2500
     run_limit = 65000
     result = None
+
+    def setUp(self):
+        super().setUp()
+        # Long runs journal many entries; a save on a fast volume keeps the
+        # server's replies within the harness deadline (see --save-root).
+        if self.save_root is not None:
+            directory = Path(self.save_root) / Path(self.directory).name
+            directory.mkdir(parents=True, exist_ok=True)
+            self.save = directory / "game.db"
+
+    def frame(self, client, predicate, seconds=15):
+        # Long saved histories make some replies slower than the test default.
+        return super().frame(client, predicate, max(seconds, RESPONSE_SECONDS))
 
     def advancement(self, player):
         frame = self.command(player, {"type": "advancement", "command": "overview"})
@@ -217,6 +236,7 @@ class CampaignRun(ProcessTestCase):
             combat = observation(frame)["combat"]
             decision = controller.choose(state)
             samples.append({"tick": state["observation"]["tick"], "phase": decision.phase,
+                            "depth": controller.depth,
                             "hp": u64(combat["hp"]), "max_hp": u64(combat["max_hp"]),
                             "hit_dice": combat["own_stats"]["hit_dice"]["total"],
                             "earned_xp": controller._advancement["growth"]["earned_xp"],
@@ -313,10 +333,10 @@ def deep_start_level(depth):
     return row.level_on_arrival
 
 
-def run_seed(seed, floor_limit, run_limit, start_depth=1):
+def run_seed(seed, floor_limit, run_limit, start_depth=1, save_root=None):
     case = type("SeededCampaignRun", (CampaignRun,), {
         "seed": seed, "floor_limit": floor_limit, "run_limit": run_limit,
-        "start_depth": start_depth})("runTest")
+        "start_depth": start_depth, "save_root": save_root})("runTest")
     CampaignRun.result = None
     if not hasattr(CampaignRun, "bin"):
         CampaignRun.setUpClass()  # unittest only does this for collected suites
@@ -373,11 +393,13 @@ def main(argv=None):
     parser.add_argument("--run-limit", default=65000, type=int)
     parser.add_argument("--start-depth", default=1, type=int,
                         help="Start on this floor with the model's expected level")
+    parser.add_argument("--save-root", type=Path,
+                        help="Directory for saves, such as a fast local volume")
     args = parser.parse_args(argv)
     args.output.mkdir(parents=True, exist_ok=True)
     runs = []
     for seed in args.seeds:
-        run = run_seed(seed, args.floor_limit, args.run_limit, args.start_depth)
+        run = run_seed(seed, args.floor_limit, args.run_limit, args.start_depth, args.save_root)
         run["start_depth"] = args.start_depth
         (args.output / f"run-{seed}.json").write_text(json.dumps(run, indent=2), encoding="utf-8")
         print(seed, run["outcome"], run.get("deepest_depth"), run.get("final_level"), flush=True)

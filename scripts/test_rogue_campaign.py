@@ -16,14 +16,14 @@ def fake_controller():
         floor_commands={1: 40, 2: 10}, commands=50, rest_episodes=2)
 
 
-def sample(tick, phase="explore", hunger="nourished", hit_dice=3):
-    return {"tick": str(tick), "phase": phase, "hp": 10, "max_hp": 20,
+def sample(tick, phase="explore", hunger="nourished", hit_dice=3, depth=1):
+    return {"tick": str(tick), "phase": phase, "depth": depth, "hp": 10, "max_hp": 20,
             "hit_dice": str(hit_dice), "earned_xp": "150", "hunger": hunger}
 
 
 class RunSummaries(unittest.TestCase):
     def test_summary_reports_levels_floors_hunger_and_unavailable_fields(self):
-        samples = [sample(0, hit_dice=2), sample(4500, "eat", "hungry"), sample(7000)]
+        samples = [sample(0, hit_dice=2), sample(4500, "eat", "hungry"), sample(7000, depth=2)]
         run = campaign.summarize(fake_controller(), samples, "death", seed=3, wall_seconds=1.0)
         self.assertEqual(run["summary"], campaign.SUMMARY)
         self.assertEqual((run["deepest_depth"], run["death_depth"]), (2, 2))
@@ -32,6 +32,7 @@ class RunSummaries(unittest.TestCase):
         self.assertEqual(run["ticks_per_floor"], {"1": 5000, "2": 2000})
         self.assertAlmostEqual(run["hungry_share"], 1 / 3)
         self.assertEqual(run["meals_eaten"], 1)
+        self.assertEqual(run["phases_per_floor"], {"1": {"explore": 1, "eat": 1}, "2": {"explore": 1}})
         self.assertEqual(run["final_level"], 2)
         self.assertIn("wanderer_arrivals", run["unavailable"])
 
