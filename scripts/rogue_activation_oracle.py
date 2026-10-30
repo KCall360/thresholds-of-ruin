@@ -219,3 +219,26 @@ def reviewed_twenty_six_activation():
         "initial_delay": [6700, 7300], "retry_ticks": 400,
         "chance": {"numerator": 1, "denominator": 6}, "living_cap": 8}
     return activation
+
+
+def reviewed_live_activation():
+    """Append the approved live content; retain all historical source oracles."""
+    activation = reviewed_twenty_six_activation()
+    stages = activation["profiles"]["rogue.low_depth"]["stages"]
+    stages.append({"id": "rogue.expanded_stock", "version": 1, "kind": "items",
+        "count": [0, 1], "quantity": 1,
+        "bands": [{"depth": {"kind": "open", "minimum": 1}, "choices": [
+            {"archetype": "rogue." + name, "weight": 1} for name in (
+                "haste", "gain_strength", "raise_level", "hallucination", "monster_detection",
+                "magic_detection", "food_detection", "magic_mapping", "wand_nothing", "wand_light",
+                "wand_drain_life", "wand_cancellation", "wand_magic_missile", "wand_polymorph",
+                "fruit", "dart", "shuriken")]}]})
+    stages.append({"id": "rogue.treasure_room", "version": 1, "kind": "room_cluster",
+        "chance": {"numerator": 1, "denominator": 20}, "item_count": [2, 4], "actor_count": [1, 3],
+        "quantity": 1, "actor_depth_offset": 1, "ai": "rogue_hostile",
+        "depth_growth": {"kind": "racial_after", "depth": 26}, "avoid_protagonist_sight": False,
+        "item_bands": [{"depth": {"kind": "open", "minimum": 1}, "choices": [
+            {"archetype": "rogue." + name, "weight": 1}
+            for name in ("gold", "healing", "fruit", "dart", "shuriken")]}],
+        "actor_bands": copy.deepcopy(stages[0]["bands"])})
+    return activation

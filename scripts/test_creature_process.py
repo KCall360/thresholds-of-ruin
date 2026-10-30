@@ -755,17 +755,23 @@ class NativeCreatureAbilityProcesses(ProcessTestCase):
         self.assertDisclosedStateEqual(observed["state"], initial["state"])
         native = self.native_keys(window)
         def press(name, reported):
+            if name == "Z":
+                native("Shift_L", True)
+                try:
+                    return self.native_press(window, native, "z", reported)
+                finally:
+                    native("Shift_L", False)
             return self.native_press(window, native, name, reported)
         def title_pixels():
             pixels = read_capture(capture).split(b"\n", 3)[3]
             return b"".join(pixels[(y * 1200 + 72) * 3:(y * 1200 + 420) * 3]
                             for y in range(96, 112))
         normal_title = title_pixels()
-        native("Shift_L", True)
+        native("Control_L", True)
         try:
-            stats = press("2", "stats")
+            stats = press("x", "stats")
         finally:
-            native("Shift_L", False)
+            native("Control_L", False)
         self.assertIn("Strength 2", "\n".join(stats["stats_rows"]))
         self.assertIn("Health recovery: 1 per 1160 active ticks", "\n".join(stats["stats_rows"]))
         self.assertTrue(stats["window_open"])
@@ -774,7 +780,7 @@ class NativeCreatureAbilityProcesses(ProcessTestCase):
         self.assertIn(bytes((103, 216, 189)), [title[n:n + 3] for n in range(0, len(title), 3)])
         self.assertEqual(stats["state"], initial["state"])
         press("Escape", "escape")
-        menu = press("z", "abilities")
+        menu = press("Z", "abilities")
         self.assertEqual(content_ids(menu["ability_choices"]), ["fixture_mana_bolt"])
         self.assertEqual(menu["state"], initial["state"])
         selected = press("Return", "enter")

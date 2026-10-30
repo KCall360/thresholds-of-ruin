@@ -21,8 +21,8 @@ the noun) transfers the entire selected stack. Numeric quantities must be positi
 and fit an unsigned 64-bit integer. Ambiguous names require selection; a requested
 quantity stays attached through adventure clarification and walking to an item.
 
-ASCII uses G for pickup and D for drop; stairs use `<` and `>`. A single one-unit
-item transfers immediately. Otherwise Up/Down selects a stack, typed digits set
+ASCII uses `,` for pickup and `d` for drop; stairs use `<` and `>`. A single
+reachable stack is picked up immediately. Otherwise Up/Down selects a stack, typed digits set
 the quantity, Backspace edits it, Enter confirms, and Escape cancels. Blank means
 the entire stack. Inventory and ground lists show counts. Inspection is free.
 
@@ -91,14 +91,16 @@ behavior. No percentage breakage rule is implied.
 
 ### Ordinary fruit
 
-The opt-in `rogue.fruit` is ordinary named Food with a generic food appearance,
+The `rogue.fruit` item is ordinary named Food with a generic food appearance,
 not a ration reskin or a special consumable effect. It is stackable, has exactly
 the ration's 1d400+1099 nutrition, and uses the same paid one-unit Eat, reserve cap,
 debt settlement and food detection. Its `ration` supply tag deliberately means
 interchangeable food supply, not literal identity: fruit never merges with a
 ration stack. The authored `name` supplies its label through ordinary validation.
-There is no mutable global fruit preference, extra effect, taste XP, food-pool
-weight change or starter addition.
+There is no mutable global fruit preference, extra effect, taste XP or starter
+addition. Fruit can appear in supplemental floor stock and treasure rooms under
+the [provisional live policy](scenario-packages.md#live-rogue-content-policy);
+the existing ration stage and carried-supply pools are unchanged.
 
 ## Timed equipment and effects
 
@@ -107,8 +109,10 @@ The server accepts `equip` (carried item plus anatomy slot index), `unequip`
 admission. Targets are opaque observer-scoped inventory references. Text accepts
 `equip`/`wear`/`wield`, `remove`/`unequip`, `drink`/`quaff`, and `eat` with a carried
 item name or opaque target. Adventure resolves disclosed nouns with its existing
-choice rules. ASCII uses W to equip, T to remove and Q to drink and E to eat; Up/Down and Enter
-choose among items, and Escape cancels without spending a turn. These commands
+choice rules. ASCII uses `w` to wield a weapon, `W` to wear armor, `P` to put on an
+accessory, `T` to take off armor, and `R` to remove an accessory. `#equip` and
+`#remove` include other equipment such as tools. `q` drinks and `e` eats; Up/Down
+and Enter choose among items, and Escape cancels without spending a turn. These commands
 act on one item at a time and have no quantity editor. Clients choose the first free
 matching anatomy socket; replacing gear requires separate removal. Both clients
 use the shared `client-common` item checks, while the simulation validates the
@@ -245,7 +249,7 @@ hit policy are TOR handling choices. It is a singleton weapon, not ammunition or
 a stack; existing exact-item holds, curse restrictions and landing rules apply.
 Neither spear availability nor starting expertise is changed.
 
-The opt-in `rogue.dart` and `rogue.shuriken` are standalone stackable weapons,
+The `rogue.dart` and `rogue.shuriken` items are standalone stackable weapons,
 not ammunition. Dart melee is fixed 1 Keen (not an invalid one-sided die) and its
 throw is 1d3 Keen; shuriken melee is 1d2 Keen and its throw is 2d4 Keen. Both use
 ordinary Knife expertise to enable Throw, 20/60-foot ranges and 60/40 timing.
@@ -254,9 +258,11 @@ not free. A successful hit consumes the thrown unit. Misses use ordinary bounded
 floor recovery, including loss when no legal landing exists. Birth conditions,
 exact-unit holds, condition-aware splitting/merging and conservative owner
 knowledge use the same inventory mechanisms as other instance-sensitive stacks.
-Neither weapon changes live stock, starter kits, existing weapons or generation
-frequencies. The authored quantity remains explicit; no source birth-stack range
-is silently adopted.
+Both can appear in supplemental floor stock and treasure rooms, one unit per
+successful item attempt under the
+[provisional live policy](scenario-packages.md#live-rogue-content-policy).
+Starting kits and existing weapon mechanics remain unchanged. Authored quantity
+remains explicit; no source birth-stack range is silently adopted.
 
 The shortbow uses LightWeaponry, a base TwoHanded requirement and expert-only
 Quickdraw. Its launcher range is 80/320 feet; incidental melee deals fixed
@@ -446,9 +452,11 @@ At the start of each run, every one of the fourteen Rogue device-effect identiti
 is assigned either a wand or a staff, following the
 [pinned per-effect form choice](https://github.com/phs/rogue/blob/c7c119f893bd2f8255f2ad78d58a32664ddb9a97/init.c#L319-L355). Every later instance of that effect keeps the
 same form and concealed appearance in that run. Wand labels are shuffled metals;
-staff labels are shuffled woods. A new seed can change both assignments. Existing
-live effect weights, charge ranges, discovery policies and magical effect numbers
-are unchanged; opt-in effects remain opt-in.
+staff labels are shuffled woods. A new seed can change both assignments. Physical
+form selection does not change an effect's authored weight, charge range, discovery
+policy or magical effect numbers. The original device stage retains its choices;
+previously catalog-only devices now appear through
+[supplemental live stock](scenario-packages.md#live-rogue-content-policy).
 
 Both forms can be wielded as one-grip weapons with ordinary HeavyWeaponry melee,
 60 wind-up / 40 recovery ticks: a wand deals fixed **1 Impact** and a staff **2d3
@@ -490,9 +498,9 @@ refund. Both require the original opaque choice token. A stale, wrong-class or
 other actor's target rejects atomically. Another Read cannot bank another choice;
 death clears it. Declining is an explicit TOR usability adaptation: pinned Rogue
 insists on an eligible selection. Reading while blind is permitted, as in that
-source. ASCII uses F6 to Read and F12 to select a device and direction. Escape
-before submission cancels freely; Escape in the paid choice declines the spent
-scroll. R still releases control and Z still opens abilities.
+source. ASCII uses `r` (also F6) to Read and `z` (also F12) to select a device and
+direction. Escape before submission cancels freely; Escape in the paid choice
+declines the spent scroll. `#release` gives up control and `Z` opens abilities.
 
 Type identity and exact-instance charge knowledge are separate actor-owned facts.
 Identifying one device learns its type for matching instances, but only that
@@ -558,7 +566,7 @@ unobstructed eye witness; this does not grant monster detection or pierce a guis
 These bindings follow the pinned [potion cases](https://github.com/phs/rogue/blob/c7c119f893bd2f8255f2ad78d58a32664ddb9a97/potions.c)
 and the actual [spread expression](https://github.com/phs/rogue/blob/c7c119f893bd2f8255f2ad78d58a32664ddb9a97/misc.c).
 Sustain-strength uses the shared worn attribute-loss protection above. Poison does
-not cure Hallucination in this accepted adaptation. The opt-in Hallucination potion
+not cure Hallucination in this accepted adaptation. The Hallucination potion
 identifies on use, including blind and repeated use, and applies `1d85 + 807` base
 turns of one pure actor-active condition. Its saved presentation phase shifts once
 per captured base turn; extending the same generation preserves that cadence.
@@ -567,17 +575,21 @@ assets and glyph categories never replace actual action targets or physical item
 classes. Only genuine visual disclosure is changed; ordinary Awareness remains
 factual. Acquired map/public-plan appearances remain historical after cure.
 All concealed potion identities have distinct catalog appearances. The existing finite magic-potion stage chooses equally
-among healing, confusion, blindness, poison, see-invisible and extra healing for one unit;
+among healing, confusion, blindness, poison, see-invisible, extra healing and levitation for one unit;
 restore-strength retains its separate stage. These are provisional TOR availability
-weights, not the source distribution. Stage IDs, order and attempt bounds are unchanged.
+weights, not the source distribution. These existing stage IDs, relative order
+and attempt bounds are unchanged. Hallucination and other completed potion choices
+are available through the appended
+[supplemental stock stage](scenario-packages.md#live-rogue-content-policy), not
+by replacing this seven-potion pool.
 
-The opt-in Cancellation and Magic Missile wands use first-body
+Cancellation and Magic Missile wands also appear through supplemental stock and use first-body
 UntilObstruction delivery, not the bounded Sight profile of the existing utility
 wands. Both start with 3–7 charges and remain directional when identified.
 Cancellation has no save or random roll and never discovers its own type;
 Magic Missile discovers on charged use and has one Agility/Lore save with
 1d4+1 Energy damage on failure through ordinary bonus/reduction rules. See
-[the player behavior](../play/rogue.md#opt-in-cancellation-and-magic-missile) and
+[the player behavior](../play/rogue.md#cancellation-and-magic-missile) and
 [the source contract](creature-rules.md#shared-ability-rules).
 
 Invisibility, haste-monster and slow-monster wands use a directional contact ray:

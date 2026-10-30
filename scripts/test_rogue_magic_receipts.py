@@ -295,6 +295,130 @@ class RogueControlReceiptTests(unittest.TestCase):
         ids = assert_equipment_item_receipts(self, equipment) + self.check_receipts(controls)
         self.assertNotEqual(len(ids), len(set(ids)), "Consumers must keep the combined owner list")
 
+    def live_receipts(self):
+        def item(identity, content):
+            return {"kind": "placed", "content": content,
+                    "location": {"region": 1, "position": {"x": 2, "y": 2, "z": 0}},
+                    "entity": {"kind": "item", "id": identity, "quantity": 1}}
+        actor = {"kind": "placed", "content": "rogue.leprechaun",
+                 "location": {"region": 1, "position": {"x": 3, "y": 2, "z": 0}},
+                 "entity": {"kind": "actor", "id": 30, "carried_loot": {
+                     "kind": "carried", "content": "rogue.gold", "quantity": 111, "item": 603}}}
+        return [
+            {"id": "rogue.expanded_stock", "version": 1, "result": {
+                "kind": "evaluated", "requested": 1, "attempts": [item(600, "rogue.haste")]}},
+            {"id": "rogue.treasure_room", "version": 1, "result": {
+                "kind": "room_cluster", "selection": {"kind": "selected", "room": 2,
+                    "room_area": 4, "actor_depth": 6, "item_requested": 2,
+                    "actor_requested": 1, "items": [item(601, "rogue.fruit"), item(602, "rogue.dart")],
+                    "actors": [actor]}}},
+        ]
+
+    def check_live(self, receipts, depth=5):
+        helper = getattr(rogue_magic_receipts, "assert_live_content_receipts", None)
+        self.assertTrue(callable(helper), "Live stock and clusters need a strict shared receipt owner")
+        return helper(self, receipts, depth)
+
+    def test_live_stock_and_treasure_include_every_item_actor_and_carried_owner(self):
+        self.assertEqual(self.check_live(self.live_receipts()),
+                         [("item", 600), ("item", 601), ("item", 602), ("actor", 30), ("item", 603)])
+        choices = ("haste", "gain_strength", "raise_level", "hallucination", "monster_detection",
+                   "magic_detection", "food_detection", "magic_mapping", "wand_nothing", "wand_light",
+                   "wand_drain_life", "wand_cancellation", "wand_magic_missile", "wand_polymorph",
+                   "fruit", "dart", "shuriken")
+        for choice in choices:
+            value = self.live_receipts()
+            value[0]["result"]["attempts"][0]["content"] = "rogue." + choice
+            self.assertEqual(len(self.check_live(value)), 5)
+        for choice in ("gold", "healing", "fruit", "dart", "shuriken"):
+            value = self.live_receipts()
+            value[1]["result"]["selection"]["items"][0]["content"] = "rogue." + choice
+            self.assertEqual(len(self.check_live(value)), 5)
+
+    def test_live_zero_miss_skips_and_area_caps_preserve_their_distinct_boundaries(self):
+        for kind in ("chance_miss", "no_eligible_room"):
+            value = self.live_receipts()
+            value[0]["result"].update(requested=0, attempts=[])
+            value[1]["result"]["selection"] = {"kind": kind}
+            self.assertEqual(self.check_live(value), [])
+            value[1]["result"]["selection"]["room"] = 1
+            with self.assertRaises(AssertionError):
+                self.check_live(value)
+        value = self.live_receipts()
+        selected = value[1]["result"]["selection"]
+        selected.update(room_area=1, item_requested=4, actor_requested=3)
+        selected["items"] = selected["items"][:1]
+        for attempts in (value[0]["result"]["attempts"], selected["items"], selected["actors"]):
+            attempts[:] = [{"kind": "skipped", "content": row["content"],
+                            "reason": "no_eligible_cell"} for row in attempts]
+        self.assertEqual(self.check_live(value), [])
+        selected["actors"][0]["entity"] = {"kind": "actor", "id": 30, "carried_loot": None}
+        with self.assertRaises(AssertionError):
+            self.check_live(value)
+
+    def test_live_receipts_reject_wrong_shape_depth_counts_choices_and_duplicate_ownership(self):
+        self.check_live(self.live_receipts())
+        stock = (0, "result")
+        selected = (1, "result", "selection")
+        item = (*selected, "items", 0)
+        actor = (*selected, "actors", 0)
+        mutations = (
+            ((0, "id"), "rogue.magic_potions"), ((1, "version"), True),
+            ((0, "unexpected"), 1), ((*stock, "requested"), True),
+            ((*stock, "requested"), 2), ((*stock, "attempts"), []),
+            ((*stock, "attempts", 0, "content"), "rogue.torch"),
+            ((*selected, "kind"), "unknown"), ((*selected, "actor_depth"), 5),
+            ((*selected, "actor_depth"), True), ((*selected, "room"), 0),
+            ((*selected, "room"), 65), ((*selected, "room_area"), 0),
+            ((*selected, "room_area"), 1025), ((*selected, "room_area"), True),
+            ((*selected, "item_requested"), 1), ((*selected, "item_requested"), 5),
+            ((*selected, "actor_requested"), 0), ((*selected, "actor_requested"), 4),
+            ((*selected, "actors"), []), ((*selected, "items"), []),
+            ((*item, "content"), "rogue.haste"), ((*item, "entity", "quantity"), 2),
+            ((*item, "entity", "id"), 600), ((*item, "entity", "id"), True),
+            ((*item, "location", "region"), True), ((*item, "location", "position", "x"), "2"),
+            ((*actor, "content"), "rogue.dragon"), ((*actor, "entity", "kind"), "item"),
+            ((*actor, "entity", "id"), 0), ((*actor, "entity", "carried_loot"), None),
+            ((*actor, "entity", "carried_loot", "kind"), "not_carried"),
+            ((*actor, "entity", "carried_loot", "quantity"), 112),
+            ((*actor, "entity", "carried_loot", "quantity"), True),
+            ((*actor, "entity", "carried_loot", "content"), "rogue.ration"),
+            ((*actor, "entity", "carried_loot", "item"), 601),
+        )
+        for path, invalid in mutations:
+            value = self.live_receipts()
+            target = value
+            for key in path[:-1]:
+                target = target[key]
+            target[path[-1]] = invalid
+            with self.subTest(path=path, invalid=invalid), self.assertRaises(AssertionError):
+                self.check_live(value)
+        for value in ([], self.live_receipts()[::-1], self.live_receipts() * 2):
+            with self.assertRaises(AssertionError):
+                self.check_live(value)
+
+    def test_treasure_birth_stock_checks_next_depth_eligibility_and_mandatory_carriers(self):
+        value = self.live_receipts()
+        actor = value[1]["result"]["selection"]["actors"][0]
+        actor.update(content="rogue.kestrel")
+        actor["entity"]["carried_loot"] = None
+        self.assertEqual(len(self.check_live(value)), 4)
+        actor["entity"]["carried_loot"] = {"kind": "not_carried"}
+        with self.assertRaises(AssertionError):
+            self.check_live(value)
+        actor["content"] = "rogue.centaur"
+        value[1]["result"]["selection"]["actor_depth"] = 7
+        self.assertEqual(len(self.check_live(value, depth=6)), 4)
+        actor["entity"]["carried_loot"] = {"kind": "carried", "content": "rogue.ration",
+                                           "quantity": 1, "item": 603}
+        self.assertEqual(len(self.check_live(value, depth=6)), 5)
+        actor["content"] = "rogue.dragon"
+        value[1]["result"]["selection"]["actor_depth"] = 32
+        self.assertEqual(len(self.check_live(value, depth=31)), 5)
+        actor["entity"]["carried_loot"] = {"kind": "not_carried"}
+        with self.assertRaises(AssertionError):
+            self.check_live(value, depth=31)
+
 
 if __name__ == "__main__":
     unittest.main()

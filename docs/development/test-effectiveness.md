@@ -2468,3 +2468,121 @@ free, pending pickup is cleared, and exact branch/tick/inventory/reconnect check
 remain. The actual affected process passes locally in 1.729 seconds. This adds one
 observed fixture synchronization failure, not a gameplay defect; no retry, timeout
 increase or production change was introduced.
+
+## ASCII NetHack-controls help regression
+
+[PR #205](https://github.com/KCall360/thresholds-of-ruin/pull/205)'s first hosted
+Linux debug and release Rust partitions exposed one presentation regression:
+the compact help rewrite retained F7's wizard-editor label but omitted the
+existing creature-list hint. The unchanged
+`presentation::wizard_creature_catalog_is_discoverable_in_ascii_help` assertion
+failed in both profiles; 177 other ASCII integration methods passed in each.
+This is one production discoverability defect and one distinct failing method,
+not two defects or an infrastructure failure. The correction restores the
+creature-list hint on the F7 line without changing the key binding, behavior or
+assertion. Final-head hosted qualification remains required.
+
+The same run's Linux debug native door/restart witness exposed one missed test
+fixture migration: its final Escape still expected process exit, although the
+new documented contract keeps the map open. The fixture now sends native Shift-S
+through the same OS-key path and retains its exact saved-door, spectator and
+restart assertions and timeout. This is one stale fixture root/method, separate
+from the help defect; it is not an unintended product quit regression. The new
+native Search/extended-command/spectator witness passed in that lane. Local
+physical-key qualification remains unavailable without xdotool; the corrected
+native door owner must pass hosted CI.
+
+Windows debug and release additionally timed out in the new ambiguous-command
+native witness while waiting for exactly `k`. The fixture sent both a held
+KeyDown and an explicit character; minifb's Windows event loop already calls
+[TranslateMessage](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-translatemessage),
+which translates the key into a character. Source tracing identifies duplicate
+character injection as the fixture cause; the retained diagnostic tail does not
+include the beginning of the final frame, so it is not direct evidence of the
+editor's full text. The corrected fixture uses one held native K on Windows
+and the existing native text route on X11. It asserts the first nonempty edit
+is exactly `k`, then retains the ambiguous-Enter, unchanged-state and paid-Search
+checks. This is one additional fixture root/method, not a verified product
+defect. Final Windows native qualification remains required.
+The cheap injection-ownership regression failed first on the duplicate Windows
+text call, then passed with the single-path correction. Companion checks retain
+Windows key release on a frame-wait failure and immediate rejection of a `kk`
+edit. These mocks prove fixture ownership/cleanup, not Win32 translation; the
+real native acceptance remains the platform authority.
+
+## Live Rogue content activation (2026-10-29)
+
+The approved data-only activation intentionally supersedes earlier opt-in-only
+stock and exact thirteen-stage assertions. The first content checkpoint had
+18 distinct stale methods (19 failure reports because the dart/shuriken method
+reported two subtests); two diagnostic-adapter methods then exposed a stale
+listed-stage inventory and a last-stage `bands` assumption after the appended
+treasure stage. These are planned policy/fixture maintenance, not discovered
+production gameplay defects. Existing item/effect, unchanged-kit, legacy-stage
+and historical-oracle assertions remain; explicit live-policy and real-process
+birth/layout/reopen witnesses cover the new policy. The three deliberate
+feature-first-red tests are excluded from stale-test and defect totals.
+
+The first combined process checkpoint overlapped a server test-binary build and
+hit two setup/deadline failures: the unmodified-live-package witness exceeded its
+60-second compiler limit, and the existing preset witness exceeded the Mage's
+server-start deadline. The suite was stopped (exit 130), retaining both failures
+and the completed all-17 and existing treasure-room witnesses. Resource
+contention is a possible contributor, not a proven cause; neither failure
+establishes a gameplay defect. Failed/interrupted and unrun selected methods are
+rerun serially after the Rust checkpoint, without increasing limits or weakening
+assertions. These two distinct methods are separate from the stale-oracle counts
+above; interrupted methods without outcomes are not counted as failures.
+
+Both earlier deadline methods passed serially with unchanged limits. Two other
+methods then exceeded existing 30-second fixture-compilation limits before any
+play: Mage source-deletion and the fixed-initial first-floor walkthrough. The
+qualified local compiler is dev-opt0; unmodified live-package validation passed
+in 51.4 seconds, so these capped methods remain locally unqualified. Ordinary
+death was reached, but its saved-game reopening exceeded the existing 15-second
+startup deadline after `restore.replay.begin`; that replay outcome also remains
+unresolved. No crash or gameplay diagnosis follows from the deadline alone.
+There are five distinct failed/error methods across these checkpoints, two later
+passing and three unresolved locally. On maintainer direction, the selected
+four deep-fixture compiles and unfinished technique methods were deferred to
+required hosted profiles rather than repeating predictable compilation limits
+or starting an optimized-build campaign. No timeout or assertion was relaxed;
+these deferrals are not passes or graphical waivers.
+
+### PR #206 hosted fixture and driver corrections (2026-10-30)
+
+The [first hosted run](https://github.com/KCall360/thresholds-of-ruin/actions/runs/40975162876)
+for [PR #206](https://github.com/KCall360/thresholds-of-ruin/pull/206) exposed
+**five distinct failing methods**, not five production defects. This window has
+four fixture/driver root groups: supplemental-stage count, omitted/maze layout
+migration (shared by two methods), mixed-room band shape, and walkthrough endpoint
+synchronization. The first three are stale/unupdated fixtures; the last is a stale
+driver assumption with harness overlap. Debug/release repeats are additional
+executions of the same methods and causes, not new roots. No complete failed-
+execution total is inferred from selected logs. The walkthrough also overlaps an
+earlier local setup-timeout method above; it is not a new method in a cumulative
+union of those windows.
+
+| Distinct failing method | Established cause and scoped correction |
+| --- | --- |
+| `scenario_package::tests::rogue_magic_catalog_uses_explicit_capabilities_and_appends_finite_stock` | The legacy loop expected every appended stage to have one item attempt. Keep exact legacy-stage checks and independently assert the supplemental 0–1 range, all 17 equal-weight choices, and the mixed treasure policy. |
+| `scenario_package::tests::bundled_rogue_uses_compact_open_family_and_preserves_room_recipe` | The live recipe now lowers to version 5 with omission/maze stages, not the discovery-only version 3. Pin the live stage order and operands; a validated control removes only those two stages for the retained historical geometry/discovery comparison. Live geometry is separately allowed and witnessed to differ. |
+| `test_rogue_roster_package.RogueRosterPackageTests.test_production_retrieval_uses_one_selected_player_bound_ordinary_amulet` | A universal `stage['bands']` lookup failed on `room_cluster`. Dispatch explicitly to required ordinary `bands` or both `item_bands` and `actor_bands`; preserve Amulet exclusion from all stages, starting loadouts and carried pools, without silently skipping missing fields or unknown stage kinds. |
+| `test_rogue_exploration_process.RogueBundledPolicy.test_geometry_fixture_preserves_the_population_free_workload_explicitly` | The same layout migration invalidated a source-recipe comparison that removed only discovery operands. Independently pin omission count `[0, 1]` and maze `one_in = 15` before removing those fields; retain the exact baseline, absent-feature, population-free and character assertions. |
+| `test_rogue_playable_process.RoguePlayableProcesses.test_ordinary_first_floor_foes_earn_second_hd_and_ground_supplies_are_finite` | The driver assumed the returning PC's action was the durable history endpoint. A legitimate hidden bat `MoveWest` completed in the same tick after the PC's `MoveUp`, so the private endpoint correctly differed from the last public entry. The correction uses one unconditional ordinary paid Wait on the verified-cleared returned floor before the unchanged strict visible-endpoint seal; stock, XP, location and entry-receipt guards remain. |
+
+The two exact Rust regressions passed after input-stable preflight and linking.
+Both Python failures were reproduced locally before correction, then all eleven
+methods in their two pure owners passed. All 24 pure movement/transport checks
+also passed, including positive one-Wait behavior and rejection of unsafe input,
+unpaid or moved results, and changed stock. These are scoped local results, not a
+new full-suite or final-head hosted pass. No production behavior, timeout,
+visibility rule or strict endpoint assertion is changed by these corrections.
+
+Hosted execution also passed the previously local-capped Mage source-deletion
+and ordinary-death reopen cases, plus actual treasure, all-17-item, technique and
+deep-fixture cases. Those outcomes resolve the earlier hosted deferrals, not the
+recorded local failures. The corrected walkthrough still requires a hosted
+actual-process rerun: local dev-opt0 fixture compilation hits the unchanged
+30-second cap before gameplay. No corrected walkthrough pass is claimed, and its
+remaining qualification is not replaced by the pure-driver or Rust results.

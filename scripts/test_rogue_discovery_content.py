@@ -18,7 +18,7 @@ class RogueDiscoveryContent(unittest.TestCase):
     def test_independent_feature_settings_do_not_replace_existing_geometry_recipe(self):
         recipe = source("scenario.toml")["generation_recipes"]["exploration"]
         self.assertEqual({key: value for key, value in recipe.items()
-                          if key not in ("secret_entrances", "hidden_traps")}, {
+                          if key not in ("secret_entrances", "hidden_traps", "room_omissions", "maze_rooms")}, {
             "kind": "grid_rooms", "version": 1, "room_width": [4, 24],
             "room_height": [3, 5], "extra_connections": [0, 2],
             "lighting": {"darkness_roll": 10, "darkness_start": 1}})

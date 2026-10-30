@@ -2,7 +2,8 @@
 
 The [`rogue-exploration` package](../../scenarios/rogue-exploration/scenario.toml)
 authors Warrior and Mage presets, all 26 depth-selected foe species, equipped
-starting gear, and finite bandage/ration supplies on persistent generated floors.
+starting gear, and finite supplies on persistent generated floors, including
+[supplemental loot and rare treasure rooms](#live-content-and-layout-policy).
 The package selects the canonical K/E/B/S/H/I/R/Z/O/C/L/Q/Y/N/F/T/W/P/X/U/M/V/G/J/A/D population.
 The L/N/O theft/gold additions still need the qualification described below.
 Its historical package name is unchanged.
@@ -186,7 +187,7 @@ See-invisible potions cure blindness and reveal invisible creatures through norm
 illuminated sight for 808–892 actor turns. A second dose extends the remaining
 duration. Effective use does not identify this potion. Both can occur in the
 existing one-unit random potion stock. Sustain-strength rings prevent new
-restorable Strength loss. The opt-in Hallucination potion identifies on use, lasts
+restorable Strength loss. The Hallucination potion identifies on use, lasts
 808–892 base turns and changes observer-specific visual appearance each base turn.
 Repeating it extends the same cadence; real interaction targets and previously
 recognized stairs remain authoritative. Extra healing
@@ -211,10 +212,35 @@ ordinary advancement. Select the carried or wielded spear in Throw; it deals
 Its range is 20/60 feet. Curses, occupied grips, paid preparation and floor landing
 rules still apply; this adds neither free expertise nor extra starter stock.
 
-## Opt-in fruit, throwing weapons and treasure rooms
+## Live content and layout policy
 
-Scenario authors can select fruit, darts and shuriken from the existing catalog.
-They do not appear in unchanged live floor pools or starting kits. Fruit is named
+The live package appends `rogue.expanded_stock` and `rogue.treasure_room` after
+all existing floor stages. Existing stage identities, relative order, weights,
+starting kits and rules stay intact; the new stages supply additional finite
+stock, not replacements. Frequencies are explicitly provisional conservative
+activation choices, not a completed balance campaign or exact Rogue parity.
+The [population reference](../reference/scenario-packages.md#live-rogue-content-policy)
+owns the exact item choices, weights and counts. Failed placement remains a saved
+skip; return visits and restarts never reroll or replenish these stages.
+
+The dungeon also enables zero or one omitted room slot per floor and a 1-in-15
+maze trial for each eligible dark room. Protected stairs, trap capacity and the
+existing lighting policy still constrain eligibility. These stages change realized
+geometry and may change legal population placements even for an old seed; preserved
+stage streams do not mean seed-identical floors. See the
+[generation reference](../reference/generation.md#optional-room-omissions).
+
+Portable torches remain catalog-only. Polymorph can now appear as loot, but its
+existing emu/snake/troll destination pool is not expanded. Warrior/Mage presets,
+ordinary expertise, care, respec, nutrition, traps, sight and persistent paired
+stairs retain their deliberate TOR behavior. The
+[frozen earned-route comparator](../development/rogue-earned-route.md) is not a
+balance or survival qualification for these newly enabled floors.
+
+## Fruit, throwing weapons and treasure rooms
+
+Fruit, darts and shuriken can appear in supplemental floor stock and treasure
+rooms, but are not added to starting kits. Fruit is named
 ordinary food: take it and `eat fruit` with the same one-unit nutrition rules as
 a ration. Darts and shuriken are real weapons; acquire Knife expertise ordinarily
 and select a carried stack in Throw to spend exactly one free unit. Wielding
@@ -222,10 +248,14 @@ requires a singleton, but throwing does not require wielding. Hits consume the
 unit; misses may leave recoverable stock under ordinary landing rules. Dagger
 recovery and arrow behavior are unchanged.
 
-The inert [treasure stage example](../../scenarios/rogue-exploration/examples/treasure-stage.toml)
-opts one selected room into coordinated loot and hostile births using next-depth
-actor context. It is not enabled automatically. Its independent bounded counts
-and illustrative bands are authored TOR policy, not a new production balance pass.
+A rare treasure room adds loot and hostile births in one selected present room,
+using next-depth actor context. Its foes use the ordinary species bands, AI and
+growth rules, but need not be outside your sight. Treasure stock is additional to
+ordinary floor stock, with independent bounded item and actor counts rather than
+Rogue's coupled counts. The separate
+[inert authoring example](../../scenarios/rogue-exploration/examples/treasure-stage.toml)
+is still not imported; its larger counts and illustrative Hobgoblin/Orc bands are
+not the live policy.
 See [items](../reference/items.md) and the
 [population schema](../reference/scenario-packages.md#first-entry-population).
 
@@ -238,13 +268,14 @@ charges. Wield either for ordinary physical attacks: staves deal 2d3 Impact,
 wands fixed 1 Impact, with no charge cost—even when empty. They occupy one grip
 and cannot be thrown. Cursed wielded implements obey the same removal restrictions
 as other equipment. The inventory category “wands and staves” and identify-wand
-scroll include both; magical effects and live loot weights are unchanged.
+scroll include both; physical form selection does not change the magical effect
+or its authored loot weight.
 
-## Opt-in Nothing, Light and Drain Life wands
+## Nothing, Light and Drain Life wands
 
-The catalog also contains `rogue.wand_nothing`, `rogue.wand_light` and
-`rogue.wand_drain_life` for scenario selection. None is added to the existing
-eight-wand live floor pool or starting kits; ordinary Rogue floor stock is unchanged.
+`rogue.wand_nothing`, `rogue.wand_light` and `rogue.wand_drain_life` can appear
+through supplemental floor stock. They do not replace choices in the original
+eight-device stage and are not added to starting kits.
 
 All three use the normal paid Zap action. An unidentified wand still asks for a
 direction, so its hidden self-targeting behavior is not disclosed by the prompt.
@@ -278,12 +309,12 @@ with Health are eligible regardless of allegiance; bodies without Health and
 the caster are excluded. Frozen recipients do not receive turns. Hidden recipients and their count are not listed in ordinary output.
 Paid results and current Health persist through source-free checkpoint reopening.
 
-## Opt-in Cancellation and Magic Missile
+## Cancellation and Magic Missile
 
-`rogue.wand_cancellation` and `rogue.wand_magic_missile` are also available for
-scenario selection, each with 3–7 charges. They do not change the existing
-eight-wand live floor pool or starting kits. Both use ordinary paid Zap and
-require a direction even after their type is identified.
+`rogue.wand_cancellation` and `rogue.wand_magic_missile` can also appear through
+supplemental floor stock, each with 3–7 charges. The original eight-device stage
+and starting kits remain unchanged. Both use ordinary paid Zap and require a
+direction even after their type is identified.
 
 These two wands follow physical geometry until the first living body or an
 obstruction. They do not bounce or use sight as their range. A body without a
@@ -426,15 +457,18 @@ and the rank-five cap, without a separate HD-derived roll bonus.
 
 ## Floors keep their history
 
-Each first entry by the selected character evaluates five ordered stages:
-`rogue.eight_species_foes` makes four weighted actor attempts, then the unchanged
+Each first entry by the selected character evaluates the ordered floor stages.
+The original `rogue.eight_species_foes` makes four weighted actor attempts, then
 `rogue.bandages` and `rogue.rations` stages each attempt one stack, containing two
 bandages and one ration respectively. The appended `rogue.restore_strength` stage
 attempts one ordinary potion unit on every floor from depth 1 onward. This is
 provisional TOR availability, not Rogue's 13% subtype probability; legal placement
-can still fail, so it does not guarantee a cure. The final independent
-`rogue.room_gold` stage makes the per-room Gold decisions described above; the earlier stage order and
-random streams are unchanged. The actor stage's authored depth bands
+can still fail, so it does not guarantee a cure. The independent
+`rogue.room_gold` stage then makes per-room Gold decisions, followed by the magic,
+equipment, ammunition, ring and control-scroll stages. The supplemental and
+rare treasure stages follow these existing stages; see the
+[complete live-content policy](../reference/scenario-packages.md#live-rogue-content-policy).
+The original actor stage's authored depth bands
 select all 26 species. Kestrel (K) is eligible at depths
 1–6, bat (B) at 1–8, orc at 4–13, leprechaun at 6–15, centaur at 7–16,
 rattlesnake at 3–12, aquator at 9–18, nymph at 10–19, yeti at 11–20,
@@ -449,9 +483,10 @@ owns the full band/weight table. The historical `rogue.eight_species_foes`
 and `rogue.vampire_supplies` IDs stay unchanged to preserve unrelated deterministic
 streams. Four-U, four-M, four-V, four-G, four-J and four-D draws are possible; these
 provisional counts and weights do not establish a safe or calibrated depth curve.
-Foe placement excludes your current sight, body occupancy and protected arrival
-cells. A stage can record a failed placement when legal space is unavailable;
-there is no refill or repeated placement attempt on return.
+Ordinary foe placement excludes your current sight, body occupancy and protected
+arrival cells. Treasure-room foes retain body and protected-cell exclusions but
+may be in sight. A stage can record a failed placement when legal space is
+unavailable; there is no refill or repeated placement attempt on return.
 
 Preparing nearby geometry does not populate it. Successful first entry does,
 before subsequent simulation time advances. Supplies must be reached and taken
@@ -460,9 +495,12 @@ remain gone on revisits. Floors persist, and the return stair pairs with its
 original endpoint. Rogue's NPCs cannot voluntarily use the abstract stairs;
 physical pushes, falls and physical portals retain the shared physics rules.
 
-The actor stage uses `racial_after` depth 26: each birth appends one actual racial
-HD per depth beyond 26, preserving its base rows, purchases and seeded per-HD
-Health rolls. New rows keep ordinary grants, with explicitly authored future
+Ordinary and treasure actors use `racial_after` depth 26: each birth appends one
+actual racial HD per effective birth depth beyond 26, preserving its base rows,
+purchases and seeded per-HD Health rolls. All capacity depths below are effective
+actor birth depths: the ordinary stage uses floor depth, while treasure uses
+floor depth + 1 and can therefore refuse entry one floor earlier. New rows keep
+ordinary grants, with explicitly authored future
 purchases spending their points at the specified ordinal. J has 15 HD at depth
 26 and reaches 256 at 267; a sampled J requests 257 at 268 and refuses the whole
 entry atomically, without partial population or time advance. G reaches 256 HD

@@ -277,10 +277,16 @@ class ProjectileProcesses(ProcessTestCase):
         native = self.native_keys(window)
 
         def press(name, key):
+            if name == "Z":
+                native("Shift_L", True)
+                try:
+                    return self.native_press(window, native, "z", key)
+                finally:
+                    native("Shift_L", False)
             return self.native_press(window, native, name, key)
 
         def choose_throw():
-            menu = press("z", "abilities")
+            menu = press("Z", "abilities")
             index = [row["id"] for row in menu["ability_choices"]].index("rogue.throw")
             for _ in range(index):
                 press("Down", "down")
@@ -319,11 +325,7 @@ class ProjectileProcesses(ProcessTestCase):
         owner.stop()
         window, initial = self.capture_client(native=True)
         native = self.native_keys(window)
-        menu = press("z", "abilities")
-        index = [row["id"] for row in menu["ability_choices"]].index("rogue.launch")
-        for _ in range(index):
-            press("Down", "down")
-        sources = press("Return", "enter")
+        sources = press("f", "fire")
         self.assertIn("shortbow", "\n".join(sources["projectile_rows"]))
         start = len(self.replies)
         ammunition = press("Return", "enter")

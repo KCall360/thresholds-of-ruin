@@ -1,4 +1,6 @@
 """Authored Rogue content contracts, independent of generated certificates."""
+import hashlib
+import json
 from pathlib import Path
 import tomllib
 import unittest
@@ -6,6 +8,19 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = ROOT / "scenarios/rogue-exploration"
+
+
+EXPANDED_ITEMS = (
+    "haste", "gain_strength", "raise_level", "hallucination", "monster_detection",
+    "magic_detection", "food_detection", "magic_mapping", "wand_nothing", "wand_light",
+    "wand_drain_life", "wand_cancellation", "wand_magic_missile", "wand_polymorph",
+    "fruit", "dart", "shuriken",
+)
+BASELINE_STAGE_IDS = (
+    "eight_species_foes", "bandages", "rations", "restore_strength", "room_gold",
+    "magic_potions", "magic_scrolls", "magic_devices", "equipment",
+    "equipment_scrolls", "ammunition", "rings", "control_scrolls",
+)
 
 
 def source(name):
@@ -69,7 +84,7 @@ class RoguePlayableContent(unittest.TestCase):
         self.assertEqual(items["rogue.ration"]["edible"], {"nutrition": {"kind": "rolled",
             "dice": {"count": 1, "sides": 400, "bonus": 1099}}})
 
-    def test_fruit_is_opt_in_ordinary_named_food_with_ration_nutrition(self):
+    def test_fruit_is_ordinary_named_live_food_with_ration_nutrition(self):
         catalog = source("catalog/items.toml")["items"]
         self.assertEqual(catalog["rogue.fruit"], {
             "asset": "item.food", "name": "fruit", "identity": "rogue.fruit",
@@ -80,9 +95,9 @@ class RoguePlayableContent(unittest.TestCase):
             "nutrition": {"kind": "rolled", "dice": {
                 "count": 1, "sides": 400, "bonus": 1099}}})
         self.assertNotEqual(catalog["rogue.fruit"]["identity"], catalog["rogue.ration"]["identity"])
-        # Merely registering the opt-in identity does not change live births,
-        # carried stock, starter knowledge or the food probability distribution.
-        self.assertNotIn("rogue.fruit", repr(source("scenario.toml")))
+        # Supplemental floor stock now includes fruit; ordinary actor recipes
+        # and the original ration stage remain unchanged.
+        self.assertIn("rogue.fruit", repr(source("scenario.toml")["floor_activation"]))
         self.assertIn("item.food", source("scenario.toml")["assets"]["dungeon"])
         self.assertNotIn("rogue.fruit", repr(source("catalog/actors.toml")))
 
@@ -99,7 +114,7 @@ class RoguePlayableContent(unittest.TestCase):
         self.assertEqual([row["id"] for row in stages],
                          ["rogue.eight_species_foes", "rogue.bandages", "rogue.rations",
                           "rogue.restore_strength", "rogue.room_gold", "rogue.magic_potions", "rogue.magic_scrolls",
-            "rogue.magic_devices", "rogue.equipment", "rogue.equipment_scrolls", "rogue.ammunition", "rogue.rings", "rogue.control_scrolls"])
+            "rogue.magic_devices", "rogue.equipment", "rogue.equipment_scrolls", "rogue.ammunition", "rogue.rings", "rogue.control_scrolls", "rogue.expanded_stock", "rogue.treasure_room"])
         for stage, count in zip([*stages[:4], *stages[5:8]], (4, 1, 1, 1, 1, 1, 1), strict=True):
             self.assertEqual(stage["version"], 1)
             self.assertEqual(stage["count"], [count, count])
@@ -178,6 +193,55 @@ class RoguePlayableContent(unittest.TestCase):
         self.assertEqual(condition["timing"], {"kind": "actor_active", "on_expiry": {"kind": "remove"}})
         self.assertEqual(condition["descriptors"], [])
         self.assertTrue(rules["import"].startswith("interactions-v"))
+
+
+    def test_supplement_is_one_finite_uniform_chance_without_replacing_old_stock(self):
+        stages = source("scenario.toml")["floor_activation"]["profiles"]["rogue.low_depth"]["stages"]
+        self.assertEqual([row["id"] for row in stages],
+                         ["rogue." + name for name in (*BASELINE_STAGE_IDS, "expanded_stock", "treasure_room")])
+        self.assertEqual(stages[-2], {
+            "id": "rogue.expanded_stock", "version": 1, "kind": "items", "count": [0, 1],
+            "bands": [{"depth": {"kind": "open", "minimum": 1}, "choices": [
+                {"archetype": "rogue." + name, "weight": 1} for name in EXPANDED_ITEMS]}],
+            "quantity": 1,
+        })
+        # Independent before-batch oracle: existing IDs, versions, weights,
+        # count/quantity policies and every depth band remain exactly unchanged.
+        canonical = json.dumps(stages[:13], sort_keys=True, separators=(",", ":")).encode()
+        self.assertEqual(hashlib.sha256(canonical).hexdigest(), "71e762a7f3d210c37c40349139268d2fb31e6132bca30f6d85e949654a13fde8")
+        items = source("catalog/items.toml")["items"]
+        self.assertEqual(len(set(EXPANDED_ITEMS)), 17)
+        for name in EXPANDED_ITEMS:
+            self.assertIn("rogue." + name, items)
+        self.assertNotIn("torch", EXPANDED_ITEMS)
+
+    def test_live_layout_selects_existing_bounded_policies_without_retuning_other_stages(self):
+        self.assertEqual(source("scenario.toml")["generation_recipes"]["exploration"], {
+            "kind": "grid_rooms", "version": 1, "room_width": [4, 24], "room_height": [3, 5],
+            "extra_connections": [0, 2], "room_omissions": {"count": [0, 1]},
+            "maze_rooms": {"one_in": 15}, "lighting": {"darkness_roll": 10, "darkness_start": 1},
+            "secret_entrances": {"chance_per_mille": 250, "maximum": 2, "dc": 12},
+            "hidden_traps": {"count": [1, 2], "dc": 12, "rust_slot": "body_armor", "rust_amount": 1,
+                "sleep_condition": "rogue.sleep", "sleep_duration": 200, "sleep_exposure": "poison",
+                "hazards": {"avoidance_dc": 12, "bear_condition": "rogue.bear_trap", "bear_duration": 300,
+                    "arrow_ammunition": "rogue.arrow", "attack_bonus": 0, "poison_exposure": "poison"}},
+        })
+
+    def test_live_treasure_is_additional_bounded_stock_with_the_existing_next_depth_roster(self):
+        manifest = source("scenario.toml")
+        stages = manifest["floor_activation"]["profiles"]["rogue.low_depth"]["stages"]
+        self.assertEqual(stages[-1], {
+            "id": "rogue.treasure_room", "version": 1, "kind": "room_cluster",
+            "chance": {"numerator": 1, "denominator": 20}, "item_count": [2, 4],
+            "actor_count": [1, 3], "quantity": 1, "actor_depth_offset": 1,
+            "ai": "rogue_hostile", "depth_growth": {"kind": "racial_after", "depth": 26},
+            "avoid_protagonist_sight": False,
+            "item_bands": [{"depth": {"kind": "open", "minimum": 1}, "choices": [
+                {"archetype": "rogue." + name, "weight": 1}
+                for name in ("gold", "healing", "fruit", "dart", "shuriken")]}],
+            "actor_bands": stages[0]["bands"],
+        })
+        self.assertNotIn("examples/treasure-stage.toml", manifest["modules"])
 
 
 if __name__ == "__main__":

@@ -8,6 +8,9 @@ builds on the functional content described in the [Rogue plan](rogue.md) and
 Each milestone below needs the maintainer's approval before it starts, and the
 milestones that change a format need approval of that format decision too.
 Every milestone follows the [testing policy](../development/testing.md).
+The completed live-content activation is not approval of this tuning plan's
+mechanics profile, build lock, removals or format changes. Existing TOR differences
+remain active; the classifications below are proposed targets, not current behavior.
 
 ## Goal and boundary
 
@@ -27,8 +30,12 @@ what only Rogue needs; every other scenario keeps today's behavior.
 
 The bundled package already selects all 26 species, wandering population,
 traps and secret entrances, potions, scrolls, rings, wands and staves,
-equipment, gold and treasure rooms, Rogue's nutrition constants, the Amulet and
-surface escape. Almost every number that shapes a run is marked provisional:
+equipment, gold, Rogue's nutrition constants, the Amulet and surface escape.
+The live-content activation adds 17 previously catalog-only items, rare treasure
+rooms, room omissions and dark-room mazes using explicitly provisional policy.
+It leaves earlier stages, kits and rules intact; torches remain catalog-only and
+Polymorph keeps its existing emu/snake/troll destinations. Almost every number
+that shapes a run is marked provisional:
 
 | Area | Current value | Location |
 | --- | --- | --- |
@@ -41,7 +48,10 @@ surface escape. Almost every number that shapes a run is marked provisional:
 | Respec | 600-tick preparation, costs one ration | same, `advancement` |
 | Nutrition | Rogue's 1300/2000/300/150/−852; regeneration also costs nutrition (rates 1/1) | `scenarios/rogue-exploration/rules.toml` |
 | Floor stock | One attempt per stage: 2 bandages, 1 ration, restore strength, potion, scroll, device, equipment, equipment scroll, ammunition, ring, control scroll; room gold 1/2 | `scenario.toml` `floor_activation` |
-| Population | Four initial actor attempts per floor; per-depth species bands | same, `rogue.eight_species_foes` |
+| Supplemental stock | 0–1 attempt, quantity 1; 17 equal-weight completed catalog choices | [Live content policy](../reference/scenario-packages.md#live-rogue-content-policy), `rogue.expanded_stock` |
+| Treasure | Chance 1/20; 2–4 items / 1–3 actors, quantity 1; ordinary actor bands at depth + 1 | same, `rogue.treasure_room` |
+| Layout variety | 0–1 omitted room slots; 1-in-15 maze trial per eligible dark room | [Generation policy](../reference/generation.md#optional-room-omissions) |
+| Population | Four ordinary initial actor attempts per floor; per-depth species bands; treasure actors are additional | `scenario.toml`, `rogue.eight_species_foes` |
 | Birth stock | Ration-or-bandage pool on several species; Leprechaun gold | same, `carried_item_pools` |
 | Wandering | 6,700–7,300 tick delay, then 1-in-6 every 400 ticks, cap 8 | same, `floor_activation.wandering` |
 | Traps | 1–2 hidden traps per floor, DC 12, bear 300 ticks, sleep 200 ticks | same, `hidden_traps` |
@@ -50,8 +60,9 @@ surface escape. Almost every number that shapes a run is marked provisional:
 There is no food-drought guarantee. Nothing measures a whole run: phase 7's
 targets, reference PC and species matrix are unbuilt, and the only autonomous
 descent controller, the [earned-route pilot](../development/rogue-earned-route.md),
-is qualified only to earned HD 2. Foe Physical defense bonuses also sit well
-below the spread that Rogue's armor classes imply.
+is qualified only to earned HD 2. Its frozen comparator is unchanged; prior
+results do not qualify the newly enabled layouts or added stock. Foe Physical
+defense bonuses also sit well below the spread that Rogue's armor classes imply.
 
 ## Rogue mechanics inventory
 

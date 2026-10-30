@@ -143,12 +143,14 @@ Do not mistake “implemented” for closure of those measurements.
 
 ### Layout, perception and discovery
 
-Reusable secret/discovery stages, optional strict room omissions and opt-in dark
-room mazes are implemented. Neither omission nor maze policies are enabled in the
-live Rogue package; selecting their probabilities remains separate tuning work.
-Absent policies and zero-realized mazes preserve the prior geometry and existing
-feature streams/output. Generation reserves the full authored trap maximum and
-landing namespace before maze carving, preserves required stair/portal identities
+Reusable secret/discovery stages, optional strict room omissions and dark-room
+mazes are implemented. The live Rogue package now selects omissions and mazes with
+explicitly provisional conservative frequencies; the
+[generation reference](../reference/generation.md#optional-room-omissions) owns
+those values. Numerical calibration remains separate. Absent policies or no
+realized omissions/mazes preserve their legacy geometry contracts; enabling these
+policies does not promise seed-identical floors. Generation reserves the full
+authored trap maximum and landing namespace before maze carving, preserves required stair/portal identities
 and body clearance, and excludes maze cells from trap placement. See the
 [generation reference](../reference/generation.md) for the owning authoring contract.
 
@@ -162,13 +164,15 @@ tactile Search and capped Awareness-based nonvisual disclosure. The latter does
 not grant genuine sight or identify concealment/disguise; tactile Search still
 requires its adjacent Perception check. Neither grants whole-room revelation. See
 [perception](../architecture/perception.md) for their separate boundaries.
-Development is paused; this remaining-work plan does not authorize implementation
-or live tuning.
+This completed live-content activation does not authorize the separate tuning
+campaign or other implementation milestones. The frozen earned-route comparator
+and its qualification boundary remain unchanged.
 
 Lighting already exists; extend it without replacing TOR
 LOS with whole-room revelation. Typed sight/invisibility, mutual-sight gaze,
 single-use object guise and adjacent timed Search support the authored M/P/X
-cohort. Hallucination and broader secret/discovery systems remain open.
+cohort. Hallucination is implemented; broader discovery acceptance and numerical
+calibration remain open.
 
 Acceptance: connectivity after discovery, no invented visible-route guarantee,
 consistent movement/sight across carved joins, actor-specific discovery/memory,
@@ -272,9 +276,10 @@ can temporarily mask the benefit. See [item contracts](../reference/items.md#rea
 Poison uses the shared restorable Strength deficit and on-use recognition.
 See-invisible uses finite extending actor-active sight plus the blindness cure,
 without automatic recognition. Sustain-strength now uses the shared worn
-attribute-loss protection described below. The opt-in Hallucination potion and
-exact Extra Healing cure now have scoped runtime/consumer coverage; detection
-and mapping remain unfinished. Extra-healing overflow uses the source one/two
+attribute-loss protection described below. Hallucination, detection and mapping
+are implemented and selected by the supplemental live stock stage. The exact
+Extra Healing cure has scoped runtime/consumer coverage; complete-run and balance
+acceptance remain separate. Extra-healing overflow uses the source one/two
 threshold on bounded owned HD records. Utility wands use persistent first-contact
 rays and nonstacking haste/slow that cancel to neutral; the Lore dodge and bounded
 reach are TOR adaptations. See [the bounded item mapping](../reference/items.md#reading-identification-and-charged-devices).
@@ -465,12 +470,16 @@ consumer yet and is explicitly unsupported rather than an inert displayed trait.
 
 Acceptance: capacity/anatomy constraints, unknown-property disclosure, naming
 without identification, allowed observed-use learning, resource consumption,
-obstruction/bounces, starvation/healing, AI use and full recovery. The bounded opt-in treasure-room mechanism, ordinary fruit and standalone
-stackable darts/shuriken now use those shared foundations; their exact contracts
-are in the [population schema](../reference/scenario-packages.md#first-entry-population)
-and [item reference](../reference/items.md). Existing live distributions remain
-unchanged. Food safeguards, live treasure frequency and overall balance remain
-separate future decisions, not implied by this content-completion batch.
+obstruction/bounces, starvation/healing, AI use and full recovery. The bounded
+treasure-room mechanism, ordinary fruit and standalone stackable darts/shuriken
+use those shared foundations and are now selected by provisional live policy.
+Seventeen completed catalog items enter through supplemental finite stock, while
+rare treasure rooms add bounded loot and next-depth foes without replacing the
+existing stages. Their exact contracts and choices are in the
+[population schema](../reference/scenario-packages.md#live-rogue-content-policy)
+and [item reference](../reference/items.md). Torches remain catalog-only and the
+Polymorph destination roster is unchanged. Food safeguards, calibrated frequencies
+and overall balance remain separate decisions, not implied by activation.
 
 ### Species, traps and pressure
 
@@ -527,8 +536,11 @@ through TOR mechanics; all specials work via ordinary actions/physics; inactive
 floors neither spawn nor accumulate catch-up spawning.
 
 Difficulty continues beyond the goal's eligibility depth within the current
-256-HD capacity, which is accepted for functional Rogue. The selected mixed M/V/G/J/D
-tail reaches J's limit at depth 267; a sampled J at 268 or deeper refuses the
+256-HD capacity, which is accepted for functional Rogue. The following boundaries
+are effective actor birth depths: the ordinary actor stage uses floor depth,
+while treasure uses floor depth + 1 and can therefore refuse entry one floor
+earlier. The selected mixed M/V/G/J/D tail reaches J's limit at depth 267;
+a sampled J at 268 or deeper refuses the
 whole entry atomically. G reaches its limit at 269 and refuses at 270; D reaches its limit at 272
 and refuses at 273; all-M/V draws can remain valid through 274. Admission
 checks the sampled recipe and never clamps or replaces it. This explicit

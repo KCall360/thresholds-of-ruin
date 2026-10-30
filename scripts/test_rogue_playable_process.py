@@ -28,7 +28,7 @@ from process_harness import (
 )
 from arena_matrix import toml_source
 from process_work_budget import ProcessOutputBudget, ProcessWorkBudget
-from rogue_activation_oracle import reviewed_twenty_six_activation
+from rogue_activation_oracle import reviewed_live_activation
 from rogue_earned_route_process import read_authoritative_evidence
 from rogue_magic_receipts import (
     EQUIPMENT_ITEM_STAGE_IDS, CONTROL_ITEM_STAGE_IDS, MAGIC_ITEM_STAGE_IDS,
@@ -58,7 +58,7 @@ def carried_stock(frame, supply):
 def fixed_initial_population_manifest(manifest):
     """Reviewed current26 source, diagnostic-only fixed initial population."""
     actual = json.dumps(manifest.get("floor_activation"), sort_keys=True)
-    expected = json.dumps(reviewed_twenty_six_activation(), sort_keys=True)
+    expected = json.dumps(reviewed_live_activation(), sort_keys=True)
     if actual != expected:
         raise ValueError("Fixed-initial diagnostic requires exact reviewed current26 population")
     fixture = copy.deepcopy(manifest)
@@ -379,6 +379,46 @@ class WalkthroughMovementPolicyTests(unittest.TestCase):
     def graph(self):
         return SimpleNamespace(edges={"here": {}, "destination": {}}, observe=lambda _: None,
                                route_through=lambda *_: [("destination", "east")])
+
+    def test_cleared_return_endpoint_uses_one_paid_wait_and_preserves_stock(self):
+        driver = RoguePlayableProcesses()
+        current, settled = self.frame(tick=300), self.frame(tick=400)
+        for frame in (current, settled):
+            observation(frame)["inventory"] = [
+                {"id": "food", "quantity": "1", "known_supply": {"id": "ration"}},
+                {"id": "care", "quantity": "5", "known_supply": {"id": "bandage"}}]
+        with patch.object(driver, "settled_action", return_value=settled) as action:
+            self.assertIs(driver.wait_at_cleared_return(None, current), settled)
+        action.assert_called_once_with(None, {"type": "wait"})
+        for mutation in ("dead", "hostile"):
+            unsafe = copy.deepcopy(current)
+            if mutation == "dead":
+                observation(unsafe)["combat"]["dead"] = True
+            else:
+                observation(unsafe)["combat"]["actors"][0]["hostile"] = True
+            with self.subTest(before=mutation), patch.object(
+                    driver, "settled_action") as action, self.assertRaises(AssertionError):
+                driver.wait_at_cleared_return(None, unsafe)
+            action.assert_not_called()
+        for mutation in ("unpaid", "moved", "dead", "hostile", "ration", "bandage"):
+            invalid = copy.deepcopy(settled)
+            view = observation(invalid)
+            if mutation == "unpaid":
+                view["tick"] = observation(current)["tick"]
+            elif mutation == "moved":
+                view["visible_cells"][0]["key"] = "elsewhere"
+            elif mutation in ("dead", "hostile"):
+                if mutation == "dead":
+                    view["combat"]["dead"] = True
+                else:
+                    view["combat"]["actors"][0]["hostile"] = True
+            else:
+                row = next(row for row in view["inventory"] if row["known_supply"]["id"] == mutation)
+                row["quantity"] = str(int(row["quantity"]) - 1)
+            with self.subTest(mutation=mutation), patch.object(
+                    driver, "settled_action", return_value=invalid) as action, self.assertRaises(AssertionError):
+                driver.wait_at_cleared_return(None, current)
+            action.assert_called_once_with(None, {"type": "wait"})
 
     def test_one_paid_wait_returns_fresh_state_without_replaying_the_move(self):
         driver = RoguePlayableProcesses()
@@ -899,6 +939,24 @@ class RogueChecks:
             self.assertEqual(underfoot(result["state"])["key"], key)
         return result, direction if moved else None
 
+    def wait_at_cleared_return(self, player, current):
+        """Create a visible paid endpoint after returning from an active floor."""
+        view = observation(current)
+        self.assertFalse(view["combat"]["dead"])
+        self.assertFalse(any(row["hostile"] for row in view["combat"]["actors"]))
+        # A hidden foe may take an autonomous turn after MoveUp.
+        # One ordinary Wait on the cleared floor supplies the explicit visible
+        # endpoint witness; never inspect private history to choose or retry it.
+        result = self.settled_action(player, {"type": "wait"})
+        after = observation(result)
+        self.assertFalse(after["combat"]["dead"])
+        self.assertFalse(any(row["hostile"] for row in after["combat"]["actors"]))
+        self.assertGreater(int(after["tick"]), int(view["tick"]))
+        self.assertEqual(underfoot(result["state"])["key"], underfoot(current["state"])["key"])
+        for supply in ("bandage", "ration"):
+            self.assertEqual(carried_stock(result, supply), carried_stock(current, supply))
+        return result
+
     def checkpoint_walkthrough_transport(self, player, server, budget, label, *, closed_processes=(),
                                          require_visible_endpoint=False):
         """Losslessly seal stopped transport, then verify exact saved authority.
@@ -1169,6 +1227,8 @@ class RogueChecks:
         return current, meals.eaten
 
     def assert_rogue_population(self, receipt, scope, cause):
+        from rogue_magic_receipts import LIVE_CONTENT_STAGE_IDS, assert_live_content_receipts
+
         self.assertEqual(receipt["scope"], scope)
         self.assertEqual(receipt["entrant"], 1)
         self.assertEqual(receipt["cause"], cause)
@@ -1190,11 +1250,13 @@ class RogueChecks:
         )
         self.assertEqual([stage["id"] for stage in receipt["decisions"]],
                          [stage for stage, _, _, _ in expected]
-                         + ["rogue.room_gold", *MAGIC_ITEM_STAGE_IDS, *EQUIPMENT_ITEM_STAGE_IDS, *CONTROL_ITEM_STAGE_IDS])
+                         + ["rogue.room_gold", *MAGIC_ITEM_STAGE_IDS, *EQUIPMENT_ITEM_STAGE_IDS,
+                            *CONTROL_ITEM_STAGE_IDS, *LIVE_CONTENT_STAGE_IDS])
         entities = assert_room_gold_receipt(self, receipt["decisions"][4], depth)
         entities.extend(assert_magic_item_receipts(self, receipt["decisions"][5:8], require_placed=True))
         entities.extend(assert_equipment_item_receipts(self, receipt["decisions"][8:12], require_placed=True))
-        entities.extend(assert_control_item_receipts(self, receipt["decisions"][12:], require_placed=True))
+        entities.extend(assert_control_item_receipts(self, receipt["decisions"][12:13], require_placed=True))
+        entities.extend(assert_live_content_receipts(self, receipt["decisions"][13:], depth))
         for stage, (_, choices, kind, count) in zip(receipt["decisions"][:4], expected, strict=True):
             self.assertEqual(stage["version"], 1)
             result = stage["result"]
@@ -1500,6 +1562,11 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
         self.assertEqual(self.overview(player)["growth"]["earned_xp"], completed_earned_xp)
         self.assertEqual(self.private_receipts(), entered_receipts,
                          "A revisit appended or changed a durable floor-entry receipt")
+        returned = self.wait_at_cleared_return(player, returned)
+        self.assertEqual(underfoot(returned["state"])["key"], departure_key)
+        self.assertEqual(self.overview(player)["growth"]["earned_xp"], completed_earned_xp)
+        self.assertEqual(self.private_receipts(), entered_receipts,
+                         "The paid endpoint witness changed a floor-entry receipt")
         # Keep the original source-free round-trip seal as an explicit witness.
         server, player, returned = self.checkpoint_walkthrough_transport(
             player, server, budget, "transport-round-trip", closed_processes=closed_transports,

@@ -74,7 +74,7 @@ class AsciiMemoryProcesses(ProcessTestCase):
         refreshed = self.key(window, "right", wait_for_admission=True)
         self.assertEqual(self.tile(refreshed,4)["glyph"],".")
         self.assertTrue(self.tile(refreshed,4)["remembered"])
-        self.key(window, "escape", wait_for_admission=True)
+        self.key(window, "save_quit", wait_for_admission=True)
         window.child.wait(timeout=10)
         observer.stop(); server.stop()
         self.server()

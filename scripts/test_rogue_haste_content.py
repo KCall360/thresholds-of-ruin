@@ -44,9 +44,9 @@ class RogueHasteContent(unittest.TestCase):
             "descriptors": [], "capacity": "reject", "timing": {"kind": "actor_active", "on_expiry": {"kind": "remove"}},
             "restrictions": ["voluntary_actions"], "preparation": "pause"})
 
-    def test_existing_live_stock_and_starter_kits_do_not_gain_haste_potion(self):
+    def test_haste_supplement_preserves_existing_device_stock_and_starter_kits(self):
         manifest = source("scenario.toml")
-        self.assertNotIn("rogue.haste'", repr(manifest["floor_activation"]))
+        self.assertIn("rogue.haste'", repr(manifest["floor_activation"]))
         stage = manifest["floor_activation"]["profiles"]["rogue.low_depth"]["stages"][7]
         self.assertEqual(stage, {"id": "rogue.magic_devices", "version": 1, "kind": "items",
             "count": [1, 1], "quantity": 1, "bands": [{"depth": {"kind": "open", "minimum": 1},

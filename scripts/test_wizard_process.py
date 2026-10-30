@@ -115,7 +115,7 @@ class WizardProcesses(ProcessTestCase):
         player.stop()
         wizard.stop()
         text_spectator.stop()
-        self.key(spectator, "escape", wait_for_simulation=False)
+        self.key(spectator, "save_quit", wait_for_simulation=False)
         spectator.child.wait(timeout=10)
         self.assertTrue(capture.exists())
         server.stop()

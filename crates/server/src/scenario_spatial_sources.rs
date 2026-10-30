@@ -604,6 +604,51 @@ pub(super) fn spatial_effect_enabled(package: &Package) -> Result<bool, Failure>
     Ok(spatial)
 }
 
+/// Negative source-closure fixtures must not start with an unrelated live root.
+/// Remove only the independently pinned supplemental stage, never its catalog.
+#[cfg(test)]
+pub(crate) fn unroot_live_rogue_supplement(manifest: &mut Manifest) {
+    let stages = &mut manifest
+        .floor_activation
+        .as_mut()
+        .unwrap()
+        .profiles
+        .get_mut("rogue.low_depth")
+        .unwrap()
+        .stages;
+    assert_eq!(stages.len(), 15);
+    let removed = stages.remove(13);
+    let choices: Vec<_> = [
+        "haste",
+        "gain_strength",
+        "raise_level",
+        "hallucination",
+        "monster_detection",
+        "magic_detection",
+        "food_detection",
+        "magic_mapping",
+        "wand_nothing",
+        "wand_light",
+        "wand_drain_life",
+        "wand_cancellation",
+        "wand_magic_missile",
+        "wand_polymorph",
+        "fruit",
+        "dart",
+        "shuriken",
+    ]
+    .into_iter()
+    .map(|name| serde_json::json!({"archetype":format!("rogue.{name}"),"weight":1}))
+    .collect();
+    assert_eq!(
+        serde_json::to_value(removed).unwrap(),
+        serde_json::json!({
+            "id":"rogue.expanded_stock","version":1,"kind":"items","count":[0,1],
+            "quantity":1,"bands":[{"depth":{"kind":"open","minimum":1},"choices":choices}]
+        })
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -613,6 +658,7 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/rogue-exploration");
         let scenario = load(&root, 7, None, true).unwrap();
         let mut package = (**scenario.package.as_ref().unwrap()).clone();
+        unroot_live_rogue_supplement(&mut package.manifest);
         let mut document = package.rules().unwrap().document().clone();
         let mut light = document
             .abilities
@@ -909,6 +955,7 @@ mod cancellation_source_tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/rogue-exploration");
         let scenario = load(&root, 7, None, true).unwrap();
         let mut package = (**scenario.package.as_ref().unwrap()).clone();
+        unroot_live_rogue_supplement(&mut package.manifest);
         let mut document = package.rules().unwrap().document().clone();
         let mut ability = document
             .abilities
