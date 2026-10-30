@@ -438,7 +438,7 @@ recovery = 100
 [[creatures.species."rogue.leprechaun".melee.strikes]]
 offset = 0
 check = { actor = "user", skill = { kind = "natural_attack" }, against = { kind = "defense", defense = "physical" } }
-on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "impact", amount = { kind = "rolled", dice = { count = 1, sides = 3, bonus = 1 } } }] } }]
+on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "impact", amount = { kind = "rolled", dice = { count = 1, sides = 5, bonus = 0 } } }] } }]
 on_failure = []
 descriptors = []
 riders = []

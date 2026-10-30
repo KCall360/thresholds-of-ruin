@@ -384,7 +384,7 @@ through normal death drops. The Amulet remains the same unique objective item.
 
 Orcs (O) appear at depths 4–13 with one humanoid Warrior HD, purchased W02
 Measured Cut, natural 1d8 damage and greedy acquisition: as in Rogue, an orc
-goes for Gold it can safely collect and otherwise attacks. Their Gold interest
+goes for Gold it can safely collect and otherwise attacks. As in Rogue, no monster flees because it is wounded; a scare effect still drives monsters off. The medusa confuses with its claws rather than a separate gaze. Their Gold interest
 does not grant theft. These are provisional TOR builds and
 behaviors, not a calibrated survival curve or original Rogue timing. See
 [shared theft and Gold](../reference/items.md#theft-and-gold) for exact inventory

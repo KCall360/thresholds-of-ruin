@@ -200,29 +200,48 @@ armor. With those, all 116 judged ratios are within the ratified ±35%. The
 final study over seeds 0–15 judged 117 ratios, all within ±35%, with at least
 20 measured attacks for every species.
 
-Signature effects (30 October 2026). Arena reports now count applied effects,
-and the study judges each species' signature per foe action. Rogue 5.4.4 has no
-monster flight, so every Rogue species has `flee_percent = 0`. Over seeds 0–15:
+Signature effects (30 October 2026). Arena reports count the effects each
+participant applied, and the study judges each species' signature per foe action.
+Each encounter stands on a quiet floor of the species' depth (an arena `floor`),
+so floor rules such as theft apply, and a ratio is judged only when its side made
+at least 20 attack checks; species that seldom attack get four times the seeds.
+Rogue 5.4.4 monsters never flee, so the package disables the
+`low_health_flight` capability rather than editing species.
 
-| Species | Signature | Target | Measured | Within ±35% |
-| --- | --- | --- | --- | --- |
-| A aquator | rust armor | 0.80 | 0.85 | Yes |
-| R rattlesnake | Strength poison | 0.20 | 0.15 | Yes |
-| F venus flytrap | hold | 0.70 | 0.47 | No |
-| M medusa | gaze confusion | 0.49 | 0.27 | No |
-| V vampire | maximum-Health drain | 0.21 | 0.55 | No |
-| W wraith | level drain | 0.08 | 0.37 | No |
-| L leprechaun | steal gold | 0.27 | 0 | No |
-| N nymph | steal magic item | 0.45 | 0 | No |
-| I ice monster | freeze | 0.35 | no attacks | Not measured |
+Final study over seeds 0–15: 128 judged ratios, all within ±35% except the
+medusa's confusion.
 
-The dragon's breath is a ranged action in Rogue, not a hit rider, so the per-hit
-target does not judge it. The ice monster and bat die to one hit; after a missed
-swing the provoked monster's attack, scaled by its Speed, has not resolved before
-the adventurer's next swing kills it, where Rogue's alternating turns would give
-it one. That is a turn-order difference to decide, not a value to tune. The
-thieves carry out basic attacks instead of their filch abilities even with gold
-or a magic item to take, which needs diagnosis before tuning.
+| Species | Signature | Target | Measured | Foe checks | Within ±35% |
+| --- | --- | --- | --- | --- | --- |
+| I ice monster | freeze | 0.35 | 0.12 | 16 | Not judged |
+| R rattlesnake | Strength poison | 0.20 | 0.15 | 54 | Yes |
+| L leprechaun | steal gold | 0.27 | 0.31 | 83 | Yes |
+| A aquator | rust armor | 0.80 | 0.85 | 118 | Yes |
+| N nymph | steal magic item | 0.45 | 0.42 | 74 | Yes |
+| F venus flytrap | hold | 0.70 | 0.69 | 826 | Yes |
+| W wraith | level drain | 0.08 | 0.08 | 212 | Yes |
+| M medusa | gaze confusion | 0.49 | 0.27 | 330 | No |
+| V vampire | maximum-Health drain | 0.21 | 0.18 | 582 | Yes |
+
+Values chosen by measurement: the wraith's drain rider uses Lore against Physical
+defense and the vampire's Spellcasting against Cognitive; the flytrap gains one
+point of accuracy; the thieves gain accuracy and their theft riders use natural
+attack against Spiritual (a theft rider must keep a check, so Rogue's certain
+nymph theft becomes the easiest pairing); the leprechaun deals 1d5 so its damage
+survives ring mail as Rogue's does; the medusa confuses with its first strike, as
+in Rogue, instead of spending turns on a separate gaze; the ice monster and bat
+gain defense and Health, and the bat accuracy and damage, so they live to strike
+back. A per-action [timeline](../development/arena.md#offline-evaluation) showed
+why they never did: a provoked passive monster's next decision falls at the tick
+of the swing that provoked it, so it waits a step, and a monster that dies to one
+blow never acts.
+
+Open limits: the dragon's breath is a ranged action in Rogue, not a hit rider, so
+the per-hit target does not judge it. The ice monster attacks too rarely (16
+checks) for its own ratios to be judged, as in Rogue. The medusa's confusion
+lands at about half Rogue's rate per attack because `rogue.confused` keeps an
+existing confusion instead of extending it, as Rogue does; that condition's
+stacking is a protected shape, so matching Rogue needs an engine decision.
 
 Open engine defect: a held adventurer's AI basic-melee plan against an adjacent
 flytrap fails execution with `InvalidPlan` when the flytrap's Clutch resolves
