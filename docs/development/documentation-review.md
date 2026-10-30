@@ -136,8 +136,12 @@ waited. The positive rotated-portal escape control also passed before the fix.
 
 Current [retreat scoring](../reference/ai.md#retreat-distance-and-limits) compares
 hop counts of the same minimum-duration remembered-route policy from the actual
-current/candidate frames. Regressions also retain one-way escapes, blocked and
-unknown-route behavior, preview purity and checkpointed AI execution. Additional
+current/candidate frames. Full CI caught a follow-on regression: this initially
+made a retained navigation map mandatory even for currently visible local retreat.
+The corrected policy retains a single-metric local fallback only in an unwrapped
+disclosed chart within the actor/threat region, without teaching topology. Regressions also retain one-way
+escapes, blocked/unknown-route behavior, same-region folded-chart rejection,
+preview purity and checkpointed AI execution. Additional
 candidate searches are an explicit correctness cost, not a measured speedup.
 The approved deterministic correction uses rules identity `interactions-v57`.
 All saves pinned to the previous identity are rejected, not only saves containing

@@ -469,9 +469,13 @@ impl Game {
         }
         if ai.state == State::Flee {
             let threat = threat.expect("flee has a disclosed or remembered threat");
-            if let Some(direction) = route(threat)
-                .and_then(|route| self.ai_retreat_direction(id, threat, route.len(), view))
-            {
+            if let Some(direction) = self.ai_retreat_direction(
+                id,
+                threat,
+                route(threat).map(|route| route.len()),
+                view,
+                &snapshot.scene,
+            ) {
                 // A technique may use only this already disclosed legal retreat.
                 // Paid prefixes still escape through the ordinary atomic Move.
                 if committed.is_none() {
@@ -651,9 +655,59 @@ impl Game {
         &self,
         actor: ActorId,
         threat: Location,
-        current: usize,
+        current_route: Option<usize>,
         view: &crate::Observation,
+        scene: &[tor_world::SightCell],
     ) -> Option<Direction> {
+        let actor_state = self.actors.get(&actor)?;
+        let displacement = |from: Location, to: Location| {
+            [
+                i64::from(to.position.x) - i64::from(from.position.x),
+                i64::from(to.position.y) - i64::from(from.position.y),
+                i64::from(to.position.z) - i64::from(from.position.z),
+            ]
+        };
+        let local_distance = |at: Location| {
+            [
+                (at.position.x, threat.position.x),
+                (at.position.y, threat.position.y),
+                (at.position.z, threat.position.z),
+            ]
+            .into_iter()
+            .map(|(at, threat)| u128::from(i64::from(at).abs_diff(i64::from(threat))))
+            .sum::<u128>()
+        };
+        // Current visibility does not require a retained navigation map. Keep
+        // ordinary local retreat available in that case, but select one metric
+        // for the whole decision: local coordinates never compete with hops.
+        // Same-region portals can fold coordinates too. Use only an unwrapped
+        // already-disclosed chart in this region, never inspect hidden links
+        // to justify it. Other-region occurrences do not invalidate ordinary
+        // local steps; any disclosed fold back into this region still does.
+        let local_chart = || {
+            scene
+                .iter()
+                .filter(|cell| cell.physical && cell.location.region == view.location.region)
+                .all(|cell| {
+                    cell.rotation == actor_state.orientation
+                        && displacement(view.location, cell.location)
+                            == tor_world::rotate_vector(
+                                actor_state.orientation,
+                                [
+                                    i64::from(cell.offset.x),
+                                    i64::from(cell.offset.y),
+                                    i64::from(cell.offset.z),
+                                ],
+                            )
+                })
+        };
+        let current = match current_route {
+            Some(distance) => distance as u128,
+            None if view.location.region == threat.region && local_chart() => {
+                local_distance(view.location)
+            }
+            None => return None,
+        };
         Direction::HORIZONTAL
             .into_iter()
             .chain([Direction::Up, Direction::Down])
@@ -666,13 +720,26 @@ impl Game {
                 {
                     return None;
                 }
-                let mut search = self.route_search_from(actor, at, orientation).ok()?;
-                // Compare like with like: hop counts of the same stable
-                // minimum-duration remembered-route policy, not local coordinates.
-                // A directed escape can remove every remembered return path to
-                // this known threat; that is unbounded distance in this graph.
-                // An unknown current distance never reaches this comparison.
-                let distance = search.route(threat).map_or(usize::MAX, |route| route.len());
+                let distance = if current_route.is_some() {
+                    let mut search = self.route_search_from(actor, at, orientation).ok()?;
+                    // A directed escape can remove every remembered return path
+                    // to this known threat: unbounded distance in this graph.
+                    search
+                        .route(threat)
+                        .map_or(u128::MAX, |route| route.len() as u128)
+                } else if at.region == threat.region
+                    && orientation == actor_state.orientation
+                    && displacement(view.location, at) == {
+                        let (x, y, z) = direction.rotated(actor_state.orientation).delta();
+                        [i64::from(x), i64::from(y), i64::from(z)]
+                    }
+                {
+                    local_distance(at)
+                } else {
+                    // Local coordinates cannot rank a portal destination, and
+                    // this decision has no known current route to compare.
+                    return None;
+                };
                 (distance > current).then_some((distance, direction))
             })
             .max_by_key(|(distance, _)| *distance)

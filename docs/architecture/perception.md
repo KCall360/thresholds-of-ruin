@@ -598,7 +598,11 @@ some policy ranking is not the same quantity as accumulated movement time.
 Retreat compares the same route-step quantity from the current and prospective
 positions, using a separate remembered frontier for each legal disclosed candidate
 and its full post-step orientation. Its [distance and limits](../reference/ai.md#retreat-distance-and-limits)
-include directed escapes and unavailable current routes. This does not change the
+include directed escapes and unavailable current routes. A no-route local fallback
+uses one consistent coordinate metric only in the already-cached unwrapped
+physical disclosure chart within the actor/threat region; it neither learns
+topology nor generates another scene.
+This does not change the
 minimum-tick search policy or establish an optimal escape planner; the extra
 candidate-search cost has not been performance-qualified.
 

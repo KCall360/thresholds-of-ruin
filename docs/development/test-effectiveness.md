@@ -61,6 +61,41 @@ These characterize compatibility hardening; no prior data-corruption failure is
 claimed. Deterministic AI replay compatibility requires its own explicit rules
 identity decision, independent of unchanged serialized shapes.
 
+
+## Uninitialized-navigation retreat regression, 30 October 2026
+
+The first v57 draft made a known current route a prerequisite for every retreat.
+Full CI caught a **production policy regression**, not stale fixture expectations:
+current visibility and public AI decisions do not require prior navigation
+initialization. Four `abilities::movement_tests::autonomous` methods lost their
+typed self-step/ordinary-retreat selection; two `abilities::strike_tests` methods
+lost atomic escape from a retained paid prefix. Their original assertions remain.
+
+The bounded evidence window is PR209's initial four Linux/Windows debug/release
+Rust jobs plus a local reproduction with the retained, hash-verified same-source
+executable: **one root, six distinct methods, thirty failed method executions**.
+Platform/profile repeats are executions, not additional roots or methods. Standard
+server boundaries refresh navigation, so these failures alone do not establish
+frequency in an initialized live server. Targeted earlier AI/travel tests missed
+the cross-feature public-Game boundary; the validation set now includes the
+existing autonomous movement and paid-strike owners.
+
+The repair chooses one metric per decision. Known routes retain route-hop
+comparison; absent routes permit a consistent local-coordinate heuristic only in
+an already-disclosed unwrapped physical chart within the actor/threat region
+and for ordinary same-region steps. Other visible regions do not veto those
+local steps; disclosed folds back into the actor’s region do.
+Same-region wrapped/rotated portal controls prevent region identity from being
+mistaken for an ordinary coordinate chart. No navigation mutation, hidden-link
+query or assertion weakening is used. A first correction restored the four movement cases but still rejected the two
+paid-prefix cases because their ordinary local retreat coexisted with a visible
+second room. That focused attempt adds two failed executions of the same methods
+(**thirty-two across both windows**); the region-scoped chart gate
+corrects that over-conservative branch. The final focused checkpoint passes
+AI 80, travel 10, autonomous movement 5 and both paid-prefix methods, with the
+six original assertions untouched. Hosted and local optimized results remain
+separate; the initial failed run is not relabeled green.
+
 ## Projected limb surface investigation, 28 October 2026
 
 Two existing source-contract defects were confirmed while developing the new

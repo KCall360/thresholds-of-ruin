@@ -206,6 +206,211 @@ fn fleeing_can_escape_through_a_disclosed_one_way_portal() {
 }
 
 #[test]
+fn local_flee_without_navigation_keeps_a_strict_disclosed_retreat() {
+    let corridor = Corridor::Unsplit;
+    let (mut game, actor, _) = corridor.game(2, 0);
+    game.navigation.remove(&actor);
+    assert_eq!(
+        game.travel_route(actor, corridor.location(0)),
+        Err(GameError::Blocked)
+    );
+    let before = game.clone();
+    let decision = game.choose_ai(actor).unwrap();
+    assert_eq!(decision.ai.state, State::Flee);
+    assert_eq!(decision.action, Action::Move(Direction::East));
+    assert_eq!(
+        game, before,
+        "current visibility must not write remembered topology"
+    );
+}
+
+#[test]
+fn missing_navigation_does_not_turn_an_approach_or_portal_into_a_retreat() {
+    for corridor in [Corridor::Unsplit, Corridor::Split, Corridor::Rotated] {
+        let (mut game, actor, _) = corridor.game(0, 5);
+        game.navigation.remove(&actor);
+        let before = game.clone();
+        let decision = game.choose_ai(actor).unwrap();
+        assert_eq!(decision.ai.state, State::Flee, "{corridor:?}");
+        assert_eq!(decision.action, Action::Wait, "{corridor:?}");
+        assert_eq!(game, before);
+    }
+    // Although both current coordinates are local, the only retreat crosses
+    // a portal. Without a current route, its destination cannot be ranked by
+    // coordinates from this region.
+    let corridor = Corridor::Rotated;
+    let (mut game, actor, _) = corridor.game(2, 0);
+    game.navigation.remove(&actor);
+    assert!(game.actor_translation(actor, Direction::East).is_some());
+    let before = game.clone();
+    assert_eq!(game.choose_ai(actor).unwrap().action, Action::Wait);
+    assert_eq!(game, before);
+}
+
+#[test]
+fn local_flee_without_navigation_allows_an_unwrapped_region_beside_a_portal() {
+    for corridor in [Corridor::Split, Corridor::Rotated] {
+        let (mut game, actor, threat) = corridor.game(1, 2);
+        game.navigation.clear();
+        let snapshot = game.decision_snapshot(actor).unwrap();
+        assert!(snapshot
+            .view
+            .visible_actors
+            .iter()
+            .any(|other| other.id == threat));
+        assert!(
+            snapshot
+                .scene
+                .iter()
+                .any(|cell| cell.physical && cell.location.region == RegionId(2)),
+            "the already-disclosed scene includes the other region"
+        );
+        assert!(snapshot
+            .scene
+            .iter()
+            .filter(|cell| cell.physical && cell.location.region == RegionId(1))
+            .all(|cell| {
+                cell.rotation == 0
+                    && i64::from(cell.location.position.x) == 1 + i64::from(cell.offset.x)
+                    && cell.location.position.y == cell.offset.y
+                    && cell.location.position.z == cell.offset.z
+            }));
+        assert_eq!(
+            game.actor_translation(actor, Direction::West),
+            Some((corridor.location(0), 0))
+        );
+        assert_eq!(
+            game.travel_route(actor, corridor.location(2)),
+            Err(GameError::Blocked)
+        );
+        let before = game.clone();
+        assert_eq!(
+            game.choose_ai(actor).unwrap().action,
+            Action::Move(Direction::West)
+        );
+        assert_eq!(
+            game, before,
+            "a disclosed remote region does not teach navigation"
+        );
+    }
+}
+
+#[test]
+fn local_flee_without_navigation_rejects_same_region_folded_charts() {
+    let corridor = Corridor::Unsplit;
+    let (mut ordinary, actor, threat) = corridor.game(1, 4);
+    ordinary.navigation.remove(&actor);
+    let snapshot = ordinary.decision_snapshot(actor).unwrap();
+    assert!(snapshot
+        .scene
+        .iter()
+        .filter(|cell| cell.physical)
+        .all(|cell| {
+            cell.location.region == RegionId(1)
+                && cell.rotation == 0
+                && i64::from(cell.location.position.x) == 1 + i64::from(cell.offset.x)
+                && cell.location.position.y == cell.offset.y
+                && cell.location.position.z == cell.offset.z
+        }));
+    let before = ordinary.clone();
+    assert_eq!(
+        ordinary.choose_ai(actor).unwrap().action,
+        Action::Move(Direction::West),
+        "an ordinary disclosed local retreat needs no remembered map"
+    );
+    assert_eq!(ordinary, before);
+
+    for turns in [0, 2] {
+        let mut game = ordinary.clone();
+        game.world
+            .connect(
+                Passage {
+                    from: corridor.location(0),
+                    direction: Direction::West,
+                    to: corridor.location(5),
+                },
+                turns,
+            )
+            .unwrap();
+        if turns == 2 {
+            // Continue the same body-relative ray after its half-turn, so the
+            // shortcut to the threat is physically disclosed in both cases.
+            game.world
+                .connect(
+                    Passage {
+                        from: corridor.location(5),
+                        direction: Direction::East,
+                        to: corridor.location(4),
+                    },
+                    0,
+                )
+                .unwrap();
+        }
+        let snapshot = game.decision_snapshot(actor).unwrap();
+        assert!(snapshot
+            .view
+            .visible_actors
+            .iter()
+            .any(|other| other.id == threat));
+        assert!(
+            snapshot.scene.iter().any(|cell| {
+                cell.physical
+                    && cell.location == corridor.location(5)
+                    && cell.offset == Position { x: -2, y: 0, z: 0 }
+                    && cell.rotation == turns
+            }),
+            "the chart folds within one region, turns={turns}"
+        );
+        assert!(
+            snapshot.scene.iter().any(|cell| {
+                cell.physical
+                    && cell.location == corridor.location(4)
+                    && cell.offset == Position { x: -3, y: 0, z: 0 }
+                    && cell.rotation == turns
+            }),
+            "the shortcut reaches the visible threat, turns={turns}"
+        );
+        let (destination, orientation) = game.actor_translation(actor, Direction::West).unwrap();
+        assert_eq!((destination, orientation), (corridor.location(0), 0));
+        assert!(!game.navigation.contains_key(&actor));
+        assert_eq!(
+            game.travel_route(actor, corridor.location(4)),
+            Err(GameError::Blocked)
+        );
+
+        // Coordinate distance rises from 3 to 4 even though this ordinary
+        // first step approaches through the disclosed same-region shortcut.
+        // Learn only on an independent witness, never on the tested Game.
+        let mut mapped = game.clone();
+        mapped.refresh_navigation();
+        assert_eq!(
+            mapped
+                .travel_route(actor, corridor.location(4))
+                .unwrap()
+                .len(),
+            3
+        );
+        assert_eq!(
+            mapped
+                .route_search_from(actor, destination, orientation)
+                .unwrap()
+                .route(corridor.location(4))
+                .unwrap()
+                .len(),
+            2
+        );
+        let before = game.clone();
+        let decision = game.choose_ai(actor).unwrap();
+        assert_eq!(decision.ai.state, State::Flee);
+        assert_eq!(decision.action, Action::Wait, "turns={turns}");
+        assert_eq!(
+            game, before,
+            "folded perception must not write remembered topology"
+        );
+    }
+}
+
+#[test]
 fn fleeing_does_not_invent_distance_for_an_unknown_current_route() {
     let corridor = Corridor::Split;
     let (mut game, actor, _) = corridor.game(0, 5);
