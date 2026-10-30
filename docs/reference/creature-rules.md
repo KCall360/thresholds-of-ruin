@@ -4,12 +4,15 @@ The simulation evaluates validated scenario content through one modifier fold an
 one plan/resolve/apply pipeline. The [architecture](../architecture/overview.md),
 [rules principles](../architecture/simulation.md#rules-design-and-review), [scenario format](scenario-packages.md)
 and [testing policy](../development/testing.md) describe the surrounding contracts.
+[Progression](progression.md) owns permanent/body records, advancement and XP;
+[combat](combat.md) connects checks and effects to the complete attack lifecycle;
+[equipment](equipment.md) owns socket, capacity and weapon-profile contracts.
 
 ## Content and identity
 
 Each scenario manifest names a rules import with optional scenario overrides, or
 an explicit standalone rules document. Its validated definitions
-include abilities, fixed starter forms, talents, conditions, creature types, subtypes, classes,
+include abilities, fixed starter forms, talents, expertise, conditions, creature types, subtypes, classes,
 descriptors, ability tags, equipment slots, flags, resources and tuning constants. Species and
 templates form the scenario catalog. Content IDs are bounded strings; display
 names are separate, non-authoritative text. Unknown IDs, duplicate definitions,
@@ -96,10 +99,12 @@ numeric socket index identifies a particular position, including repeated slots;
 clients receive the slot ID and disclosed presentation/capability data. Unknown
 slot references are rejected in authored content and restored state. Attributes
 and resources use named fields. Health rolls remain seeded per hit die
-and independent of the rules RNG. The hit-die ledger retains its per-ordinal
-seeds: removing and re-adding an ordinal yields the same Health seed. Its explicit
-restoration policy either leaves the restored purchases empty or refills that
-ordinal from the saved authored build. Maximum-Health changes preserve injury and cannot revive a
+and independent of the rules RNG. The ledger retains exact Health identity;
+body-enrolled builds use stable body/personal ownership rather than interpreting
+an effective row position as a new acquisition. Its explicit restoration policy
+and loss receipts determine which original seed and purchases return; see
+[Health ownership](progression.md#health-ownership-and-recomposition) and
+[restoration](progression.md#latest-hit-die-drain-and-restoration). Maximum-Health changes preserve injury and cannot revive a
 dead creature. Pool recovery saturates while retaining fractional active-time
 progress; capacity increases do not refill pools. Dice pools are bounded and
 use rejection sampling rather than biased modulo selection. Damage uses bounded canonical components with
@@ -296,39 +301,8 @@ in the [Rogue guide](../play/rogue.md#strength-loss-and-ordinary-restoration).
 
 ### Latest-Hit-Die drain and restoration
 
-`drain_latest_hit_die` removes one actual latest HD and its owned purchases.
-`restore_hit_die` restores at most one previously applied HD. Both effects have
-no authored operands: source, Health seed, ordinal and purchases come from the
-ordinary advancement ledger. They use the same abilities, riders, consumables,
-frozen plans and transactional publication as the other loss effects.
-
-Restorable count is the highest applied growth tier minus current actual HD.
-A funded but unapplied earned tier never becomes free restoration. Authored
-ordinal recipes restore their exact source and purchases. ChooseAgain creates
-an empty slot and requires an explicitly selected future racial or class source.
-The original Health root and ordinal are required, so neither restoration nor
-paid regrowth rerolls a retained Health stream. Missing source/root rejects new
-admission atomically, with an explanation in owner advancement inspection. A
-previously committed plan that becomes ineligible retains its normal costs and
-debt and resolves unaffected.
-
-Drain and restoration re-evaluate permanent gates and dormancy through the
-ordinary rebuild. They preserve injury, cooldowns, paid balances, quiet-time
-progress and valid frozen plans. Genuine grant loss cancels the unresolved tail
-with its full commitment/recovery debt; restoring a grant does not replay the
-prefix or resurrect cancelled work. Removing the last HD causes ordinary sticky
-death, inventory drop and once-only fatal-owner XP. Restoration never revives.
-
-The applied and earned growth watermarks remain distinct saved facts; no
-second lost-HD history is stored. Owner stats disclose the computed count and
-advancement discloses the applied ceiling and missing-source/root reason.
-Restoration never spends or refunds XP. Drain may unblock previously earned,
-unspent credit for ordinary paid regrowth; already spent credit is never reused.
-See [earned growth accounting](#earned-xp-and-future-hit-dice).
-
-A newly restored contextual recovery source uses the ordinary lazy growth
-context boundary. Frozen actors preserve a pending denominator until thaw;
-noncontextual drain never asks a frozen actor to perceive the world.
+See [the progression contract](progression.md#latest-hit-die-drain-and-restoration)
+for exact personal/body loss receipts, restoration ordering and XP interaction.
 
 ## Health recovery
 
@@ -364,6 +338,19 @@ only when ordinary actor perception discloses no living hostile. The reset stat
 and unrelated operations reject that scope. Both possible periods are bounded
 by the same fold; scoped contributions remain tracked even when their net
 percentage currently cancels. There is still one Health recovery clock.
+
+The separate `health_recovery_rate { multiplier }` operation selects the strongest
+active multiplier, not a sum or product. After the ordinary and quiet-context
+period folds, divide each period by that multiplier, round up and floor at one
+tick. This is how a Regeneration ring doubles recovery rate without adding a
+second clock; duplicate rate sources do not double it again. It is distinct from
+the Rogue innate Regeneration talent's additive −50 percentage points to
+`health_recovery_period_percent`. That talent is gated by the species-owned
+`regenerative` flag, so a retained personal purchase can become dormant in an
+ineligible body. These are current TOR rules, not verified original-Rogue
+update-cycle parity. See [derivation](../../crates/simulation/src/creatures/derive.rs),
+[bundled Rogue rules](../../scenarios/rogue-exploration/rules.toml) and
+[worn magic](magic-items.md).
 
 Taking or dealing positive applied damage resets quiet at most once per strike
 for each actor involved. Primary and ordered riders share that reset guard; a
@@ -620,274 +607,26 @@ hidden preparations never contribute to this safety projection. See the
 
 ## Advancement points and starting ranks
 
-Rules define named `point_pools`, each with a display name and allowed purchase
-kinds (`skill_rank`, `talent`). `constants.racial_point_grants` and each class's
-`point_grants` declare `{ pool, points }` grants per hit die. A source may grant
-multiple restricted or shared pools, or no points. Unknown pool references,
-duplicate grants, empty allowed-kind lists, duplicate allowed kinds and grants
-over the structural bounds reject before a game starts. Pool definitions are
-identity-keyed: declaration order does not affect compiled semantic hashes. Grant
-order is preserved because convenience purchase commands select the first
-compatible unspent pool.
-
-The default campaign provisionally grants one shared `advancement` point per HD.
-One point buys one talent or one skill rank. This economy has not been accepted
-as final balance. Purchased ranks, purchased talents and unspent points always
-sum to each pool's grant; a purchase cannot borrow another pool's balance. There
-are at most 16 grants and 256 total points per HD, with at most 256 total owned
-talents across all HD (active and dormant combined). Extra grants can remain
-unspent or buy ranks; granting points does not expand the ownership bound.
-Construction, authoring, purchase/replacement and saved current/authored builds
-enforce the same limit before producing an observation. Together with twenty
-skills capped at rank five and two permanent starting ranks, this bounds paid
-purchases at 354 and per-HD pool disclosures at 4,096. Attribute opportunities remain
-separate, every four HD in the default rules.
-
-Creation explicitly records exactly two distinct rank-1 starting skills, outside
-the HD-owned purchases. They cannot be reclaimed by drain, multiclassing or
-restoration. Starting and purchased ranks together cap at five. A purchase may
-belong to an older unspent HD and uses current permanent eligibility. Existing
-owned talents whose requirements cease to hold remain dormant; they spend their
-owned points until their HD is removed. Inspection discloses each pool's grant,
-spent and unspent balance, every purchase, the two starting skills, restoration
-policy, and failed parent/requirement descriptions for dormant talents. Large
-requirement descriptions are bounded summaries with an explicit omission marker.
+Named pools, permanent starting ranks, point ownership and limits now live in
+[progression](progression.md#advancement-points-and-starting-ranks), alongside
+[body versus personal ownership](progression.md#body-and-personal-ownership)
+and [expertise learning](progression.md#expertise-and-intellect-learning).
 
 ### Fixed acquisition forms
 
-A fixed form is an immutable `{ id, name, ability }` definition referencing one
-ordinary ability. A talent may declare up to sixteen unique `form_choices`.
-Acquiring such a root requires one `talent_form` selection containing both its
-talent ID and a listed form ID; a choice-free purchase, an unknown form or a form
-from another root rejects atomically. Ordinary roots reject form operands.
-Either selection kind spends one talent point under the original HD owner, and
-choosing another form cannot purchase the same root twice.
-
-An active root contributes its chosen ability through the ordinary grant under
-that root's source. Dormancy removes the grant without replacing the saved
-choice. Eligibility restoration reinstates that exact form; explicit ownership
-replacement can select another listed form. Records validate the operand even
-while the root is dormant. Form grants share the source modifier bound, so a
-choice-bearing root reserves one of its modifier slots. Forms add no separate
-casting, timing, effect resolution or discovery subsystem.
-
-Creature authoring, private inspection, owner catalog and exact player operands
-retain the chosen form. The compiled rules save adapter requires explicit
-`forms` and every talent's `form_choices`, including empty lists, and rejects
-missing, null, duplicate, unknown or positional field shapes. Source authoring
-may omit an empty `form_choices`; it cannot omit the root `forms` catalog.
-Form catalog order is canonicalized by identity; a root's option order is retained.
-The [advancement controls](../play/advancement.md) use the same exact operands
-in text, headless and native ASCII clients.
+See [fixed acquisition forms](progression.md#fixed-acquisition-forms).
 
 ### Restoration policy
 
-`restoration = "choose_again"` appends an empty restored slot so a character can
-choose again. `restoration = "authored"` saves the complete intended source and
-purchase list per ordinal, independently of player/control ownership. Regrowing
-an intended ordinal requires its original source and refills only that ordinal;
-retained choices are never overwritten. An ordinal beyond the fixed authored
-blueprint is empty when regrown. Saved current and intended sources must agree
-for every overlapping ordinal, even when retained purchases have been edited. Neither path grants starting skills again or
-consumes the combat RNG. Rebuilds retain injury, resource balances and persistent
-death; regrowing Health capacity is not healing or revival. Authored restoration
-can restore ownership of a still-dormant purchase. A retained edit may temporarily
-block a future authored attribute or duplicate talent choice. The current build
-remains saveable with its blueprint intact; the blocked restoration fails
-atomically until the conflicting choices are resolved.
-
-For example, a two-HD Mage with a spell and one purchased rank can declare:
-
-```toml
-starting_skills = ["spellcasting", "lore"]
-restoration = "authored"
-nutrition = { kind = "exempt" }
-hit_dice = [
-  { source = "mage", purchases = [{ pool = "advancement", selection = { kind = "talent_form", talent = "evocation_initiate", form = "spark_lance_fire" } }] },
-  { source = "mage", purchases = [{ pool = "advancement", selection = { kind = "skill_rank", skill = "spellcasting" } }] }
-]
-```
-
-The core ledger exposes read-only append-purchase and replacement previews using
-the same validation as commit. Replacement targets one existing purchase by its
-HD and purchase position, and either refunds it or buys one explicit replacement.
-Its immutable preview discloses all removed purchases at their original positions,
-gross refunds grouped by owning HD/pool, final point balances, and the resulting
-active/dormant talent sets. The replacement spends one point separately, so its
-net unspent balance can be smaller than the gross refund. Commit accepts only the
-validated candidate and rejects a changed source build atomically.
-
-Replacement removes the dependent **ownership** subtree to a fixed point. All
-remaining owned alternatives count, including dormant ones: removing A preserves
-a child requiring A OR C while C remains owned. If C is removed transitively too,
-the child is refunded once. Explicit parent chains and convergent branches use
-the same rule. Non-parent gates govern **activation** separately. Removing a skill
-rank can make a talent dormant without refunding it; a temporary HD gate or an
-unrelated pre-existing dormant branch does not enlarge the refunded subtree.
-Users must explicitly replace a retained dormant purchase to recover its point.
-Starting skills, attributes/opportunities, HD sources/seeds and the fixed authored
-restoration blueprint cannot be rewritten by this transaction.
-
-Previews return a permanent-build candidate and cached derived facts; equipment,
-injury, clocks and reservations must be projected through actor state. Actor
-revision, safety, time and supply authorization remain action-layer concerns.
-Actor-owned creature state also retains a positive permanent-build epoch. A
-successful change of the permanent build advances it once with checked integer
-arithmetic; changing a build and later restoring equal values still advances it
-twice. An identical-build rebuild, temporary conditions, equipment, Health,
-resources and active time leave it unchanged. Failed rebuilds preserve the
-entire state, and exhaustion rejects further build changes rather than wrapping.
-The current creature record requires and preserves this epoch. It is a conflict
-identity, not permission. The simulation purchase action carries an exact typed
-HD owner, named pool and skill/talent choice together with actor, build epoch and
-opaque host branch/stream/reset provenance. Admission requires an active, ready
-actor with no active or paused preparation. Execution rechecks the actor and
-epoch, reruns the permanent preview, and publishes one runtime-preserving rebuild
-through the ordinary action boundary. Authored purchase recovery is checked for
-overflow before spending. Pure preview uses a settled actor candidate without
-mutating clocks, observations, queues, randomness or the game. Its typed runtime
-consequences come from that same validated candidate: effective Health/death,
-Health-recovery state, resource maxima/balances, resulting epoch, condition-removal
-counts without private causers, and the number of canceled resource holds. These
-consequences include equipment/temporary sources and the shared finalized death
-state after equipment removal. Corpse-identity exhaustion rejects preview too.
-The transient finalized outcome is published once; death planning is not repeated.
-Permanent derived values alone cannot describe runtime clamps or death. Rebuilds preserve surviving runtime state
-but can remove newly immune conditions or clamp capacities under existing rules.
-The host must still authenticate the provenance and owner; these domain values
-grant no authority.
+See [restoration policy](progression.md#restoration-policy).
 
 ### Timed ordinary replacement
 
-An ordinary replacement freezes its exact source HD/purchase position, optional
-replacement choice, original actor/build-epoch provenance, authored timings and
-ration policy. Fresh admission requires an active, ready actor with no active or
-paused preparation. Other paid work must finish or be explicitly canceled, and
-its retained recovery debt must expire first.
-
-Safety uses perceived hostile actors and the actor-active quiet interval since
-actual positive received Health loss. It does not inspect another actor's
-private queued actions or preparations. Visible danger, received damage and a
-permanent-build change discard the attempt and release unspent ration holds;
-a retry starts the full authored duration. Ordinary explicit suspension retains
-remaining work and the original intention lineage. Only that exact paused
-intention can resume. Frozen or detached time earns no preparation, recovery or
-quiet-time progress, including when suspension or damage occurs while frozen.
-
-The plan uses the same item-owned holds as other finite-cost actions. Neither
-preparation nor cancellation consumes its ration. At completion, the simulation
-rechecks live safety and epoch, reruns the permanent replacement preview, then
-spends the held ration and finalizes/publishes the runtime-preserving actor
-candidate within one transaction. Death finalization happens after spending so
-a deleted last ration cannot enter the corpse. Any late failure rolls back the
-whole operation, including payment, holds, timers, events and build epoch.
-
-The replacement preserves current injury and legitimate recovery, resources
-subject to their resulting maxima, equipment until ordinary death cleanup,
-cooldowns and knowledge. New immunities may remove conditions, and reduced
-maximum Health can kill through the single ordinary death boundary. Maximum
-reduction is not received damage. Its read-only preview reports the finalized
-runtime consequences and complete permanent dependent refunds; it is never a
-stored whole-game candidate used later for authority.
-
-Ordinary owner queries/actions and independent host save adapters enforce current
-control for fresh access, exact authenticated receipt retry precedence and original
-admission ancestry for accepted work. Private operations are excluded from ordinary
-observer history and interaction preparation views. Text, headless and ASCII use
-the same bounded owner pages and exact confirmation/resume operations. The
-[earned-XP foundation](#earned-xp-and-future-hit-dice) shares these owner controls.
-Instant wizard edits remain a separate privileged surface.
+See [timed ordinary replacement](progression.md#timed-ordinary-replacement).
 
 ### Earned XP and future Hit Dice
 
-The applied effect that crosses alive to dead owns the award. An ally's fatal
-effect earns that ally's XP; earlier contributors receive none. Zero damage,
-immunity, self aliases and unattributed environmental deaths earn no credit.
-The existing death candidate validates corpse allocation and XP overflow, then
-publishes death and its award in the same caller-owned transaction. Retry,
-checkpoint and rewind restore death and progression together; no defeated-ID
-history accumulates beside the lifecycle.
-
-Actors declare `future_growth`: `disabled`, `selected` with an explicit racial
-or class source, or `authored` using their restoration plan. Control ownership
-never enables NPC growth. Earning a threshold immediately adds the next HD when
-the declared source is available, preserving the original ordinal Health stream.
-An authored ordinal restores its saved source and choices; ChooseAgain creates
-an empty purchased-choice slot. Existing ordinary previews spend those points.
-The owner can preview and confirm a different future source through the same
-authenticated branch/reset/BuildEpoch contracts as other advancement.
-
-Drain retains the current XP balance and highest earned tier. HD 6 drained to 5
-with 360 of a provisional 600 XP keeps that 360; 240 new XP regrows HD 6. Explicit
-restoration first leaves the 360 toward HD 7. A completed threshold is spent
-once and is never reused after another drain. Dead effect owners retain awards
-without HD growth or resurrection. An active paid strike sequence retains its
-frozen operands, resolved prefix, remaining tail and recovery through growth while its ability remains granted;
-genuine grant dormancy/removal cancels only the unresolved tail and preserves the full existing commitment/recovery debt, with no cost refund or replayed prefix;
-ordinary rebuild capacity, immunity and preparation consequences still apply.
-
-Disabled, exhausted or temporarily inadmissible future sources retain earned XP.
-Restoring an authored ordinal can temporarily conflict with retained attribute or
-skill ranks, duplicate an owned talent, or exceed the owned-talent bound. These
-ownership conflicts defer that authored row, including when a selected future
-source follows an existing restoration plan. Clearing the conflict retries the
-same held XP, source, purchases and ordinal Health seed. Empty newly selected
-rows do not receive this authored-choice exception.
-Current numeric derived bounds and override conflicts also defer the HD without
-vetoing the fatal effect. These authored bounds are distinct from operational
-allocation, checked-arithmetic and representation failures. Operational failures,
-malformed builds and interaction-invariant violations reject the whole candidate;
-no fatal damage, XP award, growth, inventory, random state or clock change from
-that candidate commits. The host reports capacity and invariant refusals
-generically to the current controller and retains the original queued execution
-for deliberate retry or cancellation. Ordinary unavailable actions still use
-their established failed-intention lifecycle. An interaction contradiction is
-an invariant failure, never a reason to discard a condition or bank an award.
-Automatic growth also defers rather than evicting an otherwise valid timed condition to fit a combined derived bound or override. Genuine immunity removals and explicit rebuild/respec reconciliation retain their normal semantics.
-New XP or authoritative source-fold changes run one bounded growth pass at actor finalization;
-ordinary damage, unchanged timers and reads do not retry an unchanged obstruction.
-Recorded-only Health ledgers also retain XP, but cannot automatically add HD without a genuine saved root.
-An exact analytical projection of that balance advances the recipient's comparison tier
-even before its missing source is supplied. Actual HD growth uses the same
-threshold ordering, without a separate credit bank or refund economy. Checked
-arithmetic-series sums and bounded binary search project funded tiers without a
-loop proportional to an untrusted saved tier. Tiers zero and one share the base
-price; the provisional tier-65,537 price is exactly 6,553,700 XP. The
-temporary actual-HD admission guard also retains XP. Earned, spent and held XP are checked `u64`
-amounts with `earned = spent + held`; restored applied/comparison tiers must also satisfy their exact minimum spent/earned totals. Extra paid regrowth remains valid. Exhaustion rejects the whole transaction,
-including its fatal effect, rather than saturating or discarding value.
-This representational limit is 18,446,744,073,709,551,615 XP, distinct from the
-actual-HD admission guard. Rules bound one award to at most 1,000,000 XP, so exhaustion
-requires at least 18.4 trillion maximum-rule awards. The host reports only a
-generic resource-limit error, without revealing another actor's balance.
-
-Rules provide provisional integer threshold/reward parameters and permanent
-source contributions, with bounded identity overrides. Assessment includes HD,
-starting/purchased training, species, resolved type/subtypes, class, templates
-and owned talents; equipment and temporary conditions do not contribute.
-The cached victim threat peak is separate from the recipient's highest earned
-tier and neither falls through temporary drain. Assessment runs at permanent
-build boundaries, not on each damage tick or owner query. These category weights
-are tuning inputs, not a validated CR model or balance claim; arena measurement
-and ordinary Warrior/Mage HD 1–6 acceptance remain required.
-
-A successful forced push can retain one bounded causal fall episode on the
-displaced actor. A lethal impact in that continuing episode credits the push
-owner through the same atomic death/award boundary. A later applied push replaces
-the owner; a blocked push does not. Settled landing, voluntary displacement, teleport
-or body reshaping retire the episode so unrelated later falls earn no credit.
-Frozen motion preserves it without accruing activity, and journal/checkpoint
-recovery preserves the episode without awarding twice. Items and corpses never
-inherit actor fall provenance. See
-[one-cell translation](../architecture/simulation.md#one-cell-ability-translation).
-
-An off-floor causal owner is loaded for the award without thawing its floor or
-granting catch-up activity. A still-detached owner blocks the transaction until
-loaded; an actually removed historical owner leaves the impact unattributed
-rather than preventing death. This is bounded causal state, not a contributor
-history, unbounded pin set or deferred-death ledger. Damaging condition content
-and its causal adapter remain future work; the typed condition origin alone
-does not implement poison credit.
+See [earned XP and future Hit Dice](progression.md#earned-xp-and-future-hit-dice).
 
 ## Delivery and exposure defenses
 
@@ -1023,14 +762,17 @@ records and the independent concrete saved policy enforce the same bounds;
 restoration does not use authoring fallbacks. Tactical profiles partially override
 supplied fields without replacing acquisition or memory; see
 [behavior authoring](scenario-packages.md#behavior-defaults-and-ai-overrides).
-Mean acquisition adapts the pinned
-Rogue reference's two-in-three chance to one committed eligible TOR AI decision,
-using that actor's current perception. This is a TOR cadence adaptation, not an
-extra clock or a claim of identical Rogue action/RNG timing. Queries, preload,
-frozen time, decisions without a visible eligible opponent and retained paid
-work consume no wake draws. A frightened owner can choose an already-approved
-ordinary escape from a currently visible threat while preserving the existing
-atomic step and abandonment-debt rules, without fresh engagement or wake RNG.
+Mean acquisition has no two-in-three wake lottery in current TOR. At an eligible
+AI decision, a Mean actor with positive memory and no engagement acquires the
+eligible opponent selected from its current perception. Retained paid work does
+not acquire a new enemy or refresh memory. No acquisition draw is consumed by
+queries, preload, frozen time or a decision without an eligible opponent.
+This differs deliberately from the pinned Rogue reference. A frightened owner
+can choose an already-approved ordinary escape from a currently visible threat
+while preserving the existing atomic step and abandonment-debt rules, without
+requiring fresh engagement. The implementation is in
+[AI decision selection](../../crates/simulation/src/ai.rs); boundary witnesses
+are in [behavior tests](../../crates/simulation/src/behavior_tests.rs).
 
 One engagement, its required licensed location and a zero-valid deterministic
 random stream belong to the actor. They survive controller reconfiguration and
@@ -1638,8 +1380,10 @@ single-actor lazy settlement and one perception scene per AI decision. Generated
 certificates, save fixtures and wire samples must come from repository tooling.
 All required local and CI gates in the testing policy must pass before merge.
 The default dungeon scout, guardian and wisp use owned creature builds through
-these same rules. The Rogue package remains exploration-only; shared creature
-support does not establish Rogue parity or accepted adventure balance.
+these same rules. The live Rogue package includes survival, combat, content and an objective;
+its current activation is described in the [Rogue guide](../play/rogue.md).
+Shared creature support and content activation do not establish historical Rogue
+parity or accepted full-adventure balance.
 See [arena evaluation](../development/arena.md) for controlled experiments and
 [project status](../status.md) for remaining acceptance work.
 

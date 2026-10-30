@@ -1,26 +1,18 @@
-# Progression and constructed creatures: implementation plan
+# Progression and constructed creatures: design and acceptance record
 
-This plan orders the work for the [progression design](progression-design.md).
-Phase 1 mechanics, the core phase-2 point ledger and permanent requirement
-predicates, and the phase-3 active-time Health recovery kernel are implemented. Phase 4's
-ordered strike kernel, independent adapters and bounded inspection are implemented;
-its process/native and measured performance acceptance remain distinct gates.
-The point economy and recovery curve remain provisional. Ordinary owner purchase,
-preview and ration-respec controls are implemented. The earned-XP foundation
-supports direct fatal-effect awards, bounded direct-push/fall attribution and
-explicit future-source HD growth through ordinary owner controls. Starter
-movement, fixed forms and paid techniques are implemented and exposed through
-the [playable Rogue presets](../play/rogue.md). Nutrition gameplay,
-damaging-condition credit, complete HD 1–6 play and later content waves are
-unfinished. Wizard editing does not substitute for ordinary progression acceptance.
-Each phase is a separate milestone: it needs the maintainer's explicit approval before it starts, and phases that change the
-ruleset or save format need approval of that format decision too. Every phase
-follows the [testing policy](../development/testing.md), updates the current
-references it changes, and updates [status](../status.md) when scope changes.
+This is the historical implementation sequence and retained acceptance rationale,
+not a current checklist to restart completed work. The shared check/condition,
+owned progression, recovery, ordered-strike and ordinary player controls are
+implemented, as are the full Rogue roster and nutrition mechanisms. Current
+mechanics belong to [progression](../reference/progression.md),
+[combat](../reference/combat.md) and [creature rules](../reference/creature-rules.md).
+[Status](../status.md) owns remaining scope. Numerical calibration, complete earned
+HD 1–6 play and full-run survival remain separate acceptance work.
 
-The phases build the architecture first, prove it with a small Warrior and Mage
-slice, then construct the Rogue roster in waves that track the
-[Rogue plan](rogue.md)'s item, ranged and perception stages.
+The phases below preserve dependency and testing rationale. Historical future tense
+is not authorization for a new milestone or evidence that its current counterpart
+is absent. Every future implementation/compatibility decision still requires its
+ordinary approval and the [testing policy](../development/testing.md).
 
 ## Approved XP and drain policy
 

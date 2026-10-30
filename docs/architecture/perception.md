@@ -184,7 +184,10 @@ A sight line ends at one of these points:
 - **Missing, unloaded or ambiguous geometry** is never a target. It blocks sight
   and is never disclosed as a wall.
 
-Actors and items are disclosed when a cell they occupy is visible, under the same perception rule. An actor is visible if any of its body cells is visible.
+Visible occupied cells make actors and items candidates for disclosure. A body
+can be physically seen through any visible occupied cell, but actor identity and
+appearance still pass the ordinary illumination, awareness, concealment and
+private recognition gates; geometry alone is not an unconditional identity grant.
 
 ### Blockers
 
@@ -334,8 +337,9 @@ Observer-relative topology resolution stays separate from opacity, with these in
 - Each candidate offset resolves to a location and frame.
 - Crossings consume distance. All 24 proper rotations are supported.
 - A physical cell may appear at several offsets.
-- If two topology routes to the same offset disagree, the offset is treated as
-  missing geometry.
+- Along the straight unfolded route, tied axis-crossing orders must agree on
+  the resolved location and frame. Disagreement is treated as missing geometry.
+  This is not an enumeration of every arbitrary path to the same offset.
 
 The segment test takes place in the observer's unfolded space. Blocker shapes
 depend on neighbours, so face exposure is evaluated on **resolved neighbouring
@@ -350,8 +354,9 @@ walls from those facts; there are no separate server surface probes. A missing
 cell is never invented as a wall or a room boundary. ASCII merges heights into
 one map, and text examines disclosed surfaces; neither changes the sight rule.
 
-Snapshots contain complete views. Updates use view deltas relative to an exact
-connection base. Occurrences are matched by relative position after a frame
+Snapshots contain complete views. Demand-driven picture updates can use deltas
+relative to an exact connection base; ordered causal outcomes and readiness are
+separate update families and do not require a new picture. Occurrences are matched by relative position after a frame
 shift, not solely by opaque key: a physical cell can occur more than once.
 Sequence gaps or base mismatches cannot be applied as partial truth. Reconnect
 and rewind establish snapshot boundaries. See the [protocol reference](../reference/protocol.md)
@@ -555,3 +560,45 @@ approach construction and repeated unchanged observers also dominated cost.
 They are dated evidence with specific workloads and measurement boundaries,
 not current guarantees. Precomputed occlusion masks remain unjustified by the
 accepted measurements; adding them would require new equivalence evidence.
+
+## AI and remembered-route authority
+
+[Autonomous decisions](../reference/ai.md) owns current AI priority, engagement,
+care, attack, fallback and retreat limitations. AI uses this same authorized actor
+scene; private engine identity is not a targeting grant. Admission queues a
+decision without observation, path search or RNG; execution and publication obey
+the [simulation cycle](simulation-cycle.md#4-select-work-respecting-session-stop-conditions).
+
+### Known-space pathfinding and its limits
+
+Navigation remembers only perceived walkable cells and confirmed disclosed links.
+A previously known cell can become remembered opaque; never-seen solid/unknown
+cells are not walkable route candidates. Link admission checks both scene
+endpoints and composed physical frame. Hash sets used for membership do not
+choose authoritative ordering. Remembered information can remain stale outside
+current perception, so each executed move revalidates current geometry/body fit.
+
+`RouteSearch` is a deterministic Dijkstra-style minimum-tick search over
+`(Location, orientation)` nodes. Its ordered frontier stores accumulated `u128`
+cost, insertion order and node; distances/predecessors are ordered maps. Edge
+cost is the actor's checked movement duration. Physical link rotations and
+flight-gated vertical edges matter. For a diagonal, the component routes must
+produce a legal agreeing endpoint/frame when both exist; one valid side route
+can suffice under the movement rule. A stationary actor expands no movement.
+
+One search is shared across destinations within a decision. It incrementally
+expands until a requested destination is settled, then reconstructs a complete
+`Vec<TravelStep>` through predecessors. Thus it is not a separate full search per
+target, but repeated long destinations still reconstruct route vectors. The
+algorithm finds a minimum cost in **remembered** topology; it is not an omniscient
+shortest path through currently hidden changes, and route step count used by
+some policy ranking is not the same quantity as accumulated movement time.
+
+The current flee heuristic does not use one uniform distance metric. Its
+[qualified limitation](../reference/ai.md#current-retreat-limitation) is separate
+from the minimum-tick route-search guarantee; no optimal or topology-neutral
+retreat behavior is implied here.
+
+Source: [remembered routing](../../crates/simulation/src/travel.rs), `RouteSearch`,
+`refresh_navigation_scene`; [retreat scoring](../../crates/simulation/src/ai.rs),
+`choose_ai`; [movement contracts](../reference/movement.md).

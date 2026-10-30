@@ -500,9 +500,9 @@ number-key actions. Item symbols and framed stone/brass textures share bounded
 procedural atlases, using disclosed models when available and category symbols
 for unknown models. The bundled serif font has its [credits and license](assets/ui/NOTICE.txt).
 
-The supplied six UI concepts guide further work. A graphical progression tree,
-combined map and journal, and
-pause/accessibility settings remain unfinished.
+The supplied six UI concepts guide further work. The combined map/journal and
+graphical advancement choices are implemented; a full progression-tree design,
+richer resource presentation and pause/accessibility settings remain unfinished.
 
 ## How it works
 
@@ -811,9 +811,13 @@ pause/accessibility settings remain unfinished.
 
 ## Not done
 
-Advancement, abilities, history, notes and the other screens; choosing a
-quantity when taking or dropping part of a stack (the whole stack moves).
-The independent verification gate covers the retained prototype scope.
+The implemented advancement, ability, retained-history and note interfaces do
+not yet provide full ASCII-client parity; see the remaining screen/action limits
+under [Controls](#controls). Choosing a quantity when taking or dropping part of
+a stack also remains unfinished (the whole stack moves). The interface polish
+and pause/accessibility work described above remain separate from those current
+capabilities. The independent verification gate covers the retained prototype
+scope, not a completed redesign or performance target.
 
 The scene draws one representative rig per disclosed actor target. Repeated
 body cells and portal images do not create additional rigs. Mouse selection

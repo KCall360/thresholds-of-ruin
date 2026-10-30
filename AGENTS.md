@@ -166,9 +166,11 @@ Performance follow-up remains open. Runtime scripting and its language remain
 undecided. Planning approval does not authorize starting a new implementation
 milestone.
 
-The accepted [Rogue plan](docs/plans/rogue.md) builds on exploration-only floor
-generation, then adds shared mechanics and content. Preserve the distinction
-between existing foundations and unfinished survival, content and objective work.
+The accepted [Rogue plan](docs/plans/rogue.md) records the adaptation decisions
+behind the now-playable scenario. Survival mechanics, the live roster and the
+retrieval objective are implemented; [current status](docs/status.md) and the
+[live content policy](docs/reference/scenario-packages.md#live-rogue-content-policy)
+distinguish those capabilities from unfinished balance and future work.
 
 The ASCII client uses messages on top, one full-width map that merges heights,
 three status rows and on-demand screens. Its controls and limitations live in the

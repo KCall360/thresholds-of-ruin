@@ -85,3 +85,9 @@ case; retain the open research below when implementing a corresponding effect.
 5. Extract/check every source-dependent edge case when implementing the relevant
    effect. Catalog summaries identify required mechanics but do not replace the
    reference for all conditionals or presentation messages.
+
+## Consumable adaptation findings
+
+[Retained information, light, growth and device findings](consumable-adaptations.md)
+preserve the pinned source comparison. They are not current TOR mechanics; those
+belong to the linked current references.

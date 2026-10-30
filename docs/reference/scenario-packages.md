@@ -1141,6 +1141,9 @@ without objectives may omit a build.
 
 ## Behavior defaults and AI overrides
 
+The [AI reference](ai.md) owns runtime decision priority and remembered tactics;
+these fields configure permissions, not a separate combat engine.
+
 A species may author a `behavior` record. Its resolved policy contains
 `disposition`, `idle`, `memory_ticks`, `doors`, `care`, `equipment`, `loot`,
 `gold` and `flee_percent`. Omitting behavior gives conservative passive acquisition with
@@ -1159,7 +1162,7 @@ Unknown names and invalid values are rejected.
 
 | Field | Meaning |
 | --- | --- |
-| `disposition` | `passive` requires ordinary hostile provocation; `mean` uses the existing seeded acquisition check |
+| `disposition` | `passive` requires ordinary hostile provocation; `mean` directly acquires an eligible visible foe; continual-Stealth awareness can gate eligibility |
 | `idle` | `explore` permits autonomous exploration and useful-item detours; `wait` forbids all idle movement |
 | `memory_ticks` | Actor-active engagement memory, from 0 through 1000000 inclusive |
 | `doors` | Permit opening reachable known doors; anatomy or creature kind never infers this permission |
@@ -1208,6 +1211,11 @@ for how lighting controls perception and [generation recipes](generation.md)
 for generated room lighting.
 
 ## Verification and performance boundaries
+
+The unique-retrieval ledger independently admits at most 4,096 eligible entry
+receipts, including entries while the Amulet is already carried. Exhaustion
+refuses an entry atomically; it is not a terminal floor or victory. See
+[unique retrieval](../../crates/simulation/src/unique_retrieval.rs).
 
 The [scenario integration suite](../../crates/server/tests/it/scenario_packages.rs),
 [package reference check](../../scripts/test_scenario_references.py) and actual-process

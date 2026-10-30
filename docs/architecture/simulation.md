@@ -2,7 +2,9 @@
 
 `tor-simulation` owns authoritative in-memory rules. It performs no I/O,
 rendering, wall-clock reads or implicit random sampling. This page explains action
-atomicity, saved preparations, scheduling and review principles. Use
+atomicity, saved preparations, scheduling and review principles. For exact
+request-to-publication order, timer/physics phases and failure boundaries, use the
+[end-to-end simulation cycle](simulation-cycle.md). Use
 [creature rules](../reference/creature-rules.md) for mechanics,
 [protocol](../reference/protocol.md) for client envelopes and
 [architecture](overview.md) for crate ownership.
@@ -14,7 +16,9 @@ There is no global player or player-only inventory. Backend setup creates actors
 ordinary player commands cannot call setup methods. Authorized
 [wizard operations](../development/wizard.md) use separate validated, journaled authority.
 
-The scheduler selects the earliest readiness time and breaks actor ties by ID.
+The ordinary scheduler selects the earliest readiness time and breaks actor ties
+by ID. Ready explicit input boundaries take priority; the full selection rules
+are in the [simulation cycle](simulation-cycle.md#4-select-work-respecting-session-stop-conditions).
 The direct action API rejects an actor that is not due. Several actors can act at
 the same tick. Integer time advances because of simulated actions and deadlines,
 never frames, mailbox delays or save timers. Positive durations prevent zero-cost
@@ -369,8 +373,9 @@ Save completion and behind-schedule warnings are checked every 50 ms between
 actions or by a timer while blocked. That timer never advances the game. If idle,
 the thread waits for messages, output capacity or save work.
 
-Client pacing delays the presentation of observation updates, not authoritative
-execution. The first update after a pause appears immediately; other message kinds
+Clients coalesce visual demand through `Observe`; pacing delays picture
+presentation, not authoritative execution or ordered outcome/status handling.
+The first picture update after a pause appears immediately; other message kinds
 apply on arrival. The connection holds a cancel-safe pending update until due,
 so reading slowly backpressures the server. Skip displays received progress
 without waiting until the next request. Defaults and player controls belong in
