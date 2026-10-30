@@ -868,7 +868,8 @@ def save_at(address, token=TOKEN, actor=None):
              *(["--actor", str(actor)] if actor is not None else [])],
             input=json.dumps({"type": "request", "request": {"type": "save"}}) + "\n" + json.dumps({"type": "quit"}) + "\n",
             text=True, capture_output=True, timeout=35, cwd=ROOT, env={**os.environ, "TOR_SERVER_TOKEN": token})
-        errors = [] if result.returncode else save_errors(result.stdout)
+        # The client exits nonzero after any error reply, SaveBehind included.
+        errors = save_errors(result.stdout)
         if errors and all(str(error).startswith("SaveBehind") for error in errors):
             continue
         if result.returncode or errors:

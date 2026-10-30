@@ -49,6 +49,19 @@ class Acceptance(unittest.TestCase):
         self.assertEqual(acceptance.check_starvation([combat])["starved"], 0)
         self.assertEqual(acceptance.check_starvation([starved])["starved"], 1)
 
+    def test_a_waived_check_keeps_its_result_and_is_listed(self):
+        report = {"food": {"pass": True}, "starvation": {"pass": False, "starved": 5}}
+        waived = acceptance.apply_waivers(dict(report), ["starvation"])
+        self.assertEqual(waived["starvation"], {"pass": False, "starved": 5, "waived": True})
+        self.assertEqual(waived["waived"], ["starvation"])
+        self.assertTrue(waived["pass"])
+        self.assertFalse(waived["pass_without_waivers"])
+        plain = acceptance.apply_waivers(dict(report), [])
+        self.assertFalse(plain["pass"])
+        self.assertEqual(plain["waived"], [])
+        with self.assertRaises(ValueError):
+            acceptance.apply_waivers(dict(report), ["no_such_check"])
+
     def test_food_is_judged_against_the_model_ratio(self):
         expected = acceptance.model_food_ratio()
         at_model = expected * 90000 / 100 / acceptance.MEAL

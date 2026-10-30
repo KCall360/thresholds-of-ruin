@@ -64,7 +64,8 @@ The server broadcasts a warning when saving is overdue or fails. While saving is
 overdue it applies backpressure: new player commands wait in arrival order and
 autonomous play pauses, so play cannot outrun durable storage; queries, saves
 and connections are still handled. An explicit save that is not durable within
-five seconds is answered with `save_behind` and stays queued.
+five seconds (`--save-reply-ms`) is answered with `save_behind` and stays
+queued. A process test holds an exclusive SQLite lock as a slow disk to check both.
 
 The maximum age must be at least the positive target, and at most one day. Idle
 time must not exceed maximum age. Queue capacity is between one byte and 1 GiB;

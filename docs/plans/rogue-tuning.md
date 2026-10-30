@@ -393,7 +393,10 @@ orc measured under its own greedy acquisition.
 | Starvation share | Waived: bot-limited | 5 of 9 deaths |
 
 The maintainer accepted food as matching Rogue and waived the starvation share
-as a limit of the bot, not the tuned values (30 October 2026):
+as a limit of the bot, not the tuned values (30 October 2026). `rogue_acceptance.py
+--waive starvation` records that: the waived check keeps its own failing result,
+`pass` covers every other check (it passes, including all 128 judged encounter
+ratios) and `pass_without_waivers` stays false:
 
 - Generation matches the source: 0.56 food per first floor over 120 floors
   against Rogue's 0.52 ordinary rate, and the drought guarantee now forces food

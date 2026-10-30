@@ -311,8 +311,9 @@ class SaveBarriers(unittest.TestCase):
                 self.assertTrue(all(isinstance(argument, str) for argument in command))
 
     def test_a_behind_schedule_save_is_asked_again_until_durable(self):
+        # The real client exits 1 after an error reply.
         behind = subprocess.CompletedProcess(
-            [], 0, stdout='{"error":"SaveBehind: saved through 3, this save needs 9."}\n', stderr="")
+            [], 1, stdout='{"error":"SaveBehind: saved through 3, this save needs 9."}\n', stderr="")
         done = subprocess.CompletedProcess([], 0, stdout='{"error":null}\n', stderr="")
         with patch("process_harness.binaries", return_value=Path("synthetic-bin")), \
                 patch("process_harness.subprocess.run", side_effect=[behind, behind, done]) as run:

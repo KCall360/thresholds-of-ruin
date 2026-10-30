@@ -130,8 +130,21 @@ def evaluate(runs, study):
         "depth_4": check_depth(runs),
         "species": check_species(study),
     }
-    report["pass"] = all(row["pass"] for row in report.values())
     return report
+
+
+def apply_waivers(report, waived):
+    """Maintainer-waived checks keep their own result and are listed; `pass`
+    covers the rest, and `pass_without_waivers` covers every check."""
+    unknown = set(waived) - set(report)
+    if unknown:
+        raise ValueError(f"Unknown checks to waive: {sorted(unknown)}")
+    checks = {name: row for name, row in report.items() if isinstance(row, dict)}
+    for name in waived:
+        checks[name] = {**checks[name], "waived": True}
+    return {**checks, "waived": sorted(waived),
+            "pass": all(row["pass"] for name, row in checks.items() if name not in waived),
+            "pass_without_waivers": all(row["pass"] for row in checks.values())}
 
 
 def load_runs(directories):
@@ -146,9 +159,12 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--campaign", nargs="+", type=Path, required=True)
     parser.add_argument("--study", type=Path, required=True)
+    parser.add_argument("--waive", nargs="*", default=[],
+                        help="Checks the maintainer waived; each keeps its own result")
     args = parser.parse_args(argv)
     study = json.loads(args.study.read_text(encoding="utf-8"))
-    print(json.dumps(evaluate(load_runs(args.campaign), study), indent=1, default=str))
+    report = apply_waivers(evaluate(load_runs(args.campaign), study), args.waive)
+    print(json.dumps(report, indent=1, default=str))
 
 
 if __name__ == "__main__":

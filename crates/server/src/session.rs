@@ -277,6 +277,8 @@ pub struct Service {
     /// Client, request, target sequence and when it was queued.
     pending_saves: Vec<(u64, String, u64, std::time::Instant)>,
     save_warning: Option<String>,
+    /// How long an explicit save waits for durability before `SaveBehind`.
+    save_reply_wait: std::time::Duration,
     // One ephemeral delivery witness, never simulation or saved authority.
     reported_execution_failure: Option<(u64, StreamContext, BranchId, EntryId, ErrorCode)>,
     clients: BTreeMap<u64, Client>,
@@ -333,12 +335,26 @@ impl Service {
             broadcasting_travel: false,
             engine,
             pending_saves: Vec::new(),
+            save_reply_wait: SAVE_REPLY_WAIT,
             save_warning,
             reported_execution_failure: None,
             clients: BTreeMap::new(),
             controllers: BTreeMap::new(),
             next_client: 1,
         })
+    }
+
+    /// Change how long an explicit save waits before answering `SaveBehind`;
+    /// between one millisecond and a minute.
+    pub fn set_save_reply_wait(&mut self, wait: std::time::Duration) -> Result<(), Failure> {
+        if wait.is_zero() || wait > std::time::Duration::from_secs(60) {
+            return Err(Failure::new(
+                ErrorCode::InvalidRequest,
+                "Invalid save reply wait",
+            ));
+        }
+        self.save_reply_wait = wait;
+        Ok(())
     }
 
     pub(crate) fn set_diagnostics(&mut self, diagnostics: Option<crate::diagnostics::Diagnostics>) {
@@ -2292,7 +2308,7 @@ impl Service {
             if !self.clients.contains_key(&id) {
                 continue;
             }
-            match save_reply(&status, target, queued.elapsed()) {
+            match save_reply(&status, target, queued.elapsed(), self.save_reply_wait) {
                 SaveReply::Durable => {
                     self.engine.survival_save_barrier(status.durable_sequence);
                     if let Some(receipt) = self.session_receipt(id) {
@@ -2345,18 +2361,23 @@ pub(crate) const SAVE_REPLY_WAIT: std::time::Duration = std::time::Duration::fro
 enum SaveReply {
     Durable,
     Failed(String),
-    /// Not durable within [`SAVE_REPLY_WAIT`]; the save stays queued.
+    /// Not durable within the reply wait; the save stays queued.
     Behind,
     Wait,
 }
 
 /// A pending explicit save's answer: durable, failed, behind or not yet due.
-fn save_reply(status: &crate::SaveStatus, target: u64, waited: std::time::Duration) -> SaveReply {
+fn save_reply(
+    status: &crate::SaveStatus,
+    target: u64,
+    waited: std::time::Duration,
+    limit: std::time::Duration,
+) -> SaveReply {
     if status.durable_sequence >= target {
         SaveReply::Durable
     } else if let Some(message) = &status.error {
         SaveReply::Failed(message.clone())
-    } else if waited >= SAVE_REPLY_WAIT {
+    } else if waited >= limit {
         SaveReply::Behind
     } else {
         SaveReply::Wait
@@ -2376,18 +2397,27 @@ mod tests {
             ..Default::default()
         };
         let short = SAVE_REPLY_WAIT / 2;
-        assert_eq!(save_reply(&status, 7, short), SaveReply::Durable);
         assert_eq!(
-            save_reply(&status, 7, SAVE_REPLY_WAIT * 2),
+            save_reply(&status, 7, short, SAVE_REPLY_WAIT),
             SaveReply::Durable
         );
-        assert_eq!(save_reply(&status, 9, short), SaveReply::Wait);
+        assert_eq!(
+            save_reply(&status, 7, SAVE_REPLY_WAIT * 2, SAVE_REPLY_WAIT),
+            SaveReply::Durable
+        );
+        assert_eq!(
+            save_reply(&status, 9, short, SAVE_REPLY_WAIT),
+            SaveReply::Wait
+        );
         // Never "outcome unknown": a slow writer gets a definite answer in time.
-        assert_eq!(save_reply(&status, 9, SAVE_REPLY_WAIT), SaveReply::Behind);
+        assert_eq!(
+            save_reply(&status, 9, SAVE_REPLY_WAIT, SAVE_REPLY_WAIT),
+            SaveReply::Behind
+        );
         assert!(SAVE_REPLY_WAIT < std::time::Duration::from_secs(10));
         status.error = Some("disk full".into());
         assert_eq!(
-            save_reply(&status, 9, short),
+            save_reply(&status, 9, short, SAVE_REPLY_WAIT),
             SaveReply::Failed("disk full".into())
         );
     }
