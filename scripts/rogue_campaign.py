@@ -14,6 +14,7 @@ for the ratified run-shape tolerances, never a balance proof on their own.
 """
 import argparse
 from collections import Counter
+from copy import deepcopy
 import json
 import shutil
 import subprocess
@@ -26,7 +27,7 @@ from arena_matrix import toml_source
 from process_harness import OutputQueue, Process, ProcessTestCase, ROOT, settle_rogue_action
 import rogue_earned_route
 import rogue_reference_model
-from rogue_earned_route import Controller, ControllerError
+from rogue_earned_route import Controller, ControllerError, _foes, _here, _position, _stock
 from rogue_test_support import DisclosedSearchSweep
 from scalar_wire import u64
 
@@ -86,6 +87,7 @@ def item_generation(receipts):
             "food_per_floor": sum(row["food"] for row in floors.values()) / count if count else None,
             "drought_floors": sum(row["drought"] for row in floors.values())}
 MAX_PATIENT_WAITS = 20
+DEATH_WINDOW = 30
 MAX_REFUSED_STEPS = 5
 RESPONSE_SECONDS = 90
 
@@ -126,6 +128,12 @@ def summarize(controller, samples, outcome, *, seed, wall_seconds):
         "samples_by_hunger": dict(hunger),
         "hungry_share": sum(hunger[band] for band in HUNGER_BANDS) / len(samples),
         "meals_eaten": sum(1 for sample in samples if sample["phase"] == "eat"),
+        # What the adventurer faced and did just before dying.
+        "before_death": ({"foes": dict(Counter(name for sample in samples[-DEATH_WINDOW:]
+                                                for name in sample.get("foes", []))),
+                          "phases": dict(Counter(sample["phase"]
+                                                 for sample in samples[-DEATH_WINDOW:]))}
+                         if outcome == "death" else None),
         # Where each floor's commands went, to tell a stalled bot from a slow floor.
         "phases_per_floor": {str(depth): dict(Counter(sample["phase"] for sample in samples
                                                       if sample.get("depth") == depth))
@@ -137,6 +145,60 @@ def summarize(controller, samples, outcome, *, seed, wall_seconds):
         "wall_seconds": wall_seconds,
         "unavailable": ["wanderer_arrivals", "kills_by_species", "traps_triggered"],
     }
+
+
+STARVING = ("weak", "empty")
+
+
+def steady(state):
+    """The same state with Health and resources shown full.
+
+    The base controller then neither rests nor retreats, and otherwise makes
+    its ordinary fight, explore or descend choice from the same view.
+    """
+    copy = deepcopy(state)
+    combat = copy["observation"]["combat"]
+    combat["hp"] = combat["max_hp"]
+    for row in combat["own_stats"]["resources"]:
+        row["balance"] = row["maximum"]
+    return copy
+
+
+def adjacent_foe(view):
+    return any(max(abs(x), abs(y)) <= 1 and z == 0
+               for x, y, z in (_position(row) for row in _foes(view)))
+
+
+def starving(view):
+    hunger = view["combat"]["own_stats"]["nutrition"].get("hunger")
+    return hunger in STARVING and _stock(view)["ration"] == 0
+
+
+class CampaignController(Controller):
+    """The earned-route controller with two Rogue-player habits for long runs.
+
+    It never steps away on foot from an adjacent foe, which is as fast and
+    would get free attacks; the up stairs remain an escape. When Weak or
+    fainting with no food, it stops resting and heads for known down stairs
+    before exploring, since only new floors can hold food.
+    """
+
+    def choose(self, state):
+        view = state["observation"]
+        hungry = starving(view)
+        decision = super().choose(steady(state) if hungry else state)
+        action = decision.action or {}
+        if (decision.phase == "retreat" and action.get("direction") != "up"
+                and adjacent_foe(view)):
+            decision = super().choose(steady(state))
+        if hungry and decision.phase == "explore":
+            floor, here = self.floors[self.depth], _here(state)
+            if here["stairs_down"]:
+                return type(decision)({"type": "move", "direction": "down"}, "descend")
+            route = floor.route(here["key"], floor.graph.stairs_down, set())
+            if route:
+                return self._step_decision(view, route[0][1], "descend")
+        return decision
 
 
 class RollingOutputQueue(OutputQueue):
@@ -189,8 +251,13 @@ class CampaignRun(ProcessTestCase):
         return frame["advancement_page"]
 
     def settled(self, player):
-        """A state where the adventurer can act or the run is terminal."""
-        for _ in range(200):
+        """A state where the adventurer can act or the run is terminal.
+
+        Some turns run long stretches of other actors' time first, so the wait
+        uses the same reply deadline as other harness frames.
+        """
+        deadline = time.monotonic() + RESPONSE_SECONDS
+        while time.monotonic() < deadline:
             frame = self.request(player, {"type": "snapshot"})
             combat = observation(frame)["combat"]
             if combat["terminal"] or combat["dead"] or (
@@ -240,7 +307,7 @@ class CampaignRun(ProcessTestCase):
         package = PACKAGE if self.start_depth == 1 else self.deep_package()
         self.server(scenario=package, seed=self.seed)
         player, _ = self.client(omit_memory=True)
-        controller = Controller(1, floor_limit=self.floor_limit, run_limit=self.run_limit)
+        controller = CampaignController(1, floor_limit=self.floor_limit, run_limit=self.run_limit)
         # The scenario grows the locked build; there is no first-HD purchase phase.
         controller.segment = "continuation"
         controller.depth = self.start_depth
@@ -258,6 +325,8 @@ class CampaignRun(ProcessTestCase):
             decision = controller.choose(state)
             samples.append({"tick": state["observation"]["tick"], "phase": decision.phase,
                             "depth": controller.depth,
+                            "foes": [row.get("name", "") for row in rogue_earned_route._foes(
+                                state["observation"])],
                             "hp": u64(combat["hp"]), "max_hp": u64(combat["max_hp"]),
                             "hit_dice": combat["own_stats"]["hit_dice"]["total"],
                             "earned_xp": controller._advancement["growth"]["earned_xp"],

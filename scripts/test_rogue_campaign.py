@@ -3,8 +3,10 @@ from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 import unittest
+from unittest import mock
 
 import rogue_campaign as campaign
+from rogue_earned_route import Decision
 
 
 def witness(total, tick):
@@ -18,8 +20,9 @@ def fake_controller():
         floor_commands={1: 40, 2: 10}, commands=50, rest_episodes=2)
 
 
-def sample(tick, phase="explore", hunger="nourished", hit_dice=3, depth=1):
-    return {"tick": str(tick), "phase": phase, "depth": depth, "hp": 10, "max_hp": 20,
+def sample(tick, phase="explore", hunger="nourished", hit_dice=3, depth=1, foes=()):
+    return {"tick": str(tick), "phase": phase, "depth": depth, "foes": list(foes),
+            "hp": 10, "max_hp": 20,
             "hit_dice": str(hit_dice), "earned_xp": "150", "hunger": hunger}
 
 
@@ -45,9 +48,80 @@ class RollingSpool(unittest.TestCase):
                 spool.close()
 
 
+def view(*, hp=5, hunger=None, rations=0, foe_at=None):
+    actors = [] if foe_at is None else [{"actor": "9", "hostile": True}]
+    visible = [] if foe_at is None else [
+        {"id": "9", "name": "orc", "position": dict(zip("xyz", foe_at))}]
+    inventory = [{"id": "r", "quantity": str(rations), "known_supply": {"id": "ration"}}] if rations else []
+    return {"observation": {
+        "combat": {"hp": str(hp), "max_hp": "20", "actors": actors,
+                   "own_stats": {"nutrition": {"hunger": hunger},
+                                 "resources": [{"balance": 1, "maximum": 4}]}},
+        "visible_actors": visible, "inventory": inventory}}
+
+
+class CampaignHabits(unittest.TestCase):
+    def setUp(self):
+        self.controller = campaign.CampaignController(1)
+        self.seen = []
+
+    def base(self, results):
+        def choose(controller, state):
+            full = state["observation"]["combat"]["hp"] == state["observation"]["combat"]["max_hp"]
+            self.seen.append(full)
+            return results[full]
+        return mock.patch.object(campaign.Controller, "choose", choose)
+
+    def test_steady_shows_full_health_and_resources_without_touching_the_state(self):
+        state = view(hp=3)
+        shown = campaign.steady(state)
+        self.assertEqual(shown["observation"]["combat"]["hp"], "20")
+        self.assertEqual(shown["observation"]["combat"]["own_stats"]["resources"][0]["balance"], 4)
+        self.assertEqual(state["observation"]["combat"]["hp"], "3")
+
+    def test_retreat_on_foot_beside_a_foe_becomes_a_fight(self):
+        fight = Decision({"type": "use_ability", "id": "basic_melee"}, "combat")
+        step = Decision({"type": "move", "direction": "west"}, "retreat")
+        with self.base({False: step, True: fight}):
+            self.assertEqual(self.controller.choose(view(foe_at=(1, 0, 0))), fight)
+            # A distant foe still allows the step away.
+            self.assertEqual(self.controller.choose(view(foe_at=(4, 0, 0))), step)
+        stairs = Decision({"type": "move", "direction": "up"}, "retreat")
+        with self.base({False: stairs, True: fight}):
+            self.assertEqual(self.controller.choose(view(foe_at=(1, 0, 0))), stairs)
+
+    def test_starving_without_food_stops_resting(self):
+        rest = Decision({"type": "wait"}, "rest")
+        onward = Decision({"type": "move", "direction": "east"}, "supply_approach")
+        with self.base({False: rest, True: onward}):
+            self.assertEqual(self.controller.choose(view(hunger="weak")), onward)
+            self.assertEqual(self.seen, [True])
+            # Food in the pack, or mere hunger, keeps the ordinary rest.
+            self.assertEqual(self.controller.choose(view(hunger="weak", rations=1)), rest)
+            self.assertEqual(self.controller.choose(view(hunger="hungry")), rest)
+
+    def test_starving_explorer_takes_known_down_stairs(self):
+        explore = Decision({"type": "move", "direction": "east"}, "explore")
+        floor = mock.Mock()
+        floor.graph.stairs_down = {"stairs"}
+        floor.route.return_value = [("stairs", "north")]
+        self.controller.floors[1] = floor
+        here = {"key": "here", "stairs_down": False}
+        with self.base({False: explore, True: explore}),                 mock.patch.object(campaign, "_here", return_value=here),                 mock.patch.object(campaign.CampaignController, "_step_decision",
+                                  lambda self, view, direction, phase: Decision(
+                                      {"type": "move", "direction": direction}, phase)):
+            self.assertEqual(self.controller.choose(view(hunger="empty")),
+                             Decision({"type": "move", "direction": "north"}, "descend"))
+            here["stairs_down"] = True
+            self.assertEqual(self.controller.choose(view(hunger="empty")),
+                             Decision({"type": "move", "direction": "down"}, "descend"))
+            self.assertEqual(self.controller.choose(view(hunger=None)), explore)
+
+
 class RunSummaries(unittest.TestCase):
     def test_summary_reports_levels_floors_hunger_and_unavailable_fields(self):
-        samples = [sample(0, hit_dice=2), sample(4500, "eat", "hungry"), sample(7000, depth=2)]
+        samples = [sample(0, hit_dice=2), sample(4500, "eat", "hungry"),
+                   sample(7000, "combat", depth=2, foes=["orc", "bat"])]
         run = campaign.summarize(fake_controller(), samples, "death", seed=3, wall_seconds=1.0)
         self.assertEqual(run["summary"], campaign.SUMMARY)
         self.assertEqual((run["deepest_depth"], run["death_depth"]), (2, 2))
@@ -56,7 +130,9 @@ class RunSummaries(unittest.TestCase):
         self.assertEqual(run["ticks_per_floor"], {"1": 5000, "2": 2000})
         self.assertAlmostEqual(run["hungry_share"], 1 / 3)
         self.assertEqual(run["meals_eaten"], 1)
-        self.assertEqual(run["phases_per_floor"], {"1": {"explore": 1, "eat": 1}, "2": {"explore": 1}})
+        self.assertEqual(run["phases_per_floor"], {"1": {"explore": 1, "eat": 1}, "2": {"combat": 1}})
+        self.assertEqual(run["before_death"], {"foes": {"orc": 1, "bat": 1},
+                                               "phases": {"explore": 1, "eat": 1, "combat": 1}})
         self.assertEqual(run["final_level"], 2)
         self.assertIn("wanderer_arrivals", run["unavailable"])
 
@@ -65,6 +141,7 @@ class RunSummaries(unittest.TestCase):
                                  "censored_action_budget", seed=1, wall_seconds=1.0)
         self.assertFalse(run["died"])
         self.assertIsNone(run["death_depth"])
+        self.assertIsNone(run["before_death"])
 
     def test_aggregate_excludes_harness_errors_from_shape(self):
         runs = [campaign.summarize(fake_controller(), [sample(0), sample(6000)], outcome,
