@@ -790,7 +790,12 @@ class RouteExecution:
         # picture-bound advancement page. Demand that picture explicitly; the
         # client coalesces this with any already pending Observe. Do not change
         # general headless admission timing or silently retry a refused query.
-        return self.issue({'type': 'request', 'request': {'type': 'observe'}})
+        confirmed = self.issue({'type': 'request', 'request': {'type': 'observe'}})
+        # The old picture may have said ready before movement recovery began.
+        # Observe confirms the new picture, not completion of that recovery.
+        # Recheck it without submitting extra gameplay work or retrying reads.
+        self.current = settle_rogue_action(Settlement(), self.player, confirmed, survive=False)
+        return self.current
 
     def assert_start(self):
         view = self.current['state']['observation']
