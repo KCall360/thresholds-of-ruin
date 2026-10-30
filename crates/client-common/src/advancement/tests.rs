@@ -98,6 +98,77 @@ fn opened() -> AdvancementPages {
 }
 
 #[test]
+fn pending_pages_survive_ordered_cursor_progress_on_the_same_picture() {
+    for overview in [true, false] {
+        let mut pages = if overview {
+            AdvancementPages::default()
+        } else {
+            opened()
+        };
+        let page = if overview {
+            overview_page()
+        } else {
+            AdvancementPage {
+                basis: basis(),
+                revision: 6,
+                query: AdvancementQuery::Ledger {
+                    basis: basis(),
+                    offset: 0,
+                },
+                total: 0,
+                next: None,
+                entries: vec![],
+            }
+        };
+        pages
+            .track(&context(), "in-flight", 6, &page.query)
+            .unwrap();
+        let mut advanced = context();
+        advanced.cursor.sequence += 1;
+        advanced.cursor.tick += 1;
+        pages.observe(&advanced, true);
+        assert!(!pages.is_current(&advanced));
+        pages
+            .accept(&advanced, "in-flight", &page, MAX_ADVANCEMENT_PAGE_BYTES)
+            .unwrap();
+        assert!(pages.is_current(&advanced));
+        assert!(!pages.is_current(&context()));
+    }
+}
+
+#[test]
+fn pending_pages_reject_changed_picture_authority_and_backward_cursors() {
+    for field in 0..10 {
+        let mut pages = AdvancementPages::default();
+        let page = overview_page();
+        pages
+            .track(&context(), "in-flight", 6, &page.query)
+            .unwrap();
+        let mut changed = context();
+        match field {
+            0 => changed.actor = ActorId(2),
+            1 => changed.branch = BranchId("other".into()),
+            2 => changed.input.stream.stream = StreamId("other".into()),
+            3 => changed.input.stream.epoch += 1,
+            4 => changed.input.readiness_revision += 1,
+            5 => changed.snapshot = tor_protocol::SnapshotId("other".into()),
+            6 => changed.revision += 1,
+            7 => changed.cursor.sequence -= 1,
+            8 => changed.cursor.tick -= 1,
+            _ => {}
+        }
+        pages.observe(&changed, field != 9);
+        assert!(
+            pages
+                .accept(&changed, "in-flight", &page, MAX_ADVANCEMENT_PAGE_BYTES)
+                .is_err(),
+            "field {field}"
+        );
+        assert!(pages.page().is_none());
+    }
+}
+
+#[test]
 fn presentation_freshness_requires_the_exact_context_and_explicit_validity() {
     let pages = opened();
     assert!(

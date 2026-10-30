@@ -253,6 +253,12 @@ impl AdvancementPages {
             self.clear();
         } else if self.context.as_ref().is_some_and(|old| old != context) {
             self.stale = true;
+        }
+        if self
+            .pending
+            .as_ref()
+            .is_some_and(|pending| !pending_context_matches(&pending.context, context))
+        {
             self.pending = None;
         }
     }
@@ -320,7 +326,7 @@ impl AdvancementPages {
             .as_ref()
             .ok_or("Unrequested advancement page.")?;
         if pending.request_id != id
-            || &pending.context != context
+            || !pending_context_matches(&pending.context, context)
             || pending.query != page.query
             || pending.revision != page.revision
             || page.revision != context.revision
@@ -725,6 +731,20 @@ impl AdvancementPages {
         }
         rows
     }
+}
+/// Commands pin the issued picture and input authority, not the event cursor.
+/// An ordered outcome can precede the reply without replacing that picture.
+/// Connection still requires the reply to match its complete current context;
+/// displayed-page freshness continues to require exact context equality.
+fn pending_context_matches(request: &ReplyContext, reply: &ReplyContext) -> bool {
+    request.input == reply.input
+        && request.actor == reply.actor
+        && request.branch == reply.branch
+        && request.snapshot == reply.snapshot
+        && request.revision == reply.revision
+        && (request.cursor == reply.cursor
+            || (reply.cursor.sequence > request.cursor.sequence
+                && reply.cursor.tick >= request.cursor.tick))
 }
 fn basis_matches(basis: &AdvancementBasis, context: &ReplyContext) -> bool {
     basis.actor == context.actor

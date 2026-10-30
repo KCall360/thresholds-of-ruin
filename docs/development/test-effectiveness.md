@@ -2648,3 +2648,36 @@ GitHub Actions hosts, never against a local maintainer desktop. Unit contracts
 cover the Win32 ABI, mode selection, rejection/readback, local-invocation guard,
 workflow ordering and actual native fixture launch arguments. These contracts
 passed locally; live display setup and OS input remain hosted qualification.
+
+### Advancement reply ordering during the earned route
+
+The [Windows release Python shard](https://github.com/KCall360/thresholds-of-ruin/actions/runs/40998634565/job/123880989177)
+failed `test_fixed_seed42_earned_hd_reexecutes_with_exact_source_free_restore_and_gross_flows`
+with `Advancement page does not match its exact request.` Its retained headless
+transcript shows an issued picture at revision 4, followed by an ordered outcome
+advancing the event cursor from sequence 10 to 11 without replacing that picture.
+The pending advancement query incorrectly required the old complete reply
+context, although ordinary commands carry input authority and expected picture
+revision, and replies describe the attachment state when published.
+
+This is one shared-client production correlation defect, one distinct failing
+process method and one observed failed CI execution. It is not a route fixture
+failure or grounds to relax the earned-route assertions. The other observed
+platform/profile route passes do not qualify this failed execution. The Linux
+aggregate correctly rejected the failed Windows cohort.
+
+The unit regression `pending_pages_survive_ordered_cursor_progress_on_the_same_picture`
+and the existing socket acceptance owner extended with an interleaved outcome
+both first failed with the same exact-request error. The correction allows only
+ordered cursor progress while retaining the exact picture and input authority.
+Negative coverage rejects changed actor, branch, stream, reset, readiness,
+snapshot, revision, backward cursors and control loss. Existing exact displayed
+page freshness and both-presenter control-revocation witnesses remain strict;
+the connection still validates the full current wire reply context. The unit
+owner also covers a pending ledger query with a retained overview, where the
+old observation path discarded the pending request.
+
+An initial local preflight omitted the integration target's `test-support`
+feature; the corrected feature configuration compiled. This setup failure and
+the deliberate first-red executions are not additional production root causes.
+Final-head hosted route and full qualification remain required.
