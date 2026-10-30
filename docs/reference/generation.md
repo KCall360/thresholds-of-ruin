@@ -265,8 +265,9 @@ The typed preset can opt into passage-only slots:
 room_omissions = { count = [0, 3] }
 ```
 
-This is an authoring example, **not enabled in the live Rogue package** or an
-approved balance default. The strict policy has only `count`, with ordered bounds
+This is an authoring example. The live Rogue package selects the more conservative
+`room_omissions = { count = [0, 1] }` as provisional activation policy, not calibrated
+balance. The strict policy has only `count`, with ordered bounds
 `0 <= minimum <= maximum <= 63`. The independent deterministic stage samples
 within the declared range and eligible capacity, retaining at least one room.
 A minimum exceeding capacity rejects construction rather than silently reducing
@@ -293,8 +294,9 @@ does not reroll a realized floor from live authoring sources.
 
 The optional strict `maze_rooms` record has one required unsigned field, `one_in`,
 in the range 1–10,000. It requires an explicit `lighting` policy. No value is a
-default, and **the live Rogue package does not enable mazes**. The source's 1-in-15
-frequency is historical reference, not approved live tuning.
+default. The live Rogue package explicitly selects `maze_rooms = { one_in = 15 }`.
+This provisional activation frequency follows the historical reference without
+claiming calibrated balance or exact layout parity.
 
 The existing darkness draw runs exactly once on its unchanged stream. Only present
 dark rooms not reserved for ordinary trap capacity receive one independently keyed
@@ -329,10 +331,12 @@ Room-scoped loot and population use the actual walkable metadata, with their exi
 minimum-capacity rejection and atomic publication rules. Physical occlusion, carried
 light, observer knowledge and AI are unchanged: there is no whole-room revelation.
 
-This opt-in capability has behavioral, current-writer/certificate and actual-process
+The shared capability has behavioral, current-writer/certificate and actual-process
 coverage in the [merged maze batch](https://github.com/KCall360/thresholds-of-ruin/pull/186),
-which completed Windows/Linux debug and release CI. Qualification does not enable
-the live policy or approve a probability; those remain separate tuning decisions.
+which completed Windows/Linux debug and release CI. Those are historical mechanism
+results, not fresh qualification of the live activation policy. Enabling omissions
+and mazes changes realized geometry and legal placement candidates; unchanged stage
+streams do not promise seed-identical floors. Numerical calibration remains open.
 
 ### Secret entrances and hidden traps
 
@@ -460,24 +464,27 @@ authored descent pairs. Initial entry and stair owners/cells vary with the seed;
 descent continues beyond depth 26. The operational limit of 1,000,000 floors is
 an execution budget, not a terminal floor or a victory condition. No unvisited
 floor geometry is generated to establish that limit. This open geometry domain
-does not bypass actor construction capacity: in the selected V/J tail, J reaches
-256 actual HD at depth 267 and a sampled J requires 257 at 268, atomically
-refusing the entire entry. All-V draws can remain valid through depth 274; both
-recipes exceed capacity at 275. No truncated build, replacement draw or partial
+does not bypass actor construction capacity. For example, J reaches 256 actual HD
+at birth depth 267 and requires 257 at 268, atomically refusing the entire entry.
+V can fit through birth depth 274; both recipes exceed capacity at 275. These are
+recipe examples, not a safe-depth guarantee for the complete roster. Treasure
+actors use effective birth depth one higher than floor depth and therefore reach
+the same limits one floor earlier. No truncated build, replacement draw or partial
 population is published; widening deep builds and storage remains unfinished.
 
 These choices are scenario data, not requirements of the generic family API.
 The [accepted adaptation](../plans/rogue.md#adaptation-decisions) deliberately
 retains persistent floors and paired return stairs; Rogue itself regenerates
 floors and chooses arrivals independently of the stair cell. The package
-authors four weighted E/S/H/I/Z/Q/U/V attempts across 19
-depth bands, exact racial growth after depth 26 and provisional Vampire birth
-stock, followed by finite bandage/ration stages. These entry-time decisions are
-separate from geometry preparation, with focused source-qualified activation
-coverage; see [floor activation](scenario-packages.md#first-entry-population)
-and the [Rogue play guide](../play/rogue.md). The full creature/item catalog,
-survival mechanics, calibrated depth pressure and Amulet/victory remain unfinished. In the reference,
-depth 26 starts Amulet eligibility while it is not carried; it does not end descent.
+authors four ordinary weighted actor attempts from all 26 depth-selected species,
+racial growth after depth 26 and finite carried stock, followed by finite supply
+and item stages. Supplemental stock and rare treasure rooms add content after the
+existing stages. These entry-time decisions are separate from geometry preparation;
+see [floor activation](scenario-packages.md#first-entry-population) and the
+[Rogue play guide](../play/rogue.md). Calibrated depth pressure and complete-run
+survival acceptance remain unfinished. The Amulet and intentional surface escape
+are implemented; depth 26 starts Amulet eligibility while it is not carried and
+does not end descent.
 
 ## Verification and diagnostics
 

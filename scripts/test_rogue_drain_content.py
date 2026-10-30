@@ -28,7 +28,7 @@ class RogueDrainContent(unittest.TestCase):
                 "offset": 0, "on_success": [{"kind": "drain_life"}], "on_failure": [], "descriptors": [], "riders": []}]},
             "ai": {"priority": 0, "hostile": False, "minimum_resource_percent": 0, "range_preference": "any"}}])
 
-    def test_drain_is_not_added_to_live_stock_or_starting_kits(self):
+    def test_drain_keeps_legacy_device_stock_and_starting_kits_unchanged(self):
         manifest = source("scenario.toml")
         stage = manifest["floor_activation"]["profiles"]["rogue.low_depth"]["stages"][7]
         self.assertEqual(stage, {"id": "rogue.magic_devices", "version": 1, "kind": "items",

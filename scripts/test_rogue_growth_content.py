@@ -35,10 +35,10 @@ class RogueGrowthContent(unittest.TestCase):
             "amber potion", "smoky potion", "violet potion", "azure potion", "crimson potion",
             "silver potion", "pearl potion", "teal potion", "ochre potion", "indigo potion", "copper potion", "chartreuse potion", "saffron potion", "cerulean potion"])
 
-    def test_existing_restoration_and_live_stock_are_unchanged(self):
+    def test_growth_supplement_preserves_existing_restoration_stock_and_kits(self):
         manifest = source("scenario.toml")
         for kind in ("rogue.gain_strength", "rogue.raise_level"):
-            self.assertNotIn(kind, repr(manifest["floor_activation"]))
+            self.assertIn(kind, repr(manifest["floor_activation"]))
             for character in manifest["characters"]:
                 self.assertNotIn(kind, character["known_identities"])
                 self.assertNotIn(kind, [row["archetype"] for row in character["loadout"]])

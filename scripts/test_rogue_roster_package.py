@@ -74,11 +74,19 @@ class RogueRosterPackageTests(unittest.TestCase):
             self.assertIn('rogue.amulet_of_yendor', character['known_identities'])
             self.assertNotIn('rogue.amulet_of_yendor',
                              [row['archetype'] for row in character['loadout']])
+        band_fields = {
+            'actors': ('bands',),
+            'items': ('bands',),
+            'room_items': ('bands',),
+            'room_cluster': ('item_bands', 'actor_bands'),
+        }
         for profile in source['manifest']['floor_activation']['profiles'].values():
             for stage in profile['stages']:
-                for band in stage['bands']:
-                    self.assertNotIn('rogue.amulet_of_yendor',
-                                     [row['archetype'] for row in band['choices']])
+                self.assertIn(stage['kind'], band_fields)
+                for field in band_fields[stage['kind']]:
+                    for band in stage[field]:
+                        self.assertNotIn('rogue.amulet_of_yendor',
+                                         [row['archetype'] for row in band['choices']])
         for pool in source['manifest']['floor_activation']['carried_item_pools'].values():
             self.assertNotIn('rogue.amulet_of_yendor', [row['archetype'] for row in pool['choices']])
 

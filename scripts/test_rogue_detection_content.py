@@ -61,7 +61,7 @@ class RogueDetectionContent(unittest.TestCase):
         self.assertEqual(len(identities), 14)
         self.assertEqual(len(labels), len(set(labels)))
 
-    def test_generated_stock_and_starter_kits_do_not_enable_opt_in_detection(self):
+    def test_supplement_enables_detection_without_changing_old_stock_or_kits(self):
         manifest = source("scenario.toml")
         stage = next(row for row in manifest["floor_activation"]["profiles"]["rogue.low_depth"]["stages"]
                      if row["id"] == "rogue.magic_potions")
@@ -69,7 +69,7 @@ class RogueDetectionContent(unittest.TestCase):
             {"archetype": "rogue." + kind, "weight": 1} for kind in
             ("healing", "confusion", "blindness", "poison", "see_invisible", "extra_healing", "levitation")]}])
         for kind in KINDS:
-            self.assertNotIn("rogue." + kind, repr(manifest["floor_activation"]))
+            self.assertIn("rogue." + kind, repr(manifest["floor_activation"]))
             for character in manifest["characters"]:
                 self.assertNotIn("rogue." + kind, character["known_identities"])
                 self.assertNotIn("rogue." + kind, [row["archetype"] for row in character["loadout"]])

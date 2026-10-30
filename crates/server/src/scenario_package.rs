@@ -47,6 +47,8 @@ pub use retrieval::UniqueRetrieval;
 #[cfg(test)]
 pub(crate) use spatial_runtime::tests::package as spatial_audit_test_package;
 pub(crate) use spatial_runtime::{HistoricalSourceAudit, SpatialAudit};
+#[cfg(test)]
+pub(crate) use spatial_sources::unroot_live_rogue_supplement;
 #[path = "scenario_rules.rs"]
 mod rules_source;
 pub use artifact::export;
@@ -5395,10 +5397,87 @@ mod tests {
         );
         assert_eq!(ids[6], "rogue.magic_scrolls");
         assert_eq!(ids[7], "rogue.magic_devices");
-        for stage in &stages[5..] {
+        assert_eq!(stages.len(), 15);
+        assert_eq!(
+            &ids[8..],
+            &[
+                "rogue.equipment",
+                "rogue.equipment_scrolls",
+                "rogue.ammunition",
+                "rogue.rings",
+                "rogue.control_scrolls",
+                "rogue.expanded_stock",
+                "rogue.treasure_room",
+            ]
+        );
+        for stage in &stages[5..13] {
             assert_eq!(stage["kind"], "items");
             assert_eq!(stage["count"], serde_json::json!([1, 1]));
         }
+        let supplemental_choices: Vec<_> = [
+            "haste",
+            "gain_strength",
+            "raise_level",
+            "hallucination",
+            "monster_detection",
+            "magic_detection",
+            "food_detection",
+            "magic_mapping",
+            "wand_nothing",
+            "wand_light",
+            "wand_drain_life",
+            "wand_cancellation",
+            "wand_magic_missile",
+            "wand_polymorph",
+            "fruit",
+            "dart",
+            "shuriken",
+        ]
+        .into_iter()
+        .map(|name| {
+            serde_json::json!({
+                "archetype":format!("rogue.{name}"), "weight":1
+            })
+        })
+        .collect();
+        assert_eq!(
+            stages[13],
+            serde_json::json!({
+                "id":"rogue.expanded_stock", "version":1, "kind":"items", "count":[0,1],
+                "quantity":1, "bands":[{"depth":{"kind":"open","minimum":1},
+                    "choices":supplemental_choices}]
+            })
+        );
+        let treasure = &stages[14];
+        assert_eq!(treasure["version"], 1);
+        assert_eq!(treasure["kind"], "room_cluster");
+        assert_eq!(
+            treasure["chance"],
+            serde_json::json!({"numerator":1,"denominator":20})
+        );
+        assert_eq!(treasure["item_count"], serde_json::json!([2, 4]));
+        assert_eq!(treasure["actor_count"], serde_json::json!([1, 3]));
+        assert_eq!(treasure["quantity"], 1);
+        assert_eq!(treasure["actor_depth_offset"], 1);
+        assert_eq!(treasure["ai"], "rogue_hostile");
+        assert_eq!(treasure["avoid_protagonist_sight"], false);
+        assert_eq!(
+            treasure["depth_growth"],
+            serde_json::json!({"kind":"racial_after","depth":26})
+        );
+        assert_eq!(treasure["actor_bands"], stages[0]["bands"]);
+        assert_eq!(
+            treasure["item_bands"],
+            serde_json::json!([
+                {"depth":{"kind":"open","minimum":1}, "choices":[
+                    {"archetype":"rogue.gold","weight":1},
+                    {"archetype":"rogue.healing","weight":1},
+                    {"archetype":"rogue.fruit","weight":1},
+                    {"archetype":"rogue.dart","weight":1},
+                    {"archetype":"rogue.shuriken","weight":1},
+                ]}
+            ])
+        );
         assert_eq!(
             activation["carried_item_pools"].as_object().unwrap().len(),
             2
@@ -5591,7 +5670,56 @@ mod tests {
             serde_json::to_value(&package.manifest.procedural_worlds).unwrap(),
             serde_json::to_value(&geometry.manifest.procedural_worlds).unwrap()
         );
-        let production_recipe = &package.manifest.generation_recipes["exploration"];
+        let live_recipe = &package.manifest.generation_recipes["exploration"];
+        assert_eq!(live_recipe.version, 5);
+        assert_eq!(
+            live_recipe
+                .stages
+                .iter()
+                .map(|stage| stage.id.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "stone",
+                "slots",
+                "rooms",
+                "connections",
+                "corridors",
+                "stairs",
+                "room_omissions",
+                "maze_rooms",
+                "lighting",
+                "secret_entrances",
+                "hidden_traps"
+            ]
+        );
+        assert_eq!(
+            serde_json::to_value(&live_recipe.stages[6]).unwrap(),
+            serde_json::json!({
+                "id":"room_omissions", "version":1,
+                "operation":{"kind":"room_omissions","config":{"count":[0,1]}}
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(&live_recipe.stages[7]).unwrap(),
+            serde_json::json!({
+                "id":"maze_rooms", "version":1,
+                "operation":{"kind":"maze_rooms","config":{"one_in":15}}
+            })
+        );
+        // Preserve the historical discovery-isolation witness with a validated
+        // control removing only the two new, independently pinned layout ops.
+        // The live package intentionally does not promise seed-identical geometry.
+        let mut discovery_manifest = package.manifest.clone();
+        let recipe = discovery_manifest
+            .generation_recipes
+            .get_mut("exploration")
+            .unwrap();
+        recipe.stages.drain(6..8);
+        recipe.version = 3;
+        let discovery =
+            Package::from_parts(discovery_manifest, vec![], &package.rules_source).unwrap();
+        discovery.check().unwrap();
+        let production_recipe = &discovery.manifest.generation_recipes["exploration"];
         let geometry_recipe = &geometry.manifest.generation_recipes["exploration"];
         assert_eq!(production_recipe.version, 3);
         assert_eq!(geometry_recipe.version, 2);
@@ -5632,11 +5760,22 @@ mod tests {
             serde_json::to_value(&explicit.manifest.generation_recipes["exploration"]).unwrap()
         );
         let mut entrances = 0;
+        let mut live_entrances = 0;
+        let mut changed_live_geometry = false;
         for seed in [0, 1, 42] {
             for depth in [26, 27, 101, 1_000_000] {
                 let group = family.group("dungeon", seed, depth).unwrap();
                 let identity = format!("dungeon/{depth}");
-                let mut discovered = package.group_definitions(&identity, seed).unwrap();
+                let live = package.group_definitions(&identity, seed).unwrap();
+                let mut discovered = discovery.group_definitions(&identity, seed).unwrap();
+                assert_eq!(
+                    live.len(),
+                    discovered.len(),
+                    "omissions retain every grid slot"
+                );
+                changed_live_geometry |= live
+                    .iter()
+                    .any(|(id, region)| region.walls != discovered[id].walls);
                 let baseline = geometry.group_definitions(&identity, seed).unwrap();
                 for region in baseline.values() {
                     assert_eq!(region.gravity, Some([0, 0, -1]));
@@ -5644,36 +5783,47 @@ mod tests {
                 assert!(baseline
                     .values()
                     .all(|region| region.doors.is_empty() && region.traps.is_empty()));
-                let trap_count: usize = discovered.values().map(|region| region.traps.len()).sum();
-                assert!(
-                    (1..=2).contains(&trap_count),
-                    "production discovery must place its finite traps"
-                );
-                for region in discovered.values_mut() {
-                    assert!(region
-                        .doors
-                        .iter()
-                        .all(|door| !door.open && door.height == 2 && door.concealment.is_some()));
-                    entrances += region.doors.len();
-                    // New ceiling anchors are independent physical endpoints, not
-                    // rerolled carving/stairs. Assert their clearance before removing
-                    // only these deliberate additions from the geometry comparison.
-                    let landings: Vec<_> = region
-                        .anchors
-                        .iter()
-                        .filter(|(name, _)| name.starts_with("trapdoor_landing_"))
-                        .collect();
-                    assert_eq!(landings.len(), 2);
-                    for (_, landing) in landings {
-                        assert_eq!(landing[2], region.size[2] - 1);
-                        assert!((0..region.size[2])
-                            .all(|z| !region.walls.contains(&[landing[0], landing[1], z])));
-                        assert!(!region.traps.iter().any(|trap| trap.at[..2] == landing[..2]));
+                entrances += discovered
+                    .values()
+                    .map(|region| region.doors.len())
+                    .sum::<usize>();
+                live_entrances += live
+                    .values()
+                    .map(|region| region.doors.len())
+                    .sum::<usize>();
+                for generated in [&live, &discovered] {
+                    let trap_count: usize =
+                        generated.values().map(|region| region.traps.len()).sum();
+                    assert!(
+                        (1..=2).contains(&trap_count),
+                        "live and discovery-control floors retain finite trap placement"
+                    );
+                    for region in generated.values() {
+                        assert!(region.doors.iter().all(|door| !door.open
+                            && door.height == 2
+                            && door.concealment.is_some()));
+                        // New ceiling anchors are independent physical endpoints, not
+                        // rerolled carving/stairs. Assert their clearance before removing
+                        // only these deliberate additions from the geometry comparison.
+                        let landings: Vec<_> = region
+                            .anchors
+                            .iter()
+                            .filter(|(name, _)| name.starts_with("trapdoor_landing_"))
+                            .collect();
+                        assert_eq!(landings.len(), 2);
+                        for (_, landing) in landings {
+                            assert_eq!(landing[2], region.size[2] - 1);
+                            assert!((0..region.size[2])
+                                .all(|z| !region.walls.contains(&[landing[0], landing[1], z])));
+                            assert!(!region.traps.iter().any(|trap| trap.at[..2] == landing[..2]));
+                        }
+                        assert_eq!(region.gravity, Some([0, 0, -1]));
                     }
+                }
+                for region in discovered.values_mut() {
                     region
                         .anchors
                         .retain(|name, _| !name.starts_with("trapdoor_landing_"));
-                    assert_eq!(region.gravity, Some([0, 0, -1]));
                     region.doors.clear();
                     region.traps.clear();
                 }
@@ -5691,8 +5841,16 @@ mod tests {
             }
         }
         assert!(
+            changed_live_geometry,
+            "the live seed matrix must exercise its enabled layout changes"
+        );
+        assert!(
             entrances > 0,
-            "the production seed matrix must exercise actual secret closures"
+            "the discovery control seed matrix must exercise actual secret closures"
+        );
+        assert!(
+            live_entrances > 0,
+            "the live seed matrix must exercise actual secret closures"
         );
     }
 

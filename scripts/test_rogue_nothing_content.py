@@ -1,4 +1,4 @@
-"""Opt-in Nothing content uses shared paid self-device semantics, not live stock."""
+"""Opt-in Nothing content uses shared paid self-device semantics, without changing legacy stock."""
 from pathlib import Path
 import tomllib
 import unittest

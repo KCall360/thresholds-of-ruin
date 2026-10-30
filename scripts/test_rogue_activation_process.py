@@ -16,7 +16,9 @@ from process_harness import ProcessTestCase, ROOT, hit_die_counts, inspect_save
 from process_work_budget import ProcessWorkBudget
 from rogue_activation_candidate import conditional_bands, create_candidate, population_shape
 from rogue_magic_receipts import (MAGIC_ITEM_STAGE_IDS, assert_magic_item_receipts,
-    EQUIPMENT_ITEM_STAGE_IDS, CONTROL_ITEM_STAGE_IDS, assert_equipment_item_receipts, assert_control_item_receipts, assert_finite_item_identity)
+    EQUIPMENT_ITEM_STAGE_IDS, CONTROL_ITEM_STAGE_IDS, LIVE_CONTENT_STAGE_IDS,
+    assert_equipment_item_receipts, assert_control_item_receipts, assert_finite_item_identity,
+    assert_live_content_receipts)
 from rogue_test_support import assert_room_gold_receipt
 from status_condition_package import actor_creature, checkpoint
 
@@ -142,14 +144,20 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
         expected_stages = ["rogue.eight_species_foes", "rogue.bandages", "rogue.rations",
                            "rogue.restore_strength"]
         if production_policy:
-            expected_stages.extend(["rogue.room_gold", *MAGIC_ITEM_STAGE_IDS, *EQUIPMENT_ITEM_STAGE_IDS, *CONTROL_ITEM_STAGE_IDS])
+            expected_stages.extend(["rogue.room_gold", *MAGIC_ITEM_STAGE_IDS, *EQUIPMENT_ITEM_STAGE_IDS,
+                                    *CONTROL_ITEM_STAGE_IDS, *LIVE_CONTENT_STAGE_IDS])
         self.assertEqual([stage["id"] for stage in receipt["decisions"]], expected_stages)
         identities = []
+        cluster = None
         if production_policy:
             identities.extend(assert_room_gold_receipt(self, receipt["decisions"][4], depth))
             identities.extend(assert_magic_item_receipts(self, receipt["decisions"][5:8]))
             identities.extend(assert_equipment_item_receipts(self, receipt["decisions"][8:12]))
-            identities.extend(assert_control_item_receipts(self, receipt["decisions"][12:]))
+            identities.extend(assert_control_item_receipts(self, receipt["decisions"][12:13]))
+            identities.extend(assert_live_content_receipts(self, receipt["decisions"][13:], depth))
+            selection = receipt["decisions"][14]["result"]["selection"]
+            if selection["kind"] == "selected":
+                cluster = selection
         for supply, (content, quantity) in zip(receipt["decisions"][1:4], (
                 ("rogue.clean_bandage", 2), ("rogue.ration", 1), ("rogue.restore_strength", 1)),
                 strict=True):
@@ -201,30 +209,39 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
                 identities.append(("item", stock["item"]))
         self.assertEqual(len(identities), len(set(identities)),
                          "Every placed or carried item must retain a distinct owner identity")
+        actor_births = [(row, depth, stage["bands"]) for row in placed]
+        if cluster is not None:
+            treasure = manifest["floor_activation"]["profiles"]["rogue.low_depth"]["stages"][14]
+            actor_births.extend((row, cluster["actor_depth"], treasure["actor_bands"])
+                                for row in cluster["actors"] if row["kind"] == "placed")
         # Repeated observations and save barriers are not fresh entry or wake.
         for _ in range(3):
             observed = self.request(player, {"type": "snapshot"})
             self.assertDisclosedStateEqual(observed["state"], initial["state"])
         self.assertEqual(self.private_receipts(actor=selected), receipts)
-        # One ordinary action creates a real journal/checkpoint tail. Births are
-        # outside initial sight, so this is a receipt test, not an all-hit duel.
+        # One ordinary action creates a real journal/checkpoint tail. Ordinary
+        # stage births exclude initial sight; treasure births may be visible.
+        # This is a receipt/persistence witness, not a scripted all-hit duel.
         waited = self.act(player, {"type": "wait"})
         self.assertIsNone(waited["error"])
         self.assertEqual(self.private_receipts(actor=selected), receipts)
         saved = self.complete_checkpoint(player) if checkpoint_interval == 1 else None
         if saved is not None:
             if production_policy:
-                for stock_stage in receipt["decisions"][5:]:
-                    for attempt in stock_stage["result"]["attempts"]:
-                        if attempt["kind"] == "placed":
-                            item = saved["items"][str(attempt["entity"]["id"])]
-                            self.assertEqual(item["location"], {"Ground": attempt["location"]})
-                            self.assertEqual(item["quantity"], attempt["entity"]["quantity"])
-                            assert_finite_item_identity(self, item, attempt["content"])
-            for row in placed:
+                item_births = [attempt for stock_stage in receipt["decisions"][5:14]
+                               for attempt in stock_stage["result"]["attempts"]]
+                if cluster is not None:
+                    item_births.extend(cluster["items"])
+                for attempt in item_births:
+                    if attempt["kind"] == "placed":
+                        item = saved["items"][str(attempt["entity"]["id"])]
+                        self.assertEqual(item["location"], {"Ground": attempt["location"]})
+                        self.assertEqual(item["quantity"], attempt["entity"]["quantity"])
+                        assert_finite_item_identity(self, item, attempt["content"])
+            for row, birth_depth, birth_bands in actor_births:
                 recipe = source[row["content"]]["creature"]
                 born = actor_creature(saved, row["entity"]["id"])
-                expected = len(recipe["hit_dice"]) + max(0, depth - 26)
+                expected = len(recipe["hit_dice"]) + max(0, birth_depth - 26)
                 self.assertEqual(len(born["build"]["hd"]), expected)
                 self.assertEqual(born["build"]["species"], row["content"])
                 expected_choices = [{"purchases": die["purchases"], "attribute": die.get("attribute")}
@@ -233,9 +250,9 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
                                     {"kind": "class", "id": die["source"]} for die in recipe["hit_dice"]]
                 expected_sources += [{"kind": "racial"}] * (expected - len(expected_sources))
                 expected_choices += [{"purchases": [], "attribute": None}] * (expected - len(expected_choices))
-                authored = next(choice for band in stage["bands"]
-                                if band["depth"]["minimum"] <= depth and
-                                (band["depth"]["kind"] == "open" or depth <= band["depth"]["maximum"])
+                authored = next(choice for band in birth_bands
+                                if band["depth"]["minimum"] <= birth_depth and
+                                (band["depth"]["kind"] == "open" or birth_depth <= band["depth"]["maximum"])
                                 for choice in band["choices"] if choice["archetype"] == row["content"])
                 for future in authored.get("advancement", []):
                     if future["ordinal"] <= expected:
@@ -471,7 +488,7 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
         self.assertEqual([row["id"] for row in stages],
                          ["rogue.eight_species_foes", "rogue.bandages", "rogue.rations",
                           "rogue.restore_strength", "rogue.room_gold", *MAGIC_ITEM_STAGE_IDS, *EQUIPMENT_ITEM_STAGE_IDS,
-                          "rogue.control_scrolls"])
+                          "rogue.control_scrolls", *LIVE_CONTENT_STAGE_IDS])
         self.assertEqual(stages[0]["count"], [4, 4])
         self.assertEqual(stages[0]["depth_growth"], {"kind": "racial_after", "depth": 26})
         self.assertEqual(stages[0]["ai"], "rogue_hostile")
