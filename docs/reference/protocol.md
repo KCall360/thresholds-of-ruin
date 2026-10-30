@@ -1216,6 +1216,11 @@ format, and the tested durability boundaries.
 
 The save acknowledgement covers the accepted prefix at request time. Play
 doesn't wait for disk I/O, and saving doesn't stop a journey. Spectators cannot request saves.
+A save that is not durable within five seconds is answered with error
+`save_behind`: it is not durable yet, stays queued and completes when the writer
+catches up, so a client never has to guess the outcome. While saving is behind
+schedule, the server holds new commands in arrival order and pauses autonomous
+play until the writer catches up; queries and saves are still answered.
 
 ## Validation
 

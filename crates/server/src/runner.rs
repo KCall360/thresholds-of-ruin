@@ -4,7 +4,7 @@
 
 use crate::session::{Account, Connection, Service, Step, HEADROOM};
 use crate::Failure;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::{mpsc, oneshot};
@@ -93,6 +93,28 @@ impl SimulationHandle {
     }
 }
 
+/// Backpressure: while saving is overdue, a player's command waits, and so
+/// does any command behind an earlier held one, keeping arrival order. Other
+/// mail (queries, saves, connections) is handled at once.
+fn holds(mail: &Mail, overdue: bool, held: usize) -> bool {
+    matches!(
+        mail,
+        Mail::Request {
+            request: Request::Command { .. },
+            ..
+        }
+    ) && (overdue || held > 0)
+}
+
+/// Handle or hold one message; false once shut down.
+fn deliver(service: &mut Service, mail: Mail, held: &mut VecDeque<Mail>) -> bool {
+    if holds(&mail, service.saving_overdue(), held.len()) {
+        held.push_back(mail);
+        return true;
+    }
+    receive(service, mail)
+}
+
 /// Handle one message; false once shut down.
 fn receive(service: &mut Service, mail: Mail) -> bool {
     match mail {
@@ -144,13 +166,22 @@ pub(crate) async fn run(
     let mut saves_polled = Instant::now();
     // When each nearly-full client was first seen nearly full.
     let mut stalled: BTreeMap<u64, Instant> = BTreeMap::new();
+    // Player commands held while saving is overdue, in arrival order.
+    let mut held: VecDeque<Mail> = VecDeque::new();
     loop {
+        if !held.is_empty() && !service.saving_overdue() {
+            while let Some(mail) = held.pop_front() {
+                if !receive(&mut service, mail) {
+                    return service;
+                }
+            }
+        }
         // Handle every message that could already be queued, but do not let
         // continuously arriving replacements starve saves or the simulation.
         for _ in 0..mailbox.max_capacity() {
             match mailbox.try_recv() {
                 Ok(mail) => {
-                    if !receive(&mut service, mail) {
+                    if !deliver(&mut service, mail, &mut held) {
                         return service;
                     }
                 }
@@ -171,7 +202,12 @@ pub(crate) async fn run(
             service.poll_saves();
             saves_polled = Instant::now();
         }
-        let full = match service.step() {
+        // Autonomous play does not outrun durable storage either.
+        let full = match if service.saving_overdue() {
+            Step::Blocked
+        } else {
+            service.step()
+        } {
             Step::Progress => {
                 stalled.clear();
                 continue;
@@ -219,7 +255,7 @@ pub(crate) async fn run(
                     service.shutdown();
                     return service;
                 };
-                if !receive(&mut service, mail) {
+                if !deliver(&mut service, mail, &mut held) {
                     return service;
                 }
             }
@@ -227,5 +263,38 @@ pub(crate) async fn run(
             _ = deadline => {}
             _ = poll => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod backpressure_tests {
+    use super::*;
+
+    fn mail(request: Request) -> Mail {
+        Mail::Request {
+            client: 1,
+            request_id: "r".into(),
+            request,
+            timing: None,
+        }
+    }
+
+    #[test]
+    fn overdue_saving_holds_commands_in_order_and_nothing_else() {
+        let command: Request = serde_json::from_value(serde_json::json!({
+            "type": "command", "branch": "b",
+            "context": {"stream": {"stream": "s", "epoch": "1"}, "readiness_revision": "1"},
+            "command": {"type": "act", "expected_revision": "0", "action": {"type": "wait"}}
+        }))
+        .unwrap();
+        assert!(!holds(&mail(command.clone()), false, 0));
+        assert!(holds(&mail(command.clone()), true, 0));
+        // A later command never overtakes a held one.
+        assert!(holds(&mail(command), false, 1));
+        for other in [Request::Save, Request::Snapshot] {
+            assert!(!holds(&mail(other.clone()), true, 0));
+            assert!(!holds(&mail(other), true, 3));
+        }
+        assert!(!holds(&Mail::Disconnect(1), true, 3));
     }
 }

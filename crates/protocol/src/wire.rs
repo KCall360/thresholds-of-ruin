@@ -1955,6 +1955,9 @@ pub enum ErrorCode {
     InvalidArchive,
     /// The actor is still on a journey; only the server ends one.
     ActorBusy,
+    /// Saving is behind schedule: the requested save stays queued and becomes
+    /// durable when the writer catches up, but it is not durable yet.
+    SaveBehind,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

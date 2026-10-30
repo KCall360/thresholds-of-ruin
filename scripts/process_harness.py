@@ -848,15 +848,33 @@ class AdventureProcess(Process):
             self.lines.put(None)
 
 
+SAVE_BEHIND_RETRIES = 24
+
+
+def save_errors(stdout):
+    rows = [json.loads(line) for line in stdout.splitlines() if line.startswith("{")]
+    return [row["error"] for row in rows if row.get("error")]
+
+
 def save_at(address, token=TOKEN, actor=None):
-    """Explicit save barrier through a real headless client; no ordinary-action timing."""
-    result = subprocess.run(
-        [str(binaries() / ("tor-client-headless" + SUFFIX)), "--connect", address, "--observe",
-         *(["--actor", str(actor)] if actor is not None else [])],
-        input=json.dumps({"type": "request", "request": {"type": "save"}}) + "\n" + json.dumps({"type": "quit"}) + "\n",
-        text=True, capture_output=True, timeout=35, cwd=ROOT, env={**os.environ, "TOR_SERVER_TOKEN": token})
-    if result.returncode or any(json.loads(line).get("error") for line in result.stdout.splitlines() if line.startswith("{")):
-        raise AssertionError(f"Explicit save failed: {result.stdout} {result.stderr}")
+    """Explicit save barrier through a real headless client; no ordinary-action timing.
+
+    A server whose saving is behind answers `SaveBehind`: the save is queued but
+    not yet durable, so the barrier asks again until it is.
+    """
+    for _ in range(SAVE_BEHIND_RETRIES):
+        result = subprocess.run(
+            [str(binaries() / ("tor-client-headless" + SUFFIX)), "--connect", address, "--observe",
+             *(["--actor", str(actor)] if actor is not None else [])],
+            input=json.dumps({"type": "request", "request": {"type": "save"}}) + "\n" + json.dumps({"type": "quit"}) + "\n",
+            text=True, capture_output=True, timeout=35, cwd=ROOT, env={**os.environ, "TOR_SERVER_TOKEN": token})
+        errors = [] if result.returncode else save_errors(result.stdout)
+        if errors and all(str(error).startswith("SaveBehind") for error in errors):
+            continue
+        if result.returncode or errors:
+            raise AssertionError(f"Explicit save failed: {result.stdout} {result.stderr}")
+        return
+    raise AssertionError(f"Saving stayed behind through {SAVE_BEHIND_RETRIES} explicit saves")
 
 
 def inspect_save(path):

@@ -309,6 +309,18 @@ fn combat_facts_are_data_not_prose() {
 }
 
 #[test]
+fn a_behind_schedule_save_has_its_own_error_code() {
+    assert_eq!(
+        serde_json::to_value(ErrorCode::SaveBehind).unwrap(),
+        serde_json::json!("save_behind")
+    );
+    assert_eq!(
+        serde_json::from_value::<ErrorCode>(serde_json::json!("save_behind")).unwrap(),
+        ErrorCode::SaveBehind
+    );
+}
+
+#[test]
 fn a_death_names_a_closed_required_cause() {
     let died = |cause: &str| {
         serde_json::from_str::<CombatEventView>(&format!(

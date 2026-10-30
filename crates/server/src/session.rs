@@ -274,7 +274,8 @@ pub struct Service {
     resetting_streams: bool,
     broadcasting_travel: bool,
     engine: Engine,
-    pending_saves: Vec<(u64, String, u64)>,
+    /// Client, request, target sequence and when it was queued.
+    pending_saves: Vec<(u64, String, u64, std::time::Instant)>,
     save_warning: Option<String>,
     // One ephemeral delivery witness, never simulation or saved authority.
     reported_execution_failure: Option<(u64, StreamContext, BranchId, EntryId, ErrorCode)>,
@@ -569,18 +570,15 @@ impl Service {
                     .unwrap_or(ProcessedRequest::Published))
             }
             Request::Save => {
-                if self
-                    .pending_saves
-                    .iter()
-                    .any(|(client, _, _)| *client == id)
-                {
+                if self.pending_saves.iter().any(|(client, ..)| *client == id) {
                     return Err(Failure::new(
                         ErrorCode::InvalidRequest,
                         "A save is already pending",
                     ));
                 }
                 let target = self.engine.request_save();
-                self.pending_saves.push((id, request_id.into(), target));
+                self.pending_saves
+                    .push((id, request_id.into(), target, std::time::Instant::now()));
                 Ok(ProcessedRequest::SaveQueued)
             }
             Request::AcquireControl => {
@@ -2243,6 +2241,11 @@ impl Service {
         }
     }
 
+    /// Saving is behind schedule: play is held until the writer catches up.
+    pub(crate) fn saving_overdue(&self) -> bool {
+        self.engine.save_status().overdue
+    }
+
     pub(crate) fn poll_saves(&mut self) {
         let clients_before_warnings = self.clients.len();
         let status = self.engine.save_status();
@@ -2285,27 +2288,39 @@ impl Service {
         }
         self.refresh_readiness();
         let clients = self.clients.len();
-        for (id, request_id, target) in pending {
+        for (id, request_id, target, queued) in pending {
             if !self.clients.contains_key(&id) {
                 continue;
             }
-            if status.durable_sequence >= target {
-                self.engine.survival_save_barrier(status.durable_sequence);
-                if let Some(receipt) = self.session_receipt(id) {
-                    self.publish_reply(id, request_id, RequestReply::Receipt(receipt));
+            match save_reply(&status, target, queued.elapsed()) {
+                SaveReply::Durable => {
+                    self.engine.survival_save_barrier(status.durable_sequence);
+                    if let Some(receipt) = self.session_receipt(id) {
+                        self.publish_reply(id, request_id, RequestReply::Receipt(receipt));
+                    }
                 }
-            } else if let Some(message) = &status.error {
-                self.send(
+                SaveReply::Failed(message) => self.send(
                     id,
                     ServerMessage::Error {
                         scope: self.error_scope(id),
                         request_id: Some(request_id),
                         code: ErrorCode::StorageFailure,
-                        message: message.clone(),
+                        message,
                     },
-                );
-            } else {
-                self.pending_saves.push((id, request_id, target));
+                ),
+                SaveReply::Behind => self.send(
+                    id,
+                    ServerMessage::Error {
+                        scope: self.error_scope(id),
+                        request_id: Some(request_id),
+                        code: ErrorCode::SaveBehind,
+                        message: format!(
+                            "Saving is behind schedule: saved through {}, this save needs {}.                              It stays queued and completes when the writer catches up.",
+                            status.durable_sequence, target
+                        ),
+                    },
+                ),
+                SaveReply::Wait => self.pending_saves.push((id, request_id, target, queued)),
             }
         }
         if self.clients.len() != clients {
@@ -2322,11 +2337,60 @@ impl Service {
     }
 }
 
+/// How long an explicit save waits for durability before the client is told
+/// saving is behind; well inside a client's reply deadline.
+pub(crate) const SAVE_REPLY_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
+#[derive(Debug, PartialEq, Eq)]
+enum SaveReply {
+    Durable,
+    Failed(String),
+    /// Not durable within [`SAVE_REPLY_WAIT`]; the save stays queued.
+    Behind,
+    Wait,
+}
+
+/// A pending explicit save's answer: durable, failed, behind or not yet due.
+fn save_reply(status: &crate::SaveStatus, target: u64, waited: std::time::Duration) -> SaveReply {
+    if status.durable_sequence >= target {
+        SaveReply::Durable
+    } else if let Some(message) = &status.error {
+        SaveReply::Failed(message.clone())
+    } else if waited >= SAVE_REPLY_WAIT {
+        SaveReply::Behind
+    } else {
+        SaveReply::Wait
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::Scenario;
     use tokio::sync::mpsc;
+
+    #[test]
+    fn an_explicit_save_answers_durable_failed_or_behind_within_its_wait() {
+        let mut status = crate::SaveStatus {
+            durable_sequence: 7,
+            ..Default::default()
+        };
+        let short = SAVE_REPLY_WAIT / 2;
+        assert_eq!(save_reply(&status, 7, short), SaveReply::Durable);
+        assert_eq!(
+            save_reply(&status, 7, SAVE_REPLY_WAIT * 2),
+            SaveReply::Durable
+        );
+        assert_eq!(save_reply(&status, 9, short), SaveReply::Wait);
+        // Never "outcome unknown": a slow writer gets a definite answer in time.
+        assert_eq!(save_reply(&status, 9, SAVE_REPLY_WAIT), SaveReply::Behind);
+        assert!(SAVE_REPLY_WAIT < std::time::Duration::from_secs(10));
+        status.error = Some("disk full".into());
+        assert_eq!(
+            save_reply(&status, 9, short),
+            SaveReply::Failed("disk full".into())
+        );
+    }
 
     #[test]
     fn intentional_detach_drains_its_explanation_but_resource_disconnect_aborts() {
