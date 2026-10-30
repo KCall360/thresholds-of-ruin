@@ -1905,7 +1905,6 @@ class Native3DProcesses(ProcessTestCase):
         executable = Path(os.environ.get("TOR_3D_TEST_BINARY", CLIENT / "target/debug" / ("tor-client-3d" + self.suffix)))
         window = self.launch("tor-client-3d", [
             "--connect", self.address, "--capture", self.directory / "captures", "--capture-every", "0.4",
-            "--quit-after", "600",
         ], executable=executable)
         self.captured(window, lambda frame: frame["has_control"] and not frame["busy"])
         native = self.native_keys(window)

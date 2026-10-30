@@ -314,6 +314,100 @@ class NativeMouseContract(unittest.TestCase):
             actor.test_map_journal_shares_the_disclosed_map_and_preserves_note_typing()
 
 
+class NativeDisplayContracts(unittest.TestCase):
+    def module(self):
+        spec = importlib.util.spec_from_file_location('client_3d_display_contract', HERE / 'native_display.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_windows_mode_abi_matches_the_public_utf16_structure(self):
+        import ctypes
+        mode = self.module().DisplayMode
+        self.assertEqual(ctypes.sizeof(mode), 220)
+        self.assertEqual((mode.dmPelsWidth.offset, mode.dmPelsHeight.offset), (172, 176))
+
+    def test_ci_display_must_fit_the_client_before_physical_mouse_tests(self):
+        display = mock.Mock()
+        display.size.side_effect = [(1024, 768), (1920, 1080)]
+        display.modes.return_value = [(1024, 768), (1280, 1024), (1920, 1080), (2560, 1440)]
+        self.assertEqual(self.module().configure(display), (1920, 1080))
+        display.change.assert_called_once_with((1920, 1080))
+
+    def test_larger_existing_desktop_is_preserved(self):
+        display = mock.Mock()
+        display.size.return_value = (2560, 1440)
+        self.assertEqual(self.module().configure(display), (2560, 1440))
+        display.change.assert_not_called()
+        display.modes.assert_not_called()
+
+    def test_unsupported_or_unchanged_small_desktop_fails_setup(self):
+        for modes, error in (([(1024, 768)], None), ([(1920, 1080)], None),
+                             ([(1920, 1080)], RuntimeError('driver rejected mode'))):
+            with self.subTest(modes=modes, error=error):
+                display = mock.Mock()
+                display.size.return_value = (1024, 768)
+                display.modes.return_value = modes
+                display.change.side_effect = error
+                with self.assertRaises(RuntimeError):
+                    self.module().configure(display)
+
+    def test_workflow_configures_the_physical_desktop_before_native_verification(self):
+        workflow = (ROOT / '.github/workflows/client-3d.yml').read_text(encoding='utf-8')
+        setup = 'run: python crates/client-3d/scripts/native_display.py'
+        self.assertIn(setup, workflow)
+        self.assertLess(workflow.index(setup), workflow.index('run: python crates/client-3d/scripts/verify.py'))
+        self.assertIn('--server-args="-screen 0 1920x1080x24"', workflow)
+
+    def test_windows_driver_change_requires_success_and_uses_a_temporary_mode(self):
+        for code in (0, -2):
+            with self.subTest(driver_result=code):
+                module = self.module()
+                driver = SimpleNamespace(EnumDisplaySettingsW=mock.Mock(),
+                                         ChangeDisplaySettingsExW=mock.Mock(return_value=code))
+                with mock.patch.object(module.ctypes, 'WinDLL', return_value=driver, create=True):
+                    display = module.WindowsDisplay()
+                    if code:
+                        with self.assertRaisesRegex(RuntimeError, 'failed: -2'):
+                            display.change((1920, 1080))
+                    else:
+                        display.change((1920, 1080))
+                device, pointer, window, flags, extra = driver.ChangeDisplaySettingsExW.call_args.args
+                mode = pointer._obj
+                self.assertEqual((mode.dmSize, mode.dmBitsPerPel, mode.dmPelsWidth, mode.dmPelsHeight),
+                                 (220, 32, 1920, 1080))
+                self.assertEqual(mode.dmFields, 0x1C0000)
+                self.assertEqual((device, window, flags, extra), (None, None, 0, None))
+
+    def test_entrypoint_rejects_local_desktop_changes_before_constructing_a_driver(self):
+        module = self.module()
+        for platform, environment in (('posix', {'GITHUB_ACTIONS': 'true'}), ('nt', {})):
+            with self.subTest(platform=platform), \
+                    mock.patch.object(module, 'os', SimpleNamespace(name=platform, environ=environment)), \
+                    mock.patch.object(module, 'WindowsDisplay') as driver:
+                with self.assertRaises(RuntimeError):
+                    module.main()
+                driver.assert_not_called()
+
+    def test_advancement_fixture_remains_owned_until_its_explicit_exit(self):
+        spec = importlib.util.spec_from_file_location('client_3d_advancement_lifetime', HERE / 'test_client_process.py')
+        native = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(native)
+        actor = native.Native3DProcesses('test_graphical_advancement_selects_a_pool_previews_and_explicitly_confirms')
+        actor.suffix = ''
+        actor.address = '127.0.0.1:1'
+        actor.directory = Path('fixture')
+        actor.server = mock.Mock()
+        class ObservedLaunch(Exception):
+            pass
+        def launch(_name, args, **_options):
+            self.assertNotIn('--quit-after', args, 'software rendering must not terminate a valid in-progress test')
+            raise ObservedLaunch()
+        actor.launch = launch
+        with self.assertRaises(ObservedLaunch):
+            actor.test_graphical_advancement_selects_a_pool_previews_and_explicitly_confirms()
+
+
 class LocalGraphicalWaiverContracts(unittest.TestCase):
     def module(self):
         spec = importlib.util.spec_from_file_location("client_3d_verify_waiver", HERE / "verify.py")

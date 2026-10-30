@@ -2619,3 +2619,32 @@ limits and fail-closed cohort validation. An independent workflow regression
 rejects the old budget and requires bounded post-verification headroom. Fresh
 final-head hosted qualification remains required; earlier cancelled/failed jobs
 are never relabelled as passes.
+
+### Later Windows release evidence from the same run
+
+The Windows release job completed during the first correction's publication.
+Its HUD witness also hit a clamped pointer, this time the Inventory button at
+`(195, 813)` on a 1024x768 desktop, returning `(195, 767)`. This is the same
+undersized-desktop fixture cause, not another gameplay defect. Its advancement
+method also ended at 604.5 seconds while typing the final ledger command; the
+fixture passed `--quit-after 600`, and the retained frames still showed a live,
+nonfatal advancement screen. The fixture's application lifetime cap prematurely
+terminated a legitimate slow software-rendered run.
+
+This adds one distinct failing method and two confirmed failed executions to the
+Linux window above: three distinct native methods and six failed executions in
+the observed completed lanes. The remaining old Windows debug lane is not
+inferred to have passed or failed. The new advancement lifetime regression rejects
+the self-exit argument; the normal harness and explicit Escape/30-second quit
+assertion own shutdown. The existing 90-second frame waits, 3000-second native
+suite bound and all purchase/ledger/typing assertions remain unchanged.
+
+The independent workflow now establishes adequate physical desktop space before
+native verification: a supported Windows mode of at least 1600x1000 and a
+1920x1080 Xvfb screen. The Windows helper preserves an already-large desktop,
+checks mode-change success and actual readback, rejects unsupported/small modes,
+and changes no persistent display settings. It runs only on disposable Windows
+GitHub Actions hosts, never against a local maintainer desktop. Unit contracts
+cover the Win32 ABI, mode selection, rejection/readback, local-invocation guard,
+workflow ordering and actual native fixture launch arguments. These contracts
+passed locally; live display setup and OS input remain hosted qualification.
