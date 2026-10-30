@@ -166,17 +166,28 @@ skill rank, not the melee bonus, so their accuracy is an attack-attribute
 modifier that does not raise defense; selected-weapon checks use the melee
 bonus. Defense and accuracy move one point per pass, two beyond ×1.4; damage
 moves one point; Health moves straight to its target and backs off if any birth
-is rejected. Species that attack fewer than 20 times in a study (the greedy orc)
-are left alone, because their ratios are noise. Mechanics are not changed: armor keeps its damage reduction, so small
+is rejected. Species that attack fewer than 20 times in a study are left alone,
+because their ratios are noise. Mechanics are not changed: armor keeps its damage reduction, so small
 dice gain a flat bonus instead.
 
 Study-only arrangements let every species be measured without changing the
 scenario: against the invisible phantom the adventurer wears see invisible, as
-a Rogue player would; the orc and the xeroc engage first (the orc otherwise
-dies before it swings); and the orc, flytrap and xeroc get four times the seeds.
+a Rogue player would; the revealed xeroc engages first; and the orc, flytrap and
+xeroc get four times the seeds. The orc needs no edit: it is greedy, as below.
 The arena itself now counts an admitted autonomous intention that fails at
 execution as a lost turn, ending the encounter as a stalemate after eight in a
 row, instead of rejecting the encounter.
+
+Orc acquisition (fixed): the study once forced orcs to engage, which hid a
+behavior difference. The package authored orcs as passive with Gold interest,
+so they never attacked unless provoked; in Rogue a greedy monster that notices
+the player heads for the room's gold, or for the player when there is none.
+With the maintainer's approval TOR gained a `greedy` disposition: a greedy
+species collects known Gold it can safely reach under its Gold interest and
+otherwise acquires a visible hostile as a mean species does. Rogue's orcs use
+it; the starter package keeps its passive orcs. The value is authored and saved,
+within this branch's unreleased format bump. Measured without any study edit,
+the orc attacked 166 times over seeds 0–15 with every judged ratio in band.
 
 The baseline had 72 of 130 judged ratios in band. TOR foes had far more Health
 than Rogue's (a full first die), dealt little damage through ring mail, and were
@@ -291,7 +302,7 @@ needs a bot that kills more efficiently.
 | --- | --- | --- |
 | 1 | Implemented: capability switches, growth schedules and the `scenarios/rogue` package | Protocol 65, save 64, scenario 36 |
 | 2 | Implemented: reference model, targets, encounter study, run summary and campaign harness | No |
-| 3 | Implemented: value tuning of all 26 species; all 117 judged ratios within ±35% | No |
+| 3 | Implemented: value tuning of all 26 species; all 117 judged ratios within ±35%; greedy orc acquisition | `greedy` disposition, within the unreleased 64/36 bump |
 | 4 | Implemented: Rogue item table, grouped missiles and the drought guarantee | Within the unreleased 64/36 bump |
 | 5 | Implemented: treasure rooms; wandering and initial counts already match | No |
 | 6 | Implemented: recovery, regeneration cost and XP thresholds fitted at every depth by the pacing model; tolerances ratified | No |

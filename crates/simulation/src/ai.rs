@@ -352,10 +352,19 @@ impl Game {
                     behavior.engagement = None;
                 }
             }
-            if behavior.engagement.is_none()
-                && policy.memory_ticks > 0
-                && policy.disposition == crate::behavior::Disposition::Mean
-            {
+            // A greedy species pursues known Gold it can safely collect and
+            // acquires a visible hostile only when there is none.
+            let acquires = match policy.disposition {
+                crate::behavior::Disposition::Passive => false,
+                crate::behavior::Disposition::Mean => true,
+                crate::behavior::Disposition::Greedy => {
+                    self.exposed_to_visible_hostile(id, view.location, view)
+                        || self
+                            .choose_known_gold(id, view, &ai.profile, &mut route)
+                            .is_none()
+                }
+            };
+            if behavior.engagement.is_none() && policy.memory_ticks > 0 && acquires {
                 if let Some(visible) = candidate {
                     {
                         behavior.engagement = Some(crate::behavior::Engagement {

@@ -2,6 +2,7 @@
 import os
 from pathlib import Path
 import tempfile
+import tomllib
 import unittest
 
 import rogue_encounter_study as study
@@ -61,6 +62,14 @@ class StudyArrangements(unittest.TestCase):
         self.assertIn('rogue.orc"]\nbehavior = { disposition = "mean" }', changed)
         self.assertIn('rogue.human"]\nbehavior = { disposition = "passive" }', changed)
 
+    def test_the_greedy_orc_is_measured_with_its_own_acquisition(self):
+        # Only the adventurer is made to engage; the orc keeps the package's
+        # greedy disposition, which acquires when no Gold is in the arena.
+        self.assertNotIn("O", study.FOE_ENGAGES)
+        species = tomllib.loads((study.PACKAGE / "catalog/creatures.toml")
+                                .read_text(encoding="utf-8"))["creatures"]["species"]
+        self.assertEqual(species["rogue.orc"]["behavior"]["disposition"], "greedy")
+
     def test_phantom_study_wears_see_invisible(self):
         manifest, actors = study.load_source()
         package, _ = study.encounter(manifest, actors, "P", 11)
@@ -92,6 +101,19 @@ class EncounterProcess(unittest.TestCase):
                                  binaries / ("tor-arena" + suffix), [0], "F")
         [row] = report["species"]
         self.assertEqual(row["encounters"], 2 * study.EXTRA_SEEDS["F"])
+        self.assertFalse([outcome for outcome in row["outcomes"] if outcome.startswith("failure")])
+        self.assertGreater(row["counts"]["foe_checks"], 0)
+
+    def test_the_unedited_greedy_orc_attacks(self):
+        # No Gold in the arena: the package's greedy orc acquires the adventurer
+        # and attacks without any study edit to its behavior.
+        binaries = Path(os.environ.get("TOR_TEST_BINARIES", study.ROOT / "target/debug"))
+        suffix = ".exe" if (binaries / "tor-arena.exe").exists() else ""
+        with tempfile.TemporaryDirectory(dir=study.ROOT / "target") as output:
+            report = study.study(Path(output), binaries / ("tor-scenario" + suffix),
+                                 binaries / ("tor-arena" + suffix), [0], "O")
+        [row] = report["species"]
+        self.assertEqual(row["encounters"], 2 * study.EXTRA_SEEDS["O"])
         self.assertFalse([outcome for outcome in row["outcomes"] if outcome.startswith("failure")])
         self.assertGreater(row["counts"]["foe_checks"], 0)
 

@@ -432,8 +432,8 @@ def door(frame):
 class ProcessTestDirectory:
     """Temporary directory whose permissions are inherited by child processes."""
 
-    def __init__(self):
-        root = ROOT / "target" / "process-tests"
+    def __init__(self, root=None):
+        root = Path(root) if root is not None else ROOT / "target" / "process-tests"
         root.mkdir(parents=True, exist_ok=True)
         self.name = str(root / uuid.uuid4().hex)
         Path(self.name).mkdir()
@@ -643,6 +643,9 @@ class OutputQueue:
 class Process:
     """A real child process whose output lines are read on a background thread."""
 
+    # The disk spool behind unsegmented capture; a subclass may bound it.
+    output_queue = OutputQueue
+
     def __init__(self, executable, args, token=TOKEN, extra_env=None, *, separate_stderr=False,
                  diagnostics=None, save_actor=None):
         environment = {k: v for k, v in os.environ.items() if k not in ("TOR_SPECTATOR_TOKEN", "TOR_WIZARD_TOKEN")}
@@ -705,7 +708,7 @@ class Process:
         self.metadata["pid"] = self.child.pid
         self._write_status("launched")
         if self.lines is None:
-            self.lines = OutputQueue(self.stdout_path)
+            self.lines = self.output_queue(self.stdout_path)
         self.transcript = Transcript(self.stdout_path, source=self.lines if segment_bytes is not None else None)
         self.reader = threading.Thread(target=self._read, daemon=True)
         self.reader.start()
@@ -868,6 +871,10 @@ class ProcessTestCase(unittest.TestCase):
 
     graphical = False
 
+    # Long runs may place process directories (saves and captured output) on a
+    # faster volume; None keeps them under target/process-tests.
+    process_root = None
+
     @classmethod
     def setUpClass(cls):
         cls.bin = binaries()
@@ -876,7 +883,7 @@ class ProcessTestCase(unittest.TestCase):
     def setUp(self):
         if is_graphical_test(self):
             _require_native_display(os.environ)
-        directory = ProcessTestDirectory()
+        directory = ProcessTestDirectory(self.process_root)
         self.addCleanup(lambda: directory.cleanup(failed=self._failed(), test_id=self.id()))
         self.processes = []
         self.directory = Path(directory.name)

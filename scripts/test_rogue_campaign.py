@@ -1,4 +1,6 @@
 """Run summaries, campaign aggregation and one bounded real-process descent."""
+from pathlib import Path
+import tempfile
 from types import SimpleNamespace
 import unittest
 
@@ -19,6 +21,28 @@ def fake_controller():
 def sample(tick, phase="explore", hunger="nourished", hit_dice=3, depth=1):
     return {"tick": str(tick), "phase": phase, "depth": depth, "hp": 10, "max_hp": 20,
             "hit_dice": str(hit_dice), "earned_xp": "150", "hunger": hunger}
+
+
+class RollingSpool(unittest.TestCase):
+    def test_spool_restarts_only_when_fully_read_and_past_its_limit(self):
+        with tempfile.TemporaryDirectory(dir=campaign.ROOT / "target") as directory:
+            path = Path(directory) / "stdout.log"
+            spool = campaign.RollingOutputQueue(path)
+            spool.limit = 10
+            try:
+                for line in ("first line", "second line"):
+                    spool.put(line)
+                self.assertEqual(spool.get(1), "first line")
+                # An unread line keeps the spool intact.
+                self.assertGreater(path.stat().st_size, 10)
+                self.assertEqual(spool.get(1), "second line")
+                self.assertEqual(path.stat().st_size, 0)
+                spool.put("third")
+                self.assertEqual(spool.get(1), "third")
+                # Under the limit, a fully read spool is kept.
+                self.assertEqual(path.read_text(encoding="utf-8"), "third\n")
+            finally:
+                spool.close()
 
 
 class RunSummaries(unittest.TestCase):

@@ -9,12 +9,16 @@ use tor_world::Location;
 pub enum Disposition {
     Passive,
     Mean,
+    /// Collects known Gold it can safely reach; otherwise acquires a visible
+    /// hostile as a mean species does.
+    Greedy,
 }
 impl<'de> Deserialize<'de> for Disposition {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         match String::deserialize(d)?.as_str() {
             "passive" => Ok(Self::Passive),
             "mean" => Ok(Self::Mean),
+            "greedy" => Ok(Self::Greedy),
             _ => Err(serde::de::Error::custom("invalid Disposition")),
         }
     }

@@ -23,7 +23,7 @@ import time
 import unittest
 
 from arena_matrix import toml_source
-from process_harness import ProcessTestCase, ROOT, settle_rogue_action
+from process_harness import OutputQueue, Process, ProcessTestCase, ROOT, settle_rogue_action
 import rogue_earned_route
 import rogue_reference_model
 from rogue_earned_route import Controller, ControllerError
@@ -139,23 +139,44 @@ def summarize(controller, samples, outcome, *, seed, wall_seconds):
     }
 
 
+class RollingOutputQueue(OutputQueue):
+    """A disk spool that restarts once fully read and past `limit` bytes.
+
+    The headless client prints several megabytes of frames per second, so an
+    hour-long run would otherwise fill a volume. Frame waits read lines as they
+    arrive and never read the transcript back; the bounded diagnostic tail is
+    kept in memory by the transcript.
+    """
+    limit = 64 * 1024 * 1024
+
+    def get(self, timeout):
+        line = super().get(timeout)
+        with self.condition:
+            if not self.count and self.offset > self.limit:
+                self.writer.flush()
+                self.writer.seek(0)
+                self.writer.truncate()
+                self.reader.seek(0)
+                self.offset = 0
+        return line
+
+
+class CampaignClient(Process):
+    output_queue = RollingOutputQueue
+
+
 class CampaignRun(ProcessTestCase):
     """One seeded descent. Constructed by run_seed; never collected as a test."""
     seed = 0
     start_depth = 1
-    save_root = None
     floor_limit = 2500
     run_limit = 65000
     result = None
 
-    def setUp(self):
-        super().setUp()
-        # Long runs journal many entries; a save on a fast volume keeps the
-        # server's replies within the harness deadline (see --save-root).
-        if self.save_root is not None:
-            directory = Path(self.save_root) / Path(self.directory).name
-            directory.mkdir(parents=True, exist_ok=True)
-            self.save = directory / "game.db"
+    def launch(self, name, args, cls=Process, **kwargs):
+        if name == "tor-client-headless" and cls is Process:
+            cls = CampaignClient
+        return super().launch(name, args, cls, **kwargs)
 
     def frame(self, client, predicate, seconds=15):
         # Long saved histories make some replies slower than the test default.
@@ -333,10 +354,10 @@ def deep_start_level(depth):
     return row.level_on_arrival
 
 
-def run_seed(seed, floor_limit, run_limit, start_depth=1, save_root=None):
+def run_seed(seed, floor_limit, run_limit, start_depth=1, work_root=None):
     case = type("SeededCampaignRun", (CampaignRun,), {
         "seed": seed, "floor_limit": floor_limit, "run_limit": run_limit,
-        "start_depth": start_depth, "save_root": save_root})("runTest")
+        "start_depth": start_depth, "process_root": work_root})("runTest")
     CampaignRun.result = None
     if not hasattr(CampaignRun, "bin"):
         CampaignRun.setUpClass()  # unittest only does this for collected suites
@@ -393,13 +414,16 @@ def main(argv=None):
     parser.add_argument("--run-limit", default=65000, type=int)
     parser.add_argument("--start-depth", default=1, type=int,
                         help="Start on this floor with the model's expected level")
-    parser.add_argument("--save-root", type=Path,
-                        help="Directory for saves, such as a fast local volume")
+    # A run's save journals every entry and the headless client prints several
+    # megabytes of frames per second; on a slow disk, write stalls block the
+    # harness reader past its reply deadline.
+    parser.add_argument("--work-root", type=Path,
+                        help="Directory for each run's save and process logs, such as a fast local volume")
     args = parser.parse_args(argv)
     args.output.mkdir(parents=True, exist_ok=True)
     runs = []
     for seed in args.seeds:
-        run = run_seed(seed, args.floor_limit, args.run_limit, args.start_depth, args.save_root)
+        run = run_seed(seed, args.floor_limit, args.run_limit, args.start_depth, args.work_root)
         run["start_depth"] = args.start_depth
         (args.output / f"run-{seed}.json").write_text(json.dumps(run, indent=2), encoding="utf-8")
         print(seed, run["outcome"], run.get("deepest_depth"), run.get("final_level"), flush=True)

@@ -38,7 +38,8 @@ their own senses and known surroundings. Most explore and prefer less-visited
 cells; the ice monster, stationary flytrap and guised xeroc wait. Their separate door, care,
 equipment, useful-loot and Gold-interest permissions are listed below. Passive
 acquisition requires ordinary hostile provocation, except Xeroc’s narrow adjacent
-guise ambush; mean acquisition uses the existing seeded wake check.
+guise ambush; mean acquisition uses the existing seeded wake check. Greedy
+orcs collect Gold they can safely reach and otherwise come after you.
 Idle policy does not change remembered pursuit or combat. Rogue's NPC stair
 restriction remains in force.
 Only active creatures take turns, and waiting for player input still pauses the
@@ -382,8 +383,9 @@ for either actor. Stolen items and Gold remain ordinary inventory, recoverable
 through normal death drops. The Amulet remains the same unique objective item.
 
 Orcs (O) appear at depths 4–13 with one humanoid Warrior HD, purchased W02
-Measured Cut, natural 1d8 damage and passive acquisition until provoked. Their explicit
-Gold interest does not grant theft. These are provisional TOR builds and
+Measured Cut, natural 1d8 damage and greedy acquisition: as in Rogue, an orc
+goes for Gold it can safely collect and otherwise attacks. Their Gold interest
+does not grant theft. These are provisional TOR builds and
 behaviors, not a calibrated survival curve or original Rogue timing. See
 [shared theft and Gold](../reference/items.md#theft-and-gold) for exact inventory
 and preparation contracts.

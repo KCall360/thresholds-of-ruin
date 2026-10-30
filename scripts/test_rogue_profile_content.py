@@ -95,9 +95,11 @@ class RogueProfileContent(unittest.TestCase):
         for name in ["catalog/actors.toml", "catalog/bodies.toml", "catalog/items.toml"]:
             self.assertEqual((PACKAGE / name).read_bytes(), (STARTER / name).read_bytes(), name)
         # Species differ only in tuned values: Health, defense and accuracy
-        # modifiers, the melee bonus and damage amounts.
+        # modifiers, the melee bonus and damage amounts. Orcs are greedy, as in
+        # Rogue, where the starter package keeps them passive.
         def untuned(path):
             species = load(path / "catalog/creatures.toml")["creatures"]["species"]
+            species["rogue.orc"]["behavior"]["disposition"] = "greedy"
             for row in species.values():
                 row["modifiers"] = [modifier for modifier in row.get("modifiers", [])
                                     if not (modifier["op"].get("kind") == "add"
@@ -119,6 +121,16 @@ class RogueProfileContent(unittest.TestCase):
         added = [row["path"] for row in self.rules["overrides"][len(starter["overrides"]):]]
         self.assertEqual(added, [["health_recovery"], ["growth", "threshold_base"],
                                  ["growth", "threshold_per_tier"]])
+
+    def test_orcs_are_greedy_and_every_other_species_keeps_its_disposition(self):
+        tuned = load(PACKAGE / "catalog/creatures.toml")["creatures"]["species"]
+        starter = load(STARTER / "catalog/creatures.toml")["creatures"]["species"]
+        self.assertEqual(tuned["rogue.orc"]["behavior"]["disposition"], "greedy")
+        self.assertTrue(tuned["rogue.orc"]["behavior"]["gold"])
+        self.assertEqual(starter["rogue.orc"]["behavior"]["disposition"], "passive")
+        changed = [name for name in tuned
+                   if tuned[name].get("behavior") != starter[name].get("behavior")]
+        self.assertEqual(changed, ["rogue.orc"])
 
     def test_rogue_value_tuning_in_rules(self):
         by_path = {tuple(row["path"]): row["value"] for row in self.rules["overrides"]}

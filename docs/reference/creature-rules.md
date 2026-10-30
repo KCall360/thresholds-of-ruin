@@ -1018,7 +1018,7 @@ identifies its caster and a matching visible-body occurrence supplies a licensed
 last-seen location. A partial body with an undisclosed caster grants no identity.
 No new preparation cue or public provocation field bypasses paid plan inspection.
 
-Species own `passive` or `mean` acquisition, `wait` or `explore` idle behavior,
+Species own `passive`, `mean` or `greedy` acquisition, `wait` or `explore` idle behavior,
 `memory_ticks` from zero through 1000000 inclusive, and defaults for door use,
 care, equipment, useful loot, Gold interest and fleeing. Omitted behavior resolves to passive
 exploration without tool use and a 25% Health flee threshold. Named behavior
@@ -1026,6 +1026,10 @@ records and the independent concrete saved policy enforce the same bounds;
 restoration does not use authoring fallbacks. Tactical profiles partially override
 supplied fields without replacing acquisition or memory; see
 [behavior authoring](scenario-packages.md#behavior-defaults-and-ai-overrides).
+Greedy acquisition follows Rogue's greedy monsters: while the species can
+safely collect known Gold under its Gold interest (no visible hostile beside
+it, and a short disclosed route), it collects; otherwise it acquires a visible
+hostile exactly as mean acquisition does. Without Gold interest it is mean.
 Mean acquisition adapts the pinned
 Rogue reference's two-in-three chance to one committed eligible TOR AI decision,
 using that actor's current perception. This is a TOR cadence adaptation, not an

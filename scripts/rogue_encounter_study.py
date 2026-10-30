@@ -36,9 +36,10 @@ ACTOR_ID = 3
 SEE_INVISIBLE = "rogue.ring_see_invisible"
 RING_SLOT = 7  # first ring socket of the default anatomy
 EXTRA_SEEDS = {"O": 4, "F": 4, "X": 4}
-# The orc dies before it swings and the revealed xeroc waits: these foes engage
-# first instead, so their own attacks are measured.
-FOE_ENGAGES = {"O": ("rogue.orc",), "X": ("rogue.human", "rogue.xeroc")}
+# The revealed xeroc waits: it engages first as well, so its own attacks are
+# measured. The greedy orc needs no edit: with no Gold in the arena it acquires
+# the adventurer itself, as a Rogue orc in a room without gold does.
+FOE_ENGAGES = {"X": ("rogue.human", "rogue.xeroc")}
 METRICS = ("player_hit", "foe_hit", "player_damage_per_action", "foe_damage_per_action",
            "player_actions_to_kill", "foe_actions_to_kill")
 

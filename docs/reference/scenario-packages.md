@@ -1159,7 +1159,7 @@ Unknown names and invalid values are rejected.
 
 | Field | Meaning |
 | --- | --- |
-| `disposition` | `passive` requires ordinary hostile provocation; `mean` uses the existing seeded acquisition check |
+| `disposition` | `passive` requires ordinary hostile provocation; `mean` uses the existing seeded acquisition check; `greedy` collects known Gold it can safely reach and otherwise acquires as `mean` does |
 | `idle` | `explore` permits autonomous exploration and useful-item detours; `wait` forbids all idle movement |
 | `memory_ticks` | Actor-active engagement memory, from 0 through 1000000 inclusive |
 | `doors` | Permit opening reachable known doors; anatomy or creature kind never infers this permission |

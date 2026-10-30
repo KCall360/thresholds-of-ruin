@@ -1921,6 +1921,7 @@ struct CreatureBodyPackage {
 enum BehaviorDisposition {
     Passive,
     Mean,
+    Greedy,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(
@@ -5130,6 +5131,27 @@ mod tests {
         assert!(
             serde_json::from_str::<super::Owned<SupplyDef>>(r#"["bandage","Bandage"]"#).is_err()
         );
+    }
+
+    #[test]
+    fn stored_behavior_names_every_disposition_and_compiles_it() {
+        use tor_simulation::behavior::Disposition;
+        let decode = |name: &str| {
+            let value = serde_json::json!({"disposition":name,"idle":"wait","memory_ticks":1000,"doors":false,"care":false,"equipment":false,"loot":false,"gold":true,"flee_percent":25});
+            serde_json::from_slice::<super::Owned<crate::creature_authoring::BehaviorPolicy>>(
+                &serde_json::to_vec(&value).unwrap(),
+            )
+        };
+        for (name, compiled) in [
+            ("passive", Disposition::Passive),
+            ("mean", Disposition::Mean),
+            ("greedy", Disposition::Greedy),
+        ] {
+            let policy = decode(name).unwrap().0.compile();
+            assert_eq!(policy.disposition, compiled, "{name}");
+            assert!(policy.gold);
+        }
+        assert!(decode("greed").is_err());
     }
 
     #[test]

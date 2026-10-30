@@ -39,6 +39,16 @@ class Acceptance(unittest.TestCase):
         self.assertTrue(acceptance.check_food([run({1: 1, 2: 2}, food=at_model)])["pass"])
         self.assertFalse(acceptance.check_food([run({1: 1}, food=at_model * 2)])["pass"])
 
+    def test_food_model_ratio_uses_the_campaign_pace(self):
+        # A slow bot spends more food per floor in Rogue too: the model's ratio
+        # is taken at the measured turns per floor, so only generation counts.
+        per_floor = acceptance.model_food_ratio() * 900 / acceptance.MEAL
+        slow = acceptance.check_food([run({1: 1, 2: 2}, food=per_floor, ticks=150000)])
+        self.assertTrue(slow["pass"], slow)
+        self.assertAlmostEqual(slow["bands"]["1-5"]["turns_per_floor"], 1500)
+        self.assertFalse(acceptance.check_food(
+            [run({1: 1, 2: 2}, food=per_floor / 2, ticks=150000)])["pass"])
+
     def test_species_ignore_rare_attackers_and_flag_out_of_band_ratios(self):
         def row(glyph, checks, within):
             return {"glyph": glyph, "counts": {"player_checks": checks, "foe_checks": 0},

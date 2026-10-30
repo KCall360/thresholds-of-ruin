@@ -438,12 +438,14 @@ impl Melee {
 pub enum Disposition {
     Passive,
     Mean,
+    Greedy,
 }
 impl<'de> Deserialize<'de> for Disposition {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         match String::deserialize(d)?.as_str() {
             "passive" => Ok(Self::Passive),
             "mean" => Ok(Self::Mean),
+            "greedy" => Ok(Self::Greedy),
             _ => Err(serde::de::Error::custom("invalid Disposition")),
         }
     }
@@ -554,6 +556,7 @@ impl BehaviorPolicy {
             disposition: match self.disposition {
                 Disposition::Passive => s::behavior::Disposition::Passive,
                 Disposition::Mean => s::behavior::Disposition::Mean,
+                Disposition::Greedy => s::behavior::Disposition::Greedy,
             },
             idle: match self.idle {
                 IdleBehavior::Wait => s::behavior::IdleBehavior::Wait,

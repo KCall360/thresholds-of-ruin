@@ -5,7 +5,8 @@ Tolerances ratified on 29 October 2026 (docs/plans/rogue-tuning.md):
 - level on arrival within 1 of the reference model at depths 1-10, within 2 at
   11-26 (pacing model, and campaign levels where runs reached a depth);
 - food found against food spent within x1.5 of the model's ratio, per
-  five-floor band reached;
+  five-floor band reached (the model's ratio at the campaign's measured turns
+  per floor: pace is play behavior, so only food generation is judged);
 - starvation at most 10% of deaths;
 - at least 75% of completed runs reach depth 4;
 - every species with at least 20 measured attacks within 35% on every judged
@@ -41,7 +42,11 @@ def model_food_ratio(turns_per_floor=900):
 
 
 def check_food(runs):
-    """Pooled per five-floor band: food units placed against units spent."""
+    """Pooled per five-floor band: food units placed against units spent.
+
+    The model's ratio is taken at the band's measured turns per floor, since a
+    slower player spends more food per floor in Rogue as well.
+    """
     bands = {}
     for run in runs:
         generation = run.get("item_generation") or {}
@@ -50,19 +55,22 @@ def check_food(runs):
         for depth, ticks in run["ticks_per_floor"].items():
             band = (int(depth) - 1) // 5
             spent = ticks / 100
-            entry = bands.setdefault(band, {"found": 0.0, "spent": 0.0})
+            entry = bands.setdefault(band, {"found": 0.0, "spent": 0.0, "floors": 0})
             entry["spent"] += spent
+            entry["floors"] += 1
             entry["found"] += generation["food_per_floor"] * MEAL
-    expected = model_food_ratio()
     results = {}
     for band, entry in sorted(bands.items()):
+        pace = entry["spent"] / entry["floors"]
+        expected = model_food_ratio(pace) if pace else None
         ratio = entry["found"] / entry["spent"] if entry["spent"] else None
         relative = ratio / expected if ratio is not None else None
         results[f"{band * 5 + 1}-{band * 5 + 5}"] = {
-            "ratio": ratio, "relative_to_model": relative,
+            "ratio": ratio, "turns_per_floor": pace, "model_ratio": expected,
+            "relative_to_model": relative,
             "pass": relative is not None and 1 / 1.5 <= relative <= 1.5}
     return {"pass": bool(results) and all(row["pass"] for row in results.values()),
-            "bands": results, "model_ratio": expected}
+            "bands": results, "model_ratio_at_900_turns": model_food_ratio()}
 
 
 def check_starvation(runs):

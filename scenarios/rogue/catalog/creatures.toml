@@ -467,7 +467,7 @@ riders = []
 # Shared trickster/gold policies; physical tuning remains provisional.
 [creatures.species."rogue.orc"]
 detection_appearance = { name = "orc", asset = "creature.humanoid.orc" }
-behavior = { disposition = "passive", idle = "explore", memory_ticks = 1000, doors = true, care = true, equipment = true, loot = true, gold = true, flee_percent = 25 }
+behavior = { disposition = "greedy", idle = "explore", memory_ticks = 1000, doors = true, care = true, equipment = true, loot = true, gold = true, flee_percent = 25 }
 kind = "humanoid"
 attributes = { strength = 2, speed = 1, intellect = 1, willpower = 1, awareness = 1, presence = 0 }
 displacement = { size = "medium", anchored = false }
