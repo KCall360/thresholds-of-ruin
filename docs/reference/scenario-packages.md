@@ -440,6 +440,24 @@ the same once-only entry ledger. No legal placement cell produces a saved skip;
 it does not trigger a later retry or refill. It neither reorders earlier stages nor replaces geometry preparation,
 room topology or the unique retrieval objective.
 
+A `kind = "chance_items"` stage declares `attempts` (at least one) and a
+rational `chance` instead of a count range. Each attempt independently succeeds
+with that chance from the stage's count stream; the successes become the saved
+request, and each places one weighted choice exactly like an ordinary item
+stage. Rogue's nine 36% item attempts use this form.
+
+A `kind = "food_drought"` stage declares a `threshold` and a list of distinct
+`food` item archetypes, and places one weighted choice on a first entry only
+when more than `threshold` consecutive earlier first-entry floors, and this
+floor's earlier stages, placed no listed food item. The count is derived from
+the retained entry records in first-entry order, so revisits, queries,
+preparation and rollback never change it, and the receipt audit recomputes it.
+Its saved request is 0 or 1. A floor with no legal cell keeps the drought
+running into the next floor.
+
+Item band choices may carry their own `quantity` expression, overriding the
+stage quantity for that choice, such as grouped arrows.
+
 A `kind = "room_cluster"` stage makes one explicit rational chance decision and,
 on success, selects one canonical present room shared by its item and actor
 attempts. It declares `item_count` and `actor_count` inclusive positive ranges,
@@ -663,6 +681,19 @@ No death roll, replacement stock, species switch or extra inventory ledger exist
 Initial and later entries both discard the whole candidate on construction,
 identity, decision-capacity or Store failure; legal-cell exhaustion alone remains
 a placement skip. Query, preload, revisit, ascent and restart never grant stock.
+
+Scenario capabilities switch shared mechanics on or off for one scenario; no
+mechanic is removed from the engine. `npc_stair_traversal` is required inside a
+`[capabilities]` table. `owner_advancement`, `corpses` and `low_health_flight` may
+be omitted and then keep the engine default, enabled. With `owner_advancement = false` the server
+refuses owner purchases, future-source and Intellect choices and respec, before
+any preview work; growth then follows only authored rows. With `corpses = false`
+an ordinary death leaves no corpse item and allocates no item identity, while
+carried items still drop at the death location. With `low_health_flight = false`
+AI actors never flee because their Health fell below their species'
+`flee_percent`; forced flight, such as from a scare effect, still applies. The
+compiled and saved policy records every switch explicitly. Unknown switches
+reject compilation.
 
 The optional `npc_stair_traversal` capability defaults to allowing NPC stairs.
 When false, only the selected declared player character can voluntarily traverse
@@ -1063,7 +1094,17 @@ A creature recipe may declare `future_growth = { kind = "selected", source =
 "authored" }`. Omitted authoring defaults to disabled; persisted recipes require
 the policy explicitly. Controller identity never selects a future source.
 NPCs grow only when their recipe explicitly enables a future source. Invalid
-class references reject package compilation. Changing the selected future source
+class references reject package compilation.
+
+A recipe with `restoration = "authored"` and `future_growth = { kind =
+"authored" }` may add `growth_schedule`, a list of Hit Die rows in the same shape
+as `hit_dice`. Each earned threshold grows the next scheduled row with its
+purchases and attribute choice; when the schedule is exhausted, earned XP is
+held. A drained scheduled row regrows with the same choices. The complete
+schedule is checked at compilation as if every row were owned, so an unfunded,
+over-cap or ineligible row rejects the package. `hit_dice` plus the schedule
+must fit the 256-HD limit. Body-package characters keep the scheduled rows as
+future personal Hit Dice; see [the Rogue tuning plan](../plans/rogue-tuning.md). Changing the selected future source
 does not replace an authored lost-HD restoration source or choices.
 
 Actor records keep species/template IDs, owned advancement choices and mutable
@@ -1162,7 +1203,7 @@ Unknown names and invalid values are rejected.
 
 | Field | Meaning |
 | --- | --- |
-| `disposition` | `passive` requires ordinary hostile provocation; `mean` directly acquires an eligible visible foe; continual-Stealth awareness can gate eligibility |
+| `disposition` | `passive` requires ordinary hostile provocation; `mean` directly acquires an eligible visible foe; `greedy` collects known Gold it can safely reach and otherwise acquires as `mean` does; continual-Stealth awareness can gate eligibility |
 | `idle` | `explore` permits autonomous exploration and useful-item detours; `wait` forbids all idle movement |
 | `memory_ticks` | Actor-active engagement memory, from 0 through 1000000 inclusive |
 | `doors` | Permit opening reachable known doors; anatomy or creature kind never infers this permission |

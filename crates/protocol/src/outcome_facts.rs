@@ -895,7 +895,7 @@ impl OutcomeFacts {
                         .events
                         .iter()
                         .filter_map(|event| match event {
-                            CombatEventView::Died { actor } => Some(*actor),
+                            CombatEventView::Died { actor, .. } => Some(*actor),
                             _ => None,
                         })
                         .collect();
@@ -1073,7 +1073,7 @@ fn event_subjects(event: &CombatEventView) -> Vec<ActorTarget> {
         | CombatEventView::Ability { caster, target, .. } => {
             caster.iter().chain(target.iter()).copied().collect()
         }
-        CombatEventView::Died { actor } => vec![*actor],
+        CombatEventView::Died { actor, .. } => vec![*actor],
         _ => Vec::new(),
     }
 }

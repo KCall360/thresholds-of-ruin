@@ -269,14 +269,7 @@ impl Game {
             (true, actors, actor_requested, actor_depth),
         ] {
             let role = role_stage(stage, room_id, requested.min(room_area), is_actor);
-            self.validate_population_attempts(
-                record,
-                profile,
-                &role,
-                effective_depth,
-                requested.min(room_area),
-                attempts,
-            )?;
+            self.validate_population_attempts(record, profile, &role, effective_depth, attempts)?;
             // Historical actors/items may be dead, consumed or elsewhere. Check only
             // immutable room and recipe facts, never present occupancy or ownership.
             for attempt in attempts {

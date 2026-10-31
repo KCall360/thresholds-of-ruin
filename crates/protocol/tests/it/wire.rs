@@ -55,7 +55,7 @@ fn history_actions_preserve_the_tagged_wire_shape_and_validate_event_payload() {
 
 #[test]
 fn current_wire_protocol_revision_is_explicitly_pinned() {
-    assert_eq!(PROTOCOL_VERSION, 66);
+    assert_eq!(PROTOCOL_VERSION, 67);
 }
 
 #[test]
@@ -313,7 +313,7 @@ fn clients_cannot_choose_a_role_and_welcome_requires_server_authority() {
 fn combat_facts_are_data_not_prose() {
     let events: Vec<CombatEventView> = serde_json::from_str(
         r#"[{"type":"ability","ability":{"id":"basic_melee","name":"Attack"},"caster":"a_0202020202020202020202020202020202020202020202020202020202020202","target":null,"outcome":"unaffected","strike":null},
-            {"type":"interrupted","actor":"a_0101010101010101010101010101010101010101010101010101010101010101"},{"type":"died","actor":"a_0202020202020202020202020202020202020202020202020202020202020202"}]"#,
+            {"type":"interrupted","actor":"a_0101010101010101010101010101010101010101010101010101010101010101"},{"type":"died","actor":"a_0202020202020202020202020202020202020202020202020202020202020202","cause":"injury"}]"#,
     )
     .unwrap();
     assert_eq!(
@@ -333,7 +333,8 @@ fn combat_facts_are_data_not_prose() {
                 actor: ActorTarget::from_digest([1; 32])
             },
             CombatEventView::Died {
-                actor: ActorTarget::from_digest([2; 32])
+                actor: ActorTarget::from_digest([2; 32]),
+                cause: tor_protocol::DeathCause::Injury,
             },
         ]
     );
@@ -346,6 +347,40 @@ fn combat_facts_are_data_not_prose() {
         r#"{"type":"died","actor":"a_0202020202020202020202020202020202020202020202020202020202020202","message":"The scout died."}"#
     )
     .is_err());
+}
+
+#[test]
+fn a_behind_schedule_save_has_its_own_error_code() {
+    assert_eq!(
+        serde_json::to_value(ErrorCode::SaveBehind).unwrap(),
+        serde_json::json!("save_behind")
+    );
+    assert_eq!(
+        serde_json::from_value::<ErrorCode>(serde_json::json!("save_behind")).unwrap(),
+        ErrorCode::SaveBehind
+    );
+}
+
+#[test]
+fn a_death_names_a_closed_required_cause() {
+    let died = |cause: &str| {
+        serde_json::from_str::<CombatEventView>(&format!(
+            r#"{{"type":"died","actor":"a_0202020202020202020202020202020202020202020202020202020202020202"{cause}}}"#
+        ))
+    };
+    assert_eq!(
+        died(r#","cause":"starvation""#).unwrap(),
+        CombatEventView::Died {
+            actor: ActorTarget::from_digest([2; 32]),
+            cause: DeathCause::Starvation,
+        }
+    );
+    assert!(died("").is_err(), "the cause is required");
+    assert!(
+        died(r#","cause":"poison""#).is_err(),
+        "the cause is a closed set"
+    );
+    assert!(died(r#","cause":"starvation","killer":"a_01""#).is_err());
 }
 
 #[test]
@@ -495,7 +530,7 @@ fn readiness_is_required_and_does_not_accept_extra_authority() {
     let samples: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/wire-v66.json"
+            "/tests/fixtures/wire-v67.json"
         ))
         .expect("regenerate current wire samples"),
     )

@@ -1,15 +1,15 @@
 {
-  "validator": "tor-scenario-47",
+  "validator": "tor-scenario-48",
   "ruleset": "interactions-v57",
   "ruleset_hash": "19ed1ce0246e43bff6688533f8377965cf9277f2dd6ec8bfe2159fec422be21c",
   "ruleset_dependencies": {
     "interactions-v57": "e9044e8b35e2e1881aded0ff1d745700f5abc9b14712ae07a7e2282c923a99b2"
   },
-  "content_hash": "b1f954fa7c9ac52a10b597bbf46ea1d372a6fd57d5920293b4a82f557b7e8943",
+  "content_hash": "46312932ea1631f7fb87373a69ba70fcd2b3738072a0668a33d506549fedb785",
   "files": {
     "index.json": "cb16c760e7ddec17bbc448c0df17f3a3a81b2850ebf29726d40fcd13bcebc128",
     "rules.toml": "f1eaced675132f0f8c006e237a3c97ed393ae353b6e4f87d438b3180eaba883e",
-    "scenario.toml": "8a9ce9748ee34ef58d8da53b77b549518c17596dcb71fd39caecbda3b23ff7b0"
+    "scenario.toml": "ff0c8b2b12b1c898fc7361065ce130af5ffeacf30fd8cfe529e6ac502063f0d9"
   },
   "regions": 4,
   "model_hash": "c7518d165a311aa2a2be69d66d5792dc24274167b2d3cafeb32e8cdb64c296f8",

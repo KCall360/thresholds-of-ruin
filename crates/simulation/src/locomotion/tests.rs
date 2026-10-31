@@ -370,6 +370,7 @@ fn rotated_abstract_stair_keeps_actor_policy_with_or_without_flight() {
         game.configure_scenario_policy(
             crate::floor_activation::ScenarioCapabilities {
                 npc_stair_traversal: false,
+                ..Default::default()
             },
             Some(ActorId(99)),
         )
@@ -539,6 +540,7 @@ fn learned_vertical_physical_portal_does_not_require_flight() {
     game.configure_scenario_policy(
         crate::floor_activation::ScenarioCapabilities {
             npc_stair_traversal: false,
+            ..Default::default()
         },
         Some(ActorId(99)),
     )

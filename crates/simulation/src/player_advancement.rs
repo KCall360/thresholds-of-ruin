@@ -216,6 +216,14 @@ impl PlayerPurchasePreview {
 }
 
 impl Game {
+    /// Scenario policy refuses every owner choice before any preview work.
+    pub(crate) fn require_owner_advancement(&self) -> Result<(), GameError> {
+        if self.scenario_capabilities().owner_advancement {
+            Ok(())
+        } else {
+            Err(GameError::AdvancementLocked)
+        }
+    }
     /// Read-only ordinary readiness. The host additionally checks current control,
     /// run/queue permissions and exact admission provenance.
     pub fn player_advancement_ready(&self, actor: ActorId) -> bool {
@@ -256,6 +264,7 @@ impl Game {
         ),
         GameError,
     > {
+        self.require_owner_advancement()?;
         let creature = self.creature(actor).ok_or(GameError::UnknownActor)?;
         if !basis.valid() || basis.actor != actor || basis.build_epoch != creature.build_epoch() {
             return Err(GameError::Build(BuildError::StaleAdvancementPreview));
@@ -319,6 +328,7 @@ impl Game {
         basis: &AdvancementBasis,
         source: &crate::earned_growth::GrowthSource,
     ) -> Result<(PlayerGrowthPreview, crate::lifecycle::PreparedActorOutcome), GameError> {
+        self.require_owner_advancement()?;
         let creature = self.creature(actor).ok_or(GameError::UnknownActor)?;
         if !basis.valid() || basis.actor != actor || basis.build_epoch != creature.build_epoch() {
             return Err(GameError::Build(BuildError::StaleAdvancementPreview));
@@ -421,6 +431,7 @@ impl Game {
         ),
         GameError,
     > {
+        self.require_owner_advancement()?;
         let creature = self.creature(actor).ok_or(GameError::UnknownActor)?;
         if !basis.valid() || basis.actor != actor || basis.build_epoch != creature.build_epoch() {
             return Err(GameError::Build(BuildError::StaleAdvancementPreview));

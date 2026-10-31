@@ -74,12 +74,12 @@ use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
 pub const RULESET: &str = "interactions-v57";
-const VALIDATOR: &str = "tor-scenario-47";
+const VALIDATOR: &str = "tor-scenario-48";
 /// The manifest and the validator's files are bounded to this.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 /// The package layout this version reads: `scenario.toml`, one file per
 /// region in `regions/`, and the validator's `index.json`.
-pub const FORMAT: u32 = 35;
+pub const FORMAT: u32 = 36;
 const REGION_DIR: &str = "regions";
 /// Regions a package may have.
 pub const MAX_REGIONS: usize = 65_536;
@@ -201,6 +201,18 @@ pub struct Arena {
     pub control: ArenaControl,
     pub ticks: u64,
     pub actions: u64,
+    /// Places the arena's regions on a floor of this activation profile and
+    /// depth, so floor rules such as theft's depth-scaled amounts and same-floor
+    /// relocation apply. No first-entry population runs there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub floor: Option<ArenaFloor>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArenaFloor {
+    pub profile: String,
+    pub depth: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -2803,6 +2815,17 @@ impl Package {
                     && self.manifest.objective.is_none(),
                 "Invalid arena limits, participants or objective",
             )?;
+            if let Some(floor) = &arena.floor {
+                require(
+                    floor.depth > 0
+                        && self
+                            .manifest
+                            .floor_activation
+                            .as_ref()
+                            .is_some_and(|plan| plan.profiles.contains_key(&floor.profile)),
+                    "Arena floor needs a positive depth and a floor activation profile",
+                )?;
+            }
         }
         for (faction, enemies) in &self.manifest.factions {
             let origin = Origin::Faction(faction);
@@ -4772,6 +4795,26 @@ impl Package {
             game.control_arena(true, 0)
                 .map_err(|_| fail("Invalid initial arena control"))?;
         }
+        if let Some(floor) = &arena.floor {
+            // After the initial floor activation, so the arena floor runs no
+            // first-entry population; it only supplies floor context.
+            let regions = self
+                .index
+                .regions
+                .iter()
+                .map(|region| self.region_def(region.id))
+                .collect::<Result<Vec<_>, _>>()?;
+            let regions: Vec<&RegionDef> = regions.iter().map(|region| &**region).collect();
+            let scope = self.profile_scope(
+                &format!("arena/{}", floor.depth),
+                &floor.profile,
+                floor.depth,
+                &regions,
+                &[],
+            );
+            game.register_activation_scope(scope)
+                .map_err(|error| fail(format!("Arena floor: {error:?}")))?;
+        }
         Ok(())
     }
     /// Only structural edits that invalidate an authored anchor break validation.
@@ -5213,7 +5256,7 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let original = read_package(&root).unwrap();
         original.check_identity().unwrap();
-        assert_eq!(original.certificate.validator, "tor-scenario-47");
+        assert_eq!(original.certificate.validator, "tor-scenario-48");
         assert_eq!(original.certificate.ruleset, "interactions-v57");
         let current_artifact = artifact::relative_root(&original);
         for (boundary, identity) in [
@@ -5223,6 +5266,7 @@ mod tests {
             ("validator", "tor-scenario-30"),
             ("validator", "tor-scenario-31"),
             ("validator", "tor-scenario-32"),
+            ("validator", "tor-scenario-47"),
             ("ruleset", "interactions-v38"),
             ("ruleset", "interactions-v39"),
             ("ruleset", "interactions-v40"),
@@ -7725,7 +7769,8 @@ value = 13
                 "species": "guard", "name": "guard", "faction": "guards", "binding": "intellect",
                 "attributes": null, "templates": [], "future_growth": {"kind": "disabled"},
                 "body_package": null, "personal_body_grants": [],
-                "starting_skills": ["deception", "persuasion"], "restoration": "choose_again", "nutrition": {"kind":"exempt"}, "hit_dice": [{"source": "racial", "purchases": [], "attribute": null}]
+                "starting_skills": ["deception", "persuasion"], "restoration": "choose_again", "nutrition": {"kind":"exempt"}, "hit_dice": [{"source": "racial", "purchases": [], "attribute": null}],
+                "growth_schedule": []
             }
         });
         let actor: Actor = serde_json::from_value(value.clone()).unwrap();

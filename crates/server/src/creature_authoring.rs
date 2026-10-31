@@ -438,12 +438,14 @@ impl Melee {
 pub enum Disposition {
     Passive,
     Mean,
+    Greedy,
 }
 impl<'de> Deserialize<'de> for Disposition {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         match String::deserialize(d)?.as_str() {
             "passive" => Ok(Self::Passive),
             "mean" => Ok(Self::Mean),
+            "greedy" => Ok(Self::Greedy),
             _ => Err(serde::de::Error::custom("invalid Disposition")),
         }
     }
@@ -554,6 +556,7 @@ impl BehaviorPolicy {
             disposition: match self.disposition {
                 Disposition::Passive => s::behavior::Disposition::Passive,
                 Disposition::Mean => s::behavior::Disposition::Mean,
+                Disposition::Greedy => s::behavior::Disposition::Greedy,
             },
             idle: match self.idle {
                 IdleBehavior::Wait => s::behavior::IdleBehavior::Wait,
@@ -800,6 +803,9 @@ pub struct BuildSpec {
     pub attributes: Option<ByAttribute<u16>>,
     pub binding: ManaBinding,
     pub hit_dice: Vec<Advancement>,
+    /// Future Hit Dice granted in order by `future_growth = authored`.
+    #[serde(default)]
+    pub growth_schedule: Vec<Advancement>,
     #[serde(default)]
     pub templates: Vec<String>,
 }
@@ -1089,8 +1095,16 @@ impl CompiledCatalog {
         {
             return Err(invalid("Required nutrition needs an enabled policy"));
         }
+        if !author.growth_schedule.is_empty()
+            && (author.restoration != Restoration::Authored
+                || author.future_growth != FutureGrowth::Authored {})
+        {
+            return Err(invalid(
+                "A growth schedule requires authored restoration and authored future growth",
+            ));
+        }
         if author.hit_dice.is_empty()
-            || author.hit_dice.len() > s::limits::HIT_DICE
+            || author.hit_dice.len() + author.growth_schedule.len() > s::limits::HIT_DICE
             || author.templates.len() > s::limits::TEMPLATES
         {
             return Err(invalid(
@@ -1165,6 +1179,16 @@ impl CompiledCatalog {
                                 choices: choices.clone(),
                             })
                         })
+                        .chain(author.growth_schedule.iter().map(|entry| {
+                            Ok(s::creatures::PlannedAdvancement {
+                                source: hit_die_source(&entry.source, self.content.rules())?,
+                                choices: compile_choices(
+                                    &entry.purchases,
+                                    entry.attribute.as_ref(),
+                                    self.content.rules(),
+                                )?,
+                            })
+                        }))
                         .collect::<Result<_, Failure>>()?,
                 ),
             },

@@ -234,6 +234,8 @@ record!(AdvancementOverview {
     #[serde(with = "crate::integers::unsigned")]
     received_loss_remaining: u64,
     perceived_threat: bool, ready: bool, other_preparation: bool,
+    /// The scenario applies authored growth; owner choices are refused.
+    locked: bool,
     #[serde(deserialize_with = "required_option")]
     respec: Option<OwnerRespecProgress>,
 });
@@ -678,6 +680,7 @@ impl Checked for AdvancementOverview {
             && self.received_loss_remaining <= self.timings.received_loss_interval
             && self.respec.as_ref().is_none_or(Checked::checked)
             && !(self.other_preparation && self.respec.is_some())
+            && !(self.locked && (self.ready || self.respec.is_some()))
     }
 }
 impl Checked for OwnerRespecProgress {

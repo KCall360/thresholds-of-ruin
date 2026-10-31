@@ -46,7 +46,10 @@ Overview contains a required `growth` record: `highest_earned_tier`, `peak_threa
 `held_xp`, `earned_xp`, `spent_xp`, `next_threshold` and `future`. Counts,
 threat, XP prices and counters are unsigned decimal strings and satisfy earned = spent + held. Future policy
 is explicitly tagged `disabled`, `selected` (with `source`), or `authored`.
-These are owner-only descriptive facts. Source changes use the same retained
+Overview also has a required `locked` boolean. It is true when the scenario
+disables owner advancement: the build grows only along its authored schedule,
+`ready` is false, no respec is in progress, and the server refuses every
+purchase, source, Intellect and respec request. These are owner-only descriptive facts. Source changes use the same retained
 preview, ordinary admission, strict save adapters and receipt precedence as
 purchases; they preserve authored restoration choices. Zero-based owners are
 canonical unsigned decimal strings below the 64-bit maximum, so the corresponding
@@ -320,7 +323,7 @@ of this wire representation.
 The first frame authenticates and declares a frontend label:
 
 ```json client-message
-{"type":"hello","protocol":66,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":67,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and
@@ -1299,6 +1302,11 @@ format, and the tested durability boundaries.
 
 The save acknowledgement covers the accepted prefix at request time. Play
 doesn't wait for disk I/O, and saving doesn't stop a journey. Spectators cannot request saves.
+A save that is not durable within five seconds is answered with error
+`save_behind`: it is not durable yet, stays queued and completes when the writer
+catches up, so a client never has to guess the outcome. While saving is behind
+schedule, the server holds new commands in arrival order and pauses autonomous
+play until the writer catches up; queries and saves are still answered.
 
 ## Validation
 
@@ -1433,7 +1441,9 @@ observer knows. An `ability` names its disclosed technique, optional `caster` an
 `target`, qualitative `outcome` and nullable actual `strike` ordinal as described
 above; a participant the observer couldn't see is `null`.
 `interrupted` reports the observer's own wind-up being interrupted, and `died`
-names a disclosed actor that died, after the blow that killed it. The server
+names a disclosed actor that died, after the blow that killed it, with its
+`cause`: `starvation` when its food reserve ran out, otherwise `injury`. The
+cause is a category, never a causer. The server
 sends facts, never prose: clients write their own sentences, and actor
 descriptions and names are empty when nothing is authored. The observer's own
 body, including repeated portal views, has `ActorView.id` equal to

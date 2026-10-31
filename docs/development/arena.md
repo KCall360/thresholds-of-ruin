@@ -229,7 +229,20 @@ For a fresh offline arena evaluation, run the `tor-arena` binary (default seed 4
 `--scenario PATH --seed N --all-ai`. It resolves all-AI/unpaused control in memory,
 revalidates that resolved package and uses ordinary Engine admission/execution.
 The authored source and existing saves are untouched. Without `--all-ai`, the
-package must already declare unpaused all-AI control.
+package must already declare unpaused all-AI control. `--timeline` adds a
+`timeline` to the report: one step per AI decision with the actor, the tick after
+it, the journal entries it appended and the combat events it produced, in their
+saved shapes. It observes the run without changing it, which makes it the tool
+for questions such as why a participant never attacked.
+
+An arena's `floor = { profile, depth }` places its regions on a floor of that
+floor-activation profile and depth, so floor rules apply there, such as a thief's
+depth-scaled take and same-floor vanish. It runs no first-entry population and
+needs the package's `floor_activation`; the Rogue encounter study uses it.
+
+Each participant's `effects` counts the effects its resolutions applied, by kind,
+with a condition effect qualified by its condition, as in
+`apply_condition:rogue.frozen`.
 
 The JSON report includes the seed, selected character, resolved model hash,
 streaming settings, combined input hash, ticks/actions, explicit elimination or
@@ -840,7 +853,7 @@ expression kinds cannot be changed by parameters. For example, `["resources", "m
 whose stable identity is `mana`, independent of declaration order. Character and
 region actor segments select their numeric `id`, never their array position.
 Only non-identity arrays, such as effects and modifiers, use positional indices. Each arena
-report uses `tor-arena-run-v5` and includes the actual ruleset ID and exact bundled
+report uses `tor-arena-run-v6` and includes the actual ruleset ID and exact bundled
 source SHA-256, also included in its input fingerprint. Participant HD counts and
 Health/maximum-Health/injury are canonical unsigned 64-bit decimal strings;
 resource balances remain bounded JSON numbers. Overlapping targets, missing paths and edits

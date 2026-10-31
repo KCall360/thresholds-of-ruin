@@ -861,6 +861,44 @@ changes did not cause it.
   client: a harness/environment limit, not a result). Exact-head hosted CI
   remains their qualification.
 
+## Rogue tuning branch, 29 October 2026
+
+Local `feat/rogue-mechanics-profile`, before publication. Window: this
+branch's development runs only.
+
+- **Production defect, caught in development (not by a test).** Seeded birth of
+  a body-package character rebuilt its authored plan from the birth rows only,
+  dropping the growth schedule, so the Rogue adventurer earned XP without
+  growing. The seeded-descent campaign exposed it (360 XP at level 1); the
+  existing unit and process tests built schedules without seeded birth or only
+  checked the starting state. Intended red:
+  `creatures::body_tests::seeded_birth_keeps_the_growth_schedule` failed with
+  `None` for the next scheduled source; green after the birth path carries the
+  unowned future rows. A real-process witness,
+  `test_scenario_capabilities_process...test_rogue_adventurer_grows_its_scheduled_row_through_ordinary_play`,
+  now drinks Raise Level in the Rogue package. One root, one method, one failed
+  execution.
+- **Stale/unupdated tests, approved shape change.** Adding scenario capabilities
+  and an optional choice quantity left
+  `engine::floor_activation_tests::checkpoint_cannot_inject_scenario_policy_into_a_nonpackage_game`,
+  `scenario_package::tests::authoring_explicit_actor_values_preserve_canonical_shape`,
+  `scenario_package::tests::rogue_magic_catalog_uses_explicit_capabilities_and_appends_finite_stock`
+  and `wire::current_wire_protocol_revision_is_explicitly_pinned` expecting the
+  prior shapes. The capability and growth-schedule fields were updated in the
+  tests; the absent choice quantity is now omitted from authored output instead.
+  Two roots (format additions, an absent optional serialized as null), four
+  methods, four failed executions.
+- **Stale/unupdated tests after merging main, 30 October 2026.** The quick tier
+  failed `engine::floor_activation_tests::checkpoint_cannot_inject_scenario_policy_into_a_nonpackage_game`
+  (its injected capabilities lacked the new `low_health_flight` switch),
+  `runner::backpressure_tests::overdue_saving_holds_commands_in_order_and_nothing_else`
+  (a hand-written command kept the pre-merge `expected_revision` field),
+  `test_process_module_boundaries` (a process test imported another test module;
+  the helper moved to `advancement_package.py`) and
+  `test_save_backpressure_process` (its final save assumed durability under full-suite
+  load; it now uses the retrying barrier). Four roots, four methods, four failed
+  executions. Environment-only failures in the same run (missing `optuna`, a full
+  disk, load timeouts) passed or were confirmed environmental when rerun alone.
 ## Live interface shell checkpoint, 29 October 2026
 
 The new native dock test first failed at the intended missing-HUD assertion

@@ -50,6 +50,9 @@ Generation details that affect balance:
 - Ordinary item placement makes nine independent attempts, each with 36%
   success. Item-category weights are in the catalog. A food drought forces food
   when the `no_food` counter exceeds 3; creating food resets that counter.
+  `new_level()` increments `no_food` before `put_things()`, so the counter
+  includes the level being generated: after three foodless levels, the fourth
+  level's first created item is food.
 - A treasure room has a 1/20 chance when item placement is allowed. It adds
   several items and a dense group of monsters selected as if one depth deeper;
   counts are bounded by room area and the source's treasure limits.

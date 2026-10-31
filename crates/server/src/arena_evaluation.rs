@@ -14,11 +14,14 @@ use tor_simulation::{
 };
 
 /// Current offline run-report contract, shared by success and CLI failure writers.
-pub const FORMAT: &str = "tor-arena-run-v5";
+pub const FORMAT: &str = "tor-arena-run-v6";
 
 fn decimal<S: Serializer>(value: &u64, serializer: S) -> Result<S::Ok, S::Error> {
     serializer.collect_str(value)
 }
+/// Failed autonomous decisions in a row before an encounter ends as a stalemate.
+const MAX_CONSECUTIVE_FAILED_DECISIONS: u32 = 8;
+
 fn invalid(message: &str) -> Failure {
     Failure::new(ErrorCode::InvalidAction, message)
 }
@@ -67,6 +70,11 @@ pub struct ArenaAbility {
     #[serde(serialize_with = "decimal")]
     pub applications: u64,
 }
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct ArenaEffect {
+    #[serde(serialize_with = "decimal")]
+    pub applications: u64,
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ArenaParticipant {
     pub actor: ActorId,
@@ -92,6 +100,9 @@ pub struct ArenaParticipant {
     #[serde(serialize_with = "decimal")]
     pub health_recovered: u64,
     pub abilities: BTreeMap<String, ArenaAbility>,
+    /// Effects this participant's resolutions applied, by kind; a condition
+    /// effect is qualified by its condition, as in `apply_condition:frozen`.
+    pub effects: BTreeMap<String, ArenaEffect>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ArenaEvaluation {
@@ -106,6 +117,26 @@ pub struct ArenaEvaluation {
     pub actions: u64,
     pub termination: ArenaTermination,
     pub participants: Vec<ArenaParticipant>,
+    /// Every committed AI step, when requested; absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeline: Option<Vec<ArenaStep>>,
+}
+
+/// One AI step: who acted, at what tick, the journal entries it appended and
+/// the combat events it produced, in their saved shapes.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ArenaStep {
+    #[serde(serialize_with = "decimal")]
+    pub tick: u64,
+    pub actor: ActorId,
+    pub journal: Vec<serde_json::Value>,
+    pub events: Vec<serde_json::Value>,
+}
+
+/// Optional observation of a run; options never change its outcome.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RunOptions {
+    pub timeline: bool,
 }
 
 fn participant(engine: &Engine, actor: u64) -> Result<ArenaParticipant, Failure> {
@@ -150,6 +181,7 @@ fn participant(engine: &Engine, actor: u64) -> Result<ArenaParticipant, Failure>
         healing_received: 0,
         health_recovered: 0,
         abilities: BTreeMap::new(),
+        effects: BTreeMap::new(),
     })
 }
 
@@ -222,7 +254,31 @@ fn record_resolution(
         counter.resolutions += 1;
         counter.applications += u64::from(outcome.result == OutcomeStatus::Applied);
     }
+    let source = participants
+        .get_mut(&outcome.actor.0)
+        .expect("validated participant");
+    for effect in &outcome.effects {
+        source
+            .effects
+            .entry(effect_name(effect)?)
+            .or_default()
+            .applications += 1;
+    }
     Ok(())
+}
+
+/// An effect's report name: its serialized kind, qualified by the condition a
+/// condition effect applies.
+fn effect_name(effect: &ResolvedEffect) -> Result<String, Failure> {
+    let kind = serde_json::to_value(effect)
+        .ok()
+        .and_then(|value| value["kind"].as_str().map(str::to_owned))
+        .ok_or_else(|| invalid("Arena effect has no kind"))?;
+    Ok(match effect {
+        ResolvedEffect::ApplyCondition { id, .. }
+        | ResolvedEffect::ApplyPersistentCondition { id } => format!("{kind}:{}", id.as_str()),
+        _ => kind,
+    })
 }
 fn measured_recovery(value: &ArenaParticipant) -> Result<u64, Failure> {
     value
@@ -237,6 +293,11 @@ fn measured_recovery(value: &ArenaParticipant) -> Result<u64, Failure> {
 /// Run a fresh, unpaused, all-AI package arena. Errors remain explicit failures;
 /// no work is synthesized when the ordinary engine has no admissible decision.
 pub fn run(scenario: Scenario) -> Result<ArenaEvaluation, Failure> {
+    run_with(scenario, RunOptions::default())
+}
+
+/// [`run`] with optional observation such as a per-step timeline.
+pub fn run_with(scenario: Scenario, options: RunOptions) -> Result<ArenaEvaluation, Failure> {
     let package = scenario
         .package
         .as_ref()
@@ -264,10 +325,12 @@ pub fn run(scenario: Scenario) -> Result<ArenaEvaluation, Failure> {
         .map(|byte| format!("{byte:02x}"))
         .collect();
     let mut engine = Engine::memory(scenario)?;
+    let mut consecutive_failures = 0_u32;
     let mut participants = ids
         .into_iter()
         .map(|id| Ok((id, participant(&engine, id)?)))
         .collect::<Result<BTreeMap<_, _>, Failure>>()?;
+    let mut timeline = options.timeline.then(Vec::new);
     loop {
         let run = engine
             .game
@@ -280,10 +343,49 @@ pub fn run(scenario: Scenario) -> Result<ArenaEvaluation, Failure> {
         let Some((actor, _)) = engine.next_ai_action() else {
             break;
         };
+        let journaled = engine.archive.records.len();
         engine.advance_ai(actor)?;
+        if let Some(timeline) = &mut timeline {
+            let saved = |value: Result<serde_json::Value, _>| {
+                value.map_err(|_| invalid("Arena timeline entry is not serializable"))
+            };
+            timeline.push(ArenaStep {
+                tick: engine.game.tick(),
+                actor: ActorId(actor.0),
+                journal: engine.archive.records[journaled..]
+                    .iter()
+                    .map(|record| saved(serde_json::to_value(&record.entry.content)))
+                    .collect::<Result<_, _>>()?,
+                events: engine
+                    .game
+                    .combat_events()
+                    .iter()
+                    .map(|event| saved(serde_json::to_value(event)))
+                    .collect::<Result<_, _>>()?,
+            });
+        }
         let run = engine.game.arena_run().expect("validated arena runtime");
-        if run.actions != previous + 1 {
+        let failed = matches!(
+            engine
+                .archive
+                .records
+                .last()
+                .map(|record| &record.entry.content),
+            Some(crate::journal::JournalContent::IntentionFailed { .. })
+        );
+        if run.actions == previous && failed {
+            // An admitted autonomous intention can fail at execution when an
+            // opponent's resolution intervenes, such as a hold that resolves
+            // first. The actor loses that turn; a long run of such failures
+            // ends the encounter as a stalemate instead of looping.
+            consecutive_failures += 1;
+            if consecutive_failures > MAX_CONSECUTIVE_FAILED_DECISIONS {
+                break;
+            }
+        } else if run.actions != previous + 1 {
             return Err(invalid("Arena decision did not commit exactly one action"));
+        } else {
+            consecutive_failures = 0;
         }
         for event in engine.game.combat_events() {
             match event {
@@ -326,6 +428,7 @@ pub fn run(scenario: Scenario) -> Result<ArenaEvaluation, Failure> {
         actions: run.actions,
         termination,
         participants: participants.into_values().collect(),
+        timeline,
     })
 }
 
@@ -354,7 +457,61 @@ mod recovery_measurement_tests {
             healing_received: 0,
             health_recovered: 0,
             abilities: BTreeMap::new(),
+            effects: BTreeMap::new(),
         }
+    }
+    #[test]
+    fn applied_effects_are_counted_for_their_source_by_kind_and_condition() {
+        let mut participants = BTreeMap::from([(1, subject(1)), (2, subject(2))]);
+        let frozen = tor_simulation::content_ids::ConditionId::new("frozen").unwrap();
+        let outcome = |effects| tor_simulation::abilities::Outcome {
+            actor: SimActor(1),
+            target: SimActor(2),
+            ability: None,
+            intention: None,
+            result: OutcomeStatus::Applied,
+            check: None,
+            resistance: None,
+            participation: tor_simulation::abilities::AttemptedParticipation::target(),
+            target_rider_participated: false,
+            effects,
+        };
+        for effects in [
+            vec![
+                ResolvedEffect::Damage { amount: 2 },
+                ResolvedEffect::ApplyCondition {
+                    id: frozen.clone(),
+                    duration: 300,
+                },
+            ],
+            vec![
+                ResolvedEffect::ApplyCondition {
+                    id: frozen.clone(),
+                    duration: 100,
+                },
+                ResolvedEffect::Theft {
+                    quantity: 3,
+                    relocation: None,
+                },
+            ],
+        ] {
+            record_resolution(&mut participants, &outcome(effects)).unwrap();
+        }
+        let counts: BTreeMap<_, _> = participants[&1]
+            .effects
+            .iter()
+            .map(|(name, effect)| (name.as_str(), effect.applications))
+            .collect();
+        assert_eq!(
+            counts,
+            BTreeMap::from([("apply_condition:frozen", 2), ("damage", 1), ("theft", 1)])
+        );
+        assert!(participants[&2].effects.is_empty());
+        let report = serde_json::to_value(&participants[&1]).unwrap();
+        assert_eq!(
+            report["effects"]["apply_condition:frozen"]["applications"],
+            "2"
+        );
     }
     #[test]
     fn non_ability_damage_and_explicit_healing_conserve_injury_despite_capacity_changes() {

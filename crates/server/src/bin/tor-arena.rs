@@ -9,6 +9,7 @@ fn evaluate() -> Result<arena_evaluation::ArenaEvaluation, String> {
     let mut path = None;
     let mut seed = None;
     let mut all_ai = false;
+    let mut options = arena_evaluation::RunOptions::default();
     let mut args = std::env::args().skip(1);
     while let Some(argument) = args.next() {
         match argument.as_str() {
@@ -24,8 +25,10 @@ fn evaluate() -> Result<arena_evaluation::ArenaEvaluation, String> {
                 )
             }
             "--all-ai" if !all_ai => all_ai = true,
+            // Adds every AI step's journal entries and combat events to the report.
+            "--timeline" if !options.timeline => options.timeline = true,
             "--help" | "-h" => {
-                println!("tor-arena --scenario PATH [--seed N] [--all-ai]");
+                println!("tor-arena --scenario PATH [--seed N] [--all-ai] [--timeline]");
                 std::process::exit(0);
             }
             _ => return Err("Unknown or duplicate argument".into()),
@@ -49,7 +52,7 @@ fn evaluate() -> Result<arena_evaluation::ArenaEvaluation, String> {
         resolved.selected = package.selected;
         scenario.package = Some(Arc::new(resolved));
     }
-    arena_evaluation::run(scenario).map_err(|e| e.to_string())
+    arena_evaluation::run_with(scenario, options).map_err(|e| e.to_string())
 }
 
 fn main() {

@@ -440,6 +440,8 @@ pub enum GameError {
     DoorUnavailable,
     IdentityExhausted,
     ActorBusy,
+    /// The scenario disables owner advancement choices.
+    AdvancementLocked,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

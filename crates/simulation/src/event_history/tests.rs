@@ -173,7 +173,10 @@ fn unchanged_unbound_origins_reuse_work_but_changed_senses_and_bindings_do_not()
     assert_eq!(refreshed.source_target, Some(ActorReferenceKind::Contact));
     assert_eq!(origin.source_target, Some(ActorReferenceKind::Creature));
     let mut bound = refreshed;
-    bound.event = Some(EventKey::capture(&CombatEvent::Died { actor: ActorId(2) }));
+    bound.event = Some(EventKey::capture(&CombatEvent::Died {
+        actor: ActorId(2),
+        cause: crate::combat::DeathCause::Injury,
+    }));
     let before = crate::diagnostics::work_counts();
     let unbound = game.reuse_event_origin(ActorId(1), ActorId(2), Some(&bound));
     assert!(unbound.event.is_none());
@@ -323,7 +326,7 @@ fn rider_refreshes_after_primary_reveal_without_upgrading_primary_or_contact_pla
         )));
         assert!(
             history.iter().any(|event| matches!(event,
-            DisclosedCombatEvent::Died { actor: ActorId(2), reference } if *reference == expected))
+            DisclosedCombatEvent::Died { actor: ActorId(2), reference, .. } if *reference == expected))
         );
     }
 }
@@ -460,7 +463,8 @@ fn anonymous_lethal_hit_and_death_stay_anonymous_beside_visible_corpse() {
         event,
         DisclosedCombatEvent::Died {
             actor: ActorId(2),
-            reference: ActorReferenceKind::Contact
+            reference: ActorReferenceKind::Contact,
+            ..
         }
     )));
     assert!(view.ground_items.iter().any(|item| item
@@ -602,8 +606,14 @@ fn known_ability_and_death_only_batches_capture_without_extra_scenes() {
     game.host_region_continuation = true;
     game.begin_event_batch().unwrap();
     let origin = game.capture_event_origin(ActorId(1), ActorId(2));
-    game.push_event(CombatEvent::Died { actor: ActorId(2) }, Some(origin))
-        .unwrap();
+    game.push_event(
+        CombatEvent::Died {
+            actor: ActorId(2),
+            cause: crate::combat::DeathCause::Injury,
+        },
+        Some(origin),
+    )
+    .unwrap();
     game.seal_participant_events().unwrap();
     game.host_region_continuation = false;
     assert!(game.observation_knowledge_candidates().unwrap().is_empty());

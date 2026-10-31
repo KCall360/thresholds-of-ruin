@@ -6,8 +6,8 @@ work from implemented design records. “Implemented” does not mean balanced,
 fully optimized or qualified for every workload. Follow the
 [testing policy](development/testing.md).
 
-**Current formats:** protocol **66**, save format **64**, scenario format **35**,
-ruleset **`interactions-v57`**, scenario validator **`tor-scenario-47`**.
+**Current formats:** protocol **67**, save format **65**, scenario format **36**,
+ruleset **`interactions-v57`**, scenario validator **`tor-scenario-48`**.
 Unsupported identities are rejected rather than migrated. Rules-identity
 changes invalidate all saves pinned to the previous identity,
 not only saves containing affected AI. Wire and physical save formats need not
@@ -15,10 +15,10 @@ change with a deterministic rules correction. Current private
 creature records include explicit Health-roll policy, stable HD/purchase ownership,
 body snapshots and pending-return state; authored content can register body forms.
 
-Independent compiled inputs are RulesInput **26**, ContentPackage **32** and
+Independent compiled inputs are RulesInput **26**, ContentPackage **33** and
 RegionInput **9**. Physical TORB/TORJ/TORR framing is **6**, TORC **1**; rooms **2**,
 grid-rooms **1** and world-family **1** are unchanged. The arena run report is
-**`tor-arena-run-v5`**. Other guides link here instead of duplicating version lists.
+**`tor-arena-run-v6`**. Other guides link here instead of duplicating version lists.
 
 ## Implemented scope
 
@@ -106,11 +106,18 @@ separate ordinary-combat and sequence workloads and their actual executed rows.
 
 ### Rogue adaptation and shared mechanics
 
-Calibrate the implemented roster, survival, stock and depth curves rather than
-restarting completed feature foundations. See the [Rogue design record](plans/rogue.md)
-and proposed [tuning sequence](plans/rogue-tuning.md). Broader HD storage, full-run
-balance and pressured earned routes remain separate increments. Topology/recovery
-witnesses are not survival evidence; graphical waivers are never passes.
+The separate Rogue-only [`rogue` package](play/rogue.md#rogue-only-scenario) implements
+the [tuning plan](plans/rogue-tuning.md): scenario capability switches (owner
+advancement, corpses, NPC stairs, low-Health flight), a locked authored build,
+Rogue's item table, treasure rooms and food-drought guarantee, greedy orcs, and
+value tuning of all 26 species against Rogue's encounter ratios and signature
+effects (all 128 judged ratios within ±35%). Seeded campaigns pass levels, food and
+depth-4 share; the starvation share is waived as a limit of the campaign bot.
+`died` events name their cause, arenas can stand on a floor and report a per-step
+timeline, and explicit saves answer `save_behind` while play waits for a lagging
+writer. Broader HD storage, deep-run balance and pressured earned routes remain
+separate increments. Topology/recovery witnesses are not survival evidence;
+graphical waivers are never passes.
 
 ### Other scoped extensions
 

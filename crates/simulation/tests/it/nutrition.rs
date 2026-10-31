@@ -407,6 +407,14 @@ fn starvation_uses_shared_death_cleanup_without_awarding_xp() {
     let owner_before = game.creature(ActorId(1)).unwrap().earned_progress().clone();
     rest(&mut game, 10);
     assert!(!game.alive(subject));
+    // The death names its cause; no attacker is invented.
+    assert!(game.combat_events().iter().any(|event| matches!(
+        event,
+        tor_simulation::combat::CombatEvent::Died {
+            actor,
+            cause: tor_simulation::combat::DeathCause::Starvation,
+        } if *actor == subject
+    )));
     assert!(game.preparation(subject).is_none());
     assert!(game.observe(subject).unwrap().inventory.is_empty());
     let scene = game.observe(ActorId(1)).unwrap();

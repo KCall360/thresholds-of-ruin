@@ -65,6 +65,17 @@ impl<'a> PopulationBirthValidation<'a> {
 #[serde(deny_unknown_fields)]
 pub struct ScenarioCapabilities {
     pub npc_stair_traversal: bool,
+    /// Omitted switches keep the engine default: enabled.
+    #[serde(default = "enabled")]
+    pub owner_advancement: bool,
+    #[serde(default = "enabled")]
+    pub corpses: bool,
+    #[serde(default = "enabled")]
+    pub low_health_flight: bool,
+}
+
+fn enabled() -> bool {
+    true
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -196,6 +207,9 @@ pub type ActorPopulationBand = PopulationBand<ActorPopulationChoice>;
 pub struct PopulationChoice {
     pub archetype: String,
     pub weight: u32,
+    /// Overrides the stage quantity for this choice, such as grouped missiles.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quantity: Option<QuantityExpression>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -374,6 +388,26 @@ pub enum PopulationStage {
         #[serde(default = "unit_population_quantity")]
         quantity: QuantityExpression,
     },
+    /// `attempts` independent rolls, each placing one item with `chance`.
+    ChanceItems {
+        id: String,
+        version: u32,
+        attempts: u16,
+        chance: CarryChance,
+        bands: Vec<PopulationBand>,
+        #[serde(default = "unit_population_quantity")]
+        quantity: QuantityExpression,
+    },
+    /// One guaranteed item after more than `threshold` foodless first entries.
+    FoodDrought {
+        id: String,
+        version: u32,
+        threshold: u16,
+        food: Vec<String>,
+        bands: Vec<PopulationBand>,
+        #[serde(default = "unit_population_quantity")]
+        quantity: QuantityExpression,
+    },
     Actors {
         id: String,
         version: u32,
@@ -441,6 +475,12 @@ impl PopulationStage {
             }
             | PopulationStage::RoomItems {
                 quantity, bands, ..
+            }
+            | PopulationStage::ChanceItems {
+                quantity, bands, ..
+            }
+            | PopulationStage::FoodDrought {
+                quantity, bands, ..
             } => {
                 let bands = bands
                     .iter()
@@ -451,6 +491,7 @@ impl PopulationStage {
                                 .choices
                                 .iter()
                                 .map(|choice| {
+                                    let quantity = choice.quantity.as_ref().unwrap_or(quantity);
                                     Ok(runtime::PreparedItemChoice {
                                         content: choice.archetype.clone(),
                                         weight: choice.weight,
@@ -475,6 +516,26 @@ impl PopulationStage {
                                 numerator: chance.numerator,
                                 denominator: chance.denominator,
                             },
+                        }
+                    }
+                    PopulationStage::ChanceItems { chance, .. } => {
+                        runtime::PopulationContent::ChanceItems {
+                            bands,
+                            chance: runtime::CarryChance {
+                                numerator: chance.numerator,
+                                denominator: chance.denominator,
+                            },
+                        }
+                    }
+                    PopulationStage::FoodDrought {
+                        threshold, food, ..
+                    } => {
+                        let mut food = food.clone();
+                        food.sort();
+                        runtime::PopulationContent::FoodDrought {
+                            bands,
+                            threshold: *threshold,
+                            food,
                         }
                     }
                     _ => runtime::PopulationContent::Items { bands },
@@ -606,6 +667,13 @@ impl PopulationStage {
             | Self::Actors {
                 id, version, count, ..
             } => (id, *version, *count),
+            Self::ChanceItems {
+                id,
+                version,
+                attempts,
+                ..
+            } => (id, *version, [*attempts, *attempts]),
+            Self::FoodDrought { id, version, .. } => (id, *version, [1, 1]),
         }
     }
 }
@@ -769,14 +837,37 @@ impl Package {
                         }
                         | PopulationStage::RoomItems {
                             bands, quantity, ..
+                        }
+                        | PopulationStage::ChanceItems {
+                            bands, quantity, ..
+                        }
+                        | PopulationStage::FoodDrought {
+                            bands, quantity, ..
                         } => {
                             quantity.maximum()?;
-                            if let PopulationStage::RoomItems { chance, .. } = stage {
+                            if let PopulationStage::RoomItems { chance, .. }
+                            | PopulationStage::ChanceItems { chance, .. } = stage
+                            {
                                 require(
                                     chance.denominator > 0
                                         && chance.numerator <= chance.denominator,
-                                    "Invalid room population chance",
+                                    "Invalid population chance",
                                 )?;
+                            }
+                            if let PopulationStage::ChanceItems { attempts, .. } = stage {
+                                require(*attempts > 0, "Chance item stages need attempts")?;
+                            }
+                            if let PopulationStage::FoodDrought { food, .. } = stage {
+                                let unique: BTreeSet<_> = food.iter().collect();
+                                require(
+                                    !food.is_empty()
+                                        && food.len() <= 64
+                                        && unique.len() == food.len(),
+                                    "Food drought needs distinct food archetypes",
+                                )?;
+                                for archetype in food {
+                                    self.author_archetype(archetype)?;
+                                }
                             }
                             self.check_population_bands(bands, |choice| {
                                 (&choice.archetype, choice.weight)
@@ -918,13 +1009,15 @@ impl Package {
     }
 
     fn capabilities(&self) -> runtime::ScenarioCapabilities {
-        runtime::ScenarioCapabilities {
-            npc_stair_traversal: self
-                .manifest
-                .capabilities
-                .as_ref()
-                .is_none_or(|capabilities| capabilities.npc_stair_traversal),
-        }
+        self.manifest.capabilities.as_ref().map_or_else(
+            runtime::ScenarioCapabilities::default,
+            |capabilities| runtime::ScenarioCapabilities {
+                npc_stair_traversal: capabilities.npc_stair_traversal,
+                owner_advancement: capabilities.owner_advancement,
+                corpses: capabilities.corpses,
+                low_health_flight: capabilities.low_health_flight,
+            },
+        )
     }
 
     fn population_plan(
@@ -1091,6 +1184,20 @@ impl Package {
         let Some(profile) = profile else {
             return Ok(None);
         };
+        Ok(Some(
+            self.profile_scope(identity, profile, depth, regions, rooms),
+        ))
+    }
+
+    /// One floor scope of a known activation profile over immutable regions.
+    pub(super) fn profile_scope(
+        &self,
+        identity: &str,
+        profile: &str,
+        depth: u32,
+        regions: &[&RegionDef],
+        rooms: &[runtime::PreparedRoomGroup],
+    ) -> runtime::PreparedScope {
         let mut cells = BTreeSet::new();
         let mut protected = BTreeSet::new();
         for region in regions {
@@ -1110,15 +1217,15 @@ impl Package {
             }
             protected.extend(region.anchors.values().map(|at| loc(region.id, *at)));
         }
-        Ok(Some(runtime::PreparedScope {
+        runtime::PreparedScope {
             scope: identity.into(),
             depth,
-            profile: profile.clone(),
+            profile: profile.into(),
             members: regions.iter().map(|region| RegionId(region.id)).collect(),
             cells: cells.into_iter().collect(),
             protected,
             rooms: rooms.to_vec(),
-        }))
+        }
     }
 
     /// Called once by original/base reconstruction after the starting scope is

@@ -80,6 +80,8 @@ pub enum Beat {
     /// The character's attack was interrupted.
     Interrupted,
     Died(Who),
+    /// The character's food reserve ran out.
+    Starved,
     Appeared {
         figure: Figure,
         whereabouts: String,
@@ -292,7 +294,11 @@ impl Chronicler {
                             variant: self.blows,
                         }
                     }
-                    CombatEventView::Died { actor } => {
+                    CombatEventView::Died {
+                        actor,
+                        cause: DeathCause::Starvation,
+                    } if *actor == facts.self_target => Beat::Starved,
+                    CombatEventView::Died { actor, .. } => {
                         Beat::Died(self.who(Some(*actor), facts.self_target))
                     }
                     CombatEventView::Interrupted { .. } => Beat::Interrupted,
@@ -496,7 +502,11 @@ impl Chronicler {
                             Beat::Condition(condition.name.clone())
                         }
                         CombatEventView::Interrupted { .. } => Beat::Interrupted,
-                        CombatEventView::Died { actor } => {
+                        CombatEventView::Died {
+                            actor,
+                            cause: DeathCause::Starvation,
+                        } if actor == a.self_target => Beat::Starved,
+                        CombatEventView::Died { actor, .. } => {
                             Beat::Died(self.who(Some(actor), a.self_target))
                         }
                     });
@@ -508,7 +518,7 @@ impl Chronicler {
                 .events
                 .iter()
                 .filter_map(|e| match e {
-                    CombatEventView::Died { actor } => Some(*actor),
+                    CombatEventView::Died { actor, .. } => Some(*actor),
                     _ => None,
                 })
                 .collect();
@@ -1267,6 +1277,7 @@ mod tests {
             },
             CombatEventView::Died {
                 actor: tor_protocol::ActorTarget::from_digest([2; 32]),
+                cause: DeathCause::Injury,
             },
         ];
         let scout = Figure {

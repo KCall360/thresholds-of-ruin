@@ -1,0 +1,923 @@
+# Starter equipment and finite supplies; numerical values are provisional.
+namespace = "rogue"
+
+[items."rogue.mace"]
+asset = "item.weapon.mace"
+name = "mace"
+identity = "rogue.mace"
+class = "weapon"
+# The original +1/+1 starter stats are explicit owned birth state.
+equipment_generation = { kind = "authored", hit_enchantment = 1, damage_enchantment = 1 }
+equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact", sides = 4 }, components = [{ category = "impact", amount = { type = "rolled", count = 2, sides = 4, bonus = 0 } }] } }, modifiers = [] }
+
+[items."rogue.ring_mail"]
+asset = "item.armor.mail.ring"
+name = "ring mail"
+identity = "rogue.ring_mail"
+class = "armor"
+equipment_generation = { kind = "authored" }
+equipment = { slot = "body_armor", armor = { physical_reduction = 2, material = "metal", rustproof = false }, modifiers = [] }
+
+[items."rogue.clean_bandage"]
+asset = "item.bandage"
+name = "clean bandage"
+identity = "rogue.clean_bandage"
+class = "misc"
+stackable = true
+supply = "bandage"
+
+[items."rogue.ration"]
+asset = "item.food.ration"
+name = "food ration"
+identity = "rogue.ration"
+class = "food"
+stackable = true
+supply = "ration"
+edible = { nutrition = { kind = "rolled", dice = { count = 1, sides = 400, bonus = 1099 } } }
+
+# Alternative food in supplemental/treasure stock. The supply tag means
+# interchangeable food stock, not ration identity; distinct identities never merge.
+[items."rogue.fruit"]
+asset = "item.food"
+name = "fruit"
+identity = "rogue.fruit"
+class = "food"
+stackable = true
+supply = "ration"
+edible = { nutrition = { kind = "rolled", dice = { count = 1, sides = 400, bonus = 1099 } } }
+
+# Bound by the retrieval objective; never ordinary population or starter stock.
+[items."rogue.amulet_of_yendor"]
+asset = "item.amulet"
+name = "Amulet of Yendor"
+identity = "rogue.amulet_of_yendor"
+magical = true
+class = "amulet"
+stackable = false
+
+# Ordinary restoration removes only the recorded Strength deficit. The fixed
+# 1000 operand covers limits::DERIVED_ATTRIBUTE, the canonical deficit bound;
+# actual restoration clamps to that deficit. This adds no heal or bonus Strength.
+[items."rogue.restore_strength"]
+asset = "item.potion"
+name = "potion of restore strength"
+identity = "rogue.restore_strength"
+magical = true
+class = "potion"
+stackable = true
+appearance_pool = "rogue.potions"
+consumable = { discovery = "self_effect", effects = [{ kind = "restore_attribute", attribute = "strength", amount = { kind = "fixed", amount = 1000 } }] }
+
+[appearance_pools."rogue.potions"]
+asset = "item.potion"
+appearances = ["amber potion", "smoky potion", "violet potion", "azure potion", "crimson potion", "silver potion", "pearl potion", "teal potion", "ochre potion", "indigo potion", "copper potion", "chartreuse potion", "saffron potion", "cerulean potion"]
+
+# Ordinary recoverable stacks; neither a purse abstraction nor a supply item.
+[items."rogue.gold"]
+asset = "item.coin"
+name = "gold coin"
+identity = "rogue.gold"
+class = "coin"
+stackable = true
+currency = "gold"
+magical = false
+
+# Ordinary healing keeps the source's independent level-d4 rolls, sight cure,
+# on-use recognition and strict overflow trigger. TOR uses active owned HD and
+# improves the earliest eligible acquisition roll by one, bounded by its original
+# die maximum. An improved drained row keeps its bonus only on same-row restoration.
+[items."rogue.healing"]
+asset = "item.potion"
+name = "potion of healing"
+identity = "rogue.healing"
+magical = true
+class = "potion"
+stackable = true
+appearance_pool = "rogue.potions"
+consumable = { discovery = "on_use", effects = [{ kind = "heal_per_hit_die", sides = 4, bonus = 0, overflow = "improve_earliest_hit_die" }, { kind = "remove_condition", condition = "rogue.blindness" }] }
+
+# Extra healing uses independent HDd8 rolls. Strict overflow selects one or two
+# earliest eligible owned-HD improvements; the marked visual condition is cured
+# unconditionally, including when the drinker cannot see.
+[items."rogue.extra_healing"]
+asset = "item.potion"
+name = "potion of extra healing"
+identity = "rogue.extra_healing"
+magical = true
+class = "potion"
+stackable = true
+appearance_pool = "rogue.potions"
+consumable = { discovery = "on_use", effects = [{ kind = "heal_per_hit_die", sides = 8, bonus = 0, overflow = "improve_earliest_hit_dice_by_excess" }, { kind = "remove_condition", condition = "rogue.blindness" }, { kind = "remove_condition", condition = "rogue.hallucinating" }] }
+
+# Ordinary timed potion conditions have no gaze-expiry protection. Durations
+# preserve source ranges in actor turns; TOR actor-active ticks are an adaptation.
+[items."rogue.confusion"]
+asset = "item.potion"
+name = "potion of confusion"
+identity = "rogue.confusion"
+magical = true
+class = "potion"
+stackable = true
+appearance_pool = "rogue.potions"
+consumable = { discovery = "on_use", effects = [{ kind = "apply_condition_for_turns", condition = "rogue.potion_confusion", duration = { kind = "rolled", dice = { count = 1, sides = 2, bonus = 18 } } }] }
+
+[items."rogue.blindness"]
+asset = "item.potion"
+name = "potion of blindness"
+identity = "rogue.blindness"
+magical = true
+class = "potion"
+stackable = true
+appearance_pool = "rogue.potions"
+consumable = { discovery = "on_use", effects = [{ kind = "apply_condition_for_turns", condition = "rogue.blindness", duration = { kind = "rolled", dice = { count = 1, sides = 85, bonus = 807 } } }] }
+
+# Delivered poison uses the shared Athletics resistance. Failure loses 1-3
+# Strength; the exact consumed unit identifies on use even when resisted.
+[items."rogue.poison"]
+asset = "item.potion"
+name = "potion of poison"
+identity = "rogue.poison"
+magical = true
+class = "potion"
+stackable = true
+appearance_pool = "rogue.potions"
+consumable = { discovery = "on_use", descriptors = ["poison"], effects = [{ kind = "lose_attribute", attribute = "strength", amount = { kind = "rolled", dice = { count = 1, sides = 3, bonus = 0 } } }] }
+
+# spread(850) is 808-892 source-base turns. Repeat extends the actor-active
+# condition; curing blindness or revealing an invisible actor does not identify.
+[items."rogue.see_invisible"]
+asset = "item.potion"
+name = "potion of see invisible"
+identity = "rogue.see_invisible"
+magical = true
+class = "potion"
+stackable = true
+appearance_pool = "rogue.potions"
+consumable = { discovery = "never", effects = [{ kind = "apply_condition_for_turns", condition = "rogue.see_invisible", duration = { kind = "rolled", dice = { count = 1, sides = 85, bonus = 807 } } }, { kind = "remove_condition", condition = "rogue.blindness" }] }
+
+# Initial identify supports one physical category per scroll. The identified
+# type and selected exact instance are separate knowledge facts.
+[items."rogue.identify_potion"]
+asset = "item.scroll"
+name = "scroll of identify potion"
+identity = "rogue.identify_potion"
+magical = true
+class = "scroll"
+stackable = true
+appearance_pool = "rogue.scrolls"
+readable = { identify = ["potion"], discovery = "on_use" }
+
+[items."rogue.sleep"]
+asset = "item.scroll"
+name = "scroll of sleep"
+identity = "rogue.sleep"
+magical = true
+class = "scroll"
+stackable = true
+appearance_pool = "rogue.scrolls"
+readable = { discovery = "on_use", effects = [{ kind = "apply_condition_for_turns", condition = "rogue.sleep", duration = { kind = "rolled", dice = { count = 1, sides = 5, bonus = 3 } } }] }
+
+[appearance_pools."rogue.scrolls"]
+asset = "item.scroll"
+appearances = ["scroll titled VEL MOR", "scroll titled ELAM TOR", "scroll titled NAR SHEN", "scroll titled HETH ARA", "scroll titled TAL ION", "scroll titled UR SEK", "scroll titled KEL RAN", "scroll titled AN DOR", "scroll titled IV MEM", "scroll titled OS THAL", "scroll titled VEL TOR", "scroll titled SAH REN", "scroll titled OR VETH", "scroll titled NEM AL", "scroll titled TIR OS", "scroll titled KHA MER", "scroll titled LOR NEV", "scroll titled MIR VEL"]
+
+[items."rogue.identify_scroll"]
+asset = "item.scroll"
+name = "scroll of identify scroll"
+identity = "rogue.identify_scroll"
+magical = true
+class = "scroll"
+stackable = true
+appearance_pool = "rogue.scrolls"
+readable = { identify = ["scroll"], discovery = "on_use" }
+
+# One paid ring-or-wand identification choice; identity remains stable.
+[items."rogue.identify_wand"]
+asset = "item.scroll"
+name = "scroll of identify ring or wand"
+identity = "rogue.identify_wand"
+magical = true
+class = "scroll"
+stackable = true
+appearance_pool = "rogue.scrolls"
+readable = { identify = ["ring", "wand"], discovery = "on_use" }
+
+# Each effect chooses exactly one physical form per run; aliases keep the same
+# identity, effect, charges and discovery. Physical melee never zaps. Both use
+# one grip and existing 60/40 TOR timing; magical sticks have no Throw profile.
+[items."rogue.wand_fire"]
+asset = "item.wand"
+name = "wand of fire"
+identity = "rogue.wand_fire"
+magical = true
+class = "wand"
+stackable = false
+appearance_pool = "rogue.wands"
+forms = [{ name = "wand of fire", appearance_pool = "rogue.wands", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact" }, components = [{ category = "impact", amount = { type = "fixed", value = 1 } }] } }, modifiers = [] } }, { name = "staff of fire", appearance_pool = "rogue.staves", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact", sides = 3 }, components = [{ category = "impact", amount = { type = "rolled", count = 2, sides = 3, bonus = 0 } }] } }, modifiers = [] } }]
+device = { ability = "rogue.wand_fire", initial_charges = { minimum = 3, maximum = 7 }, discovery = "on_use" }
+
+[items."rogue.wand_cold"]
+asset = "item.wand"
+name = "wand of cold"
+identity = "rogue.wand_cold"
+magical = true
+class = "wand"
+stackable = false
+appearance_pool = "rogue.wands"
+forms = [{ name = "wand of cold", appearance_pool = "rogue.wands", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact" }, components = [{ category = "impact", amount = { type = "fixed", value = 1 } }] } }, modifiers = [] } }, { name = "staff of cold", appearance_pool = "rogue.staves", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact", sides = 3 }, components = [{ category = "impact", amount = { type = "rolled", count = 2, sides = 3, bonus = 0 } }] } }, modifiers = [] } }]
+device = { ability = "rogue.wand_cold", initial_charges = { minimum = 3, maximum = 7 }, discovery = "on_use" }
+
+[items."rogue.wand_lightning"]
+asset = "item.wand"
+name = "wand of lightning"
+identity = "rogue.wand_lightning"
+magical = true
+class = "wand"
+stackable = false
+appearance_pool = "rogue.wands"
+forms = [{ name = "wand of lightning", appearance_pool = "rogue.wands", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact" }, components = [{ category = "impact", amount = { type = "fixed", value = 1 } }] } }, modifiers = [] } }, { name = "staff of lightning", appearance_pool = "rogue.staves", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact", sides = 3 }, components = [{ category = "impact", amount = { type = "rolled", count = 2, sides = 3, bonus = 0 } }] } }, modifiers = [] } }]
+device = { ability = "rogue.wand_lightning", initial_charges = { minimum = 3, maximum = 7 }, discovery = "on_use" }
+
+# Utility devices remain unknown after use; each spends one ordinary charge.
+[items."rogue.wand_invisibility"]
+asset = "item.wand"
+name = "wand of invisibility"
+identity = "rogue.wand_invisibility"
+magical = true
+class = "wand"
+stackable = false
+appearance_pool = "rogue.wands"
+forms = [{ name = "wand of invisibility", appearance_pool = "rogue.wands", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact" }, components = [{ category = "impact", amount = { type = "fixed", value = 1 } }] } }, modifiers = [] } }, { name = "staff of invisibility", appearance_pool = "rogue.staves", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact", sides = 3 }, components = [{ category = "impact", amount = { type = "rolled", count = 2, sides = 3, bonus = 0 } }] } }, modifiers = [] } }]
+device = { ability = "rogue.wand_invisibility", initial_charges = { minimum = 3, maximum = 7 }, discovery = "never" }
+
+[items."rogue.wand_haste"]
+asset = "item.wand"
+name = "wand of haste monster"
+identity = "rogue.wand_haste"
+magical = true
+class = "wand"
+stackable = false
+appearance_pool = "rogue.wands"
+forms = [{ name = "wand of haste monster", appearance_pool = "rogue.wands", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact" }, components = [{ category = "impact", amount = { type = "fixed", value = 1 } }] } }, modifiers = [] } }, { name = "staff of haste monster", appearance_pool = "rogue.staves", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact", sides = 3 }, components = [{ category = "impact", amount = { type = "rolled", count = 2, sides = 3, bonus = 0 } }] } }, modifiers = [] } }]
+device = { ability = "rogue.wand_haste", initial_charges = { minimum = 3, maximum = 7 }, discovery = "never" }
+
+[items."rogue.wand_slow"]
+asset = "item.wand"
+name = "wand of slow monster"
+identity = "rogue.wand_slow"
+magical = true
+class = "wand"
+stackable = false
+appearance_pool = "rogue.wands"
+forms = [{ name = "wand of slow monster", appearance_pool = "rogue.wands", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact" }, components = [{ category = "impact", amount = { type = "fixed", value = 1 } }] } }, modifiers = [] } }, { name = "staff of slow monster", appearance_pool = "rogue.staves", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact", sides = 3 }, components = [{ category = "impact", amount = { type = "rolled", count = 2, sides = 3, bonus = 0 } }] } }, modifiers = [] } }]
+device = { ability = "rogue.wand_slow", initial_charges = { minimum = 3, maximum = 7 }, discovery = "never" }
+
+[appearance_pools."rogue.wands"]
+asset = "item.wand"
+appearances = ["aluminum wand", "bronze wand", "copper wand", "electrum wand", "gold wand", "iron wand", "lead wand", "magnesium wand", "nickel wand", "platinum wand", "silver wand", "steel wand", "tin wand", "zinc wand"]
+
+# A separate wood palette is shuffled only among identities assigned staff form.
+[appearance_pools."rogue.staves"]
+asset = "item.wand"
+appearances = ["ash staff", "birch staff", "cedar staff", "cherry staff", "elm staff", "hazel staff", "mahogany staff", "maple staff", "oak staff", "pine staff", "teak staff", "walnut staff", "willow staff", "yew staff"]
+
+# Finite gear. Rogue source weapon dice and existing birth distributions are
+# preserved; skill/category, uniform 60/40 timing and armor physical DR are
+# conservative provisional TOR adaptations, not a direct AC conversion.
+# https://github.com/phs/rogue/blob/c7c119f893bd2f8255f2ad78d58a32664ddb9a97/things.c#L250-L269
+# Generated and starter archetypes share neutral immutable equipment definitions.
+
+[items."rogue.generated_mace"]
+asset = "item.weapon.mace"
+name = "mace"
+identity = "rogue.mace"
+class = "weapon"
+equipment_generation = { kind = "weapon", curse_percent = 10, enchant_percent = 5, minimum = 1, maximum = 3 }
+equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact", sides = 4 }, components = [{ category = "impact", amount = { type = "rolled", count = 2, sides = 4, bonus = 0 } }] } }, modifiers = [] }
+
+[items."rogue.long_sword"]
+asset = "item.weapon"
+name = "long sword"
+identity = "rogue.long_sword"
+class = "weapon"
+equipment_generation = { kind = "weapon", curse_percent = 10, enchant_percent = 5, minimum = 1, maximum = 3 }
+equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "keen", sides = 4 }, components = [{ category = "keen", amount = { type = "rolled", count = 3, sides = 4, bonus = 0 } }] } }, modifiers = [] }
+
+[items."rogue.dagger"]
+asset = "item.weapon"
+name = "dagger"
+identity = "rogue.dagger"
+class = "weapon"
+equipment_generation = { kind = "weapon", curse_percent = 10, enchant_percent = 5, minimum = 1, maximum = 3 }
+equipment = { slot = "weapon", attack = { skill = "light_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "keen", sides = 6 }, components = [{ category = "keen", amount = { type = "rolled", count = 1, sides = 6, bonus = 0 } }] } }, weapon_profile = { expertise = "rogue.knife", base_traits = [], expert_traits = { add = [{ kind = "thrown", range = { short_feet = 20, long_feet = 60 } }, { kind = "offhand" }], remove = [] } }, modifiers = [] }
+
+# Knife and shortbow traits/ranges use the selected Plotweaver Open Alpha v0.3
+# and Stormlight Starter Rules mapping. Discreet has no supported consumer and
+# is deliberately absent. Existing 60/40 timing is provisional TOR tuning.
+[items."rogue.shortbow"]
+asset = "item.weapon"
+name = "shortbow"
+identity = "rogue.shortbow"
+class = "weapon"
+equipment_generation = { kind = "weapon", curse_percent = 10, enchant_percent = 5, minimum = 1, maximum = 3 }
+equipment = { slot = "weapon", attack = { skill = "light_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact" }, components = [{ category = "impact", amount = { type = "fixed", value = 1 } }] } }, weapon_profile = { expertise = "rogue.shortbow", launcher = { family = "rogue.bow", range = { short_feet = 80, long_feet = 320 } }, base_traits = [{ kind = "two_handed" }], expert_traits = { add = [{ kind = "quickdraw" }], remove = [] } }, modifiers = [] }
+
+# Arrow payload keeps the pinned Rogue launched 2d3 damage. It replaces the
+# bow's incidental melee base damage; both still use the ordinary TOR checks.
+# https://github.com/phs/rogue/blob/c7c119f893bd2f8255f2ad78d58a32664ddb9a97/weapons.c
+# Successful hits consume one arrow; misses use the shared recoverable landing.
+[items."rogue.arrow"]
+asset = "item.weapon"
+name = "arrow"
+identity = "rogue.arrow"
+class = "weapon"
+stackable = true
+projectile = { family = "rogue.bow", damage = { primary = { category = "keen", sides = 3 }, components = [{ category = "keen", amount = { type = "rolled", count = 2, sides = 3, bonus = 0 } }] }, recovery = "consumed_on_hit" }
+
+[items."rogue.two_handed_sword"]
+asset = "item.weapon"
+name = "two handed sword"
+identity = "rogue.two_handed_sword"
+class = "weapon"
+equipment_generation = { kind = "weapon", curse_percent = 10, enchant_percent = 5, minimum = 1, maximum = 3 }
+equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "keen", sides = 4 }, components = [{ category = "keen", amount = { type = "rolled", count = 4, sides = 4, bonus = 0 } }] } }, modifiers = [] }
+
+# Spear keeps Rogue melee 2d3 and its distinct 1d6 thrown payload.
+# Expert-only Throw, 20/60 feet and durable hit recovery are TOR handling;
+# the existing HeavyWeaponry check, 60/40 timing and birth rolls are unchanged.
+[items."rogue.spear"]
+asset = "item.weapon"
+name = "spear"
+identity = "rogue.spear"
+class = "weapon"
+equipment_generation = { kind = "weapon", curse_percent = 10, enchant_percent = 5, minimum = 1, maximum = 3 }
+equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "keen", sides = 3 }, components = [{ category = "keen", amount = { type = "rolled", count = 2, sides = 3, bonus = 0 } }] } }, weapon_profile = { expertise = "rogue.spear", base_traits = [], expert_traits = { add = [{ kind = "thrown", range = { short_feet = 20, long_feet = 60 } }], remove = [] }, thrown_payload = { recovery = "recoverable", damage = { primary = { category = "keen", sides = 6 }, components = [{ category = "keen", amount = { type = "rolled", count = 1, sides = 6, bonus = 0 } }] } } }, modifiers = [] }
+
+[items."rogue.leather_armor"]
+asset = "item.armor.leather"
+name = "leather armor"
+identity = "rogue.leather_armor"
+class = "armor"
+equipment_generation = { kind = "armor", curse_percent = 20, enchant_percent = 8, minimum = 1, maximum = 3 }
+equipment = { slot = "body_armor", armor = { physical_reduction = 1, material = "nonmetal", rustproof = false }, modifiers = [] }
+
+[items."rogue.generated_ring_mail"]
+asset = "item.armor.mail.ring"
+name = "ring mail"
+identity = "rogue.ring_mail"
+class = "armor"
+equipment_generation = { kind = "armor", curse_percent = 20, enchant_percent = 8, minimum = 1, maximum = 3 }
+equipment = { slot = "body_armor", armor = { physical_reduction = 2, material = "metal", rustproof = false }, modifiers = [] }
+
+[items."rogue.studded_leather"]
+asset = "item.armor.leather.studded"
+name = "studded leather armor"
+identity = "rogue.studded_leather"
+class = "armor"
+equipment_generation = { kind = "armor", curse_percent = 20, enchant_percent = 8, minimum = 1, maximum = 3 }
+equipment = { slot = "body_armor", armor = { physical_reduction = 2, material = "metal", rustproof = false }, modifiers = [] }
+
+[items."rogue.scale_mail"]
+asset = "item.armor.mail.scale"
+name = "scale mail"
+identity = "rogue.scale_mail"
+class = "armor"
+equipment_generation = { kind = "armor", curse_percent = 20, enchant_percent = 8, minimum = 1, maximum = 3 }
+equipment = { slot = "body_armor", armor = { physical_reduction = 3, material = "metal", rustproof = false }, modifiers = [] }
+
+[items."rogue.chain_mail"]
+asset = "item.armor.mail.chain"
+name = "chain mail"
+identity = "rogue.chain_mail"
+class = "armor"
+equipment_generation = { kind = "armor", curse_percent = 20, enchant_percent = 8, minimum = 1, maximum = 3 }
+equipment = { slot = "body_armor", armor = { physical_reduction = 4, material = "metal", rustproof = false }, modifiers = [] }
+
+[items."rogue.splint_mail"]
+asset = "item.armor.plate.splint"
+name = "splint mail"
+identity = "rogue.splint_mail"
+class = "armor"
+equipment_generation = { kind = "armor", curse_percent = 20, enchant_percent = 8, minimum = 1, maximum = 3 }
+equipment = { slot = "body_armor", armor = { physical_reduction = 5, material = "metal", rustproof = false }, modifiers = [] }
+
+[items."rogue.banded_mail"]
+asset = "item.armor.plate.banded"
+name = "banded mail"
+identity = "rogue.banded_mail"
+class = "armor"
+equipment_generation = { kind = "armor", curse_percent = 20, enchant_percent = 8, minimum = 1, maximum = 3 }
+equipment = { slot = "body_armor", armor = { physical_reduction = 5, material = "metal", rustproof = false }, modifiers = [] }
+
+[items."rogue.plate_mail"]
+asset = "item.armor.plate"
+name = "plate mail"
+identity = "rogue.plate_mail"
+class = "armor"
+equipment_generation = { kind = "armor", curse_percent = 20, enchant_percent = 8, minimum = 1, maximum = 3 }
+equipment = { slot = "body_armor", armor = { physical_reduction = 6, material = "metal", rustproof = false }, modifiers = [] }
+
+[items."rogue.enchant_armor"]
+asset = "item.scroll"
+name = "scroll of enchant armor"
+identity = "rogue.enchant_armor"
+magical = true
+class = "scroll"
+stackable = true
+appearance_pool = "rogue.scrolls"
+readable = { discovery = "never", effects = [{ kind = "alter_equipment", selection = { kind = "slot", slot = "body_armor", class = "armor", last = false }, alteration = "enchant_armor" }] }
+
+[items."rogue.protect_armor"]
+asset = "item.scroll"
+name = "scroll of protect armor"
+identity = "rogue.protect_armor"
+magical = true
+class = "scroll"
+stackable = true
+appearance_pool = "rogue.scrolls"
+readable = { discovery = "never", effects = [{ kind = "alter_equipment", selection = { kind = "slot", slot = "body_armor", class = "armor", last = false }, alteration = "protect_armor" }] }
+
+[items."rogue.enchant_weapon"]
+asset = "item.scroll"
+name = "scroll of enchant weapon"
+identity = "rogue.enchant_weapon"
+magical = true
+class = "scroll"
+stackable = true
+appearance_pool = "rogue.scrolls"
+readable = { discovery = "never", effects = [{ kind = "alter_equipment", selection = { kind = "slot", slot = "weapon", class = "weapon", last = true }, alteration = "enchant_weapon" }] }
+
+[items."rogue.remove_curse"]
+asset = "item.scroll"
+name = "scroll of remove curse"
+identity = "rogue.remove_curse"
+magical = true
+class = "scroll"
+stackable = true
+appearance_pool = "rogue.scrolls"
+readable = { discovery = "never", effects = [{ kind = "alter_equipment", selection = { kind = "all" }, alteration = "remove_curse" }] }
+
+[items."rogue.identify_weapon"]
+asset = "item.scroll"
+name = "scroll of identify weapon"
+identity = "rogue.identify_weapon"
+magical = true
+class = "scroll"
+stackable = true
+appearance_pool = "rogue.scrolls"
+readable = { identify = ["weapon"], discovery = "on_use" }
+
+[items."rogue.identify_armor"]
+asset = "item.scroll"
+name = "scroll of identify armor"
+identity = "rogue.identify_armor"
+magical = true
+class = "scroll"
+stackable = true
+appearance_pool = "rogue.scrolls"
+readable = { identify = ["armor"], discovery = "on_use" }
+
+# Worn magic shares generic source modifiers. Signed potency is private instance
+# state; it is not identified merely by wearing, and curses survive removal attempts.
+
+[items."rogue.ring_protection"]
+asset = "item.ring"
+name = "ring of protection"
+identity = "rogue.ring_protection"
+magical = true
+class = "ring"
+stackable = false
+appearance_pool = "rogue.rings"
+equipment_generation = { kind = "signed_potency", negative = 1, positive = 2 }
+equipment = { slot = "ring", modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "nutrition_rate_thirtieths" }, value = 30 } }], potency_modifiers = [{ scope = "always", op = { kind = "signed_reduction", selector = { kind = "category", category = "energy" }, amount = 1 } }, { scope = "always", op = { kind = "signed_reduction", selector = { kind = "category", category = "impact" }, amount = 1 } }, { scope = "always", op = { kind = "signed_reduction", selector = { kind = "category", category = "keen" }, amount = 1 } }, { scope = "always", op = { kind = "signed_reduction", selector = { kind = "category", category = "spirit" }, amount = 1 } }, { scope = "always", op = { kind = "signed_reduction", selector = { kind = "category", category = "vital" }, amount = 1 } }, { scope = "always", op = { kind = "signed_reduction", selector = { kind = "category", category = "psychic" }, amount = 1 } }] }
+
+[items."rogue.ring_add_strength"]
+asset = "item.ring"
+name = "ring of add strength"
+identity = "rogue.ring_add_strength"
+magical = true
+class = "ring"
+stackable = false
+appearance_pool = "rogue.rings"
+equipment_generation = { kind = "signed_potency", negative = 1, positive = 2 }
+equipment = { slot = "ring", modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "nutrition_rate_thirtieths" }, value = 30 } }], potency_modifiers = [{ scope = "always", op = { kind = "attribute_without_defense", attribute = "strength", defense = "physical", value = 1 } }] }
+
+[items."rogue.ring_sustain_strength"]
+asset = "item.ring"
+name = "ring of sustain strength"
+identity = "rogue.ring_sustain_strength"
+magical = true
+class = "ring"
+stackable = false
+appearance_pool = "rogue.rings"
+equipment = { slot = "ring", modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "nutrition_rate_thirtieths" }, value = 30 } }, { scope = "always", op = { kind = "sustain_attribute", attribute = "strength" } }], potency_modifiers = [] }
+
+[items."rogue.ring_see_invisible"]
+asset = "item.ring"
+name = "ring of see invisible"
+identity = "rogue.ring_see_invisible"
+magical = true
+class = "ring"
+stackable = false
+appearance_pool = "rogue.rings"
+equipment = { slot = "ring", modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "nutrition_rate_thirtieths" }, value = 6 } }, { scope = "always", op = { kind = "perception", value = { kind = "see_invisible", enabled = true } } }], potency_modifiers = [] }
+
+[items."rogue.ring_adornment"]
+asset = "item.ring"
+name = "ring of adornment"
+identity = "rogue.ring_adornment"
+magical = true
+class = "ring"
+stackable = false
+appearance_pool = "rogue.rings"
+equipment = { slot = "ring", modifiers = [], potency_modifiers = [] }
+
+[items."rogue.ring_dexterity"]
+asset = "item.ring"
+name = "ring of dexterity"
+identity = "rogue.ring_dexterity"
+magical = true
+class = "ring"
+stackable = false
+appearance_pool = "rogue.rings"
+equipment_generation = { kind = "signed_potency", negative = 1, positive = 2 }
+equipment = { slot = "ring", modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "nutrition_rate_thirtieths" }, value = 10 } }], potency_modifiers = [{ scope = "always", op = { kind = "attribute_without_defense", attribute = "speed", defense = "physical", value = 1 } }] }
+
+[items."rogue.ring_increase_damage"]
+asset = "item.ring"
+name = "ring of increase damage"
+identity = "rogue.ring_increase_damage"
+magical = true
+class = "ring"
+stackable = false
+appearance_pool = "rogue.rings"
+equipment_generation = { kind = "signed_potency", negative = 1, positive = 2 }
+equipment = { slot = "ring", modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "nutrition_rate_thirtieths" }, value = 10 } }], potency_modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "attack_damage_roll_bonus" }, value = 1 } }] }
+
+[items."rogue.ring_regeneration"]
+asset = "item.ring"
+name = "ring of regeneration"
+identity = "rogue.ring_regeneration"
+magical = true
+class = "ring"
+stackable = false
+appearance_pool = "rogue.rings"
+equipment = { slot = "ring", modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "nutrition_rate_thirtieths" }, value = 60 } }, { scope = "always", op = { kind = "health_recovery_rate", multiplier = 2 } }], potency_modifiers = [] }
+
+[items."rogue.ring_slow_digestion"]
+asset = "item.ring"
+name = "ring of slow digestion"
+identity = "rogue.ring_slow_digestion"
+magical = true
+class = "ring"
+stackable = false
+appearance_pool = "rogue.rings"
+equipment = { slot = "ring", modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "nutrition_rate_thirtieths" }, value = -15 } }], potency_modifiers = [] }
+
+[items."rogue.ring_maintain_armor"]
+asset = "item.ring"
+name = "ring of maintain armor"
+identity = "rogue.ring_maintain_armor"
+magical = true
+class = "ring"
+stackable = false
+appearance_pool = "rogue.rings"
+equipment = { slot = "ring", modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "nutrition_rate_thirtieths" }, value = 30 } }, { scope = "always", op = { kind = "protect_armor" } }], potency_modifiers = [] }
+
+[items."rogue.ring_searching"]
+asset = "item.ring"
+name = "ring of searching"
+identity = "rogue.ring_searching"
+magical = true
+class = "ring"
+stackable = false
+appearance_pool = "rogue.rings"
+equipment = { slot = "ring", modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "nutrition_rate_thirtieths" }, value = 10 } }, { scope = "always", op = { kind = "perception", value = { kind = "periodic_search", interval = 100 } } }], potency_modifiers = [] }
+
+[appearance_pools."rogue.rings"]
+asset = "item.ring"
+appearances = ["agate ring", "bronze ring", "coral ring", "diamond ring", "emerald ring", "ivory ring", "jade ring", "opal ring", "ruby ring", "sapphire ring", "topaz ring", "amethyst ring", "garnet ring", "quartz ring"]
+
+# Paid completion applies 29-31 base turns once, then arrests gravity-directed
+# descent without granting voluntary vertical flight or touching loose items.
+[items."rogue.levitation"]
+asset = "item.potion"
+name = "potion of levitation"
+identity = "rogue.levitation"
+magical = true
+class = "potion"
+stackable = true
+appearance_pool = "rogue.potions"
+consumable = { discovery = "on_use", effects = [{ kind = "apply_condition_for_turns", condition = "rogue.levitation", duration = { kind = "rolled", dice = { count = 1, sides = 3, bonus = 28 } } }, { kind = "arrest_descent" }] }
+
+[items."rogue.teleportation"]
+asset = "item.scroll"
+name = "scroll of teleportation"
+identity = "rogue.teleportation"
+magical = true
+class = "scroll"
+stackable = true
+appearance_pool = "rogue.scrolls"
+readable = { effects = [{ kind = "teleport_random" }], discovery = "self_effect" }
+
+# Pinned Rogue births this ring cursed. Each exact source earns an independent
+# trial after 100 actor-active ticks; this capability is not a modifier fold.
+[items."rogue.ring_teleportation"]
+asset = "item.ring"
+name = "ring of teleportation"
+identity = "rogue.ring_teleportation"
+magical = true
+class = "ring"
+stackable = false
+appearance_pool = "rogue.rings"
+equipment_generation = { kind = "cursed" }
+equipment = { slot = "ring", modifiers = [], potency_modifiers = [], periodic_relocation = { interval = 100, chance_denominator = 50 } }
+
+[items."rogue.wand_teleport_away"]
+asset = "item.wand"
+name = "wand of teleport away"
+identity = "rogue.wand_teleport_away"
+magical = true
+class = "wand"
+stackable = false
+appearance_pool = "rogue.wands"
+forms = [{ name = "wand of teleport away", appearance_pool = "rogue.wands", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact" }, components = [{ category = "impact", amount = { type = "fixed", value = 1 } }] } }, modifiers = [] } }, { name = "staff of teleport away", appearance_pool = "rogue.staves", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact", sides = 3 }, components = [{ category = "impact", amount = { type = "rolled", count = 2, sides = 3, bonus = 0 } }] } }, modifiers = [] } }]
+device = { ability = "rogue.wand_teleport_away", initial_charges = { minimum = 3, maximum = 7 }, discovery = "never" }
+
+[items."rogue.wand_teleport_to"]
+asset = "item.wand"
+name = "wand of teleport to"
+identity = "rogue.wand_teleport_to"
+magical = true
+class = "wand"
+stackable = false
+appearance_pool = "rogue.wands"
+forms = [{ name = "wand of teleport to", appearance_pool = "rogue.wands", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact" }, components = [{ category = "impact", amount = { type = "fixed", value = 1 } }] } }, modifiers = [] } }, { name = "staff of teleport to", appearance_pool = "rogue.staves", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact", sides = 3 }, components = [{ category = "impact", amount = { type = "rolled", count = 2, sides = 3, bonus = 0 } }] } }, modifiers = [] } }]
+device = { ability = "rogue.wand_teleport_to", initial_charges = { minimum = 3, maximum = 7 }, discovery = "never" }
+
+# Balance defaults: continual Stealth gets one advantage, not invisibility.
+[items."rogue.ring_stealth"]
+asset = "item.ring"
+name = "ring of stealth"
+identity = "rogue.ring_stealth"
+magical = true
+class = "ring"
+stackable = false
+appearance_pool = "rogue.rings"
+equipment = { slot = "ring", modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "nutrition_rate_thirtieths" }, value = 30 } }, { scope = "always", op = { kind = "perception", value = { kind = "continual_stealth", edge = 1 } } }], potency_modifiers = [] }
+
+# Periodic snapshot-location pulses; this cadence is TOR provisional tuning.
+# The disadvantage is Stealth-specific, never an attack or Search penalty.
+[items."rogue.ring_aggravation"]
+asset = "item.ring"
+name = "ring of aggravation"
+identity = "rogue.ring_aggravation"
+magical = true
+class = "ring"
+stackable = false
+appearance_pool = "rogue.rings"
+equipment_generation = { kind = "cursed" }
+equipment = { slot = "ring", modifiers = [{ scope = "always", op = { kind = "perception", value = { kind = "aggravation", interval = 500, chance_denominator = 3, stealth_disadvantage = 1 } } }], potency_modifiers = [] }
+
+# Monster-control durations and finite supply rate are provisional TOR tuning.
+
+[items."rogue.aggravate_monster"]
+asset = "item.scroll"
+name = "scroll of aggravate monster"
+identity = "rogue.aggravate_monster"
+magical = true
+class = "scroll"
+stackable = true
+appearance_pool = "rogue.scrolls"
+readable = { control = { kind = "aggravate" }, discovery = "on_use" }
+
+[items."rogue.create_monster"]
+asset = "item.scroll"
+name = "scroll of create monster"
+identity = "rogue.create_monster"
+magical = true
+class = "scroll"
+stackable = true
+appearance_pool = "rogue.scrolls"
+readable = { control = { kind = "create_monster" }, discovery = "on_use" }
+
+[items."rogue.hold_monster"]
+asset = "item.scroll"
+name = "scroll of hold monster"
+identity = "rogue.hold_monster"
+magical = true
+class = "scroll"
+stackable = true
+appearance_pool = "rogue.scrolls"
+readable = { control = { kind = "hold_nearby", condition = "rogue.held", duration = 1000, radius = 2 }, discovery = "on_use" }
+
+[items."rogue.monster_confusion"]
+asset = "item.scroll"
+name = "scroll of monster confusion"
+identity = "rogue.monster_confusion"
+magical = true
+class = "scroll"
+stackable = true
+appearance_pool = "rogue.scrolls"
+readable = { control = { kind = "arm_confusion", condition = "rogue.potion_confusion", duration = 2000 }, discovery = "on_use" }
+
+[items."rogue.scare_monster"]
+asset = "item.scroll"
+name = "scroll of scare monster"
+identity = "rogue.scare_monster"
+magical = true
+class = "scroll"
+stackable = true
+appearance_pool = "rogue.scrolls"
+readable = { control = { kind = "nothing" }, discovery = "never" }
+ground_scare = { condition = "rogue.scared", duration = 1000 }
+
+# Supplemental live stock; no starting-kit entry. The paid effect remains empty.
+[items."rogue.wand_nothing"]
+asset = "item.wand"
+name = "wand of nothing"
+identity = "rogue.wand_nothing"
+magical = true
+class = "wand"
+stackable = false
+appearance_pool = "rogue.wands"
+forms = [{ name = "wand of nothing", appearance_pool = "rogue.wands", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact" }, components = [{ category = "impact", amount = { type = "fixed", value = 1 } }] } }, modifiers = [] } }, { name = "staff of nothing", appearance_pool = "rogue.staves", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact", sides = 3 }, components = [{ category = "impact", amount = { type = "rolled", count = 2, sides = 3, bonus = 0 } }] } }, modifiers = [] } }]
+device = { ability = "rogue.wand_nothing", initial_charges = { minimum = 3, maximum = 7 }, discovery = "never" }
+
+# Original Light device, now included in supplemental live stock.
+[items."rogue.wand_light"]
+asset = "item.wand"
+name = "wand of light"
+identity = "rogue.wand_light"
+magical = true
+class = "wand"
+stackable = false
+appearance_pool = "rogue.wands"
+forms = [{ name = "wand of light", appearance_pool = "rogue.wands", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact" }, components = [{ category = "impact", amount = { type = "fixed", value = 1 } }] } }, modifiers = [] } }, { name = "staff of light", appearance_pool = "rogue.staves", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact", sides = 3 }, components = [{ category = "impact", amount = { type = "rolled", count = 2, sides = 3, bonus = 0 } }] } }, modifiers = [] } }]
+device = { ability = "rogue.wand_light", initial_charges = { minimum = 10, maximum = 19 }, discovery = "on_use" }
+
+# Original Drain Life, now included in supplemental live stock.
+[items."rogue.wand_drain_life"]
+asset = "item.wand"
+name = "wand of drain life"
+identity = "rogue.wand_drain_life"
+magical = true
+class = "wand"
+stackable = false
+appearance_pool = "rogue.wands"
+forms = [{ name = "wand of drain life", appearance_pool = "rogue.wands", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact" }, components = [{ category = "impact", amount = { type = "fixed", value = 1 } }] } }, modifiers = [] } }, { name = "staff of drain life", appearance_pool = "rogue.staves", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact", sides = 3 }, components = [{ category = "impact", amount = { type = "rolled", count = 2, sides = 3, bonus = 0 } }] } }, modifiers = [] } }]
+device = { ability = "rogue.wand_drain_life", initial_charges = { minimum = 3, maximum = 7 }, discovery = "never" }
+
+[items."rogue.wand_cancellation"]
+asset = "item.wand"
+name = "wand of cancellation"
+identity = "rogue.wand_cancellation"
+magical = true
+class = "wand"
+stackable = false
+appearance_pool = "rogue.wands"
+forms = [{ name = "wand of cancellation", appearance_pool = "rogue.wands", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact" }, components = [{ category = "impact", amount = { type = "fixed", value = 1 } }] } }, modifiers = [] } }, { name = "staff of cancellation", appearance_pool = "rogue.staves", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact", sides = 3 }, components = [{ category = "impact", amount = { type = "rolled", count = 2, sides = 3, bonus = 0 } }] } }, modifiers = [] } }]
+device = { ability = "rogue.wand_cancellation", initial_charges = { minimum = 3, maximum = 7 }, discovery = "never" }
+
+[items."rogue.wand_magic_missile"]
+asset = "item.wand"
+name = "wand of magic missile"
+identity = "rogue.wand_magic_missile"
+magical = true
+class = "wand"
+stackable = false
+appearance_pool = "rogue.wands"
+forms = [{ name = "wand of magic missile", appearance_pool = "rogue.wands", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact" }, components = [{ category = "impact", amount = { type = "fixed", value = 1 } }] } }, modifiers = [] } }, { name = "staff of magic missile", appearance_pool = "rogue.staves", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact", sides = 3 }, components = [{ category = "impact", amount = { type = "rolled", count = 2, sides = 3, bonus = 0 } }] } }, modifiers = [] } }]
+device = { ability = "rogue.wand_magic_missile", initial_charges = { minimum = 3, maximum = 7 }, discovery = "on_use" }
+
+# Opt-in physical light; not part of live floor stock or starting kits.
+[items."rogue.torch"]
+name = "torch"
+class = "tool"
+stackable = false
+held_light = { radius = 4, fuel_ticks = 100000 }
+equipment = { slot = "held_light", modifiers = [] }
+
+# Supplemental Haste dose shares the exact wand condition.
+[items."rogue.haste"]
+asset = "item.potion"
+name = "potion of haste"
+identity = "rogue.haste"
+magical = true
+class = "potion"
+stackable = true
+appearance_pool = "rogue.potions"
+consumable = { discovery = "on_use", effects = [{ kind = "haste_dose", condition = "rogue.hasted", rest = "rogue.haste_exhaustion" }] }
+
+[items."rogue.gain_strength"]
+asset = "item.potion"
+name = "potion of gain strength"
+identity = "rogue.gain_strength"
+magical = true
+class = "potion"
+stackable = true
+appearance_pool = "rogue.potions"
+consumable = { discovery = "on_use", effects = [{ kind = "gain_strength" }] }
+
+[items."rogue.raise_level"]
+asset = "item.potion"
+name = "potion of raise level"
+identity = "rogue.raise_level"
+magical = true
+class = "potion"
+stackable = true
+appearance_pool = "rogue.potions"
+consumable = { discovery = "on_use", effects = [{ kind = "raise_level" }] }
+
+# Supplemental live stock, not a starting-kit entry. Each dose
+# draws the source-equivalent 808..892 base-turn duration, including extensions.
+[items."rogue.hallucination"]
+asset = "item.potion"
+name = "potion of hallucination"
+identity = "rogue.hallucination"
+magical = true
+class = "potion"
+stackable = true
+appearance_pool = "rogue.potions"
+consumable = { discovery = "on_use", effects = [{ kind = "apply_condition_for_turns", condition = "rogue.hallucinating", duration = { kind = "rolled", dice = { count = 1, sides = 85, bonus = 807 } } }] }
+
+# Supplemental chart dose; absent from starter kits. Recognition
+# requires a complete admitted positive chart, not merely an active condition.
+[items."rogue.monster_detection"]
+asset = "item.potion"
+name = "potion of monster detection"
+identity = "rogue.monster_detection"
+magical = true
+class = "potion"
+stackable = true
+appearance_pool = "rogue.potions"
+consumable = { discovery = "self_effect", effects = [{ kind = "detect_monsters", condition = "rogue.detecting_monsters" }] }
+
+# Supplemental chart dose; absent from starter kits. Recognition
+# requires a complete admitted positive chart, not merely an active condition.
+[items."rogue.food_detection"]
+asset = "item.scroll"
+name = "scroll of food detection"
+identity = "rogue.food_detection"
+magical = true
+class = "scroll"
+stackable = true
+appearance_pool = "rogue.scrolls"
+readable = { discovery = "self_effect", effects = [{ kind = "detect_food" }] }
+
+# Supplemental chart dose; absent from starter kits. Recognition
+# requires a complete admitted positive chart, not merely an active condition.
+[items."rogue.magic_detection"]
+asset = "item.potion"
+name = "potion of magic detection"
+identity = "rogue.magic_detection"
+magical = true
+class = "potion"
+stackable = true
+appearance_pool = "rogue.potions"
+consumable = { discovery = "self_effect", effects = [{ kind = "detect_magic" }] }
+
+# Supplemental live stock. Source certification is checked before payment; an admitted
+# mapping read identifies without borrowing detection's positive-only predicate.
+[items."rogue.magic_mapping"]
+asset = "item.scroll"
+name = "scroll of magic mapping"
+identity = "rogue.magic_mapping"
+magical = true
+class = "scroll"
+stackable = true
+appearance_pool = "rogue.scrolls"
+readable = { discovery = "on_use", effects = [{ kind = "map_topology" }] }
+
+# Supplemental live stock with the unchanged emu/snake/troll review roster.
+[items."rogue.wand_polymorph"]
+asset = "item.wand"
+name = "wand of polymorph"
+identity = "rogue.wand_polymorph"
+magical = true
+class = "wand"
+stackable = false
+appearance_pool = "rogue.wands"
+forms = [{ name = "wand of polymorph", appearance_pool = "rogue.wands", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact" }, components = [{ category = "impact", amount = { type = "fixed", value = 1 } }] } }, modifiers = [] } }, { name = "staff of polymorph", appearance_pool = "rogue.staves", equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact", sides = 3 }, components = [{ category = "impact", amount = { type = "rolled", count = 2, sides = 3, bonus = 0 } }] } }, modifiers = [] } }]
+device = { ability = "rogue.wand_polymorph", initial_charges = { minimum = 3, maximum = 7 }, discovery = "discernible_effect" }
+
+# Standalone throwing weapons in supplemental/treasure stock, not starting kits
+# or monster birth stock. Dice follow the pinned Rogue pair; LightWeaponry/Knife,
+# 20/60-foot range and 60/40 timing are conservative TOR adaptations.
+[items."rogue.dart"]
+asset = "item.weapon"
+name = "dart"
+identity = "rogue.dart"
+class = "weapon"
+stackable = true
+equipment_generation = { kind = "weapon", curse_percent = 10, enchant_percent = 5, minimum = 1, maximum = 3 }
+equipment = { slot = "weapon", attack = { skill = "light_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "keen" }, components = [{ category = "keen", amount = { type = "fixed", value = 1 } }] } }, weapon_profile = { expertise = "rogue.knife", base_traits = [], expert_traits = { add = [{ kind = "thrown", range = { short_feet = 20, long_feet = 60 } }], remove = [] }, thrown_payload = { damage = { primary = { category = "keen", sides = 3 }, components = [{ category = "keen", amount = { type = "rolled", count = 1, sides = 3, bonus = 0 } }] }, recovery = "consumed_on_hit" } }, modifiers = [] }
+
+[items."rogue.shuriken"]
+asset = "item.weapon"
+name = "shuriken"
+identity = "rogue.shuriken"
+class = "weapon"
+stackable = true
+equipment_generation = { kind = "weapon", curse_percent = 10, enchant_percent = 5, minimum = 1, maximum = 3 }
+equipment = { slot = "weapon", attack = { skill = "light_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "keen", sides = 2 }, components = [{ category = "keen", amount = { type = "rolled", count = 1, sides = 2, bonus = 0 } }] } }, weapon_profile = { expertise = "rogue.knife", base_traits = [], expert_traits = { add = [{ kind = "thrown", range = { short_feet = 20, long_feet = 60 } }], remove = [] }, thrown_payload = { damage = { primary = { category = "keen", sides = 4 }, components = [{ category = "keen", amount = { type = "rolled", count = 2, sides = 4, bonus = 0 } }] }, recovery = "consumed_on_hit" } }, modifiers = [] }

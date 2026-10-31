@@ -492,7 +492,8 @@ or roll back together. The exact-unit hold, hidden operand and ordinary item-wor
 are in [items](items.md#explicit-edibility).
 
 Reaching `starve_at` invokes ordinary injury/death and lifecycle cleanup. It has
-no invented attacker or XP recipient. Timers/effects precede action completion:
+no invented attacker or XP recipient; the death event names its cause as
+starvation, and every other death as injury. Timers/effects precede action completion:
 if Eat and starvation share a tick, death cancels Eat and releases its held unit
 unconsumed; ordinary death drops it. Completing one tick earlier can save the
 creature. Strict restore checks the reserve against the saved Health nutrition
@@ -754,7 +755,7 @@ identifies its caster and a matching visible-body occurrence supplies a licensed
 last-seen location. A partial body with an undisclosed caster grants no identity.
 No new preparation cue or public provocation field bypasses paid plan inspection.
 
-Species own `passive` or `mean` acquisition, `wait` or `explore` idle behavior,
+Species own `passive`, `mean` or `greedy` acquisition, `wait` or `explore` idle behavior,
 `memory_ticks` from zero through 1000000 inclusive, and defaults for door use,
 care, equipment, useful loot, Gold interest and fleeing. Omitted behavior resolves to passive
 exploration without tool use and a 25% Health flee threshold. Named behavior
@@ -762,6 +763,10 @@ records and the independent concrete saved policy enforce the same bounds;
 restoration does not use authoring fallbacks. Tactical profiles partially override
 supplied fields without replacing acquisition or memory; see
 [behavior authoring](scenario-packages.md#behavior-defaults-and-ai-overrides).
+Greedy acquisition follows Rogue's greedy monsters: while the species can
+safely collect known Gold under its Gold interest (no visible hostile beside
+it, and a short disclosed route), it collects; otherwise it acquires a visible
+hostile exactly as mean acquisition does. Without Gold interest it is mean.
 Mean acquisition has no two-in-three wake lottery in current TOR. At an eligible
 AI decision, a Mean actor with positive memory and no engagement acquires the
 eligible opponent selected from its current perception. Retained paid work does

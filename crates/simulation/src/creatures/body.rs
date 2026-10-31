@@ -424,6 +424,14 @@ impl CreatureBuild {
             &advancement.restoration,
             super::RestorationPolicy::Authored(_)
         );
+        let mut future = Vec::new();
+        if let super::RestorationPolicy::Authored(plan) = &mut advancement.restoration {
+            // Rows beyond the birth ledger schedule later personal growth.
+            if plan.len() < ledger.entries().len() {
+                return Err(BuildError::InvalidOwnership);
+            }
+            future = plan.split_off(ledger.entries().len());
+        }
         if let super::RestorationPolicy::Authored(plan) = &advancement.restoration {
             if plan.len() != ledger.entries().len()
                 || plan
@@ -437,6 +445,25 @@ impl CreatureBuild {
             }
             advancement.restoration = super::RestorationPolicy::ChooseAgain;
         }
+        if !future.is_empty() {
+            // The complete schedule must be admissible before any row is owned.
+            let mut sources: Vec<_> = ledger.entries().iter().map(|row| row.source()).collect();
+            sources.extend(future.iter().map(|row| row.source.clone()));
+            let mut intended = advancement.clone();
+            intended
+                .choices
+                .extend(future.iter().map(|row| row.choices.clone()));
+            Self::from_recorded_body_package_personal_grants(
+                content.clone(),
+                package.clone(),
+                initial_attributes,
+                HdLedger::seeded(sources, health_root).map_err(BuildError::from)?,
+                binding,
+                intended,
+                health_root,
+                personal_body_grants.clone(),
+            )?;
+        }
         let raw = Self::recorded_structure(
             content,
             package.species.clone(),
@@ -449,7 +476,24 @@ impl CreatureBuild {
         )?;
         let mut build = raw.enroll_body_package(package, health_root, personal_body_grants)?;
         if authored {
-            let receipts = build.personal_restoration_receipts();
+            let mut receipts = build.personal_restoration_receipts();
+            let first = build
+                .body_build
+                .as_ref()
+                .expect("just enrolled")
+                .next_personal_id;
+            for (offset, mut row) in future.into_iter().enumerate() {
+                let id = PersonalHdId(
+                    NonZeroU64::new(
+                        first
+                            .checked_add(offset as u64)
+                            .ok_or(BuildError::Arithmetic)?,
+                    )
+                    .ok_or(BuildError::InvalidOwnership)?,
+                );
+                row.choices.enroll_owner(&HdOwner::Personal { id })?;
+                receipts.insert(id, row);
+            }
             build
                 .body_build
                 .as_mut()
@@ -776,15 +820,29 @@ impl CreatureBuild {
                     .checked_add(id.0.get() - 1)
                     .ok_or(BuildError::Arithmetic)?;
                 let die = HitDie::new(
-                    source,
+                    source.clone(),
                     crate::dice::random_word_at(root_seed, stream_ordinal),
                 )
                 .with_owner(owner.clone())
                 .map_err(BuildError::from)?;
                 body.acquisition_species
                     .insert(owner.clone(), candidate.species.clone());
-                let mut choices = HdChoices::default();
-                choices.enroll_owner(&owner)?;
+                let choices = match &body.personal_restoration {
+                    PersonalRestorationPolicy::Authored(plan) => match plan.get(&id) {
+                        Some(authored) if authored.source == source => authored.choices.clone(),
+                        Some(_) => return Err(BuildError::InvalidOwnership),
+                        None => {
+                            let mut choices = HdChoices::default();
+                            choices.enroll_owner(&owner)?;
+                            choices
+                        }
+                    },
+                    PersonalRestorationPolicy::ChooseAgain => {
+                        let mut choices = HdChoices::default();
+                        choices.enroll_owner(&owner)?;
+                        choices
+                    }
+                };
                 RemovedAdvancement {
                     hit_die: die,
                     choices,
@@ -829,15 +887,18 @@ impl CreatureBuild {
         let PersonalRestorationPolicy::Authored(plan) = &body.personal_restoration else {
             return None;
         };
+        // Regrowth restores the latest drained row; otherwise an authored
+        // future row may schedule the next new personal Hit Die.
         let id = body
             .drained
             .iter()
             .rev()
             .find_map(|row| match row.hit_die.owner() {
-                Some(HdOwner::Personal { id }) => Some(id),
+                Some(HdOwner::Personal { id }) => Some(*id),
                 _ => None,
-            })?;
-        plan.get(id).map(|row| row.source.clone())
+            })
+            .or_else(|| NonZeroU64::new(body.next_personal_id).map(PersonalHdId))?;
+        plan.get(&id).map(|row| row.source.clone())
     }
     fn personal_restoration_receipts(&self) -> BTreeMap<PersonalHdId, PlannedAdvancement> {
         self.ledger
@@ -855,6 +916,27 @@ impl CreatureBuild {
                         choices: choices.clone(),
                     },
                 ))
+            })
+            .collect()
+    }
+    /// Authored future personal rows after the birth rows, as unowned
+    /// declarations; a new birth assigns their owners and purchase serials.
+    pub(crate) fn body_birth_growth_schedule(&self) -> Vec<PlannedAdvancement> {
+        let Some(body) = &self.body_build else {
+            return Vec::new();
+        };
+        let PersonalRestorationPolicy::Authored(plan) = &body.personal_restoration else {
+            return Vec::new();
+        };
+        plan.iter()
+            .filter(|(id, _)| id.0.get() > body.birth_personal_count)
+            .map(|(_, row)| {
+                let mut row = row.clone();
+                row.choices.purchase_highwater = 0;
+                for purchase in &mut row.choices.purchases {
+                    purchase.id = None;
+                }
+                row
             })
             .collect()
     }
@@ -889,7 +971,12 @@ impl CreatureBuild {
             return Err(BuildError::InvalidOwnership);
         }
         if let PersonalRestorationPolicy::Authored(plan) = &body.personal_restoration {
-            if &self.personal_restoration_receipts() != plan {
+            let birth: BTreeMap<_, _> = plan
+                .iter()
+                .filter(|(id, _)| id.0.get() <= body.birth_personal_count)
+                .map(|(id, row)| (*id, row.clone()))
+                .collect();
+            if self.personal_restoration_receipts() != birth {
                 return Err(BuildError::InvalidOwnership);
             }
         }

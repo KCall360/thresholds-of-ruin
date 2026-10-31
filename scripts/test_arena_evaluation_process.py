@@ -220,7 +220,7 @@ class ArenaEvaluationProcesses(ProcessTestCase):
         self.assertEqual(first.returncode, 0, first.stderr)
         report = json.loads(first.stdout)
         rules_source = (package / "rules.toml").read_text(encoding="utf-8")
-        self.assertEqual(report["format"], "tor-arena-run-v5")
+        self.assertEqual(report["format"], "tor-arena-run-v6")
         self.assertEqual(report["ruleset"], load_rules(package / "rules.toml", self.bin / ("tor-scenario" + self.suffix))["id"])
         certificate = json.loads((package / "validation.json").read_text(encoding="utf-8"))
         self.assertEqual(report["ruleset_hash"], certificate["ruleset_hash"])
@@ -246,14 +246,14 @@ class ArenaEvaluationProcesses(ProcessTestCase):
         manual = run("--seed", "42")
         self.assertEqual(manual.returncode, 2)
         failure = json.loads(manual.stdout)
-        self.assertEqual(failure["format"], "tor-arena-run-v5")
+        self.assertEqual(failure["format"], "tor-arena-run-v6")
         self.assertEqual(failure["status"], "failure")
         self.assertEqual(path.read_text(encoding="utf-8"), source, "evaluation must not edit its source")
         for arguments in [("--all-ai", "--seed", "bad"), ("--all-ai", "--all-ai"), ("--unknown",)]:
             invalid = run(*arguments)
             self.assertEqual(invalid.returncode, 2)
             failure = json.loads(invalid.stdout)
-            self.assertEqual(failure["format"], "tor-arena-run-v5")
+            self.assertEqual(failure["format"], "tor-arena-run-v6")
             self.assertEqual(failure["status"], "failure")
 
     def test_current_report_records_nonzero_actual_healing_and_natural_recovery(self):
@@ -289,7 +289,7 @@ class ArenaEvaluationProcesses(ProcessTestCase):
                                 encoding="utf-8", timeout=30)
         self.assertEqual(result.returncode, 0, result.stderr)
         report = json.loads(result.stdout)
-        self.assertEqual(report["format"], "tor-arena-run-v5")
+        self.assertEqual(report["format"], "tor-arena-run-v6")
         self.assertTrue(any(int(actor["healing_received"]) > 0 for actor in report["participants"]))
         self.assertTrue(any(int(actor["health_recovered"]) > 0 for actor in report["participants"]))
         self.assertEqual(sum(int(actor["damage_dealt"]) for actor in report["participants"]),

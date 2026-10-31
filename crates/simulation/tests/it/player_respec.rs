@@ -999,7 +999,7 @@ fn phase5_respec_lethal_last_ration_finalizes_only_post_spend_inventory_once() {
             subject
                 .combat_events()
                 .iter()
-                .filter(|event| matches!(event,CombatEvent::Died {actor:dead} if *dead==actor))
+                .filter(|event| matches!(event,CombatEvent::Died {actor:dead,..} if *dead==actor))
                 .count(),
             1
         );

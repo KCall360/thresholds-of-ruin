@@ -293,6 +293,7 @@ fn basic_attack_messages_keep_each_strike_and_the_disclosed_departed_target() {
         second.clone(),
         CombatEventView::Died {
             actor: super::actor_target(2),
+            cause: tor_protocol::DeathCause::Injury,
         },
     ];
     let lines = tor_client_common::narration::observation_lines(&before, &after, None);
@@ -421,6 +422,7 @@ fn concise_combat_keeps_special_effects_interruptions_and_actionable_feedback() 
         },
         CombatEventView::Died {
             actor: after.self_target,
+            cause: tor_protocol::DeathCause::Injury,
         },
     ];
     let start = Event::AbilityStarted {
@@ -473,7 +475,10 @@ fn routine_lines_are_left_out_and_kills_read_as_one_sentence() {
             ),
             line(Topic::Combat(hit), "You struck the ruin scout."),
             line(
-                Topic::Combat(CombatEventView::Died { actor: scout }),
+                Topic::Combat(CombatEventView::Died {
+                    actor: scout,
+                    cause: tor_protocol::DeathCause::Injury,
+                }),
                 "The ruin scout died.",
             ),
             line(Topic::Status, "HP 40/50 - Recovering: 16 ticks."),

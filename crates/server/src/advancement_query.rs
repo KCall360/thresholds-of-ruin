@@ -460,6 +460,7 @@ impl Engine {
                 .ok_or_else(invalid)?;
         }
         let pending = game.preparation(s::ActorId(actor.0));
+        let locked = !game.scenario_capabilities().owner_advancement;
         let timing = game
             .preparation_timing(s::ActorId(actor.0))
             .ok_or_else(unavailable)?;
@@ -555,8 +556,10 @@ impl Engine {
             },
             received_loss_remaining: creature.received_health_loss_remaining(),
             perceived_threat: game.has_perceived_hostile(s::ActorId(actor.0)),
-            ready: game.player_advancement_ready(s::ActorId(actor.0))
+            ready: !locked
+                && game.player_advancement_ready(s::ActorId(actor.0))
                 && self.input_readiness_at(game, branch, actor, None).admission,
+            locked,
             other_preparation: pending.is_some() && respec.is_none(),
             respec,
         })

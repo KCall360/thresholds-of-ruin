@@ -352,10 +352,19 @@ impl Game {
                     behavior.engagement = None;
                 }
             }
-            if behavior.engagement.is_none()
-                && policy.memory_ticks > 0
-                && policy.disposition == crate::behavior::Disposition::Mean
-            {
+            // A greedy species pursues known Gold it can safely collect and
+            // acquires a visible hostile only when there is none.
+            let acquires = match policy.disposition {
+                crate::behavior::Disposition::Passive => false,
+                crate::behavior::Disposition::Mean => true,
+                crate::behavior::Disposition::Greedy => {
+                    self.exposed_to_visible_hostile(id, view.location, view)
+                        || self
+                            .choose_known_gold(id, view, &ai.profile, &mut route)
+                            .is_none()
+                }
+            };
+            if behavior.engagement.is_none() && policy.memory_ticks > 0 && acquires {
                 if let Some(visible) = candidate {
                     {
                         behavior.engagement = Some(crate::behavior::Engagement {
@@ -386,7 +395,9 @@ impl Game {
             })
             .or(alert);
         let (hp, max) = self.health(id)?;
-        let frightened = forced_flee.is_some() || low_health(hp, max, ai.profile.flee_percent);
+        let frightened = forced_flee.is_some()
+            || (self.scenario_capabilities().low_health_flight
+                && low_health(hp, max, ai.profile.flee_percent));
         ai.state = TRANSITIONS
             .iter()
             .find(|(low, known, _)| *low == frightened && *known == threat.is_some())
@@ -1466,6 +1477,15 @@ mod tests {
         }
         let AiDecision { action, ai, .. } = game.choose_ai(ActorId(2)).unwrap();
         assert_eq!(ai.state, State::Flee);
+        assert_eq!(action, basic(ActorId(1)));
+    }
+    #[test]
+    fn a_scenario_without_low_health_flight_keeps_wounded_ai_fighting() {
+        let mut game = fixture();
+        game.scenario_capabilities_mut().low_health_flight = false;
+        injury(&mut game, ActorId(2), 25);
+        let AiDecision { action, ai, .. } = game.choose_ai(ActorId(2)).unwrap();
+        assert_eq!(ai.state, State::Attack);
         assert_eq!(action, basic(ActorId(1)));
     }
 
