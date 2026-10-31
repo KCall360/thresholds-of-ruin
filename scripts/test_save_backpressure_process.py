@@ -12,7 +12,7 @@ import threading
 import time
 import unittest
 
-from process_harness import ProcessTestCase, ROOT, SUFFIX, TOKEN, binaries
+from process_harness import ProcessTestCase, ROOT, SUFFIX, TOKEN, binaries, save_at
 
 REPLY_MS = 300
 LOCK_SECONDS = 1.6
@@ -64,8 +64,9 @@ class SaveBackpressure(ProcessTestCase):
         self.assertFalse(command.is_alive())
         # The command waited for saving to catch up instead of outrunning it.
         self.assertGreaterEqual(finished["at"], released - 0.05)
-        code, errors = save_once(self.address)
-        self.assertEqual((code, errors), (0, []))
+        # Once released, the queued writes become durable; under load a save may
+        # still answer SaveBehind briefly, so the ordinary barrier asks again.
+        save_at(self.address)
 
 
 if __name__ == "__main__":

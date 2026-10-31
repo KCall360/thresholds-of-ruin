@@ -783,6 +783,17 @@ branch's development runs only.
   tests; the absent choice quantity is now omitted from authored output instead.
   Two roots (format additions, an absent optional serialized as null), four
   methods, four failed executions.
+- **Stale/unupdated tests after merging main, 30 October 2026.** The quick tier
+  failed `engine::floor_activation_tests::checkpoint_cannot_inject_scenario_policy_into_a_nonpackage_game`
+  (its injected capabilities lacked the new `low_health_flight` switch),
+  `runner::backpressure_tests::overdue_saving_holds_commands_in_order_and_nothing_else`
+  (a hand-written command kept the pre-merge `expected_revision` field),
+  `test_process_module_boundaries` (a process test imported another test module;
+  the helper moved to `advancement_package.py`) and
+  `test_save_backpressure_process` (its final save assumed durability under full-suite
+  load; it now uses the retrying barrier). Four roots, four methods, four failed
+  executions. Environment-only failures in the same run (missing `optuna`, a full
+  disk, load timeouts) passed or were confirmed environmental when rerun alone.
 ## Live interface shell checkpoint, 29 October 2026
 
 The new native dock test first failed at the intended missing-HUD assertion

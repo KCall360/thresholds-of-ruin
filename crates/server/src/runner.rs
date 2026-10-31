@@ -284,7 +284,7 @@ mod backpressure_tests {
         let command: Request = serde_json::from_value(serde_json::json!({
             "type": "command", "branch": "b",
             "context": {"stream": {"stream": "s", "epoch": "1"}, "readiness_revision": "1"},
-            "command": {"type": "act", "expected_revision": "0", "action": {"type": "wait"}}
+            "command": {"type": "act", "action": {"type": "wait"}}
         }))
         .unwrap();
         assert!(!holds(&mail(command.clone()), false, 0));

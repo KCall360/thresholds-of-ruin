@@ -11,7 +11,7 @@ import unittest
 from arena_matrix import toml_source
 from process_harness import ProcessTestCase, ROOT
 from scalar_wire import u64
-from test_player_advancement_process import earned_growth_package, observation
+from advancement_package import earned_growth_package, observation
 
 
 def locked_growth_package(test):
