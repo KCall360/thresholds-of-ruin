@@ -81,6 +81,16 @@ even when cursed; a removed held light is extinguished only at commit. Existing
 fall causal provenance is preserved. Absolute injury survives the transition, so a
 frailer body can die; zero HP is real death, never a protective reversion.
 
+Within that private transition, body validation produces one owned replacement:
+its build, compiled permanent inputs and pure selection sheet stay paired. The
+selection sheet drives ordered equipment retention; the permanent inputs are
+then reused for runtime reconciliation. The pure sheet is **not** published as
+actor state. Actual equipment, losses and cancellation still receive a
+condition-free fold, followed by live-condition reconciliation and one final
+Health commit. Original-body reward/learning projection remains distinct from
+the active form. This reuse is transaction-local, not a global cache, persisted
+identity or alternate rules path; public builder validation is unchanged.
+
 Cancellation suppresses and reverses in the same final fold. A living actor whose
 base body cannot fit stays suppressed with a persisted pending return. Outstanding
 package-HD losses can also block return until their exact receipts are restored.

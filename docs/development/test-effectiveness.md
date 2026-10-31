@@ -96,6 +96,48 @@ AI 80, travel 10, autonomous movement 5 and both paid-prefix methods, with the
 six original assertions untouched. Hosted and local optimized results remain
 separate; the initial failed run is not relabeled green.
 
+## Earned-route confirmed-picture recovery, 30 October 2026
+
+PR 210's Windows debug process partition exposed one controller synchronization
+root cause in the fixed-seed earned-route method. A causal completion and admission
+update retained an older ready picture. The explicit Observe correctly returned
+a newer picture with movement recovery still pending, but the route caller
+returned it without rechecking settlement. The controller's nonready guard then
+failed as intended. The retained frame sequence includes the later ready picture;
+this is a driver defect, not evidence of a body-compilation or gameplay defect.
+Count one observed failed method and execution, separately from deliberate local
+first-red work and later runs.
+
+The caller now settles again against the confirmed picture before returning.
+The transport-only regression reproduces the old-ready → confirmed-recovering →
+later-ready order and fails before the correction. It checks both returned and
+stored state, unchanged command budget, and a single Observe without Wait,
+readmission or retry. A terminal-picture control and existing refusal, paid-tail
+resume and budget controls remain. Full hosted qualification remains required;
+the deterministic caller witness does not measure scheduling frequency.
+
+Local qualification separately retained an interrupted process attempt with no
+terminal receipt and one setup error before gameplay: the restored shell omitted
+the installed Rust toolchain from `PATH`, so campaign provenance could not run
+`rustc --version`. Restoring that environment, without changing assertions or
+rebuilding the verified binaries, passed the complete fixed-seed earned-HD,
+repeated-execution and source-free-restore method. The setup error is one separate
+infrastructure root and execution, not an additional gameplay failure; the
+interrupted attempt is neither a pass nor a demonstrated behavioral failure.
+
+## Body-refactor process binary inventory, 30 October 2026
+
+The focused text Polymorph reopen/retry check first failed before gameplay:
+its helper also launches a headless observer, but the local binary inventory
+included only server, scenario compiler and text client. The missing
+`tor-client-headless` produced `FileNotFoundError`. This is one local setup/
+inventory root, one failed method and one failed execution, not a gameplay or
+persistence defect. Building the omitted executable and rerunning the exact
+method passed without weakening assertions or changing runtime source; the
+failed receipt remains separate. Select process binaries from helper dependencies,
+not only the client named in the method. The owner is
+[`MagicItemProcesses.test_text_paid_self_polymorph_reopens_and_retries_without_source_or_private_ledger`](../../scripts/test_magic_items_process.py).
+
 ## Projected limb surface investigation, 28 October 2026
 
 Two existing source-contract defects were confirmed while developing the new
