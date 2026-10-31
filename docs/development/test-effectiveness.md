@@ -2863,6 +2863,18 @@ fresh native executions and do not inflate the hosted failure count. The
 existing real equipment and character native methods remain the live boundary;
 fresh final-head hosted qualification is still required.
 
+Integrated qualification later encountered one runner setup failure, not a test
+failure: [Linux debug Python shard 2](https://github.com/KCall360/thresholds-of-ruin/actions/runs/41152209718/job/124391616165)
+had only the Microsoft package feed in its updated index, then could not locate
+`libx11-dev`, `libxcursor-dev` or `libxrandr-dev`. No tests ran in that attempt.
+A targeted retry passed, but the [aggregate](https://github.com/KCall360/thresholds-of-ruin/actions/runs/41152209718/job/124414302702)
+correctly rejected Linux shard origin attempts 1 and 2. This is one separate
+retry-procedure error, not another failing gameplay method. Both Linux debug
+shards must execute in the same attempt; an isolated sibling retry cannot qualify
+the cohort. Complete final-head qualification was restarted without changing
+assertions or weakening the cohort guard. Native passes from prior heads remain
+historical evidence, not substitutes for the final integration's checks.
+
 ### Measurement-witness setup and rules-source inventory
 
 The local rules-identity and count-witness checkpoint exposed two test-fixture
@@ -2885,3 +2897,35 @@ preserving privacy, occurrence/list ordering and required matched-row emissions.
 The count reductions do not establish a release timing improvement. Focused
 local feedback is not full or hosted qualification; failed evidence remains
 separate from subsequent passing checks.
+
+## Checkpoint failure classification, 30 October 2026
+
+A scoped reduced encoder limit reproduced the explicit-Save retry policy on an
+otherwise valid ordinary checkpoint. The new
+`storage::checkpoint_failure_tests::unchanged_capacity_failure_keeps_work_and_explicit_save_does_not_reencode`
+failed at the intended assertion: the second Save encoded the identical retained
+snapshot again (two attempts rather than one). This is deliberate first-red work
+for the approved failure-classification policy, not evidence that gameplay has
+reached the real capacity ceiling. The SQLite lock/retry and concurrently retained
+newer-checkpoint controls passed in that same run.
+
+An earlier preflight failed before behavioral tests: a wrapper made test-only by
+the refactor still compiled in production, and new SQLite count assertions asked
+for an unsupported Rust unsigned result type. These are two local scaffolding
+roots in one failed preflight, with no failed test-method executions. The wrapper
+is now test-only and the zero-count assertions use SQLite's signed type; no
+behavioral assertion was weakened. Typed encoder controls also distinguish
+serializer/resource/writer failures from explicit bounds, preserve the first
+failure during buffered cleanup, and recover Interrupted writes without masking
+a later real bound failure. Runtime validation and qualification are reported
+separately from these failures.
+
+Recovery of an interrupted incremental build later failed in the linker with
+undefined hidden LLVM symbols before executing any tests. Isolating only the
+affected server-test incremental cache, while retaining the application and
+dependency caches, allowed the unchanged implementation to pass all 219 storage
+checks on the current main baseline. This is one local build-infrastructure
+failure, not an additional production defect or failed test-method execution.
+The subsequently interrupted application build was resumed separately; its
+verified binaries passed all nine background-save process checks. Interruption
+without an exit receipt is incomplete evidence, not a pass or behavioral failure.
