@@ -72,6 +72,7 @@ fn script_clock_holds_all_capture_phases_and_advances_once() {
     let mut app = App::new();
     app.add_plugins(bevy::time::TimePlugin);
     app.insert_resource(Run {
+        offscreen: false,
         script,
         output: PathBuf::new(),
         tick: 0,
@@ -158,6 +159,7 @@ fn director_timeout_records_failure_without_advancing_or_claiming_captures() {
     app.add_event::<AppExit>();
     app.insert_resource(Readiness::default());
     app.insert_resource(Run {
+        offscreen: false,
         script: parse(fixture()).unwrap(),
         output: output.clone(),
         tick: 0,
@@ -336,4 +338,114 @@ fn live_timeline_does_not_depend_on_capture_requests() {
     );
     value["events"][0]["tick"] = json!(30001);
     assert!(Script::parse_live(&serde_json::to_vec(&value).unwrap()).is_err());
+}
+
+#[test]
+fn offscreen_cli_is_explicit_bounded_capture_only() {
+    let args = |values: &[&str]| {
+        values
+            .iter()
+            .map(|value| (*value).to_owned())
+            .collect::<Vec<_>>()
+    };
+    let ordinary = parse_cli(&args(&[
+        "--scene-script",
+        "scene.json",
+        "--capture",
+        "new-dir",
+    ]))
+    .unwrap();
+    assert_eq!(
+        ordinary,
+        CaptureOptions {
+            script: "scene.json".into(),
+            output: "new-dir".into(),
+            offscreen: false,
+        }
+    );
+    let offscreen = parse_cli(&args(&[
+        "--offscreen",
+        "--capture",
+        "new-dir",
+        "--scene-script",
+        "scene.json",
+    ]))
+    .unwrap();
+    assert!(offscreen.offscreen);
+    assert_eq!(offscreen.script, ordinary.script);
+    assert_eq!(offscreen.output, ordinary.output);
+    for values in [
+        vec!["--offscreen"],
+        vec!["--offscreen", "--scene-script", "scene.json"],
+        vec![
+            "--offscreen",
+            "--scene-script",
+            "scene.json",
+            "--capture",
+            "new-dir",
+            "--offscreen",
+        ],
+        vec!["--scene-script", "--offscreen", "--capture", "new-dir"],
+        vec!["--scene-script", "scene.json", "--capture", "--offscreen"],
+        vec![
+            "--scene-script",
+            "scene.json",
+            "--capture",
+            "new-dir",
+            "--connect",
+            "localhost:1",
+        ],
+        vec![
+            "--scene-script",
+            "scene.json",
+            "--capture",
+            "new-dir",
+            "--scene-script",
+            "other.json",
+        ],
+    ] {
+        assert!(parse_cli(&args(&values)).is_err(), "{values:?}");
+    }
+}
+
+#[test]
+fn offscreen_target_has_exact_requested_extent_and_render_readback_usage() {
+    for viewport in [[640, 480], [641, 479], [320, 320]] {
+        let image = offscreen_image(viewport);
+        let descriptor = &image.texture_descriptor;
+        assert_eq!(
+            descriptor.size,
+            Extent3d {
+                width: viewport[0],
+                height: viewport[1],
+                depth_or_array_layers: 1
+            }
+        );
+        assert_eq!(descriptor.format, TextureFormat::Rgba8UnormSrgb);
+        assert_eq!(descriptor.sample_count, 1);
+        assert!(descriptor.usage.contains(
+            TextureUsages::RENDER_ATTACHMENT
+                | TextureUsages::COPY_SRC
+                | TextureUsages::TEXTURE_BINDING
+        ));
+        assert_eq!(
+            image.data.as_ref().unwrap().len(),
+            viewport[0] as usize * viewport[1] as usize * 4
+        );
+    }
+}
+
+#[test]
+fn offscreen_has_no_window_and_waits_for_director_exit() {
+    let offscreen = review_window([640, 480], true);
+    assert!(offscreen.primary_window.is_none());
+    assert!(matches!(offscreen.exit_condition, ExitCondition::DontExit));
+    let windowed = review_window([640, 480], false);
+    let window = windowed.primary_window.unwrap();
+    assert_eq!(window.resolution.physical_width(), 640);
+    assert_eq!(window.resolution.physical_height(), 480);
+    assert!(matches!(
+        windowed.exit_condition,
+        ExitCondition::OnAllClosed
+    ));
 }

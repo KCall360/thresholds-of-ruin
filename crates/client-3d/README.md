@@ -5,6 +5,10 @@ with procedural scenery, creatures, and items. Its gameplay scope remains the
 prototype's exploration, combat, and basic item interactions. It has its own
 workspace, lockfile, tests, and verification gate.
 
+Offline [scripted model review](review-scripts/README.md#windowless-capture) also
+supports `--offscreen` PNG capture without a window or display server, using a
+hardware or software graphics adapter. Normal windowed play is unchanged.
+
 Live play currently omits disclosed terrain two or more levels above the
 character's feet, keeping the overhead view open. Nearby walls retain their
 camera cutaway. There is no ceiling display toggle.

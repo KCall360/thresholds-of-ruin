@@ -8,18 +8,24 @@ use crate::{
     props::{PropLibrary, PropMaterials},
 };
 use bevy::{
+    app::ScheduleRunnerPlugin,
     ecs::schedule::ScheduleLabel,
     prelude::*,
     render::{
+        camera::RenderTarget,
         mesh::RenderMesh,
-        render_asset::RenderAssets,
-        render_resource::{CachedPipelineState, PipelineCache},
+        render_asset::{RenderAssetUsages, RenderAssets},
+        render_resource::{
+            CachedPipelineState, Extent3d, PipelineCache, TextureDimension, TextureFormat,
+            TextureUsages,
+        },
         renderer::RenderAdapterInfo,
         view::screenshot::{Screenshot, ScreenshotCaptured},
         Render, RenderApp, RenderSet,
     },
     time::TimeSystem,
-    window::WindowResolution,
+    window::{ExitCondition, WindowResolution},
+    winit::WinitPlugin,
 };
 use schema::*;
 use serde_json::{json, Value};
@@ -42,6 +48,7 @@ enum Phase {
 #[derive(Resource)]
 struct Run {
     script: Script,
+    offscreen: bool,
     output: PathBuf,
     tick: u32,
     next_capture: usize,
@@ -68,7 +75,49 @@ struct ActorState {
 #[derive(Component)]
 struct ReviewCamera;
 
-pub(crate) fn run(path: &Path, output: &Path) -> Result<(), crate::Error> {
+/// The image used by both the camera and screenshot request in windowless mode.
+#[derive(Resource)]
+struct OffscreenTarget(Handle<Image>);
+
+fn review_window(viewport: [u32; 2], offscreen: bool) -> WindowPlugin {
+    if offscreen {
+        WindowPlugin {
+            primary_window: None,
+            // The capture director owns the bounded exit, not window presence.
+            exit_condition: ExitCondition::DontExit,
+            ..default()
+        }
+    } else {
+        WindowPlugin {
+            primary_window: Some(Window {
+                title: "Procedural model script review".into(),
+                resolution: WindowResolution::new(viewport[0] as f32, viewport[1] as f32)
+                    .with_scale_factor_override(1.0),
+                ..default()
+            }),
+            ..default()
+        }
+    }
+}
+
+fn offscreen_image(viewport: [u32; 2]) -> Image {
+    let mut image = Image::new_fill(
+        Extent3d {
+            width: viewport[0],
+            height: viewport[1],
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        &[0, 0, 0, 255],
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::default(),
+    );
+    image.texture_descriptor.usage |=
+        TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_SRC;
+    image
+}
+
+fn run(path: &Path, output: &Path, offscreen: bool) -> Result<(), crate::Error> {
     if std::fs::metadata(path)?.len() > 1_048_576 {
         return Err("scene script exceeds 1 MiB".into());
     }
@@ -80,6 +129,7 @@ pub(crate) fn run(path: &Path, output: &Path) -> Result<(), crate::Error> {
     let manifest = json!({"version":1,"status":"running","script":script,
         "script_fingerprint_fnv1a64":fingerprint(&bytes),
         "executable":std::env::current_exe()?.to_string_lossy(),
+        "capture_mode":if offscreen { "offscreen" } else { "window" },
         "captures":[],"provenance":"local executable; source revision not supplied"});
     std::fs::write(
         output.join("manifest.json"),
@@ -88,50 +138,49 @@ pub(crate) fn run(path: &Path, output: &Path) -> Result<(), crate::Error> {
     let viewport = script.viewport;
     let readiness = Readiness::default();
     let mut app = App::new();
-    app.add_plugins(
-        crate::graphics::plugins().set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "Procedural model script review".into(),
-                resolution: WindowResolution::new(viewport[0] as f32, viewport[1] as f32)
-                    .with_scale_factor_override(1.0),
-                ..default()
-            }),
+    let plugins = crate::graphics::plugins().set(review_window(viewport, offscreen));
+    if offscreen {
+        app.add_plugins(plugins.disable::<WinitPlugin>())
+            .add_plugins(ScheduleRunnerPlugin::run_loop(Duration::from_secs_f64(
+                1.0 / 60.0,
+            )));
+    } else {
+        app.add_plugins(plugins);
+    }
+    app.insert_resource(ClearColor(Color::srgb(0.08, 0.09, 0.12)))
+        .insert_resource(AmbientLight {
+            color: Color::WHITE,
+            brightness: 180.0,
             ..default()
-        }),
-    )
-    .insert_resource(ClearColor(Color::srgb(0.08, 0.09, 0.12)))
-    .insert_resource(AmbientLight {
-        color: Color::WHITE,
-        brightness: 180.0,
-        ..default()
-    })
-    .insert_resource(readiness.clone())
-    .insert_resource(Run {
-        script,
-        output: output.to_path_buf(),
-        tick: 0,
-        next_capture: 0,
-        phase: Phase::Apply,
-        clock: Time::default(),
-        deadline: Instant::now() + Duration::from_secs(180),
-        manifest,
-        error: None,
-    })
-    .add_systems(Startup, setup)
-    .add_systems(First, clock.after(TimeSystem))
-    .add_systems(
-        Update,
-        (
-            advance_actors,
-            advance_animation,
-            apply,
-            refresh_animation,
-            creatures::snuff,
-            creatures::effects,
+        })
+        .insert_resource(readiness.clone())
+        .insert_resource(Run {
+            script,
+            offscreen,
+            output: output.to_path_buf(),
+            tick: 0,
+            next_capture: 0,
+            phase: Phase::Apply,
+            clock: Time::default(),
+            deadline: Instant::now() + Duration::from_secs(180),
+            manifest,
+            error: None,
+        })
+        .add_systems(Startup, setup)
+        .add_systems(First, clock.after(TimeSystem))
+        .add_systems(
+            Update,
+            (
+                advance_actors,
+                advance_animation,
+                apply,
+                refresh_animation,
+                creatures::snuff,
+                creatures::effects,
+            )
+                .chain(),
         )
-            .chain(),
-    )
-    .add_systems(Last, (track_drawn_meshes, capture).chain());
+        .add_systems(Last, (track_drawn_meshes, capture).chain());
     configure_animation(&mut app);
     app.sub_app_mut(RenderApp)
         .insert_resource(readiness)
@@ -195,6 +244,7 @@ fn setup(
     run: Res<Run>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut images: ResMut<Assets<Image>>,
 ) {
     let mut library = PropLibrary::new(PropMaterials::new(&mut materials));
     for spec in &run.script.actors {
@@ -240,8 +290,19 @@ fn setup(
         },
         Transform::from_xyz(3.0, 5.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
+    let target = if run.offscreen {
+        let image = images.add(offscreen_image(run.script.viewport));
+        commands.insert_resource(OffscreenTarget(image.clone()));
+        RenderTarget::Image(image.into())
+    } else {
+        RenderTarget::default()
+    };
     commands.spawn((
         ReviewCamera,
+        Camera {
+            target,
+            ..default()
+        },
         Camera3d::default(),
         crate::graphics::camera_antialiasing(),
         Transform::from_xyz(0.0, 1.5, 4.0).looking_at(Vec3::Y * 0.5, Vec3::Y),
@@ -397,6 +458,7 @@ fn capture(
     mut commands: Commands,
     mut run: ResMut<Run>,
     readiness: Res<Readiness>,
+    offscreen: Option<Res<OffscreenTarget>>,
     mut camera: Query<(&mut Transform, &mut Projection), With<ReviewCamera>>,
     actors: Query<(&ActorState, &Anim, &Transform, &Rig, &Children), Without<ReviewCamera>>,
     joints: Query<&GlobalTransform>,
@@ -494,7 +556,11 @@ fn capture(
         "camera":camera_spec,"actors":states,"renderer":adapter});
     let output = run.output.clone();
     run.phase = Phase::Pending;
-    commands.spawn(Screenshot::primary_window()).observe(
+    let screenshot = match offscreen {
+        Some(target) => Screenshot::image(target.0.clone()),
+        None => Screenshot::primary_window(),
+    };
+    commands.spawn(screenshot).observe(
         move |trigger: Trigger<ScreenshotCaptured>, mut run: ResMut<Run>| {
             let result = (|| -> Result<Value, crate::Error> {
                 let image = trigger.event().0.clone().try_into_dynamic()?;
@@ -528,11 +594,26 @@ fn capture(
     );
 }
 
-pub(crate) fn cli(arguments: &[String]) -> Result<(), crate::Error> {
+#[derive(Debug, PartialEq, Eq)]
+struct CaptureOptions {
+    script: PathBuf,
+    output: PathBuf,
+    offscreen: bool,
+}
+
+fn parse_cli(arguments: &[String]) -> Result<CaptureOptions, crate::Error> {
     let mut script = None;
     let mut output = None;
+    let mut offscreen = false;
     let mut args = arguments.iter();
     while let Some(arg) = args.next() {
+        if arg == "--offscreen" {
+            if offscreen {
+                return Err("duplicate --offscreen".into());
+            }
+            offscreen = true;
+            continue;
+        }
         let slot = match arg.as_str() {
             "--scene-script" => &mut script,
             "--capture" => &mut output,
@@ -541,13 +622,22 @@ pub(crate) fn cli(arguments: &[String]) -> Result<(), crate::Error> {
         if slot.is_some() {
             return Err(format!("duplicate {arg}").into());
         }
-        *slot = Some(PathBuf::from(
-            args.next()
-                .ok_or_else(|| format!("missing value for {arg}"))?,
-        ));
+        let value = args
+            .next()
+            .ok_or_else(|| format!("missing value for {arg}"))?;
+        if value.starts_with("--") {
+            return Err(format!("missing value for {arg}").into());
+        }
+        *slot = Some(PathBuf::from(value));
     }
-    run(
-        &script.ok_or("--scene-script is required")?,
-        &output.ok_or("--scene-script requires --capture with a new output directory")?,
-    )
+    Ok(CaptureOptions {
+        script: script.ok_or("--scene-script is required")?,
+        output: output.ok_or("--scene-script requires --capture with a new output directory")?,
+        offscreen,
+    })
+}
+
+pub(crate) fn cli(arguments: &[String]) -> Result<(), crate::Error> {
+    let options = parse_cli(arguments)?;
+    run(&options.script, &options.output, options.offscreen)
 }

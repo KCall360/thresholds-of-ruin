@@ -8,7 +8,8 @@ Run the built 3D client with a script and a **new** output directory:
 
 This offline mode uses the real procedural generator, renderer and animation
 systems. It does not connect to a game server. Other client/review arguments
-cannot be combined with `--scene-script`. Existing output directories are
+cannot be combined with `--scene-script`, except `--capture` and the optional
+`--offscreen` switch described below. Existing output directories are
 rejected so review evidence is not overwritten.
 
 Scripts are strict JSON with `version: 1`. Unknown fields fail validation.
@@ -71,6 +72,46 @@ cross-driver pixel identity is not promised. Full joint/cloth diagnostics,
 orthographic cameras, action-at-zero initialization, richer motion tracks and
 automatic seeded fixture generation remain unfinished. See the implementation
 and future contracts in [the art continuation guide](../../../docs/plans/3d-art-continuation.md).
+
+## Windowless capture
+
+Add `--offscreen` to render the same scene into an image without opening a window
+or startup splash. This option is only valid with `--scene-script` and `--capture`;
+it is not a headless live-game client or a live-playlist mode. Omitting it retains
+the existing windowed review behavior.
+
+Build from the repository root, then run with a new output directory:
+
+```sh
+cargo build --manifest-path crates/client-3d/Cargo.toml --bin tor-client-3d --locked
+crates/client-3d/target/debug/tor-client-3d --scene-script crates/client-3d/review-scripts/showcase/02-adventurers.json --capture .local/reviews/offscreen-001 --offscreen
+```
+
+The executable path above assumes the default target directory; use your configured
+`CARGO_TARGET_DIR` instead if set. On Windows, add `.exe` to the executable name.
+No display server is needed, but a working graphics adapter and the normal native
+build dependencies still are. On Linux, Mesa's Vulkan software driver (Debian's
+`mesa-vulkan-drivers`) can provide a CPU adapter when no hardware GPU is available.
+`WGPU_BACKEND=vulkan` selects Vulkan explicitly; `vulkaninfo --summary` (from
+`vulkan-tools`) can inspect its available adapters. Install packages through your
+platform's normal package manager; this mode does not install drivers itself.
+
+The camera and PNG readback share an offscreen target at the script's exact
+viewport dimensions, including widths that are not aligned to GPU row padding.
+The existing readiness checks, deterministic timeline and capture watchdog apply.
+The manifest's `capture_mode` is `offscreen` (or `window` for windowed runs), and
+its renderer details identify the actual adapter. A successful process must exit
+zero and leave `manifest.json` with status `complete`; partial output is not proof
+of a successful run. The in-app 180-second watchdog runs once the application is
+updating, so an automated caller should also impose an outer process timeout
+(for example 240 seconds) to cover graphics-driver initialization hangs.
+
+Software-rendered captures can validate scene construction and image output, not
+hardware GPU performance, native window presentation, mouse/keyboard input, audio,
+or cross-driver pixel identity. Native client tests remain separate. Linux VM
+validation produced inspected 960×540 and odd-sized 641×479 PNGs on Mesa llvmpipe,
+with identical repeated same-state captures; this is not a full platform matrix
+or a performance measurement.
 
 ## Looping showcase
 
