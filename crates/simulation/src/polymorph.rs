@@ -92,13 +92,13 @@ impl Game {
         if !self.body_fits(outcome.id, actor.location, actor.orientation, &package.body) {
             return Ok(BodyTransitionResult::Blocked);
         }
-        let build = combat
+        let replacement = combat
             .creature()
             .build()
-            .replace_body_package(package.clone())
+            .validated_body_replacement(package.clone())
             .map_err(GameError::Build)?;
-        let permanent = build.derive().map_err(GameError::Build)?;
-        let anatomy = permanent.anatomy.clone();
+        let selection = replacement.selection();
+        let anatomy = selection.anatomy.clone();
         let mut equipment = BTreeMap::new();
         // Existing socket identity must still denote the same kind. No implicit
         // equipment remapping, curse checks, transfer, duplication or destruction.
@@ -114,7 +114,7 @@ impl Game {
                 .equipment_capacity_state_for_facts(
                     outcome.id,
                     &anatomy,
-                    &permanent.expertises,
+                    &selection.expertises,
                     &equipment,
                 )
                 .is_none_or(|deficits| !deficits.is_empty())
@@ -133,7 +133,7 @@ impl Game {
             .collect::<Result<Vec<_>, _>>()?;
         let mut creature = combat.creature().clone();
         creature
-            .stage_body_rebuild_with_equipment(build, sources)
+            .stage_body_rebuild_with_equipment(replacement, sources)
             .map_err(GameError::Creature)?;
         // Equipment-dependent expertise cannot silently make a retained kit
         // structurally invalid. Unsupported circular capacity changes reject.
@@ -1100,6 +1100,23 @@ mod tests {
                 "creature_build_copies": after.creature_build_copies - before.creature_build_copies,
                 "health_provenance_copies": after.health_provenance_copies - before.health_provenance_copies,
             })
+        );
+        // Explicit case budgets guard orchestration work without preventing a
+        // future reduction. Semantic assertions above remain independent.
+        let maximum_compiles = match case {
+            "changed_plain" | "changed_with_condition_and_cursed_gear" => 2,
+            "immediate_cancellation_return" | "pending_return_after_move" => 1,
+            "already_effective"
+            | "rejected_definition"
+            | "blocked_geometry"
+            | "cancellation_blocked_return"
+            | "pending_retry_blocked" => 0,
+            _ => panic!("unbudgeted body-work case: {case}"),
+        };
+        let compiles = after.permanent_creature_compiles - before.permanent_creature_compiles;
+        assert!(
+            compiles <= maximum_compiles,
+            "{case}: {compiles} permanent compiles exceeds {maximum_compiles}"
         );
     }
 

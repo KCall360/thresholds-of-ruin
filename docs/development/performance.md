@@ -76,6 +76,48 @@ The harness:
 Allocation instrumentation is deferred: no low-overhead approach has been
 established under the workspace's `unsafe` prohibition.
 
+### Atomic body replacement work counts
+
+Body transitions reuse one owned validation result (build, permanent inputs and
+pure selection sheet) across equipment selection and runtime reconciliation.
+Original-body reward/learning projection and actual equipment/loss/cancellation
+and condition folds remain separate; see [Polymorph](../reference/polymorph.md#atomic-transition-and-disclosure).
+
+A matched Linux Rust 1.99.1 local-feedback comparison against the first v57
+refactor baseline (`fcda0503`) exercised 16 unchanged fixture cases. These are
+**deterministic operation counts**, collected in the optimized test profile
+(opt-level 1), not release timings or a demonstrated end-to-end speedup.
+
+| Case | Initial HD | Permanent compiles | Dynamic folds | Raw HD visits |
+| --- | ---: | ---: | ---: | ---: |
+| Paid changed form | 2 | 4 → 2 | 3 → 2 | 38 → 18 |
+| Direct change, plain / live condition + cursed gear | 2 | 4 → 2 | 3 → 2 / 4 → 3 | 50 → 22 |
+| Same direct variants | 16 | 4 → 2 | 3 → 2 / 4 → 3 | 316 → 148 |
+| Same direct variants | 64 | 4 → 2 | 3 → 2 / 4 → 3 | 1,228 → 580 |
+| Immediate Cancellation return | 3 | 3 → 1 | 5 → 4 | 24 → 8 |
+| Pending return after legal movement | 2 | 3 → 1 | 3 → 2 | 24 → 8 |
+| Blocked Cancellation return | 2 | 0 → 0 | 4 → 4 | 0 → 0 |
+| Same form, rejected definition, blocked geometry/retry, paid resistance/blocked fit | 2 each | 0 → 0 | 0 → 0 | 0 → 0 |
+
+The independent semantic assertions retain personal HD/Health rolls, injury,
+conditions, cursed-item carry state, payment, identification and combat RNG.
+Additional full-state comparisons cover fresh compilation versus owned-result
+reuse with retained compatible gear, restorable losses and staged Cancellation.
+The workload tests now bound changed-form compilation at two, base-form return
+at one, and no-change paths at zero; semantic assertions remain independent.
+Only duplicate active-build compiles and one duplicate pure fold were removed;
+there is no global cache or serialized derived authority.
+
+The direct and paid rows use different replacement packages and scopes; do not
+subtract them to estimate wrapper overhead. The scaled personal rows have empty
+choices, not deep purchased-talent histories. No allocation-byte/RSS, live-game
+frequency or release latency result was collected. Reproduce the counter trace
+with `body_compile_work_` in the simulation library tests (set
+`RUST_TEST_NOCAPTURE=1` when using the local feedback helper); retain the exact
+16 `body_work_v1` rows and compare matched case/HD/scope keys. Run
+`creatures::body_tests::validated_body_replacement_` for the fresh-rebuild and
+atomic-rejection witnesses, alongside the existing body/Polymorph owner tests.
+
 ### Regeneration and nutrition baseline
 
 Recovery periods, per-point nutrition costs, maximum pools, action costs,
