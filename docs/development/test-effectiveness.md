@@ -2854,6 +2854,65 @@ suite deadline expires. Individual frame waits, quit deadlines, test selection,
 native assertions and hosted no-waiver rules are unchanged. Fresh final-head
 hosted native and core qualification remain required after this control change.
 
+### Portrait scale measured colored clothing instead of the figure, 30 October 2026
+
+The documentation-only PR208 passed its exact-head core and independent 3D gates
+before merge. On the identical merged tree, the independent
+[Windows release job](https://github.com/KCall360/thresholds-of-ruin/actions/runs/41085519415/job/124165532111)
+failed only
+`Native3DProcesses.test_character_screen_shares_the_live_portrait_and_keeps_command_keys`,
+in its `character_scale` subtest: 0.5084745603469354 was not greater than 0.52.
+The suite completed 57 methods with one failure and 29 existing skips; the other
+three independent 3D jobs and core post-merge checks passed. This is one
+demonstrated screenshot-oracle root, one distinct method and one failed hosted
+execution, not a newly demonstrated renderer defect or a waived failure.
+
+The retained screenshot visibly contains the full figure from hair to boots.
+The old pixel predicate required both brightness above 55 and RGB spread above
+10; dark, nearly neutral trousers and boots therefore did not count. Replaying
+the exact predicate on retained shots 06 and 07 reproduces 0.508474560, ending at
+the colored cloak rather than the feet. The connected visible figure occupies
+0.696798472 of the same image pane. All 17 retained unrotated active captures
+show the old false negative; all four rotated captures pass the old predicate.
+This does not establish why the prior hosted execution passed, and does not
+support repairing the test with an arbitrary settling delay.
+
+The corrected scale oracle remains inside the disclosed portrait image bounds.
+It estimates the near-black clear background from the inset perimeter, then
+measures one connected contrasting component with more than 1,000 of the
+existing bright/color samples. Dark neutral pixels can extend that same body;
+unrelated marks cannot be unioned into a larger figure. Edge-touching components
+and non-dark uniform backgrounds are rejected. The strict height requirement
+remains **greater than 0.52**. The independent nonempty-render, actor identity,
+actor-count reuse, texture-limit and heading-spacing assertions remain intact;
+no renderer, camera, fixture model, timeout or waiver was changed.
+
+An independently drawn tall figure with dark legs first failed the unchanged
+native assertion at 0.395, then passed after the oracle correction. Nine
+`test_verification.PortraitSilhouette` methods cover known RGB/RGBA extents,
+neutral/dark clothing, translated panes, empty and uniform images, borders,
+captions, disconnected noise and marks, undersized figures, invalid bounds, and
+the exact/below/above 0.52 boundary through the actual native assertion helper.
+Exact background, contrast and connected-seed cutoffs are also covered; two
+independently eligible small components must not combine into a large figure.
+The complete 34-method 3D tooling owner and all 21 retained active captures pass
+the corrected measurement. Synthetic tests and retained-image replays are not
+fresh native executions and do not inflate the hosted failure count. The
+existing real equipment and character native methods remain the live boundary;
+fresh final-head hosted qualification is still required.
+
+Integrated qualification later encountered one runner setup failure, not a test
+failure: [Linux debug Python shard 2](https://github.com/KCall360/thresholds-of-ruin/actions/runs/41152209718/job/124391616165)
+had only the Microsoft package feed in its updated index, then could not locate
+`libx11-dev`, `libxcursor-dev` or `libxrandr-dev`. No tests ran in that attempt.
+A targeted retry passed, but the [aggregate](https://github.com/KCall360/thresholds-of-ruin/actions/runs/41152209718/job/124414302702)
+correctly rejected Linux shard origin attempts 1 and 2. This is one separate
+retry-procedure error, not another failing gameplay method. Both Linux debug
+shards must execute in the same attempt; an isolated sibling retry cannot qualify
+the cohort. Complete final-head qualification was restarted without changing
+assertions or weakening the cohort guard. Native passes from prior heads remain
+historical evidence, not substitutes for the final integration's checks.
+
 ### Measurement-witness setup and rules-source inventory
 
 The local rules-identity and count-witness checkpoint exposed two test-fixture

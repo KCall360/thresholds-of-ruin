@@ -64,23 +64,16 @@ class Native3DProcesses(ProcessTestCase):
         self.assertEqual(len(portrait["actors"]), len(initial["actors"]), "the portrait reuses the live rig rather than adding an actor")
         self.assertLessEqual(portrait["portrait"]["texture_size"][0], 768)
         self.assertLessEqual(portrait["portrait"]["texture_size"][1], 1024)
-        from render_pixels import decode_png
-        width, height, channels, rows = decode_png(Path(portrait["png"]).read_bytes())
+        from render_pixels import portrait_pixels
+        data = Path(portrait["png"]).read_bytes()
+        width, height = struct.unpack(">II", data[16:24])
         left, top, right, bottom = portrait["portrait"]["bounds"]
         self.assertGreater(right - left, 0.1)
         self.assertGreater(bottom - top, 0.2)
-        colored = 0
-        colored_top, colored_bottom = height, 0
-        for y in range(int((top + 0.02) * height), int((bottom - 0.02) * height), 2):
-            for x in range(int((left + 0.02) * width), int((right - 0.02) * width), 2):
-                rgb = rows[y][x * channels:x * channels + 3]
-                if max(rgb) > 55 and max(rgb) - min(rgb) > 10:
-                    colored += 1
-                    colored_top = min(colored_top, y)
-                    colored_bottom = max(colored_bottom, y)
+        colored, figure_height = portrait_pixels(data, (left, top, right, bottom))
         self.assertGreater(colored, 1000, "the actual offscreen portrait must contain the rendered character, not an empty target")
         with self.subTest(portrait="character_scale"):
-            self.assertGreater((colored_bottom - colored_top) / ((bottom - top) * height), 0.52,
+            self.assertGreater(figure_height, 0.52,
                                "the full character must use a substantial part of the portrait's height")
         with self.subTest(portrait="heading_space"):
             self.assertGreater(top * height - left * width, 20,
