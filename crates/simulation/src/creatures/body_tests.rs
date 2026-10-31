@@ -2003,3 +2003,212 @@ fn seeded_birth_keeps_the_growth_schedule() {
         [PurchaseSelection::SkillRank(Skill::Perception)]
     );
 }
+
+#[test]
+fn validated_body_replacement_matches_fresh_build_and_runtime_reconciliation() {
+    let (mut build, base, large, other) = fixture();
+    build.train(crate::HdIndex(1), Skill::Lore).unwrap();
+    let personal = build.ledger().entries()[1].clone();
+    let choices = build.choices()[1].clone();
+    let mut actual = CreatureState::new(build).unwrap();
+    for package in [large, other, base.clone()] {
+        let reference_build = actual
+            .build()
+            .replace_body_package(package.clone())
+            .unwrap();
+        let fresh_selection = reference_build.derive().unwrap();
+        let before = crate::diagnostics::work_counts();
+        let replacement = actual
+            .build()
+            .validated_body_replacement(package.clone())
+            .unwrap();
+        let after = crate::diagnostics::work_counts();
+        assert_eq!(
+            after.permanent_creature_compiles - before.permanent_creature_compiles,
+            1
+        );
+        assert_eq!(
+            after.dynamic_creature_folds - before.dynamic_creature_folds,
+            1
+        );
+        assert_eq!(replacement.selection(), &fresh_selection);
+
+        // The reference uses the ordinary rebuild, which independently compiles
+        // the candidate. Only the body path may consume its retained evidence.
+        let mut reference = actual.clone();
+        let base_period = reference.health_recovery().base_period();
+        let expected = reference
+            .stage_rebuild_with_recovery_context(reference_build, || {
+                Ok(crate::health_recovery::RecoveryContext::Pending { base_period })
+            })
+            .unwrap();
+        let before = crate::diagnostics::work_counts();
+        let outcome = actual
+            .stage_body_rebuild_with_equipment(replacement, vec![])
+            .unwrap();
+        let after = crate::diagnostics::work_counts();
+        assert_eq!(
+            after.permanent_creature_compiles - before.permanent_creature_compiles,
+            usize::from(package.id != base.id),
+            "only the distinct original-body reward projection compiles here"
+        );
+        assert_eq!(outcome, expected);
+        assert_eq!(
+            actual, reference,
+            "all runtime fields match fresh reconciliation"
+        );
+        assert_eq!(actual.build().ledger().entries().last().unwrap(), &personal);
+        assert_eq!(actual.build().choices().last().unwrap(), &choices);
+    }
+}
+
+#[test]
+fn validated_body_replacement_preserves_public_noop_and_rejection_boundaries() {
+    let (build, base, large, _) = fixture();
+    let before = crate::diagnostics::work_counts();
+    let unchanged = build.replace_body_package(base.clone()).unwrap();
+    let after = crate::diagnostics::work_counts();
+    assert_eq!(unchanged, build);
+    assert_eq!(
+        after.permanent_creature_compiles,
+        before.permanent_creature_compiles
+    );
+    assert_eq!(after.dynamic_creature_folds, before.dynamic_creature_folds);
+
+    let mut same_identity = (*base).clone();
+    same_identity.species = large.species.clone();
+    let mut invalid_owner = (*large).clone();
+    invalid_owner.advancement[0].choices.attribute = Some(Attribute::Strength);
+    for (package, expected) in [
+        (same_identity, BuildError::InvalidDefinition),
+        (invalid_owner, BuildError::InvalidOwnership),
+    ] {
+        let package = Arc::new(package);
+        let before = crate::diagnostics::work_counts();
+        assert_eq!(
+            build.replace_body_package(package.clone()).err(),
+            Some(expected)
+        );
+        assert_eq!(
+            build.validated_body_replacement(package).err(),
+            Some(expected)
+        );
+        let after = crate::diagnostics::work_counts();
+        assert_eq!(
+            after.permanent_creature_compiles,
+            before.permanent_creature_compiles
+        );
+        assert_eq!(after.dynamic_creature_folds, before.dynamic_creature_folds);
+    }
+}
+
+#[test]
+fn validated_body_replacement_refolds_retained_gear_losses_conditions_and_cancellation() {
+    use crate::rules::Stat;
+    let (build, base, large, _) = fixture();
+    let mut cancellable = crate::test_creatures::add(Stat::Health, 11);
+    cancellable.cancellable = true;
+    let equipment = vec![EquipmentSource {
+        item: crate::ItemId(7),
+        socket: crate::EquipmentSlotId(0),
+        modifiers: vec![
+            crate::test_creatures::add(Stat::Health, 7),
+            cancellable,
+            crate::test_creatures::add(
+                Stat::Attribute {
+                    attribute: Attribute::Strength,
+                },
+                3,
+            ),
+        ],
+        attack: None,
+        weapon_profile: None,
+    }];
+    for cancelled in [false, true] {
+        let mut actual = CreatureState::new(build.clone()).unwrap();
+        actual.set_equipment(equipment.clone()).unwrap();
+        actual
+            .apply_condition(
+                &crate::content_ids::ConditionId::new("braced").unwrap(),
+                crate::ActorId(9),
+                30,
+            )
+            .unwrap();
+        assert_eq!(
+            actual
+                .lose_attribute(Attribute::Strength, 1)
+                .unwrap()
+                .applied,
+            1
+        );
+        assert_eq!(actual.lose_maximum_health(2).unwrap().applied, 2);
+        assert_eq!(actual.damage(3).applied, 3);
+        let conditions = actual.conditions().clone();
+        assert_eq!(conditions.instances().count(), 1);
+        let losses = actual.restorable_losses();
+        if cancelled {
+            // As on the atomic return path: do not publish a suppression-only
+            // Health maximum before the final body/equipment reconciliation.
+            assert!(actual.stage_cancellation_inputs().unwrap());
+        }
+        for package in [large.clone(), base.clone()] {
+            let reference_build = actual
+                .build()
+                .replace_body_package(package.clone())
+                .unwrap();
+            let fresh_selection = reference_build.derive().unwrap();
+            let replacement = actual.build().validated_body_replacement(package).unwrap();
+            assert_eq!(replacement.selection(), &fresh_selection);
+            let mut reference = actual.clone();
+            let base_period = reference.health_recovery().base_period();
+            let expected = reference
+                .stage_rebuild_with_recovery_context(reference_build, || {
+                    Ok(crate::health_recovery::RecoveryContext::Pending { base_period })
+                })
+                .unwrap();
+            let outcome = actual
+                .stage_body_rebuild_with_equipment(replacement, equipment.clone())
+                .unwrap();
+            assert_eq!(outcome, expected);
+            assert_eq!(actual, reference);
+            // The retained +3 Strength minus its loss adds 2 Health, exactly
+            // offsetting the separate maximum-Health loss of 2.
+            assert_eq!(
+                actual.derived().maximum_health,
+                fresh_selection.maximum_health + if cancelled { 7 } else { 18 }
+            );
+            assert_eq!(
+                actual.derived().attributes.get(Attribute::Strength),
+                fresh_selection.attributes.get(Attribute::Strength) + 3 - 1
+            );
+            assert_eq!(actual.health().injury(), 3);
+            assert!(!actual.health().dead());
+            assert_eq!(actual.conditions(), &conditions);
+            assert_eq!(actual.restorable_losses(), losses);
+            assert_eq!(actual.cancelled(), cancelled);
+        }
+    }
+}
+
+#[test]
+fn validated_body_replacement_rejects_bad_equipment_without_publishing_candidate() {
+    let (build, _, large, _) = fixture();
+    let mut actual = CreatureState::new(build).unwrap();
+    let replacement = actual.build().validated_body_replacement(large).unwrap();
+    assert!(replacement.selection().maximum_health > 0);
+    let before = actual.clone();
+    assert_eq!(
+        actual.stage_body_rebuild_with_equipment(
+            replacement,
+            vec![EquipmentSource {
+                item: crate::ItemId(0),
+                socket: crate::EquipmentSlotId(0),
+                modifiers: vec![],
+                attack: None,
+                weapon_profile: None,
+            }]
+        ),
+        Err(CreatureStateError::Inconsistent),
+    );
+    assert_eq!(actual, before);
+}

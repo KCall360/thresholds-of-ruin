@@ -1,4 +1,4 @@
-format = 36
+format = 35
 id = "rogue-exploration"
 version = "1.0"
 ruleset = "rules.toml"

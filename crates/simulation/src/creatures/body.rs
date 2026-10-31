@@ -1,6 +1,10 @@
 //! Explicit authored body packages and composition through the ordinary builder.
 use super::composition::{HdOwner, PersonalHdId};
-use super::{BuildError, CreatureBuild, HdChoices, PlannedAdvancement, RemovedAdvancement};
+use super::derive::PermanentCreature;
+use super::{
+    BuildError, CreatureBuild, DerivedCreature, HdChoices, PlannedAdvancement, RemovedAdvancement,
+    RestorableLosses,
+};
 use crate::attributes::{Attribute, Attributes};
 use crate::content_ids::{BodyFormId, SpeciesId};
 use crate::progression::{HdLedger, HdSource, HitDie};
@@ -45,6 +49,38 @@ impl BodyPackage {
             )?;
         }
         Ok(())
+    }
+}
+
+/// Transaction-local validation evidence. The immutable build and compilation
+/// cannot be independently replaced; this value is consumed, never persisted.
+/// The pure selection sheet is not the actor's equipment/condition-aware sheet.
+pub(crate) struct ValidatedBodyReplacement {
+    build: CreatureBuild,
+    permanent: PermanentCreature,
+    selection: DerivedCreature,
+}
+impl ValidatedBodyReplacement {
+    fn new(build: CreatureBuild) -> Result<Self, BuildError> {
+        let permanent = PermanentCreature::compile(&build)?;
+        let selection = permanent.fold(
+            &build,
+            &BTreeMap::new(),
+            &[],
+            RestorableLosses::default(),
+            false,
+        )?;
+        Ok(Self {
+            build,
+            permanent,
+            selection,
+        })
+    }
+    pub(crate) fn selection(&self) -> &DerivedCreature {
+        &self.selection
+    }
+    pub(super) fn into_parts(self) -> (CreatureBuild, PermanentCreature) {
+        (self.build, self.permanent)
     }
 }
 
@@ -476,6 +512,30 @@ impl CreatureBuild {
 
     /// Builder-only projection. Game owns geometry, equipment and paid actions.
     pub fn replace_body_package(&self, package: Arc<BodyPackage>) -> Result<Self, BuildError> {
+        let Some(candidate) = self.body_replacement_candidate(package)? else {
+            return Ok(self.clone());
+        };
+        // Public callers receive the same fully validated build as before.
+        Ok(ValidatedBodyReplacement::new(candidate)?.build)
+    }
+
+    /// Retain the pure validation products for the atomic game transition.
+    /// Game checks the unchanged-form boundary before requesting this evidence.
+    pub(crate) fn validated_body_replacement(
+        &self,
+        package: Arc<BodyPackage>,
+    ) -> Result<ValidatedBodyReplacement, BuildError> {
+        let candidate = self
+            .body_replacement_candidate(package)?
+            .unwrap_or_else(|| self.clone());
+        ValidatedBodyReplacement::new(candidate)
+    }
+
+    /// None preserves the public same-form no-op without recompilation.
+    fn body_replacement_candidate(
+        &self,
+        package: Arc<BodyPackage>,
+    ) -> Result<Option<Self>, BuildError> {
         package.validate(self.content())?;
         let state = self
             .body_build
@@ -486,7 +546,7 @@ impl CreatureBuild {
         }
         if state.active.id == package.id {
             return if state.active == package {
-                Ok(self.clone())
+                Ok(None)
             } else {
                 Err(BuildError::InvalidDefinition)
             };
@@ -594,8 +654,7 @@ impl CreatureBuild {
         candidate.body_build = Some(state);
         let kind = super::derive::kind_for_templates(&candidate, &candidate.templates)?;
         candidate.bind_health_origins(&kind)?;
-        candidate.derive()?;
-        Ok(candidate)
+        Ok(Some(candidate))
     }
     pub(super) fn personal_attribute_ordinal(&self, effective: usize) -> Option<u64> {
         if self.body_build.is_none() {

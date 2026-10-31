@@ -1,12 +1,12 @@
 {
   "current_rules_dependencies": {
-    "interactions-v56": "6c4c3eb331a1567c50e1fed30fa59fd37f69f6d2413d829be49a0253748b5f80"
+    "interactions-v57": "e9044e8b35e2e1881aded0ff1d745700f5abc9b14712ae07a7e2282c923a99b2"
   },
-  "current_ruleset": "interactions-v56",
-  "current_scenario_format": 36,
+  "current_ruleset": "interactions-v57",
+  "current_scenario_format": 35,
   "current_snapshot": "rogue-earned-baseline-v28",
   "format": 1,
-  "only_transformation": "Change package/scenario.toml format 35 to 36 only; the bundled rules import and its dependency digest are unchanged. All other authored package input bytes remain unchanged. No maze_rooms or room_omissions policy, body packages, two-HD player kits, treasure-room stages, darts, shuriken, fruit, spear throwing, item forms, staves, scenario capability switches, growth schedules, roster or loot changes are copied into this frozen comparator. This receipt records source bytes only; current compiler validation, certificates and route qualification remain separate requirements. It does not requalify historical outcomes.",
+  "only_transformation": "Change package/rules.toml bundled import interactions-v56 to interactions-v57 only. The scenario format remains 35 and all other authored package input bytes remain unchanged. The dependency digest comes from the current Rust rules resolver and matches the bundled source bytes. No maze_rooms or room_omissions policy, body packages, two-HD player kits, treasure-room stages, darts, shuriken, fruit, spear throwing, item forms, staves, roster or loot changes are copied into this frozen comparator. This receipt records source bytes only; current compiler validation, certificates and route qualification remain separate requirements. Consistent remembered-route flee decisions change deterministic behavior; this does not requalify historical outcomes.",
   "previous_package_inputs": {
     "catalog/actors.toml": "9aa3f2ae65a5b5370ca624a89a0ba2fad02aa94b244655c2c9314fcb57132abd",
     "catalog/creatures.toml": "43460a6543e04413d4eab64c05a66ce8f9b45ac2b6fb06cf39714b81ab0557e2",
@@ -22,5 +22,5 @@
   "previous_scenario_format": 35,
   "previous_snapshot": "rogue-earned-baseline-v27",
   "previous_source_sha256": "98da098114a79ce9c5bef02b812f9e8fb1f8f47b7f00ed74f4aface8318cbaf4",
-  "retained_fixture_reference": "cf7c4498520263cd98b38f033458c9d984f7ad46:scripts/fixtures/rogue-earned-baseline-v27"
+  "retained_fixture_reference": "b0b04c0c8b846323836efafdb9d85a99157ce7e4:scripts/fixtures/rogue-earned-baseline-v27"
 }

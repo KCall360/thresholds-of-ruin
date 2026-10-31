@@ -5015,7 +5015,7 @@ mod tests {
                 super::CONTENT_PACKAGE_FORMAT,
                 crate::arena_evaluation::FORMAT,
             ),
-            (65, 36, "interactions-v56", 26, 9, 33, "tor-arena-run-v6")
+            (65, 36, "interactions-v57", 26, 9, 33, "tor-arena-run-v6")
         );
     }
 

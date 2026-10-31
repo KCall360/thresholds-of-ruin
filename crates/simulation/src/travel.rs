@@ -214,8 +214,7 @@ pub(crate) struct RouteSearch<'a> {
 }
 
 impl<'a> RouteSearch<'a> {
-    fn new(actor: &'a crate::Actor, knowledge: &'a Navigation) -> Self {
-        let start = (actor.location, actor.orientation);
+    fn new(actor: &'a crate::Actor, knowledge: &'a Navigation, start: Node) -> Self {
         Self {
             actor,
             knowledge,
@@ -534,7 +533,31 @@ impl Game {
     pub(crate) fn route_search(&self, actor: ActorId) -> Result<RouteSearch<'_>, GameError> {
         let actor_state = self.actors.get(&actor).ok_or(GameError::UnknownActor)?;
         let knowledge = self.navigation.get(&actor).ok_or(GameError::Blocked)?;
-        Ok(RouteSearch::new(actor_state, knowledge))
+        Ok(RouteSearch::new(
+            actor_state,
+            knowledge,
+            (actor_state.location, actor_state.orientation),
+        ))
+    }
+
+    /// Evaluate a prospective disclosed step without moving the actor or
+    /// learning topology. The caller supplies the legal post-step body frame.
+    pub(crate) fn route_search_from(
+        &self,
+        actor: ActorId,
+        location: Location,
+        orientation: u8,
+    ) -> Result<RouteSearch<'_>, GameError> {
+        let actor_state = self.actors.get(&actor).ok_or(GameError::UnknownActor)?;
+        let knowledge = self.navigation.get(&actor).ok_or(GameError::Blocked)?;
+        if knowledge.cells.get(&location) != Some(&false) {
+            return Err(GameError::Blocked);
+        }
+        Ok(RouteSearch::new(
+            actor_state,
+            knowledge,
+            (location, orientation),
+        ))
     }
 }
 

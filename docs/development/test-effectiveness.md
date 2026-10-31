@@ -33,6 +33,111 @@ failure. Record errors, cancellations, waivers and not-run checks separately.
 Define the evidence window and deduplicate before adding totals; never extrapolate
 a repository-lifetime count from a partial set of logs.
 
+## Cross-region retreat and save-anchor boundaries, 30 October 2026
+
+The documentation review's mixed flee-distance candidate was reproduced against
+unchanged production AI before repair. In
+`ai::flee_tests::cornered_flee_does_not_approach_a_threat_across_region_partitions`,
+the split six-cell corridor chose `Move(East)` toward a visible threat instead of
+`Wait`; its unsplit control and the separate positive rotated-retreat method
+passed. This is **one production root, one distinct intended failing method and
+one failed execution** in this first-red window. Before that reproduction, a new
+fixture's customized species was absent from its Game catalog: one fixture-setup
+root caused two failed methods/executions. Those failures are not flee evidence.
+
+The correction uses the same remembered-route step-count policy from actual
+post-step frames. Six dedicated methods cover split/unsplit and rotated joins,
+one-way escape, missing remembered connections, blocked movement, decision purity
+and checkpointed autonomous execution. The affected AI owner passes 76 methods;
+the remembered-route unit owner passes 10. These are targeted local results, not
+full workspace, platform/release or performance qualification.
+
+Save-owned note-anchor adapters separately preserve current string/null encoding
+and validation. The save-schema owner passes 21 methods, including independent
+shape/rejection fixtures for snapshots and private optional entry boundaries.
+Two journal-boundary tests, eleven history integration tests, two AI execution/
+recovery tests and the actual-server action/annotation restart witness also pass.
+These characterize compatibility hardening; no prior data-corruption failure is
+claimed. Deterministic AI replay compatibility requires its own explicit rules
+identity decision, independent of unchanged serialized shapes.
+
+
+## Uninitialized-navigation retreat regression, 30 October 2026
+
+The first v57 draft made a known current route a prerequisite for every retreat.
+Full CI caught a **production policy regression**, not stale fixture expectations:
+current visibility and public AI decisions do not require prior navigation
+initialization. Four `abilities::movement_tests::autonomous` methods lost their
+typed self-step/ordinary-retreat selection; two `abilities::strike_tests` methods
+lost atomic escape from a retained paid prefix. Their original assertions remain.
+
+The bounded evidence window is PR209's initial four Linux/Windows debug/release
+Rust jobs plus a local reproduction with the retained, hash-verified same-source
+executable: **one root, six distinct methods, thirty failed method executions**.
+Platform/profile repeats are executions, not additional roots or methods. Standard
+server boundaries refresh navigation, so these failures alone do not establish
+frequency in an initialized live server. Targeted earlier AI/travel tests missed
+the cross-feature public-Game boundary; the validation set now includes the
+existing autonomous movement and paid-strike owners.
+
+The repair chooses one metric per decision. Known routes retain route-hop
+comparison; absent routes permit a consistent local-coordinate heuristic only in
+an already-disclosed unwrapped physical chart within the actor/threat region
+and for ordinary same-region steps. Other visible regions do not veto those
+local steps; disclosed folds back into the actor’s region do.
+Same-region wrapped/rotated portal controls prevent region identity from being
+mistaken for an ordinary coordinate chart. No navigation mutation, hidden-link
+query or assertion weakening is used. A first correction restored the four movement cases but still rejected the two
+paid-prefix cases because their ordinary local retreat coexisted with a visible
+second room. That focused attempt adds two failed executions of the same methods
+(**thirty-two across both windows**); the region-scoped chart gate
+corrects that over-conservative branch. The final focused checkpoint passes
+AI 80, travel 10, autonomous movement 5 and both paid-prefix methods, with the
+six original assertions untouched. Hosted and local optimized results remain
+separate; the initial failed run is not relabeled green.
+
+## Earned-route confirmed-picture recovery, 30 October 2026
+
+PR 210's Windows debug process partition exposed one controller synchronization
+root cause in the fixed-seed earned-route method. A causal completion and admission
+update retained an older ready picture. The explicit Observe correctly returned
+a newer picture with movement recovery still pending, but the route caller
+returned it without rechecking settlement. The controller's nonready guard then
+failed as intended. The retained frame sequence includes the later ready picture;
+this is a driver defect, not evidence of a body-compilation or gameplay defect.
+Count one observed failed method and execution, separately from deliberate local
+first-red work and later runs.
+
+The caller now settles again against the confirmed picture before returning.
+The transport-only regression reproduces the old-ready → confirmed-recovering →
+later-ready order and fails before the correction. It checks both returned and
+stored state, unchanged command budget, and a single Observe without Wait,
+readmission or retry. A terminal-picture control and existing refusal, paid-tail
+resume and budget controls remain. Full hosted qualification remains required;
+the deterministic caller witness does not measure scheduling frequency.
+
+Local qualification separately retained an interrupted process attempt with no
+terminal receipt and one setup error before gameplay: the restored shell omitted
+the installed Rust toolchain from `PATH`, so campaign provenance could not run
+`rustc --version`. Restoring that environment, without changing assertions or
+rebuilding the verified binaries, passed the complete fixed-seed earned-HD,
+repeated-execution and source-free-restore method. The setup error is one separate
+infrastructure root and execution, not an additional gameplay failure; the
+interrupted attempt is neither a pass nor a demonstrated behavioral failure.
+
+## Body-refactor process binary inventory, 30 October 2026
+
+The focused text Polymorph reopen/retry check first failed before gameplay:
+its helper also launches a headless observer, but the local binary inventory
+included only server, scenario compiler and text client. The missing
+`tor-client-headless` produced `FileNotFoundError`. This is one local setup/
+inventory root, one failed method and one failed execution, not a gameplay or
+persistence defect. Building the omitted executable and rerunning the exact
+method passed without weakening assertions or changing runtime source; the
+failed receipt remains separate. Select process binaries from helper dependencies,
+not only the client named in the method. The owner is
+[`MagicItemProcesses.test_text_paid_self_polymorph_reopens_and_retries_without_source_or_private_ledger`](../../scripts/test_magic_items_process.py).
+
 ## Projected limb surface investigation, 28 October 2026
 
 Two existing source-contract defects were confirmed while developing the new
@@ -2748,3 +2853,58 @@ regression still requires nonzero failure and retained diagnostics when the
 suite deadline expires. Individual frame waits, quit deadlines, test selection,
 native assertions and hosted no-waiver rules are unchanged. Fresh final-head
 hosted native and core qualification remain required after this control change.
+
+### Measurement-witness setup and rules-source inventory
+
+The local rules-identity and count-witness checkpoint exposed two test-fixture
+causes, not additional gameplay defects. The new source-only comparator name
+was missing from the documentation workload allowlist (one failing method in a
+39-test Python checkpoint); adding that name preserved historical identifiers,
+and all 19 documentation tests then passed. The new scaled Polymorph fixture
+attempted to configure an actor already owning combat and correctly received
+`ActorBusy` before its measurement (one failing method/execution). Constructing
+2/16/64 HD in the original birth builder instead retained every semantic
+assertion; all four count tests then passed and produced 16 rows. Existing
+ordinary fixtures still construct exactly two HD.
+
+An earlier outcome-test preflight tried to serialize the deliberately non-wire
+compact observation type: two compiler diagnostics from one scaffolding error,
+not two failing behavioral methods. The correction compares complete typed
+inputs and serializes actual eventful outcome facts, without changing any wire
+type. Four outcome-adapter tests pass before and after the per-call index,
+preserving privacy, occurrence/list ordering and required matched-row emissions.
+The count reductions do not establish a release timing improvement. Focused
+local feedback is not full or hosted qualification; failed evidence remains
+separate from subsequent passing checks.
+
+## Checkpoint failure classification, 30 October 2026
+
+A scoped reduced encoder limit reproduced the explicit-Save retry policy on an
+otherwise valid ordinary checkpoint. The new
+`storage::checkpoint_failure_tests::unchanged_capacity_failure_keeps_work_and_explicit_save_does_not_reencode`
+failed at the intended assertion: the second Save encoded the identical retained
+snapshot again (two attempts rather than one). This is deliberate first-red work
+for the approved failure-classification policy, not evidence that gameplay has
+reached the real capacity ceiling. The SQLite lock/retry and concurrently retained
+newer-checkpoint controls passed in that same run.
+
+An earlier preflight failed before behavioral tests: a wrapper made test-only by
+the refactor still compiled in production, and new SQLite count assertions asked
+for an unsupported Rust unsigned result type. These are two local scaffolding
+roots in one failed preflight, with no failed test-method executions. The wrapper
+is now test-only and the zero-count assertions use SQLite's signed type; no
+behavioral assertion was weakened. Typed encoder controls also distinguish
+serializer/resource/writer failures from explicit bounds, preserve the first
+failure during buffered cleanup, and recover Interrupted writes without masking
+a later real bound failure. Runtime validation and qualification are reported
+separately from these failures.
+
+Recovery of an interrupted incremental build later failed in the linker with
+undefined hidden LLVM symbols before executing any tests. Isolating only the
+affected server-test incremental cache, while retaining the application and
+dependency caches, allowed the unchanged implementation to pass all 219 storage
+checks on the current main baseline. This is one local build-infrastructure
+failure, not an additional production defect or failed test-method execution.
+The subsequently interrupted application build was resumed separately; its
+verified binaries passed all nine background-save process checks. Interruption
+without an exit receipt is incomplete evidence, not a pass or behavioral failure.

@@ -77,7 +77,7 @@ class SightProcesses(ProcessTestCase):
         self.key(window, "save_quit")
         self.assertEqual(window.child.wait(timeout=10), 0)
         text.stop(); observer.stop(); server.stop()
-        self.assertEqual(inspect_save(self.save)["ruleset"], "interactions-v56")
+        self.assertEqual(inspect_save(self.save)["ruleset"], "interactions-v57")
         self.server(scenario="sight-3d")
         _, resumed = self.client(SPECTATOR_TOKEN)
         self.assertDisclosedStateEqual(resumed["state"], opened["state"])

@@ -36,7 +36,7 @@ class MaterialProcesses(ProcessTestCase):
         self.assertIn("walk east", self.say(player, "east"))
         expected = self.request(observer, {"type": "snapshot"})["state"]
         player.stop(); observer.stop(); server.stop()
-        self.assertEqual(inspect_save(self.save)["ruleset"], "interactions-v56")
+        self.assertEqual(inspect_save(self.save)["ruleset"], "interactions-v57")
         self.server()
         _, resumed = self.client(SPECTATOR_TOKEN)
         self.assertDisclosedStateEqual(resumed["state"], expected)
