@@ -443,6 +443,9 @@ struct UniqueRetrieval {
 #[serde(remote = "source::ScenarioCapabilities", deny_unknown_fields)]
 struct ScenarioCapabilities {
     npc_stair_traversal: bool,
+    owner_advancement: bool,
+    corpses: bool,
+    low_health_flight: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -539,6 +542,33 @@ enum PopulationStage {
         quantity: source::QuantityExpression,
         #[serde(with = "mapped")]
         chance: source::CarryChance,
+    },
+    ChanceItems {
+        id: String,
+        version: u32,
+        attempts: u16,
+        #[serde(with = "mapped")]
+        chance: source::CarryChance,
+        #[serde(
+            serialize_with = "mapped::serialize",
+            deserialize_with = "bounded_stored::<_, source::PopulationBand, 32>"
+        )]
+        bands: Vec<source::PopulationBand>,
+        #[serde(with = "mapped")]
+        quantity: source::QuantityExpression,
+    },
+    FoodDrought {
+        id: String,
+        version: u32,
+        threshold: u16,
+        food: Vec<String>,
+        #[serde(
+            serialize_with = "mapped::serialize",
+            deserialize_with = "bounded_stored::<_, source::PopulationBand, 32>"
+        )]
+        bands: Vec<source::PopulationBand>,
+        #[serde(with = "mapped")]
+        quantity: source::QuantityExpression,
     },
     Actors {
         id: String,
@@ -640,6 +670,8 @@ struct PopulationBand {
 struct PopulationChoice {
     archetype: String,
     weight: u32,
+    #[serde(with = "mapped")]
+    quantity: Option<source::QuantityExpression>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1890,6 +1922,7 @@ struct CreatureBodyPackage {
 enum BehaviorDisposition {
     Passive,
     Mean,
+    Greedy,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(
@@ -2506,6 +2539,8 @@ struct BuildSpec {
     binding: String,
     #[serde(with = "mapped")]
     hit_dice: Vec<crate::creature_authoring::Advancement>,
+    #[serde(with = "mapped")]
+    growth_schedule: Vec<crate::creature_authoring::Advancement>,
     templates: Vec<String>,
 }
 
@@ -4508,7 +4543,7 @@ struct ContentPackage {
     #[serde(with = "mapped")]
     index: source::RegionIndex,
 }
-const CONTENT_PACKAGE_FORMAT: u32 = 32;
+const CONTENT_PACKAGE_FORMAT: u32 = 33;
 pub(crate) fn check_metadata_capacity(package: &source::Package) -> Result<(), crate::Failure> {
     let bytes = serde_json::to_vec(&Borrowed(package)).map_err(|_| storage_failure())?;
     if bytes.len() > MAX_SAVE_METADATA_BYTES {
@@ -4980,13 +5015,13 @@ mod tests {
                 super::CONTENT_PACKAGE_FORMAT,
                 crate::arena_evaluation::FORMAT,
             ),
-            (64, 35, "interactions-v57", 26, 9, 32, "tor-arena-run-v5")
+            (65, 36, "interactions-v57", 26, 9, 33, "tor-arena-run-v6")
         );
     }
 
     #[test]
     fn discovery_formats_preserve_physical_envelopes() {
-        assert_eq!(tor_protocol::PROTOCOL_VERSION, 66);
+        assert_eq!(tor_protocol::PROTOCOL_VERSION, 67);
         assert_eq!(super::RULES_INPUT_FORMAT, 26);
         assert_eq!(super::REGION_INPUT_FORMAT, 9);
         // Semantic rule, region and package payload versions advance independently
@@ -5097,6 +5132,27 @@ mod tests {
         assert!(
             serde_json::from_str::<super::Owned<SupplyDef>>(r#"["bandage","Bandage"]"#).is_err()
         );
+    }
+
+    #[test]
+    fn stored_behavior_names_every_disposition_and_compiles_it() {
+        use tor_simulation::behavior::Disposition;
+        let decode = |name: &str| {
+            let value = serde_json::json!({"disposition":name,"idle":"wait","memory_ticks":1000,"doors":false,"care":false,"equipment":false,"loot":false,"gold":true,"flee_percent":25});
+            serde_json::from_slice::<super::Owned<crate::creature_authoring::BehaviorPolicy>>(
+                &serde_json::to_vec(&value).unwrap(),
+            )
+        };
+        for (name, compiled) in [
+            ("passive", Disposition::Passive),
+            ("mean", Disposition::Mean),
+            ("greedy", Disposition::Greedy),
+        ] {
+            let policy = decode(name).unwrap().0.compile();
+            assert_eq!(policy.disposition, compiled, "{name}");
+            assert!(policy.gold);
+        }
+        assert!(decode("greed").is_err());
     }
 
     #[test]

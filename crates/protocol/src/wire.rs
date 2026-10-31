@@ -5,7 +5,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-pub const PROTOCOL_VERSION: u32 = 66;
+pub const PROTOCOL_VERSION: u32 = 67;
 /// The maximum disclosed primary strike ordinal plus one.
 pub const MAX_SEQUENCE_STRIKES: u16 = 16;
 
@@ -1280,10 +1280,7 @@ pub enum CombatEventView {
         outcome: AbilityOutcome,
     },
     /// The observer's own Escape result, with no hidden holder details.
-    EscapeResolved {
-        hold: HoldTarget,
-        success: bool,
-    },
+    EscapeResolved { hold: HoldTarget, success: bool },
     Ability {
         caster: Option<ActorTarget>,
         target: Option<ActorTarget>,
@@ -1294,16 +1291,23 @@ pub enum CombatEventView {
         strike: Option<u16>,
     },
     /// The observer's own standalone status; no hidden causer is disclosed.
-    Condition {
-        condition: crate::ContentRef,
-    },
+    Condition { condition: crate::ContentRef },
     /// The observer's own attack preparation was interrupted.
-    Interrupted {
-        actor: ActorTarget,
-    },
+    Interrupted { actor: ActorTarget },
+    /// A disclosed actor died; the cause is a category, never a causer.
     Died {
         actor: ActorTarget,
+        cause: DeathCause,
     },
+}
+
+/// Why a disclosed actor died: its food reserve ran out, or it lost its Health
+/// any other way.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeathCause {
+    Injury,
+    Starvation,
 }
 
 fn read_anonymous_ability<'de, D: serde::Deserializer<'de>>(
@@ -1977,6 +1981,9 @@ pub enum ErrorCode {
     InvalidArchive,
     /// The actor is still on a journey; only the server ends one.
     ActorBusy,
+    /// Saving is behind schedule: the requested save stays queued and becomes
+    /// durable when the writer catches up, but it is not durable yet.
+    SaveBehind,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

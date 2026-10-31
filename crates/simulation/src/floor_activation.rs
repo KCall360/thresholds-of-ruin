@@ -37,6 +37,14 @@ pub const MAX_RETAINED_DECISIONS: usize = 1_000_000;
 #[serde(deny_unknown_fields)]
 pub struct ScenarioCapabilities {
     pub npc_stair_traversal: bool,
+    /// Owner purchases, future-source choices, Intellect choices and respec.
+    /// Disabled scenarios grow only through authored future rows.
+    pub owner_advancement: bool,
+    /// Ordinary deaths leave a corpse item; carried items still drop.
+    pub corpses: bool,
+    /// AI actors flee below their species' `flee_percent` of Health. Forced
+    /// flight, such as from a scare effect, is unaffected.
+    pub low_health_flight: bool,
 }
 impl<'de> Deserialize<'de> for ScenarioCapabilities {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -44,10 +52,16 @@ impl<'de> Deserialize<'de> for ScenarioCapabilities {
         #[serde(deny_unknown_fields)]
         struct Fields {
             npc_stair_traversal: bool,
+            owner_advancement: bool,
+            corpses: bool,
+            low_health_flight: bool,
         }
         let fields: Fields = crate::bounded::named_map(deserializer)?;
         Ok(Self {
             npc_stair_traversal: fields.npc_stair_traversal,
+            owner_advancement: fields.owner_advancement,
+            corpses: fields.corpses,
+            low_health_flight: fields.low_health_flight,
         })
     }
 }
@@ -56,6 +70,9 @@ impl Default for ScenarioCapabilities {
     fn default() -> Self {
         Self {
             npc_stair_traversal: true,
+            owner_advancement: true,
+            corpses: true,
+            low_health_flight: true,
         }
     }
 }
@@ -160,6 +177,22 @@ pub enum PopulationContent {
     Items {
         #[serde(deserialize_with = "read_bands")]
         bands: Vec<DepthBand<PreparedItemChoice>>,
+    },
+    /// Each of the stage's exact `count` attempts independently succeeds with
+    /// `chance`; every success places one weighted choice.
+    ChanceItems {
+        #[serde(deserialize_with = "read_bands")]
+        bands: Vec<DepthBand<PreparedItemChoice>>,
+        chance: CarryChance,
+    },
+    /// Places one item when more than `threshold` consecutive earlier first-entry
+    /// floors, and this floor's earlier stages, placed no `food` content. The
+    /// count is derived from retained floor records; no separate counter exists.
+    FoodDrought {
+        #[serde(deserialize_with = "read_bands")]
+        bands: Vec<DepthBand<PreparedItemChoice>>,
+        threshold: u16,
+        food: Vec<String>,
     },
     Actors {
         #[serde(deserialize_with = "read_bands")]
@@ -823,9 +856,10 @@ impl PopulationContent {
     }
     fn eligible(&self, depth: u32) -> bool {
         match self {
-            Self::Items { bands } | Self::RoomItems { bands, .. } => {
-                eligible_band(bands, depth).is_some()
-            }
+            Self::Items { bands }
+            | Self::RoomItems { bands, .. }
+            | Self::ChanceItems { bands, .. }
+            | Self::FoodDrought { bands, .. } => eligible_band(bands, depth).is_some(),
             Self::Actors { bands, .. } => eligible_band(bands, depth).is_some(),
             Self::RoomCluster {
                 item_bands,
@@ -1016,6 +1050,28 @@ impl PopulationPlan {
                                     |c| (&c.content, c.weight),
                                     |c| c.valid(game),
                                 ),
+                                PopulationContent::ChanceItems { bands, chance } => {
+                                    stage.count[0] == stage.count[1]
+                                        && stage.count[1] > 0
+                                        && chance.valid()
+                                        && valid_bands(
+                                            bands,
+                                            |c| (&c.content, c.weight),
+                                            |c| c.valid(game),
+                                        )
+                                }
+                                PopulationContent::FoodDrought { bands, food, .. } => {
+                                    stage.count == [1, 1]
+                                        && !food.is_empty()
+                                        && food.len() <= MAX_CHOICES
+                                        && food.iter().all(|content| label(content))
+                                        && food.windows(2).all(|pair| pair[0] < pair[1])
+                                        && valid_bands(
+                                            bands,
+                                            |c| (&c.content, c.weight),
+                                            |c| c.valid(game),
+                                        )
+                                }
                                 PopulationContent::RoomItems { bands, chance } => {
                                     stage.count == [1, 1]
                                         && chance.valid()
@@ -1286,6 +1342,14 @@ impl Game {
         };
         Ok(())
     }
+    pub fn scenario_capabilities(&self) -> &ScenarioCapabilities {
+        &self.scenario_policy.capabilities
+    }
+    /// Fixtures that build their scene first switch capabilities afterwards.
+    #[cfg(test)]
+    pub(crate) fn scenario_capabilities_mut(&mut self) -> &mut ScenarioCapabilities {
+        &mut self.scenario_policy.capabilities
+    }
     pub(crate) fn can_use_abstract_stairs(&self, id: ActorId) -> bool {
         !self.actors[&id].locomotion().levitating
             && (self.scenario_policy.capabilities.npc_stair_traversal
@@ -1520,6 +1584,8 @@ impl Game {
                 profile.stages.iter().all(|stage| match &stage.population {
                     PopulationContent::Items { bands }
                     | PopulationContent::RoomItems { bands, .. }
+                    | PopulationContent::ChanceItems { bands, .. }
+                    | PopulationContent::FoodDrought { bands, .. }
                     | PopulationContent::RoomCluster {
                         item_bands: bands, ..
                     } => bands.iter().all(|band| {
@@ -1754,20 +1820,14 @@ impl Game {
             } else if matches!(stage.population, PopulationContent::RoomItems { .. }) {
                 self.evaluate_room_items(id, &scope, &profile, stage)?
             } else {
-                let mut count_rng = stream(
-                    self.seed,
+                let requested = self.requested_count(
                     &scope.scope,
                     &scope.profile,
                     &profile,
                     stage,
-                    0,
-                    "count",
-                );
-                let requested = stage.count[0]
-                    + index(
-                        &mut count_rng,
-                        usize::from(stage.count[1] - stage.count[0]) + 1,
-                    ) as u16;
+                    ordinal,
+                    &decisions,
+                )?;
                 let attempts = self.evaluate_population_attempts(
                     id,
                     &scope,
@@ -1878,7 +1938,9 @@ impl Game {
                 PopulationContent::RoomItems { .. } | PopulationContent::RoomCluster { .. } => {
                     unreachable!("room stage evaluated separately")
                 }
-                PopulationContent::Items { bands } => {
+                PopulationContent::Items { bands }
+                | PopulationContent::ChanceItems { bands, .. }
+                | PopulationContent::FoodDrought { bands, .. } => {
                     let choices = &eligible_band(bands, scope.depth).unwrap().choices;
                     let choice = weighted_choice(&mut choice_rng, choices, |c| c.weight);
                     let at = cells.into_iter().find(|at| {
@@ -2215,7 +2277,9 @@ impl Game {
         {
             return Err(invalid());
         }
-        for (decision, stage) in record.decisions.iter().zip(&profile.stages) {
+        for (position, (decision, stage)) in
+            record.decisions.iter().zip(&profile.stages).enumerate()
+        {
             if decision.id != stage.id || decision.version != stage.version {
                 return Err(invalid());
             }
@@ -2236,17 +2300,82 @@ impl Game {
                     stage.population,
                     PopulationContent::RoomItems { .. } | PopulationContent::RoomCluster { .. }
                 ) && stage.population.eligible(depth)
-                    && (stage.count[0]..=stage.count[1]).contains(requested)
+                    && *requested <= stage.count[1]
                     && attempts.len() == usize::from(*requested) =>
                 {
-                    self.validate_population_attempts(
-                        record, profile, stage, depth, *requested, attempts,
+                    let earlier = &record.decisions[..position];
+                    let expected = self.requested_count(
+                        &record.scope,
+                        &record.profile,
+                        profile,
+                        stage,
+                        record.ordinal,
+                        earlier,
                     )?;
+                    if *requested != expected {
+                        return Err(invalid());
+                    }
+                    self.validate_population_attempts(record, profile, stage, depth, attempts)?;
                 }
                 _ => return Err(invalid()),
             }
         }
         Ok(())
+    }
+    /// The authored request for an ordinary count stage, shared by evaluation and
+    /// receipt audit. `ordinal` is the floor's first-entry position and `earlier`
+    /// holds its preceding stage decisions on the same floor.
+    fn requested_count(
+        &self,
+        scope: &str,
+        profile_id: &str,
+        profile: &PopulationProfile,
+        stage: &PopulationStage,
+        ordinal: u64,
+        earlier: &[StageDecision],
+    ) -> Result<u16, GameError> {
+        let mut count_rng = stream(self.seed, scope, profile_id, profile, stage, 0, "count");
+        Ok(match &stage.population {
+            PopulationContent::ChanceItems { chance, .. } => (0..stage.count[1])
+                .filter(|_| chance.succeeds(&mut count_rng))
+                .count() as u16,
+            PopulationContent::FoodDrought {
+                threshold, food, ..
+            } => {
+                let state = self.floor_activation.as_ref().ok_or_else(invalid)?;
+                let fed = |decisions: &[StageDecision]| {
+                    decisions.iter().any(|decision| {
+                        decision.result.attempts().any(|attempt| {
+                            matches!(attempt, PlacementDecision::Placed {
+                                content,
+                                entity: PopulationEntity::Item { .. },
+                                ..
+                            } if food.binary_search(content).is_ok())
+                        })
+                    })
+                };
+                let previous = state
+                    .order
+                    .get(..usize::try_from(ordinal).map_err(|_| invalid())?)
+                    .ok_or_else(invalid)?;
+                let mut foodless = 0usize;
+                for scope in previous.iter().rev() {
+                    let record = state.floors.get(scope).ok_or_else(invalid)?;
+                    if fed(&record.decisions) || foodless > usize::from(*threshold) {
+                        break;
+                    }
+                    foodless += 1;
+                }
+                u16::from(!fed(earlier) && foodless > usize::from(*threshold))
+            }
+            _ => {
+                stage.count[0]
+                    + index(
+                        &mut count_rng,
+                        usize::from(stage.count[1] - stage.count[0]) + 1,
+                    ) as u16
+            }
+        })
     }
     fn validate_population_attempts(
         &self,
@@ -2254,27 +2383,9 @@ impl Game {
         profile: &PopulationProfile,
         stage: &PopulationStage,
         depth: u32,
-        requested: u16,
         attempts: &[PlacementDecision],
     ) -> Result<(), GameError> {
         let state = self.floor_activation.as_ref().ok_or_else(invalid)?;
-        let mut count_rng = stream(
-            self.seed,
-            &record.scope,
-            &record.profile,
-            profile,
-            stage,
-            0,
-            "count",
-        );
-        let expected = stage.count[0]
-            + index(
-                &mut count_rng,
-                usize::from(stage.count[1] - stage.count[0]) + 1,
-            ) as u16;
-        if requested != expected {
-            return Err(invalid());
-        }
         for (ordinal, attempt) in attempts.iter().enumerate() {
             let content = match attempt {
                 PlacementDecision::Placed {
@@ -2290,7 +2401,9 @@ impl Game {
                             ) => id.0 == 0 || id.0 == u64::MAX,
                             (
                                 PopulationEntity::Item { id, .. },
-                                PopulationContent::Items { .. },
+                                PopulationContent::Items { .. }
+                                | PopulationContent::ChanceItems { .. }
+                                | PopulationContent::FoodDrought { .. },
                             ) => id.0 == 0 || id.0 == u64::MAX,
                             _ => true,
                         }
@@ -2383,7 +2496,9 @@ impl Game {
                     }
                     &choice.content
                 }
-                PopulationContent::Items { bands } => {
+                PopulationContent::Items { bands }
+                | PopulationContent::ChanceItems { bands, .. }
+                | PopulationContent::FoodDrought { bands, .. } => {
                     let choices = &eligible_band(bands, depth).unwrap().choices;
                     let choice = weighted_choice(&mut choice_rng, choices, |c| c.weight);
                     if let PlacementDecision::Placed {
@@ -2562,6 +2677,7 @@ mod tests {
     include!("spawn_carried_loot_tests.rs");
     include!("gold_population_tests.rs");
     include!("room_cluster_tests.rs");
+    include!("food_drought_tests.rs");
 
     fn at(region: u64, x: i32, y: i32) -> Location {
         Location {
@@ -3148,6 +3264,7 @@ mod tests {
         game.configure_scenario_policy(
             ScenarioCapabilities {
                 npc_stair_traversal: false,
+                ..Default::default()
             },
             Some(ActorId(1)),
         )

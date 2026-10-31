@@ -317,8 +317,11 @@ pub struct Service {
     resetting_streams: bool,
     broadcasting_travel: bool,
     engine: Engine,
-    pending_saves: Vec<(u64, String, u64)>,
+    /// Client, request, target sequence and when it was queued.
+    pending_saves: Vec<(u64, String, u64, std::time::Instant)>,
     save_warning: Option<String>,
+    /// How long an explicit save waits for durability before `SaveBehind`.
+    save_reply_wait: std::time::Duration,
     // One ephemeral delivery witness, never simulation or saved authority.
     reported_execution_failure: Option<(u64, StreamContext, BranchId, EntryId, ErrorCode)>,
     clients: BTreeMap<u64, Client>,
@@ -376,6 +379,7 @@ impl Service {
             broadcasting_travel: false,
             engine,
             pending_saves: Vec::new(),
+            save_reply_wait: SAVE_REPLY_WAIT,
             save_warning,
             reported_execution_failure: None,
             clients: BTreeMap::new(),
@@ -383,6 +387,19 @@ impl Service {
             control_generations: BTreeMap::new(),
             next_client: 1,
         })
+    }
+
+    /// Change how long an explicit save waits before answering `SaveBehind`;
+    /// between one millisecond and a minute.
+    pub fn set_save_reply_wait(&mut self, wait: std::time::Duration) -> Result<(), Failure> {
+        if wait.is_zero() || wait > std::time::Duration::from_secs(60) {
+            return Err(Failure::new(
+                ErrorCode::InvalidRequest,
+                "Invalid save reply wait",
+            ));
+        }
+        self.save_reply_wait = wait;
+        Ok(())
     }
 
     pub(crate) fn set_diagnostics(&mut self, diagnostics: Option<crate::diagnostics::Diagnostics>) {
@@ -617,18 +634,15 @@ impl Service {
                     .unwrap_or(ProcessedRequest::Published))
             }
             Request::Save => {
-                if self
-                    .pending_saves
-                    .iter()
-                    .any(|(client, _, _)| *client == id)
-                {
+                if self.pending_saves.iter().any(|(client, ..)| *client == id) {
                     return Err(Failure::new(
                         ErrorCode::InvalidRequest,
                         "A save is already pending",
                     ));
                 }
                 let target = self.engine.request_save();
-                self.pending_saves.push((id, request_id.into(), target));
+                self.pending_saves
+                    .push((id, request_id.into(), target, std::time::Instant::now()));
                 Ok(ProcessedRequest::SaveQueued)
             }
             Request::AcquireControl => {
@@ -2521,6 +2535,11 @@ impl Service {
         }
     }
 
+    /// Saving is behind schedule: play is held until the writer catches up.
+    pub(crate) fn saving_overdue(&self) -> bool {
+        self.engine.save_status().overdue
+    }
+
     pub(crate) fn poll_saves(&mut self) {
         let clients_before_warnings = self.clients.len();
         let status = self.engine.save_status();
@@ -2563,27 +2582,39 @@ impl Service {
         }
         self.refresh_readiness();
         let clients = self.clients.len();
-        for (id, request_id, target) in pending {
+        for (id, request_id, target, queued) in pending {
             if !self.clients.contains_key(&id) {
                 continue;
             }
-            if status.durable_sequence >= target {
-                self.engine.survival_save_barrier(status.durable_sequence);
-                if let Some(receipt) = self.session_receipt(id) {
-                    self.publish_reply(id, request_id, RequestReply::Receipt(receipt));
+            match save_reply(&status, target, queued.elapsed(), self.save_reply_wait) {
+                SaveReply::Durable => {
+                    self.engine.survival_save_barrier(status.durable_sequence);
+                    if let Some(receipt) = self.session_receipt(id) {
+                        self.publish_reply(id, request_id, RequestReply::Receipt(receipt));
+                    }
                 }
-            } else if let Some(message) = &status.error {
-                self.send(
+                SaveReply::Failed(message) => self.send(
                     id,
                     ServerMessage::Error {
                         scope: self.error_scope(id),
                         request_id: Some(request_id),
                         code: ErrorCode::StorageFailure,
-                        message: message.clone(),
+                        message,
                     },
-                );
-            } else {
-                self.pending_saves.push((id, request_id, target));
+                ),
+                SaveReply::Behind => self.send(
+                    id,
+                    ServerMessage::Error {
+                        scope: self.error_scope(id),
+                        request_id: Some(request_id),
+                        code: ErrorCode::SaveBehind,
+                        message: format!(
+                            "Saving is behind schedule: saved through {}, this save needs {}.                              It stays queued and completes when the writer catches up.",
+                            status.durable_sequence, target
+                        ),
+                    },
+                ),
+                SaveReply::Wait => self.pending_saves.push((id, request_id, target, queued)),
             }
         }
         if self.clients.len() != clients {
@@ -2600,11 +2631,89 @@ impl Service {
     }
 }
 
+/// How long an explicit save waits for durability before the client is told
+/// saving is behind; well inside a client's reply deadline.
+pub(crate) const SAVE_REPLY_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
+#[derive(Debug, PartialEq, Eq)]
+enum SaveReply {
+    Durable,
+    Failed(String),
+    /// Not durable within the reply wait; the save stays queued.
+    Behind,
+    Wait,
+}
+
+/// A pending explicit save's answer: durable, failed, behind or not yet due.
+fn save_reply(
+    status: &crate::SaveStatus,
+    target: u64,
+    waited: std::time::Duration,
+    limit: std::time::Duration,
+) -> SaveReply {
+    if status.durable_sequence >= target {
+        SaveReply::Durable
+    } else if let Some(message) = &status.error {
+        SaveReply::Failed(message.clone())
+    } else if waited >= limit {
+        SaveReply::Behind
+    } else {
+        SaveReply::Wait
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::Scenario;
     use tokio::sync::mpsc;
+
+    #[test]
+    fn an_explicit_save_answers_durable_failed_or_behind_within_its_wait() {
+        let mut status = crate::SaveStatus {
+            durable_sequence: 7,
+            ..Default::default()
+        };
+        let short = SAVE_REPLY_WAIT / 2;
+        assert_eq!(
+            save_reply(&status, 7, short, SAVE_REPLY_WAIT),
+            SaveReply::Durable
+        );
+        assert_eq!(
+            save_reply(&status, 7, SAVE_REPLY_WAIT * 2, SAVE_REPLY_WAIT),
+            SaveReply::Durable
+        );
+        assert_eq!(
+            save_reply(&status, 9, short, SAVE_REPLY_WAIT),
+            SaveReply::Wait
+        );
+        // Never "outcome unknown": a slow writer gets a definite answer in time.
+        assert_eq!(
+            save_reply(&status, 9, SAVE_REPLY_WAIT, SAVE_REPLY_WAIT),
+            SaveReply::Behind
+        );
+        assert!(SAVE_REPLY_WAIT < std::time::Duration::from_secs(10));
+        status.error = Some("disk full".into());
+        assert_eq!(
+            save_reply(&status, 9, short, SAVE_REPLY_WAIT),
+            SaveReply::Failed("disk full".into())
+        );
+        status.error = None;
+        let configured = std::time::Duration::from_millis(200);
+        assert_eq!(
+            save_reply(&status, 9, configured, configured),
+            SaveReply::Behind
+        );
+        let mut service = Service::new(Engine::memory(Scenario::two_room(42)).unwrap());
+        assert!(service
+            .set_save_reply_wait(std::time::Duration::ZERO)
+            .is_err());
+        assert!(service
+            .set_save_reply_wait(std::time::Duration::from_secs(61))
+            .is_err());
+        service.set_save_reply_wait(configured).unwrap();
+        assert_eq!(service.save_reply_wait, configured);
+    }
 
     #[test]
     fn observer_capture_failure_retains_every_pending_pause_until_retry() {

@@ -1384,6 +1384,7 @@ fn owner_advancement_message(context: ReplyContext, id: &str) -> ServerMessage {
                 perceived_threat: false,
                 ready: true,
                 other_preparation: false,
+                locked: false,
                 respec: None,
             }),
         }],

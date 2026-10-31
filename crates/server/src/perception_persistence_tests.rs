@@ -447,7 +447,8 @@ fn kill_anonymous_phantom(engine: &mut Engine) {
         event,
         DisclosedCombatEvent::Died {
             actor: SimActor(PHANTOM),
-            reference: ActorReferenceKind::Contact
+            reference: ActorReferenceKind::Contact,
+            ..
         }
     )));
     assert!(

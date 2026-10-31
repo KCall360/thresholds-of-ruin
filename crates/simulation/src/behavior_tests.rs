@@ -47,6 +47,14 @@ fn fixture_with(
     memory_ticks: u64,
     edit: impl FnOnce(&mut crate::rules::RulesetDocument, &mut crate::creatures::Species),
 ) -> Game {
+    fixture_placed(disposition, memory_ticks, [1, 2], edit)
+}
+fn fixture_placed(
+    disposition: Disposition,
+    memory_ticks: u64,
+    places: [i32; 2],
+    edit: impl FnOnce(&mut crate::rules::RulesetDocument, &mut crate::creatures::Species),
+) -> Game {
     let mut species = crate::test_creatures::species();
     species.behavior = BehaviorPolicy {
         disposition,
@@ -78,7 +86,7 @@ fn fixture_with(
         ],
     )
     .unwrap();
-    for x in [1, 2] {
+    for x in places {
         let actor = game
             .spawn_actor(at(x), NonZeroU64::new(100).unwrap())
             .unwrap();
@@ -1142,4 +1150,122 @@ fn compiled_species_deadline_projection_does_not_read_raw_species() {
         assert_eq!(after.raw_species_lookups, before.raw_species_lookups);
         assert_eq!(after.raw_hit_die_visits, before.raw_hit_die_visits);
     }
+}
+
+fn hostile_neighbors(game: &mut Game) {
+    game.configure_run(
+        ActorId(1),
+        BTreeSet::from([ActorId(1)]),
+        None,
+        BTreeMap::from([("neighbors".into(), BTreeSet::from(["neighbors".into()]))]),
+    )
+    .unwrap();
+}
+fn gold_coins() -> crate::ItemSpec {
+    let mut item = crate::ItemSpec::ordinary("gold coin".into());
+    item.class = crate::ItemClass::Coin;
+    item.stackable = true;
+    item.currency = Some(crate::CurrencyKind::Gold);
+    item
+}
+
+#[test]
+fn greedy_species_acquire_a_visible_hostile_when_no_gold_is_collectable() {
+    // Rogue's greedy monsters head for room gold, or for the hero when the
+    // room has none. Passive species wait for provocation instead.
+    let mut passive = fixture_placed(Disposition::Passive, 500, [0, 3], |_, _| {});
+    hostile_neighbors(&mut passive);
+    assert_eq!(passive.choose_ai(ActorId(2)).unwrap().action, Action::Wait);
+
+    let mut game = fixture_placed(Disposition::Greedy, 500, [0, 3], |_, _| {});
+    hostile_neighbors(&mut game);
+    let before = game.clone();
+    let decision = game.choose_ai(ActorId(2)).unwrap();
+    assert_eq!(game, before, "choosing previews only");
+    let engagement = decision.behavior.engagement.unwrap();
+    assert_eq!(
+        (engagement.target, engagement.location),
+        (ActorId(1), at(0))
+    );
+    assert_eq!(
+        decision.action,
+        Action::Move(tor_world::Direction::West),
+        "the greedy creature closes on the hostile"
+    );
+    // Without hostility there is nothing to acquire.
+    let calm = fixture_placed(Disposition::Greedy, 500, [0, 3], |_, _| {});
+    assert_eq!(calm.choose_ai(ActorId(2)).unwrap().action, Action::Wait);
+    // No memory means no engagement, as for mean species.
+    let mut forgetful = fixture_placed(Disposition::Greedy, 0, [0, 3], |_, _| {});
+    hostile_neighbors(&mut forgetful);
+    assert!(forgetful
+        .choose_ai(ActorId(2))
+        .unwrap()
+        .behavior
+        .engagement
+        .is_none());
+}
+
+#[test]
+fn greedy_species_collect_known_gold_before_acquiring_and_fight_when_exposed() {
+    let mut game = fixture_placed(Disposition::Greedy, 500, [0, 3], |_, _| {});
+    hostile_neighbors(&mut game);
+    game.combat.ai.get_mut(&ActorId(2)).unwrap().profile.gold = true;
+    game.place_item_stack(20, at(3), None, 7, gold_coins())
+        .unwrap();
+    let decision = game.choose_ai(ActorId(2)).unwrap();
+    assert_eq!(
+        decision.action,
+        Action::Take {
+            item: crate::ItemId(20),
+            quantity: Some(7)
+        }
+    );
+    assert!(decision.behavior.engagement.is_none());
+
+    // A hostile beside the gold makes collection unsafe: the creature fights.
+    let mut exposed = fixture_placed(Disposition::Greedy, 500, [2, 3], |_, _| {});
+    hostile_neighbors(&mut exposed);
+    exposed.combat.ai.get_mut(&ActorId(2)).unwrap().profile.gold = true;
+    exposed
+        .place_item_stack(20, at(3), None, 7, gold_coins())
+        .unwrap();
+    let decision = exposed.choose_ai(ActorId(2)).unwrap();
+    assert_eq!(decision.behavior.engagement.unwrap().target, ActorId(1));
+    assert!(matches!(decision.action, Action::UseAbility { .. }));
+
+    // Without Gold interest a greedy creature never waits on gold.
+    game.combat.ai.get_mut(&ActorId(2)).unwrap().profile.gold = false;
+    assert_eq!(
+        game.choose_ai(ActorId(2))
+            .unwrap()
+            .behavior
+            .engagement
+            .unwrap()
+            .target,
+        ActorId(1)
+    );
+}
+
+#[test]
+fn greedy_disposition_is_a_named_policy_value_that_survives_restore() {
+    let game = fixture_placed(Disposition::Greedy, 500, [1, 2], |_, _| {});
+    let restored = restore(&game);
+    assert_eq!(
+        restored.actors[&ActorId(2)]
+            .behavior_policy()
+            .unwrap()
+            .disposition,
+        Disposition::Greedy
+    );
+    assert_eq!(restored, game);
+    assert_eq!(
+        serde_json::to_value(Disposition::Greedy).unwrap(),
+        serde_json::json!("greedy")
+    );
+    assert_eq!(
+        serde_json::from_value::<Disposition>(serde_json::json!("greedy")).unwrap(),
+        Disposition::Greedy
+    );
+    assert!(serde_json::from_value::<Disposition>(serde_json::json!("greed")).is_err());
 }

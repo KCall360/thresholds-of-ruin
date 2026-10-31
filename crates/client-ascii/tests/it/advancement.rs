@@ -124,6 +124,7 @@ fn page(context: &ReplyContext) -> AdvancementPage {
                 perceived_threat: false,
                 ready: true,
                 other_preparation: false,
+                locked: false,
                 respec: None,
             }),
         }],

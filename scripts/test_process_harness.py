@@ -310,6 +310,27 @@ class SaveBarriers(unittest.TestCase):
                     self.assertEqual(command[-2:], ["--actor", "2"])
                 self.assertTrue(all(isinstance(argument, str) for argument in command))
 
+    def test_a_behind_schedule_save_is_asked_again_until_durable(self):
+        # The real client exits 1 after an error reply.
+        behind = subprocess.CompletedProcess(
+            [], 1, stdout='{"error":"SaveBehind: saved through 3, this save needs 9."}\n', stderr="")
+        done = subprocess.CompletedProcess([], 0, stdout='{"error":null}\n', stderr="")
+        with patch("process_harness.binaries", return_value=Path("synthetic-bin")), \
+                patch("process_harness.subprocess.run", side_effect=[behind, behind, done]) as run:
+            save_at("127.0.0.1:1")
+            self.assertEqual(run.call_count, 3)
+        failed = subprocess.CompletedProcess(
+            [], 0, stdout='{"error":"StorageFailure: disk full"}\n', stderr="")
+        with patch("process_harness.binaries", return_value=Path("synthetic-bin")), \
+                patch("process_harness.subprocess.run", return_value=failed):
+            with self.assertRaisesRegex(AssertionError, "Explicit save failed"):
+                save_at("127.0.0.1:1")
+        with patch("process_harness.binaries", return_value=Path("synthetic-bin")), \
+                patch("process_harness.subprocess.run", return_value=behind) as run:
+            with self.assertRaisesRegex(AssertionError, "stayed behind"):
+                save_at("127.0.0.1:1")
+            self.assertEqual(run.call_count, 24)
+
     def test_flush_save_preserves_default_and_forwards_explicit_selected_actor(self):
         harness = ProcessTestCase()
         harness.address = "127.0.0.1:1"

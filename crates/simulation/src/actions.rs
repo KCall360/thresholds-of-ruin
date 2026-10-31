@@ -549,6 +549,15 @@ impl Game {
         captured_plan: Option<crate::abilities::Plan>,
         entry: ActionEntry,
     ) -> Result<PreparedAction, GameError> {
+        if matches!(
+            &action,
+            Action::Purchase { .. }
+                | Action::ChooseGrowthSource { .. }
+                | Action::ChooseIntellectExpertise { .. }
+                | Action::Respec { .. }
+        ) {
+            self.require_owner_advancement()?;
+        }
         if self.condition_blocks_action(id, &action) {
             return Err(GameError::ActorBusy);
         }

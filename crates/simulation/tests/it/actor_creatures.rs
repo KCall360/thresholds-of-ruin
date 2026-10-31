@@ -190,7 +190,13 @@ fn removing_last_hd_runs_ordinary_death_cleanup_once_and_cannot_revive() {
     assert_eq!(
         game.combat_events()
             .iter()
-            .filter(|event| matches!(event, CombatEvent::Died { actor: ActorId(1) }))
+            .filter(|event| matches!(
+                event,
+                CombatEvent::Died {
+                    actor: ActorId(1),
+                    ..
+                }
+            ))
             .count(),
         1
     );
@@ -216,7 +222,13 @@ fn removing_last_hd_runs_ordinary_death_cleanup_once_and_cannot_revive() {
     assert_eq!(
         game.combat_events()
             .iter()
-            .filter(|event| matches!(event, CombatEvent::Died { actor: ActorId(1) }))
+            .filter(|event| matches!(
+                event,
+                CombatEvent::Died {
+                    actor: ActorId(1),
+                    ..
+                }
+            ))
             .count(),
         1
     );

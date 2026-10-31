@@ -299,7 +299,15 @@ pub enum DisclosedCombatEvent {
     Died {
         actor: ActorId,
         reference: crate::perception::ActorReferenceKind,
+        cause: DeathCause,
     },
+}
+/// Why an actor died: an exhausted food reserve, or Health lost any other way.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeathCause {
+    Injury,
+    Starvation,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -363,6 +371,7 @@ pub enum CombatEvent {
     },
     Died {
         actor: ActorId,
+        cause: DeathCause,
     },
 }
 

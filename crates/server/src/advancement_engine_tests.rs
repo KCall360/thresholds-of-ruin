@@ -573,7 +573,7 @@ fn owner_host_store_refusal_after_replacement_spend_rolls_back_and_replays_once(
                 );
             }
             assert_eq!(engine.game.combat_events().iter().filter(|event| matches!(event, s::combat::CombatEvent::RespecCompleted { actor, .. } if actor.0 == 1)).count(), 1);
-            assert_eq!(engine.game.combat_events().iter().filter(|event| matches!(event, s::combat::CombatEvent::Died { actor } if actor.0 == 1)).count(), usize::from(lethal));
+            assert_eq!(engine.game.combat_events().iter().filter(|event| matches!(event, s::combat::CombatEvent::Died { actor, .. } if actor.0 == 1)).count(), usize::from(lethal));
             let after = engine.game.clone();
             let duplicate = submit(&mut engine, actor, "complete", completion.clone());
             assert!(duplicate.duplicate);

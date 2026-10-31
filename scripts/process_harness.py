@@ -440,8 +440,8 @@ def door(frame):
 class ProcessTestDirectory:
     """Temporary directory whose permissions are inherited by child processes."""
 
-    def __init__(self):
-        root = ROOT / "target" / "process-tests"
+    def __init__(self, root=None):
+        root = Path(root) if root is not None else ROOT / "target" / "process-tests"
         root.mkdir(parents=True, exist_ok=True)
         self.name = str(root / uuid.uuid4().hex)
         Path(self.name).mkdir()
@@ -651,6 +651,9 @@ class OutputQueue:
 class Process:
     """A real child process whose output lines are read on a background thread."""
 
+    # The disk spool behind unsegmented capture; a subclass may bound it.
+    output_queue = OutputQueue
+
     def __init__(self, executable, args, token=TOKEN, extra_env=None, *, separate_stderr=False,
                  diagnostics=None, save_actor=None):
         environment = {k: v for k, v in os.environ.items() if k not in ("TOR_SPECTATOR_TOKEN", "TOR_WIZARD_TOKEN")}
@@ -713,7 +716,7 @@ class Process:
         self.metadata["pid"] = self.child.pid
         self._write_status("launched")
         if self.lines is None:
-            self.lines = OutputQueue(self.stdout_path)
+            self.lines = self.output_queue(self.stdout_path)
         self.transcript = Transcript(self.stdout_path, source=self.lines if segment_bytes is not None else None)
         self.reader = threading.Thread(target=self._read, daemon=True)
         self.reader.start()
@@ -853,15 +856,34 @@ class AdventureProcess(Process):
             self.lines.put(None)
 
 
+SAVE_BEHIND_RETRIES = 24
+
+
+def save_errors(stdout):
+    rows = [json.loads(line) for line in stdout.splitlines() if line.startswith("{")]
+    return [row["error"] for row in rows if row.get("error")]
+
+
 def save_at(address, token=TOKEN, actor=None):
-    """Explicit save barrier through a real headless client; no ordinary-action timing."""
-    result = subprocess.run(
-        [str(binaries() / ("tor-client-headless" + SUFFIX)), "--connect", address, "--observe",
-         *(["--actor", str(actor)] if actor is not None else [])],
-        input=json.dumps({"type": "request", "request": {"type": "save"}}) + "\n" + json.dumps({"type": "quit"}) + "\n",
-        text=True, capture_output=True, timeout=35, cwd=ROOT, env={**os.environ, "TOR_SERVER_TOKEN": token})
-    if result.returncode or any(json.loads(line).get("error") for line in result.stdout.splitlines() if line.startswith("{")):
-        raise AssertionError(f"Explicit save failed: {result.stdout} {result.stderr}")
+    """Explicit save barrier through a real headless client; no ordinary-action timing.
+
+    A server whose saving is behind answers `SaveBehind`: the save is queued but
+    not yet durable, so the barrier asks again until it is.
+    """
+    for _ in range(SAVE_BEHIND_RETRIES):
+        result = subprocess.run(
+            [str(binaries() / ("tor-client-headless" + SUFFIX)), "--connect", address, "--observe",
+             *(["--actor", str(actor)] if actor is not None else [])],
+            input=json.dumps({"type": "request", "request": {"type": "save"}}) + "\n" + json.dumps({"type": "quit"}) + "\n",
+            text=True, capture_output=True, timeout=35, cwd=ROOT, env={**os.environ, "TOR_SERVER_TOKEN": token})
+        # The client exits nonzero after any error reply, SaveBehind included.
+        errors = save_errors(result.stdout)
+        if errors and all(str(error).startswith("SaveBehind") for error in errors):
+            continue
+        if result.returncode or errors:
+            raise AssertionError(f"Explicit save failed: {result.stdout} {result.stderr}")
+        return
+    raise AssertionError(f"Saving stayed behind through {SAVE_BEHIND_RETRIES} explicit saves")
 
 
 def inspect_save(path):
@@ -876,6 +898,10 @@ class ProcessTestCase(unittest.TestCase):
 
     graphical = False
 
+    # Long runs may place process directories (saves and captured output) on a
+    # faster volume; None keeps them under target/process-tests.
+    process_root = None
+
     @classmethod
     def setUpClass(cls):
         cls.bin = binaries()
@@ -884,7 +910,7 @@ class ProcessTestCase(unittest.TestCase):
     def setUp(self):
         if is_graphical_test(self):
             _require_native_display(os.environ)
-        directory = ProcessTestDirectory()
+        directory = ProcessTestDirectory(self.process_root)
         self.addCleanup(lambda: directory.cleanup(failed=self._failed(), test_id=self.id()))
         self.processes = []
         self.directory = Path(directory.name)

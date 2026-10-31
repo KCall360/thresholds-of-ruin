@@ -11,6 +11,32 @@ The calibrated depth curve and full survival loop remain unfinished. The Amulet
 and intentional surface escape provide the retrieval/ascent objective. The default launch still selects the separate
 [first dungeon](gameplay.md).
 
+## Rogue-only scenario
+
+The separate [`rogue` package](../../scenarios/rogue/scenario.toml) is the
+scenario being tuned toward Rogue's experience; see the
+[tuning plan](../plans/rogue-tuning.md). It shares this package's dungeon,
+roster and items but keeps only Rogue's mechanics active. You play one
+adventurer with Rogue's kit (mace, ring mail, shortbow, 32 arrows, one ration)
+and no bandages. Each new Hit Die applies the next row of the authored build
+automatically; the advancement screen shows the build as locked, and purchases,
+source choices and respec are refused. Bind Wounds is not granted, and the dead
+leave no corpses, though what they carried still drops. Load it with
+`--scenario scenarios/rogue`.
+
+Floors follow Rogue's item generation: nine chances at 36% for an item, drawn
+by Rogue's category and type weights, arrows and darts in groups of 8 to 15, and
+a treasure room on about one floor in twenty. If three new floors in a row
+produced no food, the next new floor places a ration. Natural healing
+follows Rogue's level-based rate, and healing does not cost food. Monster
+Health, accuracy, defense and damage are tuned so each species' fights resemble
+Rogue's at its usual depth; see the [tuning plan](../plans/rogue-tuning.md) for
+what is calibrated and what remains open. As in Rogue, orcs are greedy: they
+collect Gold they can safely reach and otherwise come after you. No monster flees
+because it is wounded, though a scare effect still drives monsters off. The
+medusa confuses with its claws rather than a separate gaze, and confusion that
+lands while you are confused lasts longer.
+
 Creatures follow explicit species defaults before engaging a foe, using only
 their own senses and known surroundings. Most explore and prefer less-visited
 cells; the ice monster, stationary flytrap and guised xeroc wait. Their separate door, care,

@@ -378,6 +378,8 @@ impl PopulationStage {
             }),
             PopulationContent::Items { .. }
             | PopulationContent::RoomItems { .. }
+            | PopulationContent::ChanceItems { .. }
+            | PopulationContent::FoodDrought { .. }
             | PopulationContent::RoomCluster { .. } => false,
         };
         usize::from(self.count[1])

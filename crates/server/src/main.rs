@@ -19,13 +19,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut allow_unvalidated = false;
     let mut actors = 1usize;
     let mut save_policy = SavePolicy::default();
+    let mut save_reply_ms = None;
     let mut outbound = OutboundLimits::default();
     let mut args = std::env::args().skip(1);
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--help" | "-h" => {
                 println!("Outgoing buffers: --outbound-frame-bytes 16777216 --outbound-client-bytes 67108864 --outbound-total-bytes 268435456. Byte limits include queued and in-flight payloads. Frame <= client <= total; frame is at most 16 MiB. Each connection reserves one maximum frame; the connection limit is min(128, total/frame), 16 by default. Exhausted streams disconnect and must reconnect for a snapshot.");
-                println!("Background saves: --save-target-ms 30000 --save-max-ms 60000 --save-idle-ms 750 --save-queue-bytes 8388608. Ordinary acknowledgements may be lost after a crash; explicit save and clean shutdown wait for storage.");
+                println!("Background saves: --save-target-ms 30000 --save-max-ms 60000 --save-idle-ms 750 --save-queue-bytes 8388608 --save-reply-ms 5000. Ordinary acknowledgements may be lost after a crash; explicit save and clean shutdown wait for storage, and a save not durable within the reply wait is answered save_behind.");
                 println!("Checkpoints: --checkpoint-interval 1024 journal entries (0 disables). Retains all history; bounds simulation replay after the latest committed checkpoint.");
                 println!("Authored packages: --scenario <directory> [--character <id>] [--allow-unvalidated]. Validate with tor-scenario validate <directory>. Saves pin their original package.");
                 println!("Diagnostic fixture: --regions 1..=256 [--actors 1..=8] selects performance trace version 1.");
@@ -49,6 +50,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--save-idle-ms" => {
                 save_policy.idle_interval = std::time::Duration::from_millis(
                     args.next().ok_or("Missing save idle interval")?.parse()?,
+                )
+            }
+            "--save-reply-ms" => {
+                save_reply_ms = Some(
+                    args.next()
+                        .ok_or("Missing save reply wait")?
+                        .parse::<u64>()?,
                 )
             }
             "--save-queue-bytes" => {
@@ -207,7 +215,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
     tor_server::process_diagnostics::startup("simulation.begin");
-    let simulation = Simulation::start(Service::with_outbound_limits(engine, outbound)?);
+    let mut service = Service::with_outbound_limits(engine, outbound)?;
+    if let Some(ms) = save_reply_ms {
+        service.set_save_reply_wait(std::time::Duration::from_millis(ms))?;
+    }
+    let simulation = Simulation::start(service);
     tor_server::process_diagnostics::startup("simulation.end");
     tor_server::process_diagnostics::startup("listener.begin");
     let listener = TcpListener::bind(listen).await?;

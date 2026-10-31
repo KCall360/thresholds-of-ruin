@@ -1133,8 +1133,16 @@ fn combat_event_view(
             },
         },
         E::Interrupted { actor } => p::CombatEventView::Interrupted { actor: id(actor) },
-        E::Died { actor, reference } => p::CombatEventView::Died {
+        E::Died {
+            actor,
+            reference,
+            cause,
+        } => p::CombatEventView::Died {
             actor: targets.actor_reference(actor, reference),
+            cause: match cause {
+                s::combat::DeathCause::Injury => p::DeathCause::Injury,
+                s::combat::DeathCause::Starvation => p::DeathCause::Starvation,
+            },
         },
     }
 }

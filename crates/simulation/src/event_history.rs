@@ -96,7 +96,7 @@ impl EventKey {
             CombatEvent::Interrupted { actor, .. } => {
                 (EventKind::Interrupted, *actor, *actor, true)
             }
-            CombatEvent::Died { actor } => (EventKind::Died, *actor, *actor, true),
+            CombatEvent::Died { actor, .. } => (EventKind::Died, *actor, *actor, true),
         };
         Self {
             kind,
@@ -1202,10 +1202,11 @@ impl Game {
                     CombatEvent::Interrupted { actor, .. } if *actor == observer => {
                         Some(DisclosedCombatEvent::Interrupted { actor: *actor })
                     }
-                    CombatEvent::Died { actor } => {
+                    CombatEvent::Died { actor, cause } => {
                         receipt.source.map(|reference| DisclosedCombatEvent::Died {
                             actor: *actor,
                             reference,
+                            cause: *cause,
                         })
                     }
                     _ => None,

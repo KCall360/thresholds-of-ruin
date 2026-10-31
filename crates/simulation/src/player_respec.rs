@@ -229,6 +229,7 @@ impl Game {
         ),
         GameError,
     > {
+        self.require_owner_advancement()?;
         let creature = self.creature(actor).ok_or(GameError::UnknownActor)?;
         if !basis.valid() || basis.actor != actor || basis.build_epoch != creature.build_epoch() {
             return Err(GameError::Build(BuildError::StaleAdvancementPreview));

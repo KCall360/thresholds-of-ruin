@@ -14,7 +14,7 @@ import tempfile
 from scalar_wire import u64
 
 FORMAT = "tor-arena-batch-v1"
-RUN_FORMAT = "tor-arena-run-v5"
+RUN_FORMAT = "tor-arena-run-v6"
 VARIANTS = ("baseline", "candidate")
 ORIENTATIONS = ("forward", "mirrored")
 MAX_BYTES = 64 * 1024 * 1024
