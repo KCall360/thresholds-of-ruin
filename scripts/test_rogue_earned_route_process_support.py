@@ -1806,6 +1806,56 @@ class PaidTailBudgetCallerTests(unittest.TestCase):
                 route.settle(route.current)
             self.assertEqual(route.player.write.call_count, 2)  # No retry.
 
+    def test_confirmed_picture_rechecks_recovery_after_old_ready_picture(self):
+        # Retained Windows CI sequence: lifecycle/readiness reach tick2700
+        # while the picture still says ready at tick2650. Observe discloses
+        # recovery at2700; the real ready picture arrives later at2750.
+        with tempfile.TemporaryDirectory() as directory:
+            route, old = self.route(Path(directory), 1)
+            old['state']['observation']['tick'] = '2650'
+            old['cursor'] = {'tick': '2700', 'revision': '8'}
+            recovering = copy.deepcopy(old)
+            recovering['state']['observation'].update(tick='2700', ready=False)
+            recovering['state']['observation']['combat']['recovery_remaining'] = '50'
+            done = copy.deepcopy(recovering)
+            done['state']['observation'].update(tick='2750', ready=True)
+            done['state']['observation']['combat']['recovery_remaining'] = '0'
+            done['cursor'] = {'tick': '2750', 'revision': '11'}
+            route.current = old
+            calls = []
+
+            def frame(player, predicate, seconds=15):
+                self.assertIs(player, route.player)
+                calls.append(seconds)
+                if len(calls) == 1:
+                    self.assertTrue(predicate(recovering))  # Observe's ready reply.
+                    return recovering
+                self.assertFalse(predicate(recovering))
+                self.assertTrue(predicate(done))
+                return done
+
+            route.frame.side_effect = frame
+            self.assertIs(route.settle(old), done)
+            self.assertIs(route.current, done)
+            self.assertEqual(len(calls), 2)
+            self.assertEqual(route.controller.commands, 1)
+            self.assertEqual([json.loads(call.args[0]) for call in route.player.write.call_args_list],
+                             [{'type': 'request', 'request': {'type': 'observe'}}])
+
+    def test_confirmed_terminal_picture_does_not_wait_for_ready_or_resume(self):
+        with tempfile.TemporaryDirectory() as directory:
+            route, completed = self.route(Path(directory), 1)
+            terminal = copy.deepcopy(completed)
+            terminal['state']['observation']['ready'] = False
+            terminal['state']['observation']['combat']['terminal'] = True
+            route.current = completed
+            route.frame.return_value = terminal
+            self.assertIs(route.settle(completed), terminal)
+            route.frame.assert_called_once()
+            self.assertEqual(route.controller.commands, 1)
+            self.assertEqual([json.loads(call.args[0]) for call in route.player.write.call_args_list],
+                             [{'type': 'request', 'request': {'type': 'observe'}}])
+
     def test_paid_tail_at_exact_budget_censors_before_any_transport_write(self):
         with tempfile.TemporaryDirectory() as directory:
             route, _ = self.route(Path(directory), 1)
